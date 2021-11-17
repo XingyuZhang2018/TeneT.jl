@@ -3,6 +3,16 @@ uuid = "260a78e0-cbf2-49ba-8157-48058c700f32"
 authors = ["XingyuZhang2018 <zhangxingyu@iphy.ac.cn> and contributors"]
 version = "0.1.0"
 
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+OMEinsum = "ebe7aa44-baf0-506c-a96f-8464559b3922"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
 [compat]
 julia = "1.6"
 
