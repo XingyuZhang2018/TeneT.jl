@@ -21,4 +21,9 @@ using Test
         println("vumpsruntime tests running...")
         include("vumpsruntime.jl")
     end
+
+    @testset "autodiff.jl" begin
+        println("autodiff tests running...")
+        include("autodiff.jl")
+    end
 end
