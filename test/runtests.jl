@@ -11,4 +11,14 @@ using Test
         println("environment tests running...")
         include("environment.jl")
     end
+
+    @testset "fixedpoint" begin
+        println("fixedpoint tests running...")
+        include("fixedpoint.jl")
+    end
+
+    @testset "vumpsruntime.jl" begin
+        println("vumpsruntime tests running...")
+        include("vumpsruntime.jl")
+    end
 end

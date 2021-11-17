@@ -141,22 +141,24 @@ end
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
 """
-function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, folder::String="./data/", direction::String= "up")
+function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up")
     D = size(M[1,1],1)
-    savefile && mkpath(folder)
-    chkp_file = folder*"$(direction)_D$(D)_χ$(χ).jld2"
+    savefile && mkpath(outfolder)
+    in_chkp_file = infolder*"/$(direction)_D$(D)_χ$(χ).jld2"
+    
     verbose && direction == "up" ? print("↑ ") : print("↓ ")
-    if isfile(chkp_file)                               
-        rtup = SquareVUMPSRuntime(M, chkp_file, χ; verbose = verbose)   
+    if isfile(in_chkp_file)                               
+        rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
     else
         rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose)
     end
     env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose)
 
     Zygote.@ignore savefile && begin
+        out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = Array{Array{ComplexF64,3},2}(env.AL), Array{Array{ComplexF64,2},2}(env.C), Array{Array{ComplexF64,3},2}(env.AR), Array{Array{ComplexF64,3},2}(env.FL), Array{Array{ComplexF64,3},2}(env.FR)
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
-        save(chkp_file, "env", envsave)
+        save(out_chkp_file, "env", envsave)
     end
     env
 end
@@ -166,16 +168,16 @@ end
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, folder::String="./data/", updown = true)
-    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, folder=folder, direction="up")
+function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true)
+    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up")
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
     D = size(M[1,1],1)
     atype = _arraytype(M[1,1])
-    chkp_file_obs = folder*"obs_D$(D)_chi$(χ).jld2"
-    if isfile(chkp_file_obs)   
-        verbose && println("←→ observable environment load from $(chkp_file_obs)")
-        FL, FR = load(chkp_file_obs)["env"]
+    in_chkp_file_obs = infolder*"/obs_D$(D)_χ$(χ).jld2"
+    if isfile(in_chkp_file_obs)   
+        verbose && println("←→ observable environment load from $(in_chkp_file_obs)")
+        FL, FR = load(in_chkp_file_obs)["env"]
         Zygote.@ignore begin
             FL, FR = Array{atype{ComplexF64,3},2}(FL), Array{atype{ComplexF64,3},2}(FR)
         end
@@ -188,7 +190,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
         Md = reshape(Md, Ni, Nj)
 
-        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, folder=folder, direction="down")
+        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down")
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu
@@ -197,8 +199,9 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     _, FL = obs_FL(ALu, ALd, M, FL)
     _, FR = obs_FR(ARu, ARd, M, FR)
     Zygote.@ignore savefile && begin
+        out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         envsave = (Array{Array{ComplexF64,3},2}(FL), Array{Array{ComplexF64,3},2}(FR))
-        save(chkp_file_obs, "env", envsave)
+        save(out_chkp_file_obs, "env", envsave)
     end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
 end
