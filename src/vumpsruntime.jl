@@ -94,17 +94,26 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     AL, C, AR, FL, FR
 end
 
-function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false)
+function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, show_every = Inf)
     # initialize
     olderror = Inf
+    vumps_counting = show_every_count(show_every)
 
     stopfun = StopFunction(olderror, -1, tol, maxiter, miniter)
-    rt, err = fixedpoint(res -> vumpstep(res...), (rt, olderror), stopfun)
+    rt, err = fixedpoint(res -> vumpstep(res...;show_counting=vumps_counting), (rt, olderror), stopfun)
     verbose && println("vumps done@step: $(stopfun.counter), error=$(err)")
     return rt
 end
 
-function vumpstep(rt::VUMPSRuntime, err)
+function show_every_count(n::Number)
+    i = 0
+    counting() = (i += 1; mod(i,n)==0 ? i : 0)
+    return counting
+end
+
+function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
+    temp = show_counting()
+    temp != 0 && println("vumps@step: $(temp), error=$(err)")
     M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
     AC = ALCtoAC(AL,C)
     _, ACp = ACenv(AC, FL, M, FR)
@@ -117,6 +126,7 @@ function vumpstep(rt::VUMPSRuntime, err)
     ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
     # err = error(ALp, Cp, ARp, FL, M, FR) + errL + errR
     err = errL + errR
+    err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR")
     return SquareVUMPSRuntime(M, ALp, Cp, ARp, FL, FR), err
 end
 
@@ -141,18 +151,18 @@ end
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
 """
-function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up")
+function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", show_every = Inf)
     D = size(M[1,1],1)
     savefile && mkpath(outfolder)
     in_chkp_file = infolder*"/$(direction)_D$(D)_χ$(χ).jld2"
     
-    verbose && direction == "up" ? print("↑ ") : print("↓ ")
+    verbose && (direction == "up" ? print("↑ ") : print("↓ "))
     if isfile(in_chkp_file)                               
         rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
     else
         rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose)
     end
-    env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose)
+    env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
     Zygote.@ignore savefile && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
@@ -168,8 +178,8 @@ end
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true)
-    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up")
+function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, show_every = Inf)
+    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", show_every = show_every)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
     D = size(M[1,1],1)
@@ -190,7 +200,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
         Md = reshape(Md, Ni, Nj)
 
-        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down")
+        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", show_every = show_every)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu

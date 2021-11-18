@@ -38,6 +38,6 @@ end
     for j = 1:Nj, i = 1:Ni
         M[i,j] = atype(rand(dtype,2,2,2,2))
     end
-    env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./data1", outfolder = "./data2")
+    env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./data1", outfolder = "./data2", show_every = 3)
     @test env !== nothing
 end
