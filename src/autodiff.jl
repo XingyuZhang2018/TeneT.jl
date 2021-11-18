@@ -68,7 +68,7 @@ end
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)
     function back(ȳ)
-        return NO_FIELDS, NO_FIELDS, NO_FIELDS, permutedims(ȳ)...
+        return NoTangent(), NoTangent(), NoTangent(), permutedims(ȳ)...
     end
     return y, back
 end
@@ -78,7 +78,7 @@ end
 function ChainRulesCore.rrule(::typeof(LinearAlgebra.norm), A::AbstractArray)
     n = norm(A)
     function back(Δ)
-        return NO_FIELDS, Δ .* A ./ (n + eps(0f0)), NO_FIELDS
+        return NoTangent(), Δ .* A ./ (n + eps(0f0)), NoTangent()
     end
     return n, back
 end
@@ -87,7 +87,7 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
     As = Base.sqrt(A)
     function back(dAs)
         dA =  As' \ dAs ./2 
-        return NO_FIELDS, dA
+        return NoTangent(), dA
     end
     return As, back
 end
@@ -99,7 +99,7 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     function back((dQ, dR))
         M = Array(R * dR' - dQ' * Q)
         dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * _arraytype(Q)(Hermitian(M, :L)))' )'
-        return NO_FIELDS, _arraytype(Q)(dA)
+        return NoTangent(), _arraytype(Q)(dA)
     end
     return (Q, R), back
 end
@@ -109,7 +109,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     function back((dL, dQ))
         M = Array(L' * dL - dQ * Q')
         dA = LowerTriangular(L + I * 1e-12)' \ (dQ + _arraytype(Q)(Hermitian(M, :L)) * Q)
-        return NO_FIELDS, _arraytype(Q)(dA)
+        return NoTangent(), _arraytype(Q)(dA)
     end
     return (L, Q), back
 end
@@ -181,7 +181,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
                 dM[i,J] += dMiJ
             end
         end
-        return NO_FIELDS, dALu, dALd, dM, NO_FIELDS
+        return NoTangent(), dALu, dALd, dM, NoTangent()
     end
     return (λL, FL), back
 end
@@ -208,7 +208,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
                 dM[i,J] += dMiJ
             end
         end
-        return NO_FIELDS, dARu, dARd, dM, NO_FIELDS
+        return NoTangent(), dARu, dARd, dM, NoTangent()
     end
     return (λR, FR), back
 end
@@ -325,7 +325,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
                 end
             end
         end
-        return NO_FIELDS, NO_FIELDS, dFL, dM, dFR
+        return NoTangent(), NoTangent(), dFL, dM, dFR
     end
     return (λAC, AC), back
 end
@@ -428,7 +428,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
                 end
             end
         end
-        return NO_FIELDS, NO_FIELDS, dFL, dFR
+        return NoTangent(), NoTangent(), dFL, dFR
     end
     return (λC, C), back
 end
@@ -455,7 +455,7 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
                 dM[i,J] += dMiJ
             end
         end
-        return NO_FIELDS, dALu, dALd, dM, NO_FIELDS
+        return NoTangent(), dALu, dALd, dM, NoTangent()
     end
     return (λL, FL), back
 end
@@ -482,7 +482,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
                 dM[i,J] += dMiJ
             end
         end
-        return NO_FIELDS, dARu, dARd, dM, NO_FIELDS
+        return NoTangent(), dARu, dARd, dM, NoTangent()
     end
     return (λR, FR), back
 end
@@ -571,7 +571,7 @@ function ChainRulesCore.rrule(::typeof(bigleftenv), ALu, ALd, M, BgFL; kwargs...
                 end
             end
         end
-        return NO_FIELDS, dALu, dALd, dM, NO_FIELDS
+        return NoTangent(), dALu, dALd, dM, NoTangent()
     end
     return (λL, BgFL), back
 end
@@ -605,7 +605,7 @@ function ChainRulesCore.rrule(::typeof(bigrightenv), ARu, ARd, M, BgFR; kwargs..
                 end
             end
         end
-        return NO_FIELDS, dARu, dARd, dM, NO_FIELDS
+        return NoTangent(), dARu, dARd, dM, NoTangent()
     end
     return (λR, BgFR), back
 end

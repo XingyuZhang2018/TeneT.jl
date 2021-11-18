@@ -16,6 +16,13 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 julia = "1.6"
+CUDA = "3.5.0"
+ChainRulesCore = "1.11.1"
+IterTools = "1.3.0"
+JLD2 = "0.4.15"
+KrylovKit = "0.5.3"
+OMEinsum = "0.6.3"
+Zygote = "0.6.30"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
