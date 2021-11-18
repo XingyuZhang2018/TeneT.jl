@@ -19,16 +19,16 @@ a struct to hold the tensors during the `vumps` algorithm, each is a `Ni` x `Nj`
 - `D × d' × D` `FR[i,j]` tensor
 and `LT` is a AbstractLattice to define the lattice type.
 """
-struct VUMPSRuntime{LT,T,N,AT <: AbstractArray{<:AbstractArray,2},CT,ET}
+struct VUMPSRuntime{LT,T,N,AT <: AbstractArray{<:AbstractArray,2},CT,ET1,ET2}
     M::AT
-    AL::ET
+    AL::ET1
     C::CT
-    AR::ET
-    FL::ET
-    FR::ET
-    function VUMPSRuntime{LT}(M::AT, AL::ET, C::CT, AR::ET, FL::ET, FR::ET) where {LT <: AbstractLattice,AT <: AbstractArray{<:AbstractArray,2}, CT <: AbstractArray{<:AbstractArray,2}, ET <: AbstractArray{<:AbstractArray,2}}
+    AR::ET1
+    FL::ET2
+    FR::ET2
+    function VUMPSRuntime{LT}(M::AT, AL::ET1, C::CT, AR::ET1, FL::ET2, FR::ET2) where {LT <: AbstractLattice,AT <: AbstractArray{<:AbstractArray,2}, CT <: AbstractArray{<:AbstractArray,2}, ET1 <: AbstractArray{<:AbstractArray,2}, ET2 <: AbstractArray{<:AbstractArray,2}}
         T, N = eltype(M[1,1]), ndims(M[1,1])
-        new{LT,T,N,AT,CT,ET}(M, AL, C, AR, FL, FR)
+        new{LT,T,N,AT,CT,ET1,ET2}(M, AL, C, AR, FL, FR)
     end
 end
 
@@ -66,23 +66,23 @@ julia> size(rt.AL[1,1]) == (4,2,4)
 true
 ```
 "
-function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, D::Int; verbose=false)
-    return SquareVUMPSRuntime(M, _initializect_square(M, env, D; verbose=verbose)...)
+function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false)
+    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ; verbose=verbose)...)
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, D::Int; verbose=false)
-    A = initialA(M, D)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int; verbose=false)
+    A = initialA(M, χ)
     AL, L = leftorth(A)
     R, AR = rightorth(AL)
     _, FL = leftenv(AL, AL, M)
     _, FR = rightenv(AR, AR, M)
     C = LRtoC(L,R)
     Ni, Nj = size(M)
-    verbose && print("random initial $(Ni)×$(Nj) vumps_χ$(D) environment-> ")
+    verbose && print("random initial $(Ni)×$(Nj) vumps_χ$(χ) environment-> ")
     AL, C, AR, FL, FR
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, D::Int; verbose=false)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int; verbose=false)
     env = load(chkp_file)["env"]
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
