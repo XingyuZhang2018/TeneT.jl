@@ -124,9 +124,11 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     _, ACp = ACenv(ACp, FL, M, FR)
     _, Cp = Cenv(Cp, FL, FR)
     ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
-    # err = error(ALp, Cp, ARp, FL, M, FR) + errL + errR
-    err = errL + errR
-    err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR")
+    erroverlap = error(ALp, Cp, ARp, FL, M, FR)
+    err = erroverlap + errL + errR
+    # @show error(ALp, Cp, ARp, FL, M, FR)
+    # err = errL + errR
+    err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR, erroverlap=$erroverlap")
     return SquareVUMPSRuntime(M, ALp, Cp, ARp, FL, FR), err
 end
 
@@ -174,11 +176,12 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
 end
 
 """
-    Mu, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR = obs_bcenv(model::MT, Mu::AbstractArray; atype = Array, D::Int, χ::Int, verbose = false)
+    M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR    = obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, show_every = Inf)
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
 function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, show_every = Inf)
+    M /= norm(M)
     envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", show_every = show_every)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
