@@ -108,7 +108,9 @@ If ρ is not exactly positive definite, cholesky will fail
 function getL!(A,L; kwargs...)
     Ni,Nj = size(A)
     for j = 1:Nj, i = 1:Ni
-        _,ρs,_ = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
+        λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
+        @debug "getL eigsolv" λ info sort(abs.(λ))
+        info.converged==0 && @warn "getL not converged"
         ρ = ρs[1] + ρs[1]'
         ρ ./= tr(ρ)
         F = svd!(ρ)
@@ -144,7 +146,9 @@ function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
     L = Array{_arraytype(A[1,1]){ComplexF64,2},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        _, Ls, _ = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "getLsped eigsolve" λ info sort(abs.(λ))
+        info.converged==0 && @warn "getLsped not converged"
         _, L[i,j] = qrpos!(Ls[1])
     end
     return L
@@ -302,7 +306,9 @@ function leftenv!(ALu, ALd, M, FL; kwargs...)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
-        λLs, FL1s, _= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=1000 , ishermitian = false, kwargs...)
+        @debug "leftenv! eigsolv" λLs info sort(abs.(λLs))
+        info.converged==0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
@@ -339,7 +345,9 @@ function rightenv!(ARu, ARd, M, FR; kwargs...)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
-        λRs, FR1s, _= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=1000 , ishermitian = false, kwargs...)
+        @debug "rightenv! eigsolv" λRs info sort(abs.(λRs))
+        info.converged==0 && @warn "rightenv not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
             @show λRs
             if real(λRs[1]) > 0
@@ -429,7 +437,9 @@ function ACenv!(AC, FL, M, FR; kwargs...)
     Ni,Nj = size(AC)
     λAC = zeros(eltype(AC[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
-        λACs, ACs, = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
+        @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
+        info.converged==0 && @warn "ACenv Not converged"
         if length(λACs) > 1 && norm(abs(λACs[1]) - abs(λACs[2])) < 1e-12
             @show λACs
             if real(λACs[1]) > 0
@@ -470,7 +480,9 @@ function Cenv!(C, FL, FR; kwargs...)
     λC = zeros(eltype(C[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         jr = j + 1 - (j==Nj) * Nj
-        λCs, Cs, = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
+        @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
+        info.converged==0 && @warn "Cenv Not converged"
         if length(λCs) > 1 && norm(abs(λCs[1]) - abs(λCs[2])) < 1e-12
             @show λCs
             if real(λCs[1]) > 0
@@ -599,7 +611,9 @@ function obs_FL!(ALu, ALd, M, FL; kwargs...)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         ir = Ni + 1 - i
-        λLs, FL1s, _= eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "obs_FL eigsolve" λLs info sort(abs.(λLs))
+        info.converged==0 && @warn "obs_FL Not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
@@ -636,7 +650,9 @@ function obs_FR!(ARu, ARd, M, FR; kwargs...)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         ir = Ni + 1 - i
-        λRs, FR1s, _= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "obs_FR! eigsolve" λRs info sort(abs.(λRs))
+        info.converged==0 && @warn "obs_FR! Not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
             @show λRs
             if real(λRs[1]) > 0
@@ -717,7 +733,8 @@ function bigleftenv!(ALu, ALd, M, BgFL; kwargs...)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
         irr = i + 2 - Ni * (i + 2 > Ni)
-        λLs, BgFL1s, _= eigsolve(X->BgFLmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], X, j), BgFL[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λLs, BgFL1s, info= eigsolve(X->BgFLmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], X, j), BgFL[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "bigleftenv! eigsolve" λLs info sort(abs.(λLs))
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
@@ -797,7 +814,8 @@ function bigrightenv!(ARu, ARd, M, BgFR; kwargs...)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
         irr = i + 2 - Ni * (i + 2 > Ni)
-        λRs, BgFR1s, _= eigsolve(X->BgFRmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], X, j), BgFR[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λRs, BgFR1s, info= eigsolve(X->BgFRmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], X, j), BgFR[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "bigrightenv eigsolve" λRs info sort(abs.(λRs))
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
             @show λRs
             if real(λRs[1]) > 0
@@ -850,7 +868,8 @@ function norm_FL!(ALu, ALd, FL_norm; kwargs...)
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL_norm[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
-        λLs, FL_norms, _= eigsolve(X->norm_FLmap(ALu[i,:], ALd[i,:], X, j), FL_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λLs, FL_norms, info= eigsolve(X->norm_FLmap(ALu[i,:], ALd[i,:], X, j), FL_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "norm_FL eigsolve" λLs info sort(abs.(λLs))
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
@@ -903,7 +922,8 @@ function norm_FR!(ARu, ARd, FR_norm; kwargs...)
     Ni,Nj = size(ARu)
     λL = zeros(eltype(FR_norm[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
-        λLs, FR_norms, _= eigsolve(X->norm_FRmap(ARu[i,:], ARd[i,:], X, j), FR_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λLs, FR_norms, info= eigsolve(X->norm_FRmap(ARu[i,:], ARd[i,:], X, j), FR_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "norm_FR! eigsolve" λLs info sort(abs.(λLs))
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
