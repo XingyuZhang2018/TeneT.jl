@@ -110,7 +110,7 @@ function getL!(A,L; kwargs...)
     for j = 1:Nj, i = 1:Ni
         λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
         @debug "getL eigsolv" λ info sort(abs.(λ))
-        info.converged==0 && @warn "getL not converged"
+        info.converged == 0 && @warn "getL not converged"
         ρ = ρs[1] + ρs[1]'
         ρ ./= tr(ρ)
         F = svd!(ρ)
@@ -148,7 +148,7 @@ function getLsped(Le, A, AL; kwargs...)
     for j = 1:Nj, i = 1:Ni
         λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λ info sort(abs.(λ))
-        info.converged==0 && @warn "getLsped not converged"
+        info.converged == 0 && @warn "getLsped not converged"
         _, L[i,j] = qrpos!(Ls[1])
     end
     return L
@@ -308,7 +308,7 @@ function leftenv!(ALu, ALd, M, FL; kwargs...)
         ir = i + 1 - Ni * (i==Ni)
         λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=1000 , ishermitian = false, kwargs...)
         @debug "leftenv! eigsolv" λLs info sort(abs.(λLs))
-        info.converged==0 && @warn "leftenv not converged"
+        info.converged == 0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
@@ -347,7 +347,7 @@ function rightenv!(ARu, ARd, M, FR; kwargs...)
         ir = i + 1 - Ni * (i==Ni)
         λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=1000 , ishermitian = false, kwargs...)
         @debug "rightenv! eigsolv" λRs info sort(abs.(λRs))
-        info.converged==0 && @warn "rightenv not converged"
+        info.converged == 0 && @warn "rightenv not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
             @show λRs
             if real(λRs[1]) > 0
@@ -439,7 +439,7 @@ function ACenv!(AC, FL, M, FR; kwargs...)
     for j = 1:Nj, i = 1:Ni
         λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
-        info.converged==0 && @warn "ACenv Not converged"
+        info.converged == 0 && @warn "ACenv Not converged"
         if length(λACs) > 1 && norm(abs(λACs[1]) - abs(λACs[2])) < 1e-12
             @show λACs
             if real(λACs[1]) > 0
@@ -482,7 +482,7 @@ function Cenv!(C, FL, FR; kwargs...)
         jr = j + 1 - (j==Nj) * Nj
         λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
         @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
-        info.converged==0 && @warn "Cenv Not converged"
+        info.converged == 0 && @warn "Cenv Not converged"
         if length(λCs) > 1 && norm(abs(λCs[1]) - abs(λCs[2])) < 1e-12
             @show λCs
             if real(λCs[1]) > 0
@@ -613,7 +613,7 @@ function obs_FL!(ALu, ALd, M, FL; kwargs...)
         ir = Ni + 1 - i
         λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "obs_FL eigsolve" λLs info sort(abs.(λLs))
-        info.converged==0 && @warn "obs_FL Not converged"
+        info.converged == 0 && @warn "obs_FL Not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
             if real(λLs[1]) > 0
@@ -652,7 +652,7 @@ function obs_FR!(ARu, ARd, M, FR; kwargs...)
         ir = Ni + 1 - i
         λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "obs_FR! eigsolve" λRs info sort(abs.(λRs))
-        info.converged==0 && @warn "obs_FR! Not converged"
+        info.converged == 0 && @warn "obs_FR! Not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
             @show λRs
             if real(λRs[1]) > 0

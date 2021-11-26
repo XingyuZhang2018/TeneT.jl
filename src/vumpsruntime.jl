@@ -113,7 +113,7 @@ end
 
 function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     temp = show_counting()
-    temp != 0 && @info "vumps@step: $(temp), error=$(err)"
+    temp != 0 && println("vumps@step: $(temp), error=$(err)")
     M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
     AC = ALCtoAC(AL,C)
     _, ACp = ACenv(AC, FL, M, FR)

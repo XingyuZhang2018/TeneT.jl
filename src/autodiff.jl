@@ -173,7 +173,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
             jr = j - 1 + Nj * (j == 1)
             dFL[i,j] -= Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] * FL[i,j]
             ξl, info = linsolve(FR -> FRmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], FR, jr), conj(dFL[i,j]), -λL[i,j], 1; maxiter = 1)
-            # @assert info.converged == 1
+            info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], FL[i,j], ξl, j, J; ifconj = true)
                 dALu[i,J] += dAiJ
@@ -200,7 +200,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
             jr = j - 1 + Nj * (j == 1)
             dFR[i,jr] -= Array(ein"abc,abc ->"(conj(FR[i,jr]), dFR[i,jr]))[] * FR[i,jr]
             ξr, info = linsolve(FL -> FLmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], FL, j), conj(dFR[i,jr]), -λR[i,jr], 1; maxiter = 1)
-            # @assert info.converged == 1
+            info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], ξr, FR[i,jr], j, J; ifconj = true)
                 dARu[i,J] += dAiJ
@@ -313,7 +313,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
                 ir = i - 1 + Ni * (i == 1)
                 dAC[i,j] -= Array(ein"abc,abc ->"(conj(AC[i,j]), dAC[i,j]))[] * AC[i,j]
                 ξAC, info = linsolve(ACd -> ACdmap(ACd, FL[:,j], FR[:,j], M[:,j], ir), conj(dAC[i,j]), -λAC[i,j], 1; maxiter = 1)
-                # @assert info.converged == 1
+                info.converged == 0 && @warn "ad's linsolve not converge"
                 # errAC = ein"abc,abc ->"(AC[i,j], ξAC)[]
                 # abs(errAC) > 1e-1 && throw("AC and ξ aren't orthometric. $(errAC) $(info)")
                 # @show info ein"abc,abc ->"(AC[i,j], ξAC)[] ein"abc,abc -> "(AC[i,j], dAC[i,j])[]
@@ -417,7 +417,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
                 jr = j + 1 - (j==Nj) * Nj
                 dC[i,j] -= Array(ein"ab,ab ->"(conj(C[i,j]), dC[i,j]))[] * C[i,j]
                 ξC, info = linsolve(Cd -> Cdmap(Cd, FL[:,jr], FR[:,j], ir), conj(dC[i,j]), -λC[i,j], 1; maxiter = 1)
-                # @assert info.converged == 1
+                info.converged == 0 && @warn "ad's linsolve not converge"
                 # errC = ein"ab,ab ->"(C[i,j], ξC)[]
                 # abs(errC) > 1e-1 && throw("C and ξ aren't orthometric. $(errC) $(info)")
                 # @show info ein"ab,ab ->"(C[i,j], ξC)[] ein"ab,ab -> "(C[i,j], dC[i,j])[]
@@ -447,7 +447,7 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
             jr = j - 1 + Nj * (j == 1)
             dFL[i,j] -= Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] * FL[i,j]
             ξl, info = linsolve(FR -> FRmap(ALu[i,:], ALd[ir,:], M[i,:], FR, jr), conj(dFL[i,j]), -λL[i,j], 1; maxiter = 1)
-            # @assert info.converged == 1
+            info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ALu[i,:], ALd[ir,:], M[i,:], FL[i,j], ξl, j, J)
                 dALu[i,J] += dAiJ
@@ -474,7 +474,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
             jr = j - 1 + Nj * (j == 1)
             dFR[i,jr] -= Array(ein"abc,abc ->"(conj(FR[i,jr]), dFR[i,jr]))[] * FR[i,jr]
             ξr, info = linsolve(FL -> FLmap(ARu[i,:], ARd[ir,:], M[i,:], FL, j), conj(dFR[i,jr]), -λR[i,jr], 1; maxiter = 1)
-            # @assert info.converged == 1
+            info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ARu[i,:], ARd[ir,:], M[i,:], ξr, FR[i,jr], j, J)
                 dARu[i,J] += dAiJ
@@ -558,7 +558,7 @@ function ChainRulesCore.rrule(::typeof(bigleftenv), ALu, ALd, M, BgFL; kwargs...
                 jr = j - 1 + Nj * (j == 1)
                 dBgFL[i,j] -= Array(ein"abcd,abcd ->"(conj(BgFL[i,j]), dBgFL[i,j]))[] * BgFL[i,j]
                 ξl, info = linsolve(BgFR -> BgFRmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], BgFR, jr), conj(dBgFL[i,j]), -λL[i,j], 1; maxiter = 1)
-                # @assert info.converged == 1
+                info.converged == 0 && @warn "ad's linsolve not converge"
                 # errL = ein"abc,cba ->"(FL[i,j], ξl)[]
                 # abs(errL) > 1e-1 && throw("FL and ξl aren't orthometric. $(errL) $(info)")
                 # @show info ein"abc,cba ->"(FL[i,j], ξl)[] ein"abc,abc -> "(FL[i,j], dFL[i,j])[]
@@ -592,7 +592,7 @@ function ChainRulesCore.rrule(::typeof(bigrightenv), ARu, ARd, M, BgFR; kwargs..
             if dBgFR[i,jr] !== nothing
                 dBgFR[i,jr] -= Array(ein"abcd,abcd ->"(conj(BgFR[i,jr]), dBgFR[i,jr]))[] * BgFR[i,jr]
                 ξr, info = linsolve(BgFL -> BgFLmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], BgFL, j), conj(dBgFR[i,jr]), -λR[i,jr], 1; maxiter = 1)
-                # @assert info.converged == 1
+                info.converged == 0 && @warn "ad's linsolve not converge"
                 # errR = ein"abc,cba ->"(ξr, FR[i,jr])[]
                 # abs(errR) > 1e-1 && throw("FR and ξr aren't orthometric. $(errR) $(info)")
                 # @show info ein"abc,cba ->"(ξr, FR[i,jr])[] ein"abc,abc -> "(FR[i,jr], dFR[i,jr])[]
