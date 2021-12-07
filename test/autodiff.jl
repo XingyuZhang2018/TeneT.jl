@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,bigleftenv,bigrightenv
+using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,bigleftenv,bigrightenv,parity_conserving
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -285,4 +285,15 @@ end
         return s
     end 
     @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
+endW
+
+@testset "parity_conserving" for atype in [Array,CuArray], dtype in [ComplexF64], Ni = [2], Nj = [2]
+    Random.seed!(100)
+    D = 2
+    T = atype(rand(dtype,D,D,4,D,D,Ni*Nj))
+    function foo(T)
+        ipeps = reshape([parity_conserving(T[:,:,:,:,:,i]) for i = 1:4], (2, 2))
+        norm(ipeps)
+    end
+    @test Zygote.gradient(foo, T)[1] ≈ num_grad(foo, T) atol = 1e-8
 end

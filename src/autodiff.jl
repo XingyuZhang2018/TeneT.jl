@@ -610,3 +610,10 @@ function ChainRulesCore.rrule(::typeof(bigrightenv), ARu, ARd, M, BgFR; kwargs..
     return (λR, BgFR), back
 end
 
+function ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray})
+	result = parity_conserving(T)
+	function back(ΔT)
+		return NoTangent(), parity_conserving(ΔT)
+	end
+	return result, back
+end
