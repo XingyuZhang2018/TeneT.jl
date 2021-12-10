@@ -1,6 +1,6 @@
 module VUMPS
 
-export Z2Matrix, Z2Matrix2tensor
+export Z2Matrix, Z2Matrix2tensor, randZ2
 
 include("cuda_patch.jl")
 include("environment.jl")

@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS: parity_conserving,maxbulkMatrix,sitetoZ2site
+using VUMPS: parity_conserving,bulksize,indextoZ2index,maptable,qrpos,lqpos
 using CUDA
 using LinearAlgebra
 using OMEinsum
@@ -22,8 +22,8 @@ end
 @testset "Z2 Tensor" begin
 	Random.seed!(100)
 	## product
-	A = Z2Matrix(rand(3,2), rand(3,2), [2,3], [4])
-	B = Z2Matrix(rand(2,3), rand(2,2), [4], [5])
+	A = randZ2(2,3,4)
+	B = randZ2(4,5)
 	Atensor = Z2Matrix2tensor(A)
 	Btensor = Z2Matrix2tensor(B)
 	@test A * B ≈ Z2Matrix(A.even * B.even, A.odd * B.odd, [2,3], [5])
@@ -33,10 +33,12 @@ end
 	Ni,Nj,Nk = 4,3,2
 	evensite = []
 	oddsite = []
+	Ci = maptable([Ni])
+	Cj = maptable([Nj,Nk])
 	for ind in CartesianIndices((Ni,Nj,Nk))
 		i,j,k = Tuple(ind) .- 1 
 		if (i + j + k) % 2 == 0 
-			s = sitetoZ2site([i],[j,k],[Ni],[Nj,Nk])
+			s = indextoZ2index([i],[j,k],Ci,Cj)
 			if s[1] == :even
 				evensite = [evensite,(s[2],s[3])]
 			else
@@ -50,9 +52,8 @@ end
 		end
 	end
 
-	## maxbulkMatrix
-	@show maxbulkMatrix([4],[4])
-	@test maxbulkMatrix([4],[3,2]) == (evensite[end],oddsite[end])
+	## bulksize
+	@test bulksize([4],[3,2]) == (evensite[end],oddsite[end])
 
 	## permutedims
 	@test permutedims(Atensor,[3,2,1]) == Z2Matrix2tensor(permutedims(A,[[3],[2,1]])) == Z2Matrix2tensor(permutedims(A,[[3,2],[1]]))
@@ -63,8 +64,8 @@ end
 
 @testset "OMEinsum Z2" begin
 	Random.seed!(100)
-	A = Z2Matrix(rand(5,2), rand(4,2), [3,3], [4])
-	B = Z2Matrix(rand(2,2), rand(2,1), [4], [3])
+	A = randZ2(3,3,4)
+	B = randZ2(4,3)
 	Atensor = Z2Matrix2tensor(A)
 	Btensor = Z2Matrix2tensor(B)
 
@@ -83,13 +84,37 @@ end
 	@test ein"abc,abc ->"(Atensor,Atensor)[] ≈ ein"abc,abc ->"(A,A)[]
 
 	## tr
-	B = Z2Matrix(rand(2,2), rand(2,2), [4], [4])
+	B = randZ2(4,4)
 	Btensor = Z2Matrix2tensor(B)
 	@test ein"aa ->"(Btensor)[] ≈ ein"aa ->"(B)[]
 
-	B = Z2Matrix(rand(2,2), rand(2,2), [2,2], [2,2])
+	B = randZ2(2,2,2,2)
 	Btensor = Z2Matrix2tensor(B)
 	@test ein"abab -> "(Btensor)[] ≈ tr(B)
 	@test ein"aabb -> "(Btensor)[] ≈ tr(permutedims(B,[[1,3],[2,4]]))
 	@test ein"aabb -> "(Btensor)[] ≈ ein"aabb-> "(B)[]
+end
+
+@testset "qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
+    Random.seed!(100)
+    A = randZ2(7,4)
+	Atensor = Z2Matrix2tensor(A)
+	Q, R = qrpos(A)
+    Qtensor, Rtensor = qrpos(Atensor)
+    @test Array(Qtensor*Rtensor) ≈ Array(Atensor)
+	@test Q*R ≈ A
+	@test Z2Matrix2tensor(Q) ≈ Qtensor
+	@test Z2Matrix2tensor(R) ≈ Rtensor
+end
+
+@testset "lq with $atype{$dtype}" for atype in [Array], dtype in [Float64]
+    Random.seed!(100)
+    A = randZ2(7,4)
+	Atensor = Z2Matrix2tensor(A)
+	L, Q = lqpos(A)
+    Ltensor, Qtensor = lqpos(Atensor)
+    @test Array(Ltensor*Qtensor) ≈ Array(Atensor)
+	@test L*Q ≈ A
+	@test Z2Matrix2tensor(L) ≈ Ltensor
+	@test Z2Matrix2tensor(Q) ≈ Qtensor
 end

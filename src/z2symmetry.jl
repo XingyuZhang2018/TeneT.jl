@@ -1,6 +1,7 @@
 import Base: ==, +, -, *, ≈, size, reshape, permutedims, transpose
 import LinearAlgebra: tr
 import OMEinsum: tensorpermute, _compactify!, einsum, Diag
+import Random: rand
 using BitBasis
 
 """
@@ -42,8 +43,7 @@ struct Z2Vector{T, N, T1 <: AbstractMatrix, T2 <: AbstractVector} <: AbstractZ2A
     end
 end
 
-size(A::Z2Matrix) = Tuple(collect(Iterators.flatten((A.Ni, A.Nj))))
-size(A::Z2Vector) = A.Ni
+size(::AbstractZ2Array{T,N}) where {T,N} = N
 
 *(A::Z2Matrix, B::Z2Vector) = Z2Vector(A.even * B.even, A.Ni)
 *(A::Z2Vector, B::Z2Matrix) = Z2Vector(A.even * B.even, B.Nj)
@@ -54,58 +54,40 @@ size(A::Z2Vector) = A.Ni
 ≈(A::Z2Matrix, B::Z2Matrix) = (A.even ≈ B.even && A.odd ≈ B.odd)
 ≈(A::Z2Vector, B::Z2Vector) = A.even ≈ B.even
 
-function maxbulkMatrix(Ni::Vector,Nj::Vector)
+function bulksize(Ni,Nj)
     l1, l2 = length(Ni), length(Nj)
-    ieven, iodd = 1, 1
-    jeven, jodd = 1, 1
-    Ci = Int.(ceil.(LinearIndices(Tuple(collect((0:i) for i in Ni.-1)))/2))
-    Cj = Int.(ceil.(LinearIndices(Tuple(collect((0:j) for j in Nj.-1)))/2))
-    if l1 != 0 && l2 != 0
-        i1 = Ci[Ni...]
-        Nir = copy(Ni)
-        Nir[1] -= 1
-        i2 = Ci[Nir...]
-        j1 = Cj[Nj...]
-        Njr = copy(Nj)
-        Njr[1] -= 1
-        j2 = Cj[Njr...]
-        sum(Ni .- 1) % 2 == 0 ? (ieven = i1; iodd = i2) : (ieven = i2; iodd = i1)
-        sum(Nj .- 1) % 2 == 0 ? (jeven = j1; jodd = j2) : (jeven = j2; jodd = j1)
-        return (ieven, jeven), (iodd, jodd)
-    elseif l2 == 0
-        i1 = Ci[Ni...]
-        Nir = copy(Ni)
-        Nir[1] -= 1
-        i2 = Ci[Nir...]
-        sum(Ni .- 1) % 2 == 0 ? (ieven = i1) : (ieven = i2)
-        return (ieven, jeven)
+    if l2 == 0
+        ieven = Int(ceil(prod(Ni)/2))
+        return (ieven, 1)
+    elseif l1 == 0
+        jeven = Int(ceil(prod(Nj)/2))
+        return (1, jeven)
     else
-        j1 = Cj[Nj...]
-        Njr = copy(Nj)
-        Njr[1] -= 1
-        j2 = Cj[Njr...]
-        sum(Nj .- 1) % 2 == 0 ? (jeven = j1) : (jeven = j2)
-        return (ieven, jeven)
+        ieven = Int(ceil(prod(Ni)/2))
+        iodd = prod(Ni) - ieven
+        jeven = Int(ceil(prod(Nj)/2))
+        jodd = prod(Nj) - jeven
+        return (ieven, jeven), (iodd, jodd)
     end
 end
 
-function sitetoZ2site(a::Vector,b::Vector,Ni::Vector,Nj::Vector)
+function randZ2(a...)
+    a = collect(Iterators.flatten(a))
+    La = Int(ceil(length(a)/2))
+    N = [a[1:La], a[La+1:end]]
+    s = bulksize(N[1],N[2])
+    Z2Matrix(rand(s[1][1],s[1][2]), rand(s[2][1],s[2][2]), N[1], N[2])
+end
+
+maptable(N::Vector) = Int.(ceil.(LinearIndices(Tuple(collect((0:k) for k in N.-1)))/2))
+
+function indextoZ2index(a::Vector,b::Vector,Ci,Cj)
     s1, s2 = sum(a), sum(b) 
     l1, l2 = length(a), length(b)
     (s1 + s2) % 2 != 0 && throw(Base.error("$a $b is not in the parity conserving subspace"))
     s1 % 2 == 0 ? parity = :even : parity = :odd
-    if l1 != 0
-        Ci = Int.(ceil.(LinearIndices(Tuple(collect((0:k) for k in Ni.-1)))/2))
-        i = Ci[a.+1...]
-    else
-        i = 1
-    end
-    if l2 != 0
-        Cj = Int.(ceil.(LinearIndices(Tuple(collect((0:k) for k in Nj.-1)))/2))
-        j = Cj[b.+1...]
-    else
-        j = 1
-    end
+    l1 == 0 ? (i = 1) : (i = Ci[a.+1...])
+    l2 == 0 ? (j = 1) : (j = Cj[b.+1...])
     return (parity, i, j)
 end
 
@@ -116,19 +98,26 @@ function permutedims(A::AbstractZ2Array, b::AbstractArray)
     Nb = similar(b)
     Nb[1] = collect(iter[b[1]])
     Nb[2] = collect(iter[b[2]])
-    s = maxbulkMatrix(Nb[1],Nb[2])
+    s = bulksize(Nb[1],Nb[2])
+    Cbi, Cbj = [], [] 
     if Nb[1] == []
+        Cbj = maptable(Nb[2])
         B = Z2Vector(zeros(s), Nb[2])
     elseif Nb[2] == []
+        Cbi = maptable(Nb[1])
         B = Z2Vector(zeros(s), Nb[1])
     else
+        Cbi = maptable(Nb[1])
+        Cbj = maptable(Nb[2])
         B = Z2Matrix(zeros(s[1]), zeros(s[2]), Nb[1], Nb[2])
     end
+    Cai = maptable(Na[1])
+    Caj = maptable(Na[2])
     for i in CartesianIndices(iter)
         ind = collect(Tuple(i)) .- 1
 		if sum(ind) % 2 == 0
-            sa = sitetoZ2site(ind[1:La],ind[La+1:end],Na[1],Na[2])
-            sb = sitetoZ2site(ind[b[1]],ind[b[2]],Nb[1],Nb[2])
+            sa = indextoZ2index(ind[1:La],ind[La+1:end],Cai,Caj)
+            sb = indextoZ2index(ind[b[1]],ind[b[2]],Cbi,Cbj)
 			getfield(B,sb[1])[sb[2],sb[3]] = getfield(A,sa[1])[sa[2],sa[3]]
 		end
 	end
@@ -140,10 +129,12 @@ function Z2Matrix2tensor(A::AbstractZ2Array)
     L = length(N[1])
     iter = Tuple(collect(Iterators.flatten(N)))
     T = zeros(iter)
+    Ci = maptable(N[1])
+    Cj = maptable(N[2])
     for i in CartesianIndices(iter)
         ind = collect(Tuple(i)) .- 1
         if sum(ind) % 2 == 0
-            sa = sitetoZ2site(ind[1:L],ind[L+1:end],N[1],N[2])
+            sa = indextoZ2index(ind[1:L],ind[L+1:end],Ci,Cj)
             T[i] = getfield(A,sa[1])[sa[2],sa[3]]
         end
     end
@@ -176,4 +167,22 @@ function einsum(::Diag, ixs, iy, xs::Tuple{<:AbstractZ2Array}, size_dict::Dict)
         x = permutedims(x, [[1,3], [2,4]])
     end
     reshape([diag(x.even); diag(x.odd)],x.Ni[1],x.Ni[1])
+end
+
+function qrpos(A::AbstractZ2Array)
+    Qeven,Reven = qrpos(A.even)
+    Qodd,Rodd = qrpos(A.odd)
+    prod(A.Ni) <= prod(A.Nj) ? (Nm = A.Ni) : (Nm = A.Nj)
+    Q = Z2Matrix(Qeven, Qodd, A.Ni, Nm)
+    R = Z2Matrix(Reven, Rodd, Nm, A.Nj)
+    return Q, R
+end   
+
+function lqpos(A::AbstractZ2Array)
+    Leven,Qeven = lqpos(A.even)
+    Lodd,Qodd = lqpos(A.odd)
+    prod(A.Ni) <= prod(A.Nj) ? (Nm = A.Ni) : (Nm = A.Nj)
+    L = Z2Matrix(Leven, Lodd, A.Ni, Nm)
+    Q = Z2Matrix(Qeven, Qodd, Nm, A.Nj)
+    return L, Q
 end
