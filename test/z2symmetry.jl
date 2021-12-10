@@ -19,11 +19,11 @@ CUDA.allowscalar(false)
 	@test s == 0
 end
 
-@testset "Z2 Tensor" begin
+@testset "Z2 Tensor with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
 	Random.seed!(100)
 	## product
-	A = randZ2(2,3,4)
-	B = randZ2(4,5)
+	A = randZ2(atype, dtype, 2, 3, 4)
+	B = randZ2(atype, dtype, 4, 5)
 	Atensor = Z2Matrix2tensor(A)
 	Btensor = Z2Matrix2tensor(B)
 	@test A * B ≈ Z2Matrix(A.even * B.even, A.odd * B.odd, [2,3], [5])
@@ -62,10 +62,10 @@ end
 	@test reshape(Atensor,(6,4)) == reshape(Z2Matrix2tensor(permutedims(A,[[1,2],[3]])),(6,4)) == reshape(Z2Matrix2tensor(reshape(A,6,4)), (6,4))
 end
 
-@testset "OMEinsum Z2" begin
+@testset "OMEinsum Z2 with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
 	Random.seed!(100)
-	A = randZ2(3,3,4)
-	B = randZ2(4,3)
+	A = randZ2(atype, dtype, 3,3,4)
+	B = randZ2(atype, dtype, 4,3)
 	Atensor = Z2Matrix2tensor(A)
 	Btensor = Z2Matrix2tensor(B)
 
@@ -81,23 +81,23 @@ end
 	@test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Btensor) ≈ Z2Matrix2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),B)) ≈ Z2Matrix2tensor(ein"(abc,cd),ed -> abe"(A,B,B))
 
 	## constant
-	@test ein"abc,abc ->"(Atensor,Atensor)[] ≈ ein"abc,abc ->"(A,A)[]
+	@test Array(ein"abc,abc ->"(Atensor,Atensor))[] ≈ Array(ein"abc,abc ->"(A,A))[]
 
 	## tr
-	B = randZ2(4,4)
+	B = randZ2(atype, dtype, 4,4)
 	Btensor = Z2Matrix2tensor(B)
-	@test ein"aa ->"(Btensor)[] ≈ ein"aa ->"(B)[]
+	@test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
 
-	B = randZ2(2,2,2,2)
+	B = randZ2(atype, dtype, 2,2,2,2)
 	Btensor = Z2Matrix2tensor(B)
-	@test ein"abab -> "(Btensor)[] ≈ tr(B)
-	@test ein"aabb -> "(Btensor)[] ≈ tr(permutedims(B,[[1,3],[2,4]]))
-	@test ein"aabb -> "(Btensor)[] ≈ ein"aabb-> "(B)[]
+	@test Array(ein"abab -> "(Btensor))[] ≈ tr(B)
+	@test Array(ein"aabb -> "(Btensor))[] ≈ tr(permutedims(B,[[1,3],[2,4]]))
+	@test Array(ein"aabb -> "(Btensor))[] ≈ Array(ein"aabb-> "(B))[]
 end
 
-@testset "qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
+@testset "Z2 qr with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
     Random.seed!(100)
-    A = randZ2(7,4)
+    A = randZ2(atype, dtype, 7,4)
 	Atensor = Z2Matrix2tensor(A)
 	Q, R = qrpos(A)
     Qtensor, Rtensor = qrpos(Atensor)
@@ -107,9 +107,9 @@ end
 	@test Z2Matrix2tensor(R) ≈ Rtensor
 end
 
-@testset "lq with $atype{$dtype}" for atype in [Array], dtype in [Float64]
+@testset "Z2 lq with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
     Random.seed!(100)
-    A = randZ2(7,4)
+    A = randZ2(atype, dtype, 7,4)
 	Atensor = Z2Matrix2tensor(A)
 	L, Q = lqpos(A)
     Ltensor, Qtensor = lqpos(Atensor)
