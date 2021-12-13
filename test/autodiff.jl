@@ -285,7 +285,7 @@ end
         return s
     end 
     @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
-endW
+end
 
 @testset "parity_conserving" for atype in [Array,CuArray], dtype in [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)

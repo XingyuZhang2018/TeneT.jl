@@ -1,4 +1,4 @@
-import Base: ==, +, -, *, ≈, size, reshape, permutedims, transpose, display
+import Base: ==, +, -, *, ≈, size, reshape, permutedims, transpose, conj, show
 import LinearAlgebra: tr
 import OMEinsum: tensorpermute, _compactify!, einsum, Diag
 import Random: rand
@@ -15,7 +15,7 @@ function parity_conserving(T::Union{Array,CuArray}) where V<:Real
 	s = size(T)
 	p = zeros(s)
 	bits = map(x -> Int(ceil(log2(x))), s)
-	for index in CartesianIndices(T)
+	@inbounds for index in CartesianIndices(T)
 		i = Tuple(index) .- 1
 		sum(sum.(bitarray.(i,bits))) % 2 == 0 && (p[index] = 1)
 	end
@@ -45,9 +45,9 @@ struct Z2Vector{T, N, T1 <: AbstractMatrix, T2 <: AbstractVector} <: AbstractZ2A
 end
 
 size(::AbstractZ2Array{T,N}) where {T,N} = N
-function display(A::Z2Matrix)
-    @show A.even
-    @show A.odd
+
+function show(io::IOBuffer, A::Z2Matrix)
+    @show A.even A.odd
 end
 
 *(A::Z2Matrix, B::Z2Vector) = Z2Vector(A.even * B.even, A.Ni)
@@ -84,7 +84,7 @@ function randZ2(atype, dtype, a...)
     Z2Matrix(atype(rand(dtype, s[1][1], s[1][2])), atype(rand(dtype, s[2][1], s[2][2])), N[1], N[2])
 end
 
-maptable(N::Vector) = Int.(ceil.(LinearIndices(Tuple(collect((0:k) for k in N.-1)))/2))
+maptable(N::Vector) = Int.(ceil.(LinearIndices(Tuple([(0:k) for k in N.-1]))/2))
 
 function indextoZ2index(a::Vector,b::Vector,Ci,Cj)
     s1, s2 = sum(a), sum(b) 
@@ -119,7 +119,7 @@ function permutedims(A::AbstractZ2Array{T}, b::AbstractArray) where {T}
     end
     Cai = maptable(Na[1])
     Caj = maptable(Na[2])
-    for i in CartesianIndices(iter)
+    @inbounds for i in CartesianIndices(iter)
         ind = collect(Tuple(i)) .- 1
 		if sum(ind) % 2 == 0
             sa = indextoZ2index(ind[1:La],ind[La+1:end],Cai,Caj)
@@ -137,7 +137,7 @@ function Z2Matrix2tensor(A::AbstractZ2Array{T}) where {T}
     Tensor = _arraytype(A.even)(zeros(T, iter))
     Ci = maptable(N[1])
     Cj = maptable(N[2])
-    for i in CartesianIndices(iter)
+    @inbounds for i in CartesianIndices(iter)
         ind = collect(Tuple(i)) .- 1
         if sum(ind) % 2 == 0
             sa = indextoZ2index(ind[1:L],ind[L+1:end],Ci,Cj)
@@ -162,6 +162,7 @@ end
 
 transpose(A::Z2Vector) = Z2Vector(transpose(A.even), A.Ni)
 tr(A::Z2Matrix) = tr(A.even) + tr(A.odd)
+conj(A::Z2Matrix) = Z2Matrix(conj(A.even), conj(A.odd), A.Ni, A.Nj)
 
 tensorpermute(A::AbstractZ2Array, perm) = length(perm) == 0 ? copy(A) : permutedims(A, [collect(perm[1:length(A.Ni)]), collect(perm[length(A.Ni)+1:end])])
 

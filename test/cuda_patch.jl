@@ -1,8 +1,12 @@
+using BenchmarkTools
 using VUMPS
 using KrylovKit
 using CUDA
+using CUDA.CUSPARSE
+using SparseArrays
 using Test
 using OMEinsum
+using ProfileView
 using Random
 CUDA.allowscalar(false)
 
@@ -14,9 +18,25 @@ CUDA.allowscalar(false)
     M = atype(rand(dtype, d, d, d, d))
     FL = atype(rand(dtype, D, d, D))
     @time ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
+    function profile_test()
+        ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
+    end
+    ProfileView.@profview profile_test()
 end
 
-@testset "KrylovKit with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "OMEinsum with $atype{$dtype} " for atype in [Array], dtype in [Float64]
+    Random.seed!(100)
+    d = 16
+    D = 20
+    AL = randZ2(atype, dtype, D, d, D)
+    M = randZ2(atype, dtype, d, d, d, d)
+    FL = randZ2(atype, dtype, D, d, D)
+    tAL, tM, tFL = map(Z2Matrix2tensor,[AL, M, FL])
+    @time ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
+    @time ein"((γcη,ηpβ),csap),γsα -> αaβ"(tFL,tAL,tM,conj(tAL))
+end
+
+@testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]
     Random.seed!(100)
     d = 4
     D = 10

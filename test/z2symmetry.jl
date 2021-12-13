@@ -3,6 +3,7 @@ using VUMPS: parity_conserving,bulksize,indextoZ2index,maptable,qrpos,lqpos
 using CUDA
 using LinearAlgebra
 using OMEinsum
+using SparseArrays
 using Random
 using Test
 CUDA.allowscalar(false)
