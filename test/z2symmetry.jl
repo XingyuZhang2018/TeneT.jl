@@ -36,36 +36,47 @@ end
 	@test reshape(Atensor,(9,4)) == reshape(Z2tensor2tensor(reshape(reshape(A,9,4),3,3,4)),(9,4))
 end
 
-@testset "OMEinsum Z2 with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "OMEinsum Z2 with $atype{$dtype}" for atype in [CuArray], dtype in [Float64]
 	Random.seed!(100)
-	A = randZ2(atype, dtype, 3,3,4)
-	B = randZ2(atype, dtype, 4,3)
+	A = randZ2(atype, dtype, 3,3,4);
+	B = randZ2(atype, dtype, 4,3);
 	Atensor = Z2tensor2tensor(A)
 	Btensor = Z2tensor2tensor(B)
+	## binary contraction
 
-	# ## binary contraction
-	# @test ein"abc,cd -> abd"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,cd -> abd"(A,B))
-	# @test ein"abc,db -> adc"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,db -> adc"(A,B))
-	# @test ein"cba,dc -> abd"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"cba,dc -> abd"(A,B))
-	# @test ein"abc,cb -> a"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,cb -> a"(A,B))
-	# @test ein"bac,cb -> a"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"bac,cb -> a"(A,B))
-	# @test ein"cba,ab -> c"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"cba,ab -> c"(A,B))
+	@test ein"abc,cd -> abd"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,cd -> abd"(A,B))
+	@test ein"abc,db -> adc"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,db -> adc"(A,B))
+	@test ein"cba,dc -> abd"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"cba,dc -> abd"(A,B))
+	@test ein"abc,cb -> a"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,cb -> a"(A,B))
+	@test ein"bac,cb -> a"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"bac,cb -> a"(A,B))
+	@test ein"cba,ab -> c"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"cba,ab -> c"(A,B))
 
-	# ## NestedEinsum
-	# @test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Btensor) ≈ Z2tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),B)) ≈ Z2tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,B))
+	## NestedEinsum
+	@test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Btensor) ≈ Z2tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),B)) ≈ Z2tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,B))
 
-	# # ## constant
-	# @test Array(ein"abc,abc ->"(Atensor,Atensor))[] ≈ Array(ein"abc,abc ->"(A,A))[]
+	## constant
+	@test Array(ein"abc,abc ->"(Atensor,Atensor))[] ≈ Array(ein"abc,abc ->"(A,A))[]
 
 	## tr
-	# B = randZ2(atype, dtype, 4,4)
-	# Btensor = Z2tensor2tensor(B)
-	# @test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
+	B = randZ2(atype, dtype, 4,4)
+	Btensor = Z2tensor2tensor(B)
+	@test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
 
 	B = randZ2(atype, dtype, 2,2,2,2)
 	Btensor = Z2tensor2tensor(B)
 	@test Array(ein"abab -> "(Btensor))[] ≈ tr(reshape(B,4,4))
 	@test Array(ein"aabb -> "(Btensor))[] ≈ Array(ein"aabb-> "(B))[]
+	
+	## VUMPS unit
+	d = 2
+    D = 10
+    AL = randZ2(atype, dtype, D, d, D)
+    M = randZ2(atype, dtype, d, d, d, d)
+    FL = randZ2(atype, dtype, D, d, D)
+    tAL, tM, tFL = map(Z2tensor2tensor,[AL, M, FL])
+	tFL = ein"((γcη,ηpβ),csap),γsα -> αaβ"(tFL,tAL,tM,conj(tAL))
+	FL = ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
+    @test tFL ≈ Z2tensor2tensor(FL) 
 end
 
 @testset "Z2 qr with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]

@@ -1,5 +1,5 @@
-import Base: ==, +, -, *, ≈, size, reshape, permutedims, transpose, conj, show
-import LinearAlgebra: tr
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show
+import LinearAlgebra: tr, norm, dot, rmul!, axpy!
 import OMEinsum: _compactify!, subindex
 import Random: rand
 using BitBasis
@@ -35,6 +35,16 @@ struct Z2tensor{T, N} <: AbstractZ2Array{T,N}
 end
 
 size(::AbstractZ2Array{T,N}) where {T,N} = N
+conj(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(conj,A.tensor), N, A.division)
+norm(A::AbstractZ2Array{T,N}) where {T,N} = norm(A.tensor)
+
+*(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, map(*, A.tensor, B), N, A.division)
+*(B::Number, A::AbstractZ2Array{T,N}) where {T,N} = A * B
+/(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, map(/, A.tensor, B), N, A.division)
+dot(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N} = dot(A.tensor, B.tensor)
+rmul!(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, map(rmul!, A.tensor, B), N, A.division)
+axpy!(α::Number, A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(B.parity, map((x,y)->axpy!(α, x, y), A.tensor, B.tensor), N, B.division)
+
 function ≈(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
     A.tensor ≈ B.tensor && A.parity == B.parity
 end
@@ -47,17 +57,15 @@ function randZ2(atype, dtype, a...)
     L = length(a)
     deven = Int.(ceil.(a./2))
     dodd = a .- deven
-    parity = []
-    tensor = []
-    for i in CartesianIndices(Tuple(0:1 for i=1:L))
+    parity = Vector{Vector{Int}}()
+    tensor = Vector{atype{dtype}}()
+    @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
         if sum(i.I) % 2 == 0
             push!(parity,collect(i.I))
             dims = Tuple(i.I[j] == 0 ? deven[j] : dodd[j] for j in 1:L)
             push!(tensor,atype(rand(dtype, dims)))
         end
     end
-    parity = Vector{Vector{Int}}(parity)
-    tensor = Vector{atype{dtype}}(tensor)
     Z2tensor(parity, tensor, a, 1)
 end
 
@@ -76,52 +84,81 @@ function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
             div += 1
             p *= N[div]
         end
-        for i in 1:length(tensor)
+        @inbounds for i in 1:length(tensor)
             s = size(tensor[i])
             tensor[i] = reshape(tensor[i], prod(s[1:div]), prod(s[div+1:end]))
         end
-        return Z2tensor(A.parity, tensor, a, div)
+        return Z2tensor(A.parity, tensor, N, div)
     else
-        deven = Int.(ceil.(a./2))
-        dodd = a .- deven
+        deven = Int.(ceil.(N./2))
+        dodd = N .- deven
         parity = A.parity
-        for i in 1:length(tensor)
-            dims = Tuple(parity[i][j] == 0 ? deven[j] : dodd[j] for j in 1:length(a))
+        @inbounds for i in 1:length(tensor)
+            dims = Tuple(parity[i][j] == 0 ? deven[j] : dodd[j] for j in 1:length(N))
             tensor[i] = reshape(tensor[i], dims)
         end
-        return Z2tensor(parity, tensor, a, div)
+        return Z2tensor(parity, tensor, N, div)
     end
 end
 
 function *(A::AbstractZ2Array{T,NA}, B::AbstractZ2Array{T,NB}) where {T,NA,NB}
-    Aparity, Atensor = A.parity, A.tensor
-    Bparity, Btensor = B.parity, B.tensor
-    LA, LB = length(Aparity), length(Bparity)
+    parity = Vector{Vector{Int}}()
+    atype = _arraytype(B.tensor[1])
+    tensor = Vector{atype{T}}()
     divA, divB = A.division, B.division
-    parity, tensor = [], []
-    for i in 1:LA, j in 1:LB
-        if Aparity[i][divA+1:end] == Bparity[j][1:divB] 
-            push!(parity, [Aparity[i][1:divA];Bparity[j][divB+1:end]])
-            push!(tensor, Atensor[i] * Btensor[j])
-        end
+
+    adddata!(parity, tensor, A, B, 0)
+    if divA != length(NA) && divB != length(NB)
+        adddata!(parity, tensor, A, B, 1)
     end
-    parity, tensor = uniquetensors(parity,tensor)
-    # @show parity, tensor
     parity == [Int64[]] && return Array(tensor[1])[]
-    atype = _arraytype(tensor[1])
-    parity = Vector{Vector{Int}}(parity)
-    tensor = Vector{atype{T}}(tensor)
     Z2tensor(parity, tensor, (NA[1:divA]..., NB[divB+1:end]...), 1)
 end
 
-function uniquetensors(parity,tensor)
-    uparity = unique(parity)
-    utensor = []
-    for upy in uparity
-        i = findall(x->x in [upy], parity)
-        push!(utensor, sum(tensor[i]))
+function adddata!(parity, tensor, A, B, p)
+    Aparity, Atensor = A.parity, A.tensor
+    Bparity, Btensor = B.parity, B.tensor
+    divA, divB = A.division, B.division
+
+    ind_A = findall(x->sum(x[divA+1:end]) % 2 == p, Aparity)
+    matrix_j = unique(map(x->x[divA+1:end], Aparity[ind_A]))
+    matrix_i = unique(map(x->x[1:divA], Aparity[ind_A]))
+    ind_B = findall(x->x[1:divB] in matrix_j, Bparity)
+    matrix_k = unique(map(x->x[divB+1:end], Bparity[ind_B]))
+
+    h, bulkidims = [] , Int[]
+    # @show matrix_i matrix_j Aparity size(Atensor)
+    for i in matrix_i
+        v = []
+        for j in matrix_j
+            ind = findfirst(x->x in [[i; j]], Aparity)
+            push!(v, Atensor[ind])        
+        end
+        hi = hcat(v...)
+        push!(h, hi)
+        push!(bulkidims, size(hi)[1])
     end
-    uparity, utensor
+    Amatrix = vcat(h...)
+
+    v, bulkjdims = [], Int[]
+    for k in matrix_k
+        h = []
+        for j in matrix_j
+            ind = findfirst(x->x in [[j; k]], Bparity)
+            push!(h, Btensor[ind])
+        end
+        hj = vcat(h...)
+        push!(v, hj)
+        push!(bulkjdims, size(hj)[2])
+    end
+    Bmatrix = hcat(v...)
+
+    C = Amatrix * Bmatrix
+    for i in 1:length(matrix_i), j in 1:length(matrix_k)
+        push!(parity, [matrix_i[i]; matrix_k[j]])
+        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
+        push!(tensor, C[idim, jdim])
+    end
 end
 
 function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
@@ -130,8 +167,8 @@ function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     Tensor = atype(zeros(T, N))
     parity = A.parity
     # div = A.division
-    for l in 1:length(parity)
-        for i in CartesianIndices(tensor[l])
+    @inbounds for l in 1:length(parity)
+        @inbounds for i in CartesianIndices(tensor[l])         
             # ind = 2 .* (i.I .- 1) .+ 1 .+ (mod(sum(parity[l][1:div]),2), parity[l][div+1:end]...)
             ind = 2 .* (i.I .- 1) .+ 1 .+ parity[l]
             CUDA.@allowscalar Tensor[ind...] = tensor[l][i]
@@ -150,7 +187,7 @@ function tr(A::AbstractZ2Array{T,N}) where {T,N}
     tensor = A.tensor
     half = Int(length(parity[1])/2)
     s = 0
-    for i in 1:length(parity)
+    @inbounds for i in 1:length(parity)
         parity[i][1:half] == parity[i][half+1:end] && (s += tr(tensor[i]))
     end
     s
@@ -170,7 +207,7 @@ function qrpos(A::AbstractZ2Array{T,N}) where {T,N}
     div = A.division
     Qtensor = []
     Rtensor = []
-    for i in 1:length(tensor)
+    @inbounds for i in 1:length(tensor)
         Q, R = qrpos(tensor[i])
         push!(Qtensor, Q)
         push!(Rtensor, R)
@@ -188,7 +225,7 @@ function lqpos(A::AbstractZ2Array{T,N}) where {T,N}
     div = A.division
     Ltensor = []
     Qtensor = []
-    for i in 1:length(tensor)
+    @inbounds for i in 1:length(tensor)
         Q, R = lqpos(tensor[i])
         push!(Ltensor, Q)
         push!(Qtensor, R)
