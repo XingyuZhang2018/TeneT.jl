@@ -2,6 +2,7 @@ using VUMPS
 using VUMPS: AbstractZ2Array
 using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos
 using CUDA
+using KrylovKit
 using LinearAlgebra
 using OMEinsum
 using SparseArrays
@@ -74,9 +75,32 @@ end
     M = randZ2(atype, dtype, d, d, d, d)
     FL = randZ2(atype, dtype, D, d, D)
     tAL, tM, tFL = map(Z2tensor2tensor,[AL, M, FL])
-	tFL = ein"((γcη,ηpβ),csap),γsα -> αaβ"(tFL,tAL,tM,conj(tAL))
-	FL = ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
+	tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
+	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     @test tFL ≈ Z2tensor2tensor(FL) 
+end
+
+@testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]
+    Random.seed!(100)
+    d = 2
+    D = 5
+    AL = randZ2(atype, dtype, D, d, D)
+    M = randZ2(atype, dtype, d, d, d, d)
+    FL = randZ2(atype, dtype, D, d, D)
+    tAL, tM, tFL = map(Z2tensor2tensor,[AL, M, FL])
+    λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
+    tλs, tFLs, info = eigsolve(tFL -> ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL)), tFL, 1, :LM; ishermitian = false)
+    @test λs ≈ tλs
+    @test Z2tensor2tensor(FLs[1]) ≈ tFLs[1]
+
+    λl,FL = λs[1],FLs[1]
+    dFL = randZ2(atype, dtype, D, d, D)
+    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(AL, FR, M, conj(AL)), dFL, -λl, 1)
+
+    tλl,tFL = tλs[1],tFLs[1]
+    tdFL = Z2tensor2tensor(dFL)
+    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tAL, tFR, tM, conj(tAL)), tdFL, -tλl, 1)
+    @test Z2tensor2tensor(ξl) ≈ tξl
 end
 
 @testset "Z2 qr with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]

@@ -1,5 +1,5 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show
-import LinearAlgebra: tr, norm, dot, rmul!, axpy!
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar
+import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!
 import OMEinsum: _compactify!, subindex
 import Random: rand
 using BitBasis
@@ -38,12 +38,26 @@ size(::AbstractZ2Array{T,N}) where {T,N} = N
 conj(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(conj,A.tensor), N, A.division)
 norm(A::AbstractZ2Array{T,N}) where {T,N} = norm(A.tensor)
 
-*(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, map(*, A.tensor, B), N, A.division)
+*(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor .* B, N, A.division)
 *(B::Number, A::AbstractZ2Array{T,N}) where {T,N} = A * B
-/(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, map(/, A.tensor, B), N, A.division)
-dot(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N} = dot(A.tensor, B.tensor)
-rmul!(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, map(rmul!, A.tensor, B), N, A.division)
-axpy!(α::Number, A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(B.parity, map((x,y)->axpy!(α, x, y), A.tensor, B.tensor), N, B.division)
+/(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor ./ B, N, A.division)
+rmul!(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, rmul!.(A.tensor, B), N, A.division)
+similar(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
+
+function mul!(Y::AbstractZ2Array{T,N}, A::AbstractZ2Array{T,N}, B::Number) where {T,N}
+    Y = A*B
+    Z2tensor(Y.parity, Y.tensor, N, Y.division)
+end
+
+function dot(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
+    exchangeind = indexin(B.parity, A.parity)
+    dot(A.tensor[exchangeind], B.tensor)
+end
+
+function axpy!(α::Number, A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
+    exchangeind = indexin(B.parity, A.parity)
+    Z2tensor(B.parity, map((x,y)->axpy!(α, x, y), A.tensor[exchangeind], B.tensor), N, B.division)
+end
 
 function ≈(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
     A.tensor ≈ B.tensor && A.parity == B.parity
