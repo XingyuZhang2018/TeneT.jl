@@ -1,6 +1,6 @@
 using VUMPS
 using VUMPS: AbstractZ2Array
-using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos
+using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos,sysvd!
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -103,26 +103,40 @@ end
     @test Z2tensor2tensor(ξl) ≈ tξl
 end
 
-@testset "Z2 qr with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "Z2 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randZ2(atype, dtype, 7,4)
+    A = randZ2(atype, dtype, 3, 2, 3)
 	Atensor = Z2tensor2tensor(A)
+	A = reshape(A, 6, 3) 
+	Atensor = reshape(Atensor, 6, 3)
 	Q, R = qrpos(A)
     Qtensor, Rtensor = qrpos(Atensor)
-    @test Array(Qtensor*Rtensor) ≈ Array(Atensor)
+    @test Qtensor*Rtensor ≈ Atensor
 	@test Q*R ≈ A
-	@test Z2tensor2tensor(Q) ≈ Qtensor
+	@test Z2tensor2tensor(reshape(Q, 3, 2, 3)) ≈ reshape(Qtensor, 3, 2, 3)
 	@test Z2tensor2tensor(R) ≈ Rtensor
 end
 
 @testset "Z2 lq with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
     Random.seed!(100)
-    A = randZ2(atype, dtype, 7,4)
+    A = randZ2(atype, dtype, 3, 2, 3)
 	Atensor = Z2tensor2tensor(A)
+	A = reshape(A, 3, 6)
+	Atensor = reshape(Atensor, 3, 6)
 	L, Q = lqpos(A)
     Ltensor, Qtensor = lqpos(Atensor)
-    @test Array(Ltensor*Qtensor) ≈ Array(Atensor)
+    @test Ltensor*Qtensor ≈ Atensor
 	@test L*Q ≈ A
 	@test Z2tensor2tensor(L) ≈ Ltensor
-	@test Z2tensor2tensor(Q) ≈ Qtensor
+	@test Z2tensor2tensor(reshape(Q, 3, 2, 3)) ≈ reshape(Qtensor, 3, 2, 3)
+end
+
+@testset "Z2 svd with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+    Random.seed!(100)
+    A = randZ2(atype, dtype, 7,4)
+	Atensor = Z2tensor2tensor(A)
+	U, S, V = sysvd!(copy(A))
+    Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
+    @test Utensor * Diagonal(Stensor) * Vtensor ≈ Atensor
+	@test U * Diagonal(S) * V ≈ A
 end

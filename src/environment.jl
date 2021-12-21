@@ -63,16 +63,6 @@ function lqpos!(A)
     return L, Q
 end
 
-function cellones(A)
-    Ni, Nj = size(A)
-    D = size(A[1,1],1)
-    Cell = Array{_arraytype(A[1,1]){ComplexF64,2},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        Cell[i,j] = _mattype(A){ComplexF64}(I, D, D)
-    end
-    return Cell
-end
-
 function ρmap(ρ,Ai,J)
     Nj = size(Ai,1)
     for j = 1:Nj
@@ -84,14 +74,30 @@ end
 
 function initialA(M, D)
     Ni, Nj = size(M)
-    arraytype = _arraytype(M[1,1])
-    A = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
+    atype = _arraytype(M[1,1])
+    A = Array{atype, 2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        A[i,j] = arraytype(rand(ComplexF64, D, d, D))
+        A[i,j] = randinitial(M[1,1], D, d, D)
     end
     return A
 end
+
+function cellones(A)
+    Ni, Nj = size(A)
+    D = size(A[1,1],1)
+    Cell = Array{_arraytype(A[1,1]), 2}(undef, Ni, Nj)
+    for j = 1:Nj, i = 1:Ni
+        Cell[i,j] = Iinitial(A[1,1], D)
+    end
+    return Cell
+end
+
+function sysvd!(ρ::AbstractArray)
+    F = svd!(ρ)
+    F.U, F.S, F.Vt
+end
+
 """
     getL!(A,L; kwargs...)
 
@@ -109,12 +115,19 @@ function getL!(A,L; kwargs...)
     Ni,Nj = size(A)
     for j = 1:Nj, i = 1:Ni
         λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
-        @debug "getL eigsolv" λ info sort(abs.(λ))
+        @debug "getL eigsolve" λ info sort(abs.(λ))
         info.converged == 0 && @warn "getL not converged"
         ρ = ρs[1] + ρs[1]'
-        ρ ./= tr(ρ)
-        F = svd!(ρ)
-        Lo = lmul!(Diagonal(sqrt.(F.S)), F.Vt)
+        if typeof(ρ) <: Union{Array, CuArray}
+            ρ ./= tr(ρ)
+            _, S, Vt = sysvd!(ρ)
+            sqrtS = sqrt.(S)
+        else
+            ρ /= tr(ρ)
+            _, S, Vt = sysvd!(ρ)
+            sqrtS = sqrt(S)
+        end
+        Lo = lmul!(Diagonal(sqrtS), Vt)
         _, L[i,j] = qrpos!(Lo)
     end
     return L
@@ -129,12 +142,12 @@ a scalar factor `λ` such that ``λ AR R = L A``
 function getAL(A,L)
     Ni,Nj = size(A)
     arraytype = _arraytype(A[1,1])
-    AL = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    Le = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
+    AL = Array{arraytype,2}(undef, Ni, Nj)
+    Le = Array{arraytype,2}(undef, Ni, Nj)
     λ = zeros(Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         D, d, = size(A[i,j])
-        Q, R = qrpos!(reshape(L[i,j]*reshape(A[i,j], D, d*D), D*d, D))
+        Q, R = qrpos!(reshape(ein"ab,bcd -> acd"(L[i,j], A[i,j]), D*d, D))
         AL[i,j] = reshape(Q, D, d, D)
         λ[i,j] = norm(R)
         Le[i,j] = rmul!(R, 1/λ[i,j])
@@ -144,7 +157,7 @@ end
 
 function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
-    L = Array{_arraytype(A[1,1]){ComplexF64,2},2}(undef, Ni, Nj)
+    L = Array{_arraytype(A[1,1]), 2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λ info sort(abs.(λ))
@@ -162,8 +175,8 @@ a scalar factor `λ` such that ``λ AL L = L A``, where an initial guess for `L`
 provided.
 """
 function leftorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
-    L = getL!(A,L; kwargs...)
-    AL, Le, λ = getAL(A,L;kwargs...)
+    L = getL!(A, L; kwargs...)
+    AL, Le, λ = getAL(A, L;kwargs...)
     numiter = 1
     while norm(L.-Le) > tol && numiter < maxiter
         L = getLsped(Le, A, AL; kwargs...)
@@ -183,21 +196,9 @@ a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for
 provided.
 """
 function rightorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
-    Ni,Nj = size(A)
-    arraytype = _arraytype(A[1,1])
-    Ar = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    Lr = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        Ar[i,j] = permutedims(A[i,j],(3,2,1))
-        Lr[i,j] = permutedims(L[i,j],(2,1))
-    end
+    Ar, Lr = map(x->permutedims(x,(3,2,1)), A), map(x->permutedims(x,(2,1)), L)
     AL, L, λ = leftorth(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
-    R = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    AR = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        R[i,j] = permutedims(L[i,j],(2,1))
-        AR[i,j] = permutedims(AL[i,j],(3,2,1))
-    end
+    R, AR = map(x->permutedims(x,(2,1)), L), map(x->permutedims(x,(3,2,1)), AL)
     return R, AR, λ
 end
 

@@ -1,5 +1,6 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error,bigleftenv,BgFLmap,bigrightenv,BgFRmap, obs_FL, obs_FR, norm_FL, norm_FR, norm_FLmap, norm_FRmap
+using VUMPS: qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error,bigleftenv,BgFLmap,bigrightenv,BgFRmap, obs_FL, obs_FR, norm_FL, norm_FR, norm_FLmap, norm_FRmap
+using VUMPS: _arraytype, Z2tensor2tensor
 using CUDA
 using LinearAlgebra
 using Random
@@ -7,58 +8,60 @@ using Test
 using OMEinsum
 CUDA.allowscalar(false)
 
-@testset "qr with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "qr with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2]
     Random.seed!(100)
-    A = atype(rand(dtype, 4,4))
+    A = randinitial(Val(symmetry), atype, dtype, 4, 4)
     Q, R = qrpos(A)
-    @test Array(Q*R) ≈ Array(A)
+    @test Q*R ≈ A
     @test all(real.(diag(R)) .> 0)
     @test all(imag.(diag(R)) .≈ 0)
 end
 
-@testset "lq with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "lq with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2]
     Random.seed!(100)
-    A = atype(rand(dtype, 4,4))
+    A = randinitial(Val(symmetry), atype, dtype, 4, 4)
     L, Q = lqpos(A)
-    @test Array(L*Q) ≈ Array(A)
+    @test L*Q ≈ A
     @test all(real.(diag(L)) .> 0)
     @test all(imag.(diag(L)) .≈ 0)
 end
 
-@testset "leftorth and rightorth with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "leftorth and rightorth with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
+    x = randinitial(Val(symmetry), atype, dtype, D, d, D)
+    A = Array{_arraytype(x),2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
     end
     AL, L, λ = leftorth(A)
     R, AR, λ = rightorth(A)
-
     for j = 1:Nj,i = 1:Ni
         M = ein"cda,cdb -> ab"(AL[i,j],conj(AL[i,j]))
+        M = symmetry == :none ? M : Z2tensor2tensor(M)
         @test (Array(M) ≈ I(D))
 
-        LA = reshape(L[i,j] * reshape(A[i,j], D, d*D), d*D, D)
-        ALL = reshape(AL[i,j], d*D, D) * L[i,j] * λ[i,j]
-        @test (Array(ALL) ≈ Array(LA))
+        LA = ein"ab, bcd -> acd"(L[i,j], A[i,j])
+        ALL = ein"abc, cd -> abd"(AL[i,j], L[i,j]) * λ[i,j]
+        @test ALL ≈ LA
 
         M = ein"acd,bcd -> ab"(AR[i,j],conj(AR[i,j]))
+        M = symmetry == :none ? M : Z2tensor2tensor(M)
         @test (Array(M) ≈ I(D))
 
-        AxR = reshape(reshape(A[i,j], d*D, D)*R[i,j], D, d*D)
-        RAR = R[i,j] * reshape(AR[i,j], D, d*D) * λ[i,j]
-        @test (Array(RAR) ≈ Array(AxR))
+        AxR = ein"abc, cd -> abd"(A[i,j], R[i,j])
+        RAR = ein"ab, bcd -> acd"(R[i,j], AR[i,j]) * λ[i,j]
+        @test RAR ≈ AxR
     end
 end
 
-@testset "leftenv and rightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = Array{atype{dtype,3},2}(undef, Ni, Nj)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
         M[i,j] = atype(rand(dtype, d, d, d, d))
     end
 
@@ -74,13 +77,13 @@ end
     end
 end
 
-@testset "observable leftenv and rightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = Array{atype{dtype,3},2}(undef, Ni, Nj)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
         M[i,j] = atype(rand(dtype, d, d, d, d))
     end
 
@@ -96,13 +99,13 @@ end
     end
 end
 
-@testset "ACenv and Cenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = Array{atype{dtype,3},2}(undef, Ni, Nj)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
         M[i,j] = atype(rand(dtype, d, d, d, d))
     end
 
@@ -123,13 +126,13 @@ end
     end
 end
 
-@testset "bcvumps unit test with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "bcvumps unit test with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = Array{atype{dtype,3},2}(undef, Ni, Nj)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
         M[i,j] = atype(rand(dtype, d, d, d, d))
     end
 
@@ -148,13 +151,13 @@ end
     @test err !== nothing
 end
 
-@testset "bigleftenv and bigrightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "bigleftenv and bigrightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = Array{atype{dtype,3},2}(undef, Ni, Nj)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
         M[i,j] = atype(rand(dtype, d, d, d, d))
     end
 
@@ -173,12 +176,12 @@ end
     end
 end
 
-@testset "norm leftenv and rightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "norm leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = Array{atype{dtype,3},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
+        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
     end
 
     ALu, = leftorth(A)
