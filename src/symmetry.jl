@@ -1,17 +1,19 @@
 #helper functions to handle array types
-_mattype(x::Array{T}) where {T} = Matrix
-_mattype(x::CuArray{T}) where {T} = CuMatrix
-_mattype(x::Adjoint{T, CuArray{T, 2 ,B}}) where {T,B} = CuMatrix
-_mattype(x::Symmetric{T, CuArray{T, 2, B}}) where {T,B} = CuMatrix
+_mattype(::Array{T}) where {T} = Matrix
+_mattype(::CuArray{T}) where {T} = CuMatrix
+_mattype(::Adjoint{T, CuArray{T, 2 ,B}}) where {T,B} = CuMatrix
+_mattype(::Symmetric{T, CuArray{T, 2, B}}) where {T,B} = CuMatrix
 
-_arraytype(x::Array{T}) where {T} = Array
-_arraytype(x::CuArray{T}) where {T} = CuArray
-_arraytype(x::Diagonal{T, Vector{T}}) where {T} = Array
-_arraytype(x::Diagonal{T, CuArray{T, 1, B}}) where {T, B} = CuArray
-_arraytype(A::Z2tensor{T}) where {T} = Z2tensor
+_arraytype(::Array{T}) where {T} = Array
+_arraytype(::CuArray{T}) where {T} = CuArray
+_arraytype(::Diagonal{T, Vector{T}}) where {T} = Array
+_arraytype(::Diagonal{T, CuArray{T, 1, B}}) where {T, B} = CuArray
+_arraytype(::Z2tensor{T}) where {T} = Z2tensor
+_arraytype(::Adjoint{T, Matrix{T}}) where {T} = Matrix
+_arraytype(::Adjoint{T, CuArray{T, 2, B}}) where {T,B} = CuArray
 
-getsymmetry(A::AbstractArray) = Val(:none)
-getsymmetry(A::AbstractZ2Array) = Val(:Z2)
+getsymmetry(::AbstractArray) = Val(:none)
+getsymmetry(::AbstractZ2Array) = Val(:Z2)
 
 randinitial(::Val{:none}, atype, dtype, a...) = atype(rand(dtype, a...))
 randinitial(::Val{:Z2}, atype, dtype, a...) = randZ2(atype, dtype, a...)

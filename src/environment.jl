@@ -212,7 +212,7 @@ end
 function LRtoC(L, R)
     Ni, Nj = size(L)
     arraytype = _arraytype(L[1,1])
-    C = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
+    C = Array{arraytype,2}(undef, Ni, Nj)
     for j in 1:Nj,i in 1:Ni
         jr = j + 1 - (j + 1 > Nj) * Nj
         C[i,j] = L[i,j] * R[i,jr]
@@ -267,11 +267,11 @@ end
 function FLint(AL, M)
     Ni,Nj = size(AL)
     arraytype = _arraytype(AL[1,1])
-    FL = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
+    FL = Array{arraytype,2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
         dL = size(M[i,j],1)
-        FL[i,j] = arraytype(rand(ComplexF64, D, dL, D))
+        FL[i,j] = randinitial(AL[1,1], D, dL, D)
     end
     return FL
 end
@@ -279,11 +279,11 @@ end
 function FRint(AR, M)
     Ni,Nj = size(AR)
     arraytype = _arraytype(AR[1,1])
-    FR = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
+    FR = Array{arraytype,2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
         dR = size(M[i,j],3)
-        FR[i,j] = arraytype(rand(ComplexF64, D, dR, D))
+        FR[i,j] = randinitial(AR[1,1], D, dR, D)
     end
     return FR
 end
@@ -308,7 +308,7 @@ function leftenv!(ALu, ALd, M, FL; kwargs...)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
         λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=1000 , ishermitian = false, kwargs...)
-        @debug "leftenv! eigsolv" λLs info sort(abs.(λLs))
+        @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
             @show λLs
@@ -347,7 +347,7 @@ function rightenv!(ARu, ARd, M, FR; kwargs...)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
         λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=1000 , ishermitian = false, kwargs...)
-        @debug "rightenv! eigsolv" λRs info sort(abs.(λRs))
+        @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
             @show λRs
@@ -503,20 +503,20 @@ end
 
 function ACCtoAL(ACij,Cij)
     D,d, = size(ACij)
-    QAC, RAC = qrpos(reshape(ACij,(D*d, D)))
+    QAC, RAC = qrpos(reshape(ACij, D*d, D))
     QC, RC = qrpos(Cij)
     errL = norm(RAC-RC)
     # @show errL
-    reshape(QAC*QC', (D, d, D)), errL
+    reshape(QAC*QC', D, d, D), errL
 end
 
 function ACCtoAR(ACij,Cijr)
     D,d, = size(ACij)
-    LAC, QAC = lqpos(reshape(ACij,(D, d*D)))
+    LAC, QAC = lqpos(reshape(ACij, D, d*D))
     LC, QC = lqpos(Cijr)
     errR = norm(LAC-LC)
     # @show errR
-    reshape(QC'*QAC, (D, d, D)), errR
+    reshape(QC'*QAC, D, d, D), errR
 end
 
 """
@@ -671,176 +671,13 @@ function obs_FR!(ARu, ARd, M, FR; kwargs...)
     return λR, FR
 end
 
-function BgFLint(AL, M)
-    Ni,Nj = size(AL)
-    arraytype = _arraytype(AL[1,1])
-    BgFL = Array{arraytype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        D1 = size(AL[i,j],1)
-        D2 = size(AL[irr,j],1)
-        dL1 = size(M[i,j],1)
-        dL2 = size(M[ir,j],1)
-        BgFL[i,j] = arraytype(rand(ComplexF64, D1, dL1, dL2, D2))
-    end
-    return BgFL
-end
-
-"""
-    BgFLm = BgFLmap(ALi, ALip, Mi, Mip, BgFLij, J)
-
-ALip means ALᵢ₊₂
-Mip means Mᵢ₊₁
-```
-  ┌──        ┌──  ALᵢⱼ  ── ALᵢⱼ₊₁    ──   ...       a ────┬──── c
-  │          │     │        │                       │     b     │
-  │          │  ─ Mᵢⱼ   ── Mᵢⱼ₊₁     ──   ...       ├─ d ─┼─ e ─┤
-BgFLm   =  BgFLᵢⱼ  │        │                       │     f     │
-  │          │  ─ Mᵢ₊₁ⱼ ── Mᵢ₊₁ⱼ₊₁   ──   ...       ├─ g ─┼─ h ─┤
-  │          │     │        │                       │     j     │
-  ┕──        ┕──  ALᵢ₊₂ⱼ ─ ALᵢ₊₂ⱼ₊₁  ──   ...       i ────┴──── k 
-```
-"""
-function BgFLmap(ALi, ALip, Mi, Mip, BgFLij, J)
-    Nj = size(ALi,1)
-    BgFLm = copy(BgFLij)
-    for j=1:Nj
-        jr = J+j-1 - (J+j-1 > Nj)*Nj
-        BgFLm = ein"(((adgi,abc),dfeb),gjhf),ijk -> cehk"(BgFLm,ALi[jr],Mi[jr],Mip[jr],ALip[jr])
-    end
-    return BgFLm
-end
-
-"""
-    λL, BgFL = bigleftenv(ALu, ALd, M, BgFL = BgFLint(AL,M); kwargs...)
-
-Compute the up and down left environment tensor for MPS A and MPO M, by finding the left fixed point
-of AL - M - M - conj(AL) contracted along the physical dimension.
-```
-   ┌──  ALuᵢⱼ ── ALuᵢⱼ₊₁   ──   ...           ┌── 
-   │     │        │                           │   
-   │  ─ Mᵢⱼ   ── Mᵢⱼ₊₁     ──   ...           │   
- BgFLᵢⱼ  │        │                   = λLᵢⱼ BgFLᵢⱼ
-   │  ─ Mᵢ₊₁ⱼ ── Mᵢ₊₁ⱼ₊₁   ──   ...           │   
-   │     │        │                           │   
-   ┕── ALdᵢ₊₂ⱼ ─ ALdᵢ₊₂ⱼ₊₁ ──   ...           ┕── 
-```
-"""
-bigleftenv(ALu, ALd, M, BgFL = BgFLint(ALu,M); kwargs...) = bigleftenv!(ALu, ALd, M, copy(BgFL); kwargs...)
-function bigleftenv!(ALu, ALd, M, BgFL; kwargs...)
-    Ni,Nj = size(ALu)
-    λL = zeros(eltype(BgFL[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        λLs, BgFL1s, info= eigsolve(X->BgFLmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], X, j), BgFL[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "bigleftenv! eigsolve" λLs info sort(abs.(λLs))
-        if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
-            if real(λLs[1]) > 0
-                BgFL[i,j] = BgFL1s[1]
-                λL[i,j] = λLs[1]
-            else
-                BgFL[i,j] = BgFL1s[2]
-                λL[i,j] = λLs[2]
-            end
-        else
-            BgFL[i,j] = BgFL1s[1]
-            λL[i,j] = λLs[1]
-        end
-    end
-    return λL, BgFL
-end
-
-function BgFRint(AR, M)
-    Ni,Nj = size(AR)
-    arraytype = _arraytype(AR[1,1])
-    BgFR = Array{arraytype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        D1 = size(AR[i,j],3)
-        D2 = size(AR[irr,j],3)
-        dR1 = size(M[i,j],3)
-        dR2 = size(M[ir,j],3)
-        BgFR[i,j] = arraytype(rand(ComplexF64, D1, dR1, dR2, D2))
-    end
-    return BgFR
-end
-
-"""
-    FRm = FRmap(ARi, ARip, Mi, FR, J)
-
-ARip means ARᵢ₊₁
-```
- ──┐          ...  ─── ARᵢⱼ₋₁  ── ARᵢⱼ  ──┐        a ────┬──── c
-   │                    │          │      │        │     b     │
- ──│          ... ──── Mᵢⱼ₋₁  ──  Mᵢⱼ   ──│        ├─ d ─┼─ e ─┤
-  BgFRm   =             │          │     BgFRm     │     f     │
- ──│          ... ──── Mᵢ₊₁ⱼ₋₁ ── Mᵢ₊₁ⱼ ──│        ├─ g ─┼─ h ─┤
-   │                    │          │      │        │     j     │
- ──┘          ...  ─ ARᵢ₊₂ⱼ₋₁ ─── ARᵢ₊₂ⱼ──┘        i ────┴──── k 
-```
-"""
-function BgFRmap(ARi, ARip, Mi, Mip, BgFR, J)
-    Nj = size(ARi,1)
-    BgFRm = copy(BgFR)
-    for j=1:Nj
-        jr = J-(j-1) + (J-(j-1) < 1)*Nj
-        BgFRm = ein"(((cehk,abc),dfeb),gjhf),ijk -> adgi"(BgFRm,ARi[jr],Mi[jr],Mip[jr],ARip[jr])
-    end
-    return BgFRm
-end
-
-"""
-    λR, BgFR = bigrightenv(ARu, ARd, M, BgFR = BgFRint(ARu,M); kwargs...)
-
-Compute the up and down right environment tensor for MPS A and MPO M, by finding the left fixed point
-of AR - M - M - conj(AR) contracted along the physical dimension.
-```
-     ──┐          ...  ─── ARᵢⱼ₋₁  ── ARᵢⱼ  ──┐ 
-       │                    │          │      │ 
-     ──│          ... ──── Mᵢⱼ₋₁  ──  Mᵢⱼ   ──│
-λRᵢⱼ BgFRᵢⱼ   =             │          │     BgFRᵢⱼ
-     ──│          ... ──── Mᵢ₊₁ⱼ₋₁ ── Mᵢ₊₁ⱼ ──│
-       │                    │          │      │     
-     ──┘          ...  ─ ARᵢ₊₂ⱼ₋₁ ─── ARᵢ₊₂ⱼ──┘ 
-```
-"""
-bigrightenv(ARu, ARd, M, BgFR = BgFRint(ARu,M); kwargs...) = bigrightenv!(ARu, ARd, M, copy(BgFR); kwargs...)
-function bigrightenv!(ARu, ARd, M, BgFR; kwargs...)
-    Ni,Nj = size(ARu)
-    λR = zeros(eltype(BgFR[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        λRs, BgFR1s, info= eigsolve(X->BgFRmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], X, j), BgFR[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "bigrightenv eigsolve" λRs info sort(abs.(λRs))
-        if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
-            @show λRs
-            if real(λRs[1]) > 0
-                BgFR[i,j] = BgFR1s[1]
-                λR[i,j] = λRs[1]
-            else
-                BgFR[i,j] = BgFR1s[2]
-                λR[i,j] = λRs[2]
-            end
-        else
-            BgFR[i,j] = BgFR1s[1]
-            λR[i,j] = λRs[1]
-        end
-    end
-    return λR, BgFR
-end
-
 function norm_FLint(AL)
     Ni,Nj = size(AL)
     arraytype = _arraytype(AL[1,1])
-    norm_FL = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
+    norm_FL = Array{arraytype,2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
-        norm_FL[i,j] = arraytype(rand(ComplexF64, D, D))
+        norm_FL[i,j] = randinitial(AL[1,1], D, D)
     end
     return norm_FL
 end
@@ -891,10 +728,10 @@ end
 function norm_FRint(AR)
     Ni,Nj = size(AR)
     arraytype = _arraytype(AR[1,1])
-    norm_FR = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
+    norm_FR = Array{arraytype,2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
-        norm_FR[i,j] = arraytype(rand(ComplexF64, D, D))
+        norm_FR[i,j] = randinitial(AR[1,1], D, D)
     end
     return norm_FR
 end

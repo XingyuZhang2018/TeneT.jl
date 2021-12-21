@@ -29,11 +29,7 @@ end
 @testset "leftorth and rightorth with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    x = randinitial(Val(symmetry), atype, dtype, D, d, D)
-    A = Array{_arraytype(x),2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-    end
+    A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:2, j in 1:2]
     AL, L, λ = leftorth(A)
     R, AR, λ = rightorth(A)
     for j = 1:Nj,i = 1:Ni
@@ -58,12 +54,8 @@ end
 @testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-        M[i,j] = atype(rand(dtype, d, d, d, d))
-    end
+    A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:2, j in 1:2]
+    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:2, j in 1:2]
 
     AL, = leftorth(A)
     λL,FL = leftenv(AL, AL, M)
@@ -80,12 +72,8 @@ end
 @testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-        M[i,j] = atype(rand(dtype, d, d, d, d))
-    end
+    A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:2, j in 1:2]
+    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:2, j in 1:2]
 
     AL, = leftorth(A)
     λL,FL = obs_FL(AL, AL, M)
@@ -102,12 +90,8 @@ end
 @testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-        M[i,j] = atype(rand(dtype, d, d, d, d))
-    end
+    A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:2, j in 1:2]
+    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:2, j in 1:2]
 
     AL, L = leftorth(A)
     λL,FL = leftenv(AL, AL, M)
@@ -129,12 +113,8 @@ end
 @testset "bcvumps unit test with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-        M[i,j] = atype(rand(dtype, d, d, d, d))
-    end
+    A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:2, j in 1:2]
+    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:2, j in 1:2]
 
     AL, L = leftorth(A)
     λL,FL = leftenv(AL, AL, M)
@@ -151,38 +131,10 @@ end
     @test err !== nothing
 end
 
-@testset "bigleftenv and bigrightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
-    Random.seed!(100)
-    D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-        M[i,j] = atype(rand(dtype, d, d, d, d))
-    end
-
-    ALu, = leftorth(A)
-    ALd, = leftorth(A)
-    λL,BgFL = bigleftenv(ALu, ALd, M)
-    _, ARu, = rightorth(A)
-    _, ARd, = rightorth(A)
-    λR,BgFR = bigrightenv(ARu, ARd, M)
-
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        @test λL[i,j] * BgFL[i,j] ≈ BgFLmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], BgFL[i,j], j)
-        @test λR[i,j] * BgFR[i,j] ≈ BgFRmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], BgFR[i,j], j)
-    end
-end
-
 @testset "norm leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        A[i,j] = randinitial(Val(symmetry), atype, dtype, D, d, D)
-    end
+    A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:2, j in 1:2]
 
     ALu, = leftorth(A)
     ALd, = leftorth(A)
