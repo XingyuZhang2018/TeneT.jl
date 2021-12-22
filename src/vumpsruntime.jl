@@ -19,22 +19,22 @@ a struct to hold the tensors during the `vumps` algorithm, each is a `Ni` x `Nj`
 - `D × d' × D` `FR[i,j]` tensor
 and `LT` is a AbstractLattice to define the lattice type.
 """
-struct VUMPSRuntime{LT,T,N,AT <: AbstractArray{<:AbstractArray,2},CT,ET1,ET2}
+struct VUMPSRuntime{LT,T,N,AT <: AbstractArray{<:AbstractArray,2},CT,ET}
     M::AT
-    AL::ET1
+    AL::ET
     C::CT
-    AR::ET1
-    FL::ET2
-    FR::ET2
-    function VUMPSRuntime{LT}(M::AT, AL::ET1, C::CT, AR::ET1, FL::ET2, FR::ET2) where {LT <: AbstractLattice,AT <: AbstractArray{<:AbstractArray,2}, CT <: AbstractArray{<:AbstractArray,2}, ET1 <: AbstractArray{<:AbstractArray,2}, ET2 <: AbstractArray{<:AbstractArray,2}}
+    AR::ET
+    FL::ET
+    FR::ET
+    function VUMPSRuntime{LT}(M::AT, AL::ET, C::CT, AR::ET, FL::ET, FR::ET) where {LT <: AbstractLattice,AT <: AbstractArray{<:AbstractArray,2}, CT <: AbstractArray{<:AbstractArray,2}, ET <: AbstractArray{<:AbstractArray,2}}
         T, N = eltype(M[1,1]), ndims(M[1,1])
-        new{LT,T,N,AT,CT,ET1,ET2}(M, AL, C, AR, FL, FR)
+        new{LT,T,N,AT,CT,ET}(M, AL, C, AR, FL, FR)
     end
 end
 
 const SquareVUMPSRuntime{T,AT} = VUMPSRuntime{SquareLattice,T,4,AT}
 function SquareVUMPSRuntime(M::AT, AL, C, AR, FL, FR) where {AT <: AbstractArray{<:AbstractArray,2}}
-    ndims(M[1,1]) == 4 || throw(DimensionMismatch("M dimensions error, should be `4`, got $(ndims(M[1,1]))."))
+    # ndims(M[1,1]) == 4 || throw(DimensionMismatch("M dimensions error, should be `4`, got $(ndims(M[1,1]))."))
     VUMPSRuntime{SquareLattice}(M, AL, C, AR, FL, FR)
 end
 
@@ -51,7 +51,7 @@ canonical form. `FL,FR` is the left and right environment.
 ```jldoctest; setup = :(using VUMPS)
 julia> Ni, Nj = 2, 2;
 
-julia> M = Array{Array{ComplexF64,3},2}(undef, Ni, Nj);
+julia> M = Array{Array,2}(undef, Ni, Nj);
 
 julia> for j = 1:Nj, i = 1:Ni
            M[i,j] = rand(2,2,2,2)
@@ -79,6 +79,8 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     C = LRtoC(L,R)
     Ni, Nj = size(M)
     verbose && print("random initial $(Ni)×$(Nj) vumps_χ$(χ) environment-> ")
+    atpye = typeof(AR)
+    AL, FL, FR = map(atpye, [AL, FL, FR])
     AL, C, AR, FL, FR
 end
 
@@ -89,7 +91,11 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     verbose && print("vumps $(Ni)×$(Nj) environment load from $(chkp_file) -> ")   
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
     Zygote.@ignore begin
-        AL, C, AR, FL, FR = Array{atype{ComplexF64,3},2}(env.AL), Array{atype{ComplexF64,2},2}(env.C), Array{atype{ComplexF64,3},2}(env.AR), Array{atype{ComplexF64,3},2}(env.FL), Array{atype{ComplexF64,3},2}(env.FR)
+        AL, C, AR, FL, FR = map(Array{atype,2}, [env.AL, env.C, env.AR, env.FL, env.FR])
+    end
+    if !(atype <: Union{CuArray, Array})
+        intype = _arraytype(M[1,1].tensor[1])
+        AL, C, AR, FL, FR = map(y->map(x->insetype(x, intype), y), [AL, C, AR, FL, FR])
     end
     AL, C, AR, FL, FR
 end
@@ -170,7 +176,11 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
 
     Zygote.@ignore savefile && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
-        ALs, Cs, ARs, FLs, FRs = Array{Array{ComplexF64,3},2}(env.AL), Array{Array{ComplexF64,2},2}(env.C), Array{Array{ComplexF64,3},2}(env.AR), Array{Array{ComplexF64,3},2}(env.FL), Array{Array{ComplexF64,3},2}(env.FR)
+        atype = _arraytype(M[1,1]) <: AbstractZ2Array ? Z2tensor : Array
+        ALs, Cs, ARs, FLs, FRs = map(Array{atype,2}, [env.AL, env.C, env.AR, env.FL, env.FR])
+        if atype != Array
+            ALs, Cs, ARs, FLs, FRs = map(y->map(x->insetype(x, Array), y), [ALs, Cs, ARs, FLs, FRs])
+        end
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
         save(out_chkp_file, "env", envsave)
     end
@@ -194,7 +204,11 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         verbose && println("←→ observable environment load from $(in_chkp_file_obs)")
         FL, FR = load(in_chkp_file_obs)["env"]
         Zygote.@ignore begin
-            FL, FR = Array{atype{ComplexF64,3},2}(FL), Array{atype{ComplexF64,3},2}(FR)
+            FL, FR = Array{atype,2}(FL), Array{atype,2}(FR)
+            if !(atype <: Union{CuArray, Array})
+                intype = _arraytype(M[1,1].tensor[1])
+                FL, FR = map(y->map(x->insetype(x, intype), y), [FL, FR])
+            end
         end
     else
         FL, FR = envup.FL, envup.FR
@@ -215,8 +229,12 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     _, FR = obs_FR(ARu, ARd, M, FR)
     Zygote.@ignore savefile && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
-        envsave = (Array{Array{ComplexF64,3},2}(FL), Array{Array{ComplexF64,3},2}(FR))
-        save(out_chkp_file_obs, "env", envsave)
+        atype = _arraytype(M[1,1]) <: AbstractZ2Array ? Z2tensor : Array
+        FL, FR = map(Array{atype,2}, [FL, FR])
+        if atype != Array
+            FL, FR = map(y->map(x->insetype(x, Array), y), [FL, FR])
+        end
+        save(out_chkp_file_obs, "env", (FL, FR))
     end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
 end

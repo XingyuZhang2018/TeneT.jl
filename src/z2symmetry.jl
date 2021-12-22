@@ -114,6 +114,8 @@ function IZ2(atype, dtype, D)
     Z2tensor(parity, tensor, (D, D), 1)
 end
 
+insetype(A::AbstractZ2Array{T,N}, intype) where {T,N} = Z2tensor(A.parity, map(intype, A.tensor), N, A.division)
+
 function permutedims(A::AbstractZ2Array{T,N}, perm) where {T,N}
     parity = map(x->x[collect(perm)], A.parity)
     exchangeind = indexin(A.parity, parity)
@@ -150,7 +152,8 @@ end
 function *(A::AbstractZ2Array{TA,NA}, B::AbstractZ2Array{TB,NB}) where {TA,TB,NA,NB}
     parity = Vector{Vector{Int}}()
     atype = _arraytype(B.tensor[1])
-    tensor = Vector{atype{ComplexF64}}()
+    T = TA == ComplexF64 || TB == ComplexF64 ? ComplexF64 : Float64
+    tensor = Vector{atype{T}}()
     divA, divB = A.division, B.division
 
     bulktimes!(parity, tensor, A, B, 0)
@@ -274,15 +277,14 @@ function bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, p)
         for j in matrix_j
             ind = findfirst(x->x in [[i; j]], Aparity)
             push!(v, Atensor[ind])   
-            push!(bulkjdims, size(Atensor[ind])[2])
         end
         hi = hcat(v...)
         push!(h, hi)
-        push!(bulkidims, size(hi)[1])
+        push!(bulkidims, size(hi, 1))
     end
-    bulkjdims = unique(bulkjdims)
     Amatrix = vcat(h...)
-    
+    push!(bulkjdims, size(Amatrix, 2))
+
     Q, R = qrpos!(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_j)
         push!(Qparity, [matrix_i[i]; matrix_j[j]])
@@ -317,20 +319,19 @@ function bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, p)
     matrix_j = unique(map(x->x[div+1:end], Aparity[ind_A]))
     matrix_i = unique(map(x->x[1:div], Aparity[ind_A]))
 
-    h, bulkidims, bulkjdims = [] , Int[], Int[]
-    for i in matrix_i
-        v = []
-        for j in matrix_j
+    v, bulkidims, bulkjdims = [] , Int[], Int[]
+    for j in matrix_j
+        h = []
+        for i in matrix_i
             ind = findfirst(x->x in [[i; j]], Aparity)
-            push!(v, Atensor[ind])   
-            push!(bulkjdims, size(Atensor[ind])[2])
+            push!(h, Atensor[ind])   
         end
-        hi = hcat(v...)
-        push!(h, hi)
-        push!(bulkidims, size(hi)[1])
+        vi = vcat(h...)
+        push!(v, vi)
+        push!(bulkjdims, size(vi, 2))
     end
-    bulkjdims = unique(bulkjdims)
-    Amatrix = vcat(h...)
+    Amatrix = hcat(v...)
+    push!(bulkidims, size(Amatrix, 1))
     
     L, Q = lqpos!(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_i)

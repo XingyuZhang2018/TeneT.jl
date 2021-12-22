@@ -105,30 +105,30 @@ end
 
 @testset "Z2 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randZ2(atype, dtype, 3, 2, 3)
+    A = randZ2(atype, dtype, 4, 2, 4)
 	Atensor = Z2tensor2tensor(A)
-	A = reshape(A, 6, 3) 
-	Atensor = reshape(Atensor, 6, 3)
+	A = reshape(A, 8, 4) 
+	Atensor = reshape(Atensor, 8, 4)
 	Q, R = qrpos(A)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor*Rtensor ≈ Atensor
 	@test Q*R ≈ A
-	@test Z2tensor2tensor(reshape(Q, 3, 2, 3)) ≈ reshape(Qtensor, 3, 2, 3)
+	@test Z2tensor2tensor(reshape(Q, 4, 2, 4)) ≈ reshape(Qtensor, 4, 2, 4)
 	@test Z2tensor2tensor(R) ≈ Rtensor
 end
 
 @testset "Z2 lq with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
     Random.seed!(100)
-    A = randZ2(atype, dtype, 3, 2, 3)
+    A = randZ2(atype, dtype, 4, 2, 4)
 	Atensor = Z2tensor2tensor(A)
-	A = reshape(A, 3, 6)
-	Atensor = reshape(Atensor, 3, 6)
+	A = reshape(A, 4, 8)
+	Atensor = reshape(Atensor, 4, 8)
 	L, Q = lqpos(A)
     Ltensor, Qtensor = lqpos(Atensor)
     @test Ltensor*Qtensor ≈ Atensor
 	@test L*Q ≈ A
 	@test Z2tensor2tensor(L) ≈ Ltensor
-	@test Z2tensor2tensor(reshape(Q, 3, 2, 3)) ≈ reshape(Qtensor, 3, 2, 3)
+	@test Z2tensor2tensor(reshape(Q, 4, 2, 4)) ≈ reshape(Qtensor, 4, 2, 4)
 end
 
 @testset "Z2 svd with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]

@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,bigleftenv,bigrightenv,parity_conserving
+using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -239,47 +239,6 @@ end
         for j in 1:Nj, i in 1:Ni
             A = ein"(abc,abcdef),def -> "(FR[i,j], S[i,j], FR[i,j])
             B = ein"abc,abc -> "(FR[i,j], FR[i,j])
-            s += norm(Array(A)[]/Array(B)[])
-        end
-        return s
-    end 
-    @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
-end
-
-@testset "bigleftenv and bigrightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
-    Random.seed!(100)
-    D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    S = Array{atype{ComplexF64,8},2}(undef, Ni, Nj)
-    M = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S[i,j] = atype(rand(ComplexF64, D, d, d, D, D, d, d, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
-
-    ALu, = leftorth(A) 
-    ALd, = leftorth(A) 
-    _, ARu, = rightorth(A)
-    _, ARd, = rightorth(A)
-    function foo1(x)
-        _, FL4 = bigleftenv(ALu, ALd, M*x)
-        s = 0
-        for j in 1:Nj, i in 1:Ni
-            A = ein"(abcd,abcdefgh),efgh -> "(FL4[i,j], S[i,j], FL4[i,j])
-            B = ein"abcd,abcd -> "(FL4[i,j], FL4[i,j])
-            s += norm(Array(A)[]/Array(B)[])
-        end
-        return s
-    end 
-    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-7
-
-    function foo2(x)
-        _, FR4 = bigrightenv(ARu, ARd, M*x)
-        s = 0
-        for j in 1:Nj, i in 1:Ni
-            A = ein"(abcd,abcdefgh),efgh -> "(FR4[i,j], S[i,j], FR4[i,j])
-            B = ein"abcd,abcd -> "(FR4[i,j], FR4[i,j])
             s += norm(Array(A)[]/Array(B)[])
         end
         return s

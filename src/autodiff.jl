@@ -10,8 +10,6 @@ Zygote.@nograd StopFunction
 Zygote.@nograd error
 Zygote.@nograd FLint
 Zygote.@nograd FRint
-Zygote.@nograd BgFLint
-Zygote.@nograd BgFRint
 Zygote.@nograd leftorth
 Zygote.@nograd rightorth
 Zygote.@nograd ALCtoAC
@@ -540,74 +538,6 @@ function dBgAMmap(Ai, Aip, Mi, Mip, L, R, j, J)
     dMiJ = -ein"(adgi,abc),(gjhf,(ijk,cehk)) -> dfeb"(L, Ai[J], Mip[J], Aip[J], R)
     dMipJ = -ein"((adgi,abc),dfeb),(ijk,cehk)-> gjhf"(L, Ai[J], Mi[J], Aip[J], R)
     return conj(dAiJ), conj(dAipJ), conj(dMiJ), conj(dMipJ)
-end
-
-function ChainRulesCore.rrule(::typeof(bigleftenv), ALu, ALd, M, BgFL; kwargs...)
-    λL, BgFL = bigleftenv(ALu, ALd, M, BgFL)
-    Ni, Nj = size(ALu)
-    T = eltype(ALu[1,1])
-    atype = _arraytype(M[1,1])
-    function back((dλL, dBgFL))
-        dALu = fill!(similar(ALu, atype), atype(zeros(T,size(ALu[1,1]))))
-        dM = fill!(similar(M, atype), atype(zeros(T,size(M[1,1]))))
-        dALd = fill!(similar(ALd, atype), atype(zeros(T,size(ALd[1,1]))))
-        for j = 1:Nj, i = 1:Ni
-            if dBgFL[i,j] !== nothing
-                ir = i + 1 - Ni * (i==Ni)
-                irr = i + 2 - Ni * (i + 2 > Ni)
-                jr = j - 1 + Nj * (j == 1)
-                dBgFL[i,j] -= Array(ein"abcd,abcd ->"(conj(BgFL[i,j]), dBgFL[i,j]))[] * BgFL[i,j]
-                ξl, info = linsolve(BgFR -> BgFRmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], BgFR, jr), conj(dBgFL[i,j]), -λL[i,j], 1; maxiter = 1)
-                info.converged == 0 && @warn "ad's linsolve not converge"
-                # errL = ein"abc,cba ->"(FL[i,j], ξl)[]
-                # abs(errL) > 1e-1 && throw("FL and ξl aren't orthometric. $(errL) $(info)")
-                # @show info ein"abc,cba ->"(FL[i,j], ξl)[] ein"abc,abc -> "(FL[i,j], dFL[i,j])[]
-                for J = 1:Nj
-                    dAiJ, dAipJ, dMiJ, dMipJ = dBgAMmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], BgFL[i,j], ξl, j, J)
-                    dALu[i,J] += dAiJ
-                    dALd[i,J] += dAipJ
-                    dM[i,J] += dMiJ
-                    dM[ir,J] += dMipJ
-                end
-            end
-        end
-        return NoTangent(), dALu, dALd, dM, NoTangent()
-    end
-    return (λL, BgFL), back
-end
-
-function ChainRulesCore.rrule(::typeof(bigrightenv), ARu, ARd, M, BgFR; kwargs...)
-    λR, BgFR = bigrightenv(ARu, ARd, M, BgFR)
-    Ni, Nj = size(ARu)
-    T = eltype(ARu[1,1])
-    atype = _arraytype(M[1,1])
-    function back((dλ, dBgFR))
-        dARu = fill!(similar(ARu, atype), atype(zeros(T,size(ARu[1,1]))))
-        dM = fill!(similar(M, atype), atype(zeros(T,size(M[1,1]))))
-        dARd = fill!(similar(ARd, atype), atype(zeros(T,size(ARd[1,1]))))
-        for j = 1:Nj, i = 1:Ni
-            ir = i + 1 - Ni * (i==Ni)
-            irr = i + 2 - Ni * (i + 2 > Ni)
-            jr = j - 1 + Nj * (j == 1)
-            if dBgFR[i,jr] !== nothing
-                dBgFR[i,jr] -= Array(ein"abcd,abcd ->"(conj(BgFR[i,jr]), dBgFR[i,jr]))[] * BgFR[i,jr]
-                ξr, info = linsolve(BgFL -> BgFLmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], BgFL, j), conj(dBgFR[i,jr]), -λR[i,jr], 1; maxiter = 1)
-                info.converged == 0 && @warn "ad's linsolve not converge"
-                # errR = ein"abc,cba ->"(ξr, FR[i,jr])[]
-                # abs(errR) > 1e-1 && throw("FR and ξr aren't orthometric. $(errR) $(info)")
-                # @show info ein"abc,cba ->"(ξr, FR[i,jr])[] ein"abc,abc -> "(FR[i,jr], dFR[i,jr])[]
-                for J = 1:Nj
-                    dAiJ, dAipJ, dMiJ, dMipJ = dBgAMmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], ξr, BgFR[i,jr], j, J)
-                    dARu[i,J] += dAiJ
-                    dARd[i,J] += dAipJ
-                    dM[i,J] += dMiJ
-                    dM[ir,J] += dMipJ
-                end
-            end
-        end
-        return NoTangent(), dARu, dARd, dM, NoTangent()
-    end
-    return (λR, BgFR), back
 end
 
 function ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray})
