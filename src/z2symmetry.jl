@@ -1,4 +1,4 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar,adjoint,copy,sqrt
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!
 import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
 import OMEinsum: _compactify!, subindex
 import Random: rand
@@ -84,6 +84,21 @@ end
 function show(io::IOBuffer, A::Z2tensor)
     println("parity: \n", A.parity)
     println("tensor: \n", A.tensor)
+end
+
+function getindex(A::AbstractZ2Array, index)
+    typeof(index) <: CartesianIndex && (index = index.I)
+    sum(index .- 1) % 2 != 0 && return 0.0
+    parity = collect(mod.(index .- 1, 2))
+    ip = findfirst(x->x in [parity], A.parity)
+    A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
+end
+
+function setindex!(A::AbstractZ2Array, x, index)
+    typeof(index) <: CartesianIndex && (index = index.I)
+    parity = collect(mod.(index .- 1, 2))
+    ip = findfirst(x->x in [parity], A.parity)
+    CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...] = x
 end
 
 function randZ2(atype, dtype, a...)
@@ -211,17 +226,10 @@ function bulktimes!(parity, tensor, A, B, p)
 end
 
 function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
-    tensor = A.tensor
-    atype = _arraytype(tensor[1])
+    atype = _arraytype(A.tensor[1])
     Tensor = atype(zeros(T, N))
-    parity = A.parity
-    # div = A.division
-    @inbounds for l in 1:length(parity)
-        @inbounds for i in CartesianIndices(tensor[l])         
-            # ind = 2 .* (i.I .- 1) .+ 1 .+ (mod(sum(parity[l][1:div]),2), parity[l][div+1:end]...)
-            ind = 2 .* (i.I .- 1) .+ 1 .+ parity[l]
-            CUDA.@allowscalar Tensor[ind...] = tensor[l][i]
-        end
+    @inbounds for i in CartesianIndices(A)         
+        sum(i.I .- 1) % 2 == 0 && (CUDA.@allowscalar Tensor[i] = A[i])
     end
     Tensor
 end
@@ -271,19 +279,10 @@ function bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, p)
     matrix_j = unique(map(x->x[div+1:end], Aparity[ind_A]))
     matrix_i = unique(map(x->x[1:div], Aparity[ind_A]))
 
-    h, bulkidims, bulkjdims = [] , Int[], Int[]
-    for i in matrix_i
-        v = []
-        for j in matrix_j
-            ind = findfirst(x->x in [[i; j]], Aparity)
-            push!(v, Atensor[ind])   
-        end
-        hi = hcat(v...)
-        push!(h, hi)
-        push!(bulkidims, size(hi, 1))
-    end
-    Amatrix = vcat(h...)
-    push!(bulkjdims, size(Amatrix, 2))
+    ind = [findfirst(x->x in [[i; matrix_j[1]]], Aparity) for i in matrix_i]
+    Amatrix = vcat(Atensor[ind]...)
+    bulkidims = [size(Atensor[i],1) for i in ind]
+    bulkjdims = [size(Amatrix, 2)]
 
     Q, R = qrpos!(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_j)

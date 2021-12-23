@@ -92,10 +92,10 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
     Zygote.@ignore begin
         AL, C, AR, FL, FR = map(Array{atype,2}, [env.AL, env.C, env.AR, env.FL, env.FR])
-    end
-    if !(atype <: Union{CuArray, Array})
-        intype = _arraytype(M[1,1].tensor[1])
-        AL, C, AR, FL, FR = map(y->map(x->insetype(x, intype), y), [AL, C, AR, FL, FR])
+        if !(atype <: Union{CuArray, Array})
+            intype = _arraytype(M[1,1].tensor[1])
+            AL, C, AR, FL, FR = map(y->map(x->insetype(x, intype), y), [AL, C, AR, FL, FR])
+        end
     end
     AL, C, AR, FL, FR
 end

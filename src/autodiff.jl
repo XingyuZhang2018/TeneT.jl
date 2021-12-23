@@ -4,6 +4,8 @@ using LinearAlgebra
 using Random
 using Zygote
 
+import Base: reshape
+import LinearAlgebra: norm
 export num_grad
 
 Zygote.@nograd StopFunction
@@ -62,6 +64,19 @@ function num_grad(f, a::AbstractArray; δ::Real=1e-5)
     return _arraytype(a)(df)
 end
 
+function num_grad(f, a::AbstractZ2Array{T, N}; δ::Real=1e-5) where {T,N}
+    b = insetype(copy(a), Array)
+    intype = _arraytype(a.tensor[1])
+    df = copy(a)
+    for i in CartesianIndices(b)
+        if sum(i.I .- 1) % 2 == 0
+            foo = x -> (ac = copy(b); ac[i] = x; f(insetype(ac, intype)))
+            df[i] = num_grad(foo, b[i], δ=δ)
+        end
+    end
+    return insetype(df, intype)
+end
+
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)
@@ -73,10 +88,10 @@ end
 
 # improves performance compared to default implementation, also avoids errors
 # with some complex arrays
-function ChainRulesCore.rrule(::typeof(LinearAlgebra.norm), A::AbstractArray)
+function ChainRulesCore.rrule(::typeof(norm), A::AbstractArray{<:Number})
     n = norm(A)
     function back(Δ)
-        return NoTangent(), Δ .* A ./ (n + eps(0f0)), NoTangent()
+        return NoTangent(), Δ * A / (n + eps(0f0))
     end
     return n, back
 end
@@ -100,6 +115,50 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
         return NoTangent(), _arraytype(Q)(dA)
     end
     return (Q, R), back
+end
+
+myreshape(A, a...) = reshape(A, a...)
+function ChainRulesCore.rrule(::typeof(myreshape), A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
+    function back(dAr) 
+        return NoTangent(), reshape(dAr, N...), NoTangent()...
+    end
+    return reshape(A, a...), back
+end
+    
+function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractZ2Array)
+    Q, R = qrpos(A)
+    function back((dQ, dR))
+        dA = copy(A)
+        bulkbackQR!(A, dA, Q, R, dQ, dR, 0)
+        bulkbackQR!(A, dA, Q, R, dQ, dR, 1)
+        return NoTangent(), dA
+    end
+    return (Q, R), back
+end
+
+function bulkbackQR!(A, dA, Q, R, dQ, dR, p)
+    div = dQ.division
+    ind_A = findall(x->sum(x[div+1:end]) % 2 == p, dQ.parity)
+    m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
+    m_i = unique(map(x->x[1:div], dQ.parity[ind_A]))
+
+    ind = [findfirst(x->x in [[i; m_j[1]]], dQ.parity) for i in m_i]
+    dQm = vcat(dQ.tensor[ind]...)
+    Qm = vcat(Q.tensor[ind]...)
+    bulkidims = [size(dQ.tensor[i],1) for i in ind]
+    bulkjdims = [size(dQm, 2)]
+    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], dR.parity)
+    dRm = dR.tensor[ind]
+    Rm = R.tensor[ind]
+    
+    M = Array(Rm * dRm' - dQm' * Qm)
+    dAm = (UpperTriangular(Rm + I * 1e-12) \ (dQm + Qm * _arraytype(Qm)(Hermitian(M, :L)))' )'
+    
+    for i in 1:length(m_i), j in 1:length(m_j)
+        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
+        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
+        CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
+    end
 end
 
 function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
