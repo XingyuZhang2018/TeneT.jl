@@ -118,16 +118,9 @@ function getL!(A,L; kwargs...)
         @debug "getL eigsolve" λ info sort(abs.(λ))
         info.converged == 0 && @warn "getL not converged"
         ρ = ρs[1] + ρs[1]'
-        if typeof(ρ) <: Union{Array, CuArray}
-            ρ ./= tr(ρ)
-            _, S, Vt = sysvd!(ρ)
-            sqrtS = sqrt.(S)
-        else
-            ρ /= tr(ρ)
-            _, S, Vt = sysvd!(ρ)
-            sqrtS = sqrt(S)
-        end
-        Lo = lmul!(Diagonal(sqrtS), Vt)
+        ρ /= tr(ρ)
+        _, S, Vt = sysvd!(ρ)
+        Lo = lmul!(Diagonal(sqrt.(S)), Vt)
         _, L[i,j] = qrpos!(Lo)
     end
     return L

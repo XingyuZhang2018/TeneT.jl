@@ -1,5 +1,4 @@
 using VUMPS
-using VUMPS: AbstractZ2Array
 using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos,sysvd!
 using CUDA
 using KrylovKit
@@ -37,7 +36,7 @@ end
 	@test reshape(Atensor,(9,4)) == reshape(Z2tensor2tensor(reshape(reshape(A,9,4),3,3,4)),(9,4))
 end
 
-@testset "OMEinsum Z2 with $atype{$dtype}" for atype in [CuArray], dtype in [Float64]
+@testset "OMEinsum Z2 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)
 	A = randZ2(atype, dtype, 3,3,4);
 	B = randZ2(atype, dtype, 4,3);
@@ -67,8 +66,8 @@ end
 	Btensor = Z2tensor2tensor(B)
 	@test Array(ein"abab -> "(Btensor))[] ≈ tr(reshape(B,4,4))
 	@test Array(ein"aabb -> "(Btensor))[] ≈ Array(ein"aabb-> "(B))[]
-	
-	## VUMPS unit
+
+	# VUMPS unit
 	d = 2
     D = 10
     AL = randZ2(atype, dtype, D, d, D)
@@ -78,6 +77,14 @@ end
 	tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
 	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     @test tFL ≈ Z2tensor2tensor(FL) 
+
+	# autodiff test
+	D,d = 3,2
+	FL = randZ2(atype, dtype, D, d, D)
+	S = randZ2(atype, dtype, D, d, D, D, d, D)
+	FLtensor = Z2tensor2tensor(FL)
+	Stensor = Z2tensor2tensor(S)
+	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 
 @testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]

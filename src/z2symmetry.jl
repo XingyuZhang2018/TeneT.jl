@@ -1,9 +1,11 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!
-import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
-import OMEinsum: _compactify!, subindex
-import Random: rand
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map
 using BitBasis
 using CUDA
+import CUDA: CuArray
+import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
+import OMEinsum: _compactify!, subindex
+import Zygote: accum
+export AbstractZ2Array, Z2tensor
 
 """
     parity_conserving(T::Array)
@@ -36,20 +38,31 @@ end
 
 size(::AbstractZ2Array{T,N}) where {T,N} = N
 size(::AbstractZ2Array{T,N}, a) where {T,N} = N[a]
-conj(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(conj,A.tensor), N, A.division)
+conj(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(conj, A.tensor), N, A.division)
+map(conj, A::AbstractZ2Array) = conj(A)
 norm(A::AbstractZ2Array{T,N}) where {T,N} = norm(A.tensor)
 
-*(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor .* B, N, A.division)
+*(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor * B, N, A.division)
 *(B::Number, A::AbstractZ2Array{T,N}) where {T,N} = A * B
-/(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor ./ B, N, A.division)
+/(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor / B, N, A.division)
+broadcasted(*, A::AbstractZ2Array, B::Number) = A * B
+broadcasted(*, B::Number, A::AbstractZ2Array) = A * B
+broadcasted(/, A::AbstractZ2Array, B::Number) = A / B
+accum(A::AbstractZ2Array, B::AbstractZ2Array...) = +(A, B...)
+
 rmul!(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, rmul!.(A.tensor, B), N, A.division)
 lmul!(A::AbstractZ2Array, B::AbstractZ2Array) = A * B
 similar(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
+similar(A::AbstractZ2Array{T,N}, atype) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
 diag(A::AbstractZ2Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
 adjoint(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(adjoint, A.tensor), N, A.division)
 copy(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(copy, A.tensor), N, A.division)
 Diagonal(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(Diagonal, A.tensor), N, A.division)
 sqrt(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(x->sqrt.(x), A.tensor), N, A.division)
+broadcasted(sqrt, A::AbstractZ2Array) = sqrt(A)
+CuArray(A::AbstractZ2Array{T,N}) where {T, N} = Z2tensor(A.parity, CuArray.(A.tensor), N, A.division)
+Array(A::AbstractZ2Array{T,N}) where {T, N} = Z2tensor(A.parity, Array.(A.tensor), N, A.division)
+vec(A::AbstractZ2Array) = A
 
 function +(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
     exchangeind = indexin(B.parity, A.parity)
@@ -61,14 +74,16 @@ function -(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
     Z2tensor(B.parity, A.tensor[exchangeind] - B.tensor, N, B.division)
 end
 
+-(A::AbstractZ2Array{T,N}) where {T, N} = Z2tensor(A.parity, -A.tensor, N, A.division)
+
 function mul!(Y::AbstractZ2Array{T,N}, A::AbstractZ2Array{T,N}, B::Number) where {T,N}
     Y = A*B
     Z2tensor(Y.parity, Y.tensor, N, Y.division)
 end
 
 function dot(A::AbstractZ2Array{T,N}, B::AbstractZ2Array{T,N}) where {T,N}
-    exchangeind = indexin(B.parity, A.parity)
-    dot(A.tensor[exchangeind], B.tensor)
+    exchangeind = indexin(A.parity, B.parity)
+    dot(A.tensor, B.tensor[exchangeind])
 end
 
 function axpy!(α::Number, A::AbstractZ2Array, B::AbstractZ2Array{T,N}) where {T,N}
@@ -91,7 +106,7 @@ function getindex(A::AbstractZ2Array, index)
     sum(index .- 1) % 2 != 0 && return 0.0
     parity = collect(mod.(index .- 1, 2))
     ip = findfirst(x->x in [parity], A.parity)
-    A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
+    CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
 end
 
 function setindex!(A::AbstractZ2Array, x, index)
@@ -117,6 +132,22 @@ function randZ2(atype, dtype, a...)
     Z2tensor(parity, tensor, a, 1)
 end
 
+function zerosZ2(atype, dtype, a...)
+    L = length(a)
+    deven = Int.(ceil.(a./2))
+    dodd = a .- deven
+    parity = Vector{Vector{Int}}()
+    tensor = Vector{atype{dtype}}()
+    @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
+        if sum(i.I) % 2 == 0
+            push!(parity,collect(i.I))
+            dims = Tuple(i.I[j] == 0 ? deven[j] : dodd[j] for j in 1:L)
+            push!(tensor,atype(zeros(dtype, dims)))
+        end
+    end
+    Z2tensor(parity, tensor, a, 1)
+end
+
 function IZ2(atype, dtype, D)
     deven = Int(ceil(D/2))
     dodd = D - deven
@@ -128,8 +159,6 @@ function IZ2(atype, dtype, D)
     push!(tensor,atype{dtype}(I, dodd, dodd))
     Z2tensor(parity, tensor, (D, D), 1)
 end
-
-insetype(A::AbstractZ2Array{T,N}, intype) where {T,N} = Z2tensor(A.parity, map(intype, A.tensor), N, A.division)
 
 function permutedims(A::AbstractZ2Array{T,N}, perm) where {T,N}
     parity = map(x->x[collect(perm)], A.parity)
@@ -172,9 +201,7 @@ function *(A::AbstractZ2Array{TA,NA}, B::AbstractZ2Array{TB,NB}) where {TA,TB,NA
     divA, divB = A.division, B.division
 
     bulktimes!(parity, tensor, A, B, 0)
-    if divA != length(NA) && divB != length(NB)
-        bulktimes!(parity, tensor, A, B, 1)
-    end
+    !(divA in [0, length(NA)]) && !(divB in [0, length(NB)]) && bulktimes!(parity, tensor, A, B, 1)
     parity == [Int64[]] && return Array(tensor[1])[]
     Z2tensor(parity, tensor, (NA[1:divA]..., NB[divB+1:end]...), 1)
 end
@@ -252,6 +279,7 @@ end
 
 function _compactify!(y, x::AbstractZ2Array, indexer)
     x = Array(Z2tensor2tensor(x))
+    @show 2
     @inbounds for ci in CartesianIndices(y)
         y[ci] = x[subindex(indexer, ci.I)]
     end

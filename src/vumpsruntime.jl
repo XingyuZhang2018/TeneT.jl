@@ -176,11 +176,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
 
     Zygote.@ignore savefile && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
-        atype = _arraytype(M[1,1]) <: AbstractZ2Array ? Z2tensor : Array
-        ALs, Cs, ARs, FLs, FRs = map(Array{atype,2}, [env.AL, env.C, env.AR, env.FL, env.FR])
-        if atype != Array
-            ALs, Cs, ARs, FLs, FRs = map(y->map(x->insetype(x, Array), y), [ALs, Cs, ARs, FLs, FRs])
-        end
+        ALs, Cs, ARs, FLs, FRs = map(x -> Array.(x), [ALs, Cs, ARs, FLs, FRs])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
         save(out_chkp_file, "env", envsave)
     end
@@ -207,7 +203,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
             FL, FR = Array{atype,2}(FL), Array{atype,2}(FR)
             if !(atype <: Union{CuArray, Array})
                 intype = _arraytype(M[1,1].tensor[1])
-                FL, FR = map(y->map(x->insetype(x, intype), y), [FL, FR])
+                FL, FR = map(x->intype.(x), [FL, FR])
             end
         end
     else
@@ -229,11 +225,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     _, FR = obs_FR(ARu, ARd, M, FR)
     Zygote.@ignore savefile && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
-        atype = _arraytype(M[1,1]) <: AbstractZ2Array ? Z2tensor : Array
-        FL, FR = map(Array{atype,2}, [FL, FR])
-        if atype != Array
-            FL, FR = map(y->map(x->insetype(x, Array), y), [FL, FR])
-        end
+        FL, FR = map(x->Array.(x), [FL, FR])
         save(out_chkp_file_obs, "env", (FL, FR))
     end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
