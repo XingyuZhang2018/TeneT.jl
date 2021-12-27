@@ -94,7 +94,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
         AL, C, AR, FL, FR = map(Array{atype,2}, [env.AL, env.C, env.AR, env.FL, env.FR])
         if !(atype <: Union{CuArray, Array})
             intype = _arraytype(M[1,1].tensor[1])
-            AL, C, AR, FL, FR = map(y->map(x->insetype(x, intype), y), [AL, C, AR, FL, FR])
+            AL, C, AR, FL, FR = map(x->intype.(x), [AL, C, AR, FL, FR])
         end
     end
     AL, C, AR, FL, FR
@@ -176,7 +176,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
 
     Zygote.@ignore savefile && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
-        ALs, Cs, ARs, FLs, FRs = map(x -> Array.(x), [ALs, Cs, ARs, FLs, FRs])
+        ALs, Cs, ARs, FLs, FRs = map(x -> Array.(x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
         save(out_chkp_file, "env", envsave)
     end

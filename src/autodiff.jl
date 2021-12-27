@@ -126,11 +126,19 @@ end
 #     return reshape(A, a...), back
 # end
     
-@adjoint reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N} = reshape(A, a...), dAr -> (reshape(dAr, N...),  NoTangent()...)
+@adjoint function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N} 
+    function back(dAr)
+        exchangeind = indexin(A.parity, dAr.parity)
+        s = size.(A.tensor)
+        dAtensor = reshape.(dAr.tensor[exchangeind], s)
+        return Z2tensor(A.parity, dAtensor, N, A.division), a...
+    end
+    return reshape(A, a...), back
+end
 
 @adjoint *(A::AbstractZ2Array, B::AbstractZ2Array) = A * B, dC -> (dC * B', A' * dC)
 
-# @adjoint adjoint(A::AbstractZ2Array{T,N}) where {T,N} = adjoint(A), djA -> adjoint(djA)
+@adjoint adjoint(A::AbstractZ2Array{T,N}) where {T,N} = adjoint(A), djA -> (adjoint(djA), )
 
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractZ2Array)
     Q, R = qrpos(A)
@@ -154,8 +162,8 @@ function bulkbackQR!(A, dA, Q, R, dQ, dR, p)
     Qm = vcat(Q.tensor[ind]...)
     bulkidims = [size(dQ.tensor[i],1) for i in ind]
     bulkjdims = [size(dQm, 2)]
-    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], dR.parity)
-    dRm = dR.tensor[ind]
+    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], R.parity)
+    dRm = dR == ZeroTangent() ? ZeroTangent() : dR.tensor[ind]
     Rm = R.tensor[ind]
     
     M = Array(Rm * dRm' - dQm' * Qm)
@@ -200,8 +208,8 @@ function bulkbackLQ!(A, dA, L, Q, dL, dQ, p)
     Qm = hcat(Q.tensor[ind]...)
     bulkidims = [size(dQm, 1)]
     bulkjdims = [size(dQ.tensor[i],2) for i in ind]
-    ind = findfirst(x->x in [[m_i[1]; m_i[1]]], dL.parity)
-    dLm = dL.tensor[ind]
+    ind = findfirst(x->x in [[m_i[1]; m_i[1]]], L.parity)
+    dLm = dL == ZeroTangent() ? ZeroTangent() : dL.tensor[ind]
     Lm = L.tensor[ind]
     
     M = Array(Lm' * dLm - dQm * Qm')

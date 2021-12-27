@@ -55,7 +55,6 @@ lmul!(A::AbstractZ2Array, B::AbstractZ2Array) = A * B
 similar(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
 similar(A::AbstractZ2Array{T,N}, atype) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
 diag(A::AbstractZ2Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
-adjoint(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(adjoint, A.tensor), N, A.division)
 copy(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(copy, A.tensor), N, A.division)
 Diagonal(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(Diagonal, A.tensor), N, A.division)
 sqrt(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(x->sqrt.(x), A.tensor), N, A.division)
@@ -167,6 +166,15 @@ function permutedims(A::AbstractZ2Array{T,N}, perm) where {T,N}
     Z2tensor(A.parity, tensor[exchangeind], N[collect(perm)], 1)
 end
 
+function adjoint(A::AbstractZ2Array{T,N}) where {T,N}
+    div = A.division 
+    parity = map(x->x[[div+1:end;1:div]], A.parity)
+    exchangeind = indexin(A.parity, parity)
+    tensor = adjoint.(A.tensor)
+    Z2tensor(A.parity, tensor[exchangeind], (N[div+1:end]..., N[1:div]...), length(N) - div)
+end
+
+reshape(A::AbstractZ2Array, a::Tuple{Vararg{Int}}) = reshape(A, a...)
 function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
     tensor = copy(A.tensor)
     div = 1
@@ -203,7 +211,7 @@ function *(A::AbstractZ2Array{TA,NA}, B::AbstractZ2Array{TB,NB}) where {TA,TB,NA
     bulktimes!(parity, tensor, A, B, 0)
     !(divA in [0, length(NA)]) && !(divB in [0, length(NB)]) && bulktimes!(parity, tensor, A, B, 1)
     parity == [Int64[]] && return Array(tensor[1])[]
-    Z2tensor(parity, tensor, (NA[1:divA]..., NB[divB+1:end]...), 1)
+    Z2tensor(parity, tensor, (NA[1:divA]..., NB[divB+1:end]...), A.division)
 end
 
 function bulktimes!(parity, tensor, A, B, p)

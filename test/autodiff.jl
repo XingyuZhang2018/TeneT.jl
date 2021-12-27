@@ -9,6 +9,37 @@ using Test
 using Zygote
 CUDA.allowscalar(false)
 
+@testset "Z2 ad basic with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
+    # reshape
+    A = randinitial(Val(:Z2), atype, dtype, 3, 2, 3)
+    Atensor = Z2tensor2tensor(A)
+    foo1(x) = norm(reshape(A*x, 6, 3))
+    foo2(x) = norm(reshape(Atensor*x, 6, 3))
+    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
+
+    A = randinitial(Val(:Z2), atype, dtype, 6, 3)
+    Atensor = Z2tensor2tensor(A)
+    foo3(x) = norm(reshape(A*x, 3, 2, 3))
+    foo4(x) = norm(reshape(Atensor*x, 3, 2, 3))
+    @test Zygote.gradient(foo3, 1)[1] ≈ num_grad(foo3, 1) ≈ Zygote.gradient(foo4, 1)[1] ≈ num_grad(foo4, 1)
+
+    # * 
+    A = randinitial(Val(:Z2), atype, dtype, 3, 6)
+    B = randinitial(Val(:Z2), atype, dtype, 6, 3)
+    Atensor = Z2tensor2tensor(A)
+    Btensor = Z2tensor2tensor(B)
+    foo5(A) = norm(A*B)
+    foo6(Atensor) = norm(Atensor*Btensor)
+    @test Z2tensor2tensor(Zygote.gradient(foo5, A)[1]) ≈ Z2tensor2tensor(num_grad(foo5, A)) ≈ Zygote.gradient(foo6, Atensor)[1] ≈ num_grad(foo6, Atensor)
+
+    # '
+    A = randinitial(Val(:Z2), atype, dtype, 6, 3)
+    Atensor = Z2tensor2tensor(A)
+    foo7(A) = norm(A')
+    foo8(Atensor) = norm(Atensor')
+    @test Z2tensor2tensor(Zygote.gradient(foo7, A)[1]) ≈ Z2tensor2tensor(num_grad(foo7, A)) ≈ Zygote.gradient(foo8, Atensor)[1] ≈ num_grad(foo8, Atensor)
+end
+
 @testset "matrix autodiff with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64], symmetry in [:none, :Z2]
     Random.seed!(100)
     A = randinitial(Val(symmetry), atype, dtype, 4, 4)
@@ -72,17 +103,17 @@ end
     @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 
-@testset "$(symmetry) OMEinsum ad $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64], symmetry in [:Z2]
+@testset "Z2 OMEinsum ad $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64]
     Random.seed!(100)
     D,d = 3,2
-	FL = randinitial(Val(symmetry), atype, dtype, D, d, D)
-	S = randinitial(Val(symmetry), atype, dtype, D, d, D, D, d, D)
-    # FLtensor = Z2tensor2tensor(FL)
-	# Stensor = Z2tensor2tensor(S)
+	FL = randinitial(Val(:Z2), atype, dtype, D, d, D)
+	S = randinitial(Val(:Z2), atype, dtype, D, d, D, D, d, D)
+    FLtensor = Z2tensor2tensor(FL)
+	Stensor = Z2tensor2tensor(S)
     foo1(x) = norm(Array(ein"(abc,abcdef),def ->"(FL*x, S*x, FL*x))[])
     foo2(x) = norm(Array(ein"(abc,abcdef),def ->"(FLtensor*x, Stensor*x, FLtensor*x))[])
-    @show Zygote.gradient(foo1, 1)[1]
-	# @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
+    # @show Zygote.gradient(foo1, 1)[1]
+	@test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 end
 
 @testset "$(Ni)x$(Nj) leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
@@ -198,21 +229,15 @@ end
         end
         return s
     end
-    @show Zygote.gradient(foo1, 1)
-    # @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
+    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
 end
 
 @testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:Ni, j in 1:Nj]
-    S = Array{atype{ComplexF64,6},2}(undef, Ni, Nj)
+    S = [randinitial(Val(symmetry), atype, ComplexF64, D, d, D, D, d, D) for i in 1:Ni, j in 1:Nj]
     M = [randinitial(Val(symmetry), atype, ComplexF64, d, d, d, d) for i in 1:Ni, j in 1:Nj]
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S[i,j] = atype(rand(ComplexF64, D, d, D, D, d, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
 
     ALu, = leftorth(A) 
     ALd, = leftorth(A)
