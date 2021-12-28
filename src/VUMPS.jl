@@ -1,6 +1,6 @@
 module VUMPS
 
-export parity_conserving, Z2tensor, randinitial, randZ2
+export parity_conserving, Z2tensor, randinitial, randZ2, tensor2Z2tensor
 
 include("cuda_patch.jl")
 include("environment.jl")

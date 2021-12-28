@@ -269,6 +269,16 @@ function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     Tensor
 end
 
+function tensor2Z2tensor(A::AbstractArray)
+    atype = _arraytype(A)
+    dtype = eltype(A)
+    Z2tensor = zerosZ2(atype, dtype, size(A)...)
+    @inbounds for i in CartesianIndices(Z2tensor)         
+        sum(i.I .- 1) % 2 == 0 && (CUDA.@allowscalar Z2tensor[i] = A[i])
+    end
+    Z2tensor
+end
+
 function transpose(A::AbstractZ2Array{T,N}) where {T,N}
     tensor = map(x->transpose(x), A.tensor)
     Z2tensor(A.parity, tensor, N, 0)

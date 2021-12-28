@@ -21,6 +21,7 @@ Zygote.@nograd initialA
 Zygote.@nograd save
 Zygote.@nograd load
 Zygote.@nograd Random.seed!
+Zygote.@nograd randinitial
 
 @doc raw"
     num_grad(f, K::Real; [δ = 1e-5])
@@ -105,6 +106,14 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
     end
     return As, back
 end
+
+# function ChainRulesCore.rrule(::typeof(Z2tensor), parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where {T}
+#     function back(dy) 
+#         @show dy.parity parity
+#         Z2tensor(dy.parity, dy.tensor, N, dy.division)
+#     end
+#     Z2tensor(parity, tensor, N, division),  back
+# end
 
 # adjoint for QR factorization
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)

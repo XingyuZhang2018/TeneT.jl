@@ -134,6 +134,7 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     err = erroverlap + errL + errR
     # @show error(ALp, Cp, ARp, FL, M, FR)
     # err = errL + errR
+    FL, FR = map(typeof(ALp), [FL, FR])
     err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR, erroverlap=$erroverlap")
     return SquareVUMPSRuntime(M, ALp, Cp, ARp, FL, FR), err
 end
