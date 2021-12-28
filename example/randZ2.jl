@@ -12,7 +12,7 @@ using Zygote
     m = parity_conserving(m)
     symmetry == :Z2 && (m = tensor2Z2tensor(m))
     M = [β * m for i in 1:Ni, j in 1:Nj]
-    env = obs_env(M; χ = 20, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = true)
+    env = obs_env(M; χ = 20, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
     @show Z(env, M)
 end
 
@@ -23,7 +23,7 @@ end
     symmetry == :Z2 && (m = tensor2Z2tensor(m))
     function foo(β)
         M = [β * m for i in 1:Ni, j in 1:Nj]
-        env = obs_env(M; χ = 20, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = true)
+        env = obs_env(M; χ = 20, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
         real(Z(env, M))
     end
     @show Zygote.gradient(foo, 0.2)

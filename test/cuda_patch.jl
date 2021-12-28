@@ -13,8 +13,8 @@ CUDA.allowscalar(false)
 
 @testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
     Random.seed!(100)
-    d = 2
-    χ = 200
+    d = 16
+    χ = 50
     FL = randinitial(Val(symmetry), atype, dtype, χ, d, χ)
     M = randinitial(Val(symmetry), atype, dtype, d, d, d, d)
     AL = randinitial(Val(symmetry), atype, dtype, χ, d, χ)

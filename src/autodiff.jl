@@ -127,10 +127,12 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     return (Q, R), back
 end
 
-# function ChainRulesCore.rrule(::typeof(reshape), A::AbstractArray{<:Number}, a::Int...)
-#     function back(dAr::AbstractZ2Array{T,N}) where {T,N} 
-#         @show 1
-#         return NoTangent(), reshape(dAr, N...), NoTangent()...
+# function ChainRulesCore.rrule(::typeof(reshape), A::AbstractZ2Array{T,N}, a::Int...)
+#     function back(dAr)
+#         exchangeind = indexin(A.parity, dAr.parity)
+#         s = size.(A.tensor)
+#         dAtensor = reshape.(dAr.tensor[exchangeind], s)
+#         return Z2tensor(A.parity, dAtensor, N, A.division), a...
 #     end
 #     return reshape(A, a...), back
 # end
