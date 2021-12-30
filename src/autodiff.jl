@@ -151,6 +151,23 @@ end
 
 @adjoint adjoint(A::AbstractZ2Array{T,N}) where {T,N} = adjoint(A), djA -> (adjoint(djA), )
 
+function ChainRulesCore.rrule(::typeof(Z2tensor2tensor), A::AbstractZ2Array)
+    function back(dAt)
+        dA = tensor2Z2tensor(dAt)
+        return NoTangent(), dA
+    end
+    Z2tensor2tensor(A), back
+end
+
+function ChainRulesCore.rrule(::typeof(tensor2Z2tensor), A::AbstractArray)
+    AZ2 = tensor2Z2tensor(A)
+    function back(dAZ2)
+        dA = Z2tensor2tensor(dAZ2)
+        return NoTangent(), dA
+    end
+    AZ2, back
+end
+
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractZ2Array)
     Q, R = qrpos(A)
     function back((dQ, dR))

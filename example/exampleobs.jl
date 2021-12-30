@@ -11,9 +11,9 @@ function Z(env, M)
     for j = 1:Nj,i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
         jr = j + 1 - Nj * (j==Nj)
-        z = ein"(((adf,abc),dgeb),ceh),fgh ->"(FLu[i,j],ACu[i,j],M[i,j],FRu[i,j],conj(ACu[ir,j]))[]
-        λ = ein"(acd,ab),(bce,de) ->"(FLu[i,jr],Cu[i,j],FRu[i,j],conj(Cu[ir,j]))[]
-        z_tol *= z/λ
+        z = ein"(((adf,abc),dgeb),ceh),fgh ->"(FLu[i,j],ACu[i,j],M[i,j],FRu[i,j],conj(ACu[ir,j]))
+        λ = ein"(acd,ab),(bce,de) ->"(FLu[i,jr],Cu[i,j],FRu[i,j],conj(Cu[ir,j]))
+        z_tol *= Array(z)[]/Array(λ)[]
     end
     return z_tol^(1/Ni/Nj)
 end

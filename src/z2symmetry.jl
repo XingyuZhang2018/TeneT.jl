@@ -113,25 +113,38 @@ function show(io::IOBuffer, A::Z2tensor)
     println("tensor: \n", A.tensor)
 end
 
-function getindex(A::AbstractZ2Array, index)
+function getindex(A::AbstractZ2Array{T,N}, index) where {T,N}
     typeof(index) <: CartesianIndex && (index = index.I)
-    sum(index .- 1) % 2 != 0 && return 0.0
-    parity = collect(mod.(index .- 1, 2))
+    bits = map(x -> Int(ceil(log2(x))), N)
+    parity = collect(sum.(bitarray.(index .- 1, bits))) .% 2
+    sum(parity) % 2 != 0 && return 0.0
     ip = findfirst(x->x in [parity], A.parity)
     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
 end
 
-function setindex!(A::AbstractZ2Array, x, index)
+function setindex!(A::AbstractZ2Array{T,N}, x, index) where {T,N}
     typeof(index) <: CartesianIndex && (index = index.I)
-    parity = collect(mod.(index .- 1, 2))
+    bits = map(x -> Int(ceil(log2(x))), N)
+    parity = collect(sum.(bitarray.(index .- 1, bits))) .% 2
     ip = findfirst(x->x in [parity], A.parity)
     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...] = x
 end
 
+"""
+    deven, dodd = bulkdims(N::Vector)
+
+find dims of 
+"""
+function bulkdims(N...)
+    bits = map(x -> Int(ceil(log2(x))), N)
+    dodd = map((bits,N) -> sum([sum(bitarray(i - 1, bits)) % 2 for i = 1:N]), bits, N)
+    deven = N .- dodd
+    deven, dodd
+end
+
 function randZ2(atype, dtype, a...)
     L = length(a)
-    deven = Int.(ceil.(a./2))
-    dodd = a .- deven
+    deven, dodd = bulkdims(a...)
     parity = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
@@ -146,8 +159,7 @@ end
 
 function zerosZ2(atype, dtype, a...)
     L = length(a)
-    deven = Int.(ceil.(a./2))
-    dodd = a .- deven
+    deven, dodd = bulkdims(a...)
     parity = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
@@ -161,14 +173,13 @@ function zerosZ2(atype, dtype, a...)
 end
 
 function IZ2(atype, dtype, D)
-    deven = Int(ceil(D/2))
-    dodd = D - deven
+    deven, dodd = bulkdims(D, D)
     parity = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     push!(parity,[0, 0])
-    push!(tensor,atype{dtype}(I, deven, deven))
+    push!(tensor,atype{dtype}(I, deven...))
     push!(parity,[1, 1])
-    push!(tensor,atype{dtype}(I, dodd, dodd))
+    push!(tensor,atype{dtype}(I, dodd...))
     Z2tensor(parity, tensor, (D, D), 1)
 end
 
@@ -196,14 +207,13 @@ function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
         end
         return Z2tensor(A.parity, tensor, N, div)
     else
-        deven = Int.(ceil.(N./2))
-        dodd = N .- deven
+        deven, dodd = bulkdims(a...)
         parity = A.parity
         @inbounds for i in 1:length(tensor)
-            dims = Tuple(parity[i][j] == 0 ? deven[j] : dodd[j] for j in 1:length(N))
+            dims = Tuple(parity[i][j] == 0 ? deven[j] : dodd[j] for j in 1:length(a))
             tensor[i] = reshape(tensor[i], dims)
         end
-        return Z2tensor(parity, tensor, N, div)
+        return Z2tensor(parity, tensor, a, div)
     end
 end
 
@@ -280,18 +290,20 @@ end
 function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     atype = _arraytype(A.tensor[1])
     Tensor = atype(zeros(T, N))
-    @inbounds for i in CartesianIndices(A)         
-        sum(i.I .- 1) % 2 == 0 && (CUDA.@allowscalar Tensor[i] = A[i])
+    bits = map(x -> Int(ceil(log2(x))), N)
+    @inbounds for i in CartesianIndices(Tensor)         
+        sum(sum.(bitarray.(i.I .- 1, bits))) % 2 == 0 && (CUDA.@allowscalar Tensor[i] = A[i])
     end
     Tensor
 end
 
-function tensor2Z2tensor(A::AbstractArray)
+function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
     atype = _arraytype(A)
     dtype = eltype(A)
     Z2tensor = zerosZ2(atype, dtype, size(A)...)
+    bits = map(x -> Int(ceil(log2(x))), size(A))
     @inbounds for i in CartesianIndices(Z2tensor)         
-        sum(i.I .- 1) % 2 == 0 && (CUDA.@allowscalar Z2tensor[i] = A[i])
+        sum(sum.(bitarray.(i.I .- 1, bits))) % 2 == 0 && (CUDA.@allowscalar Z2tensor[i] = A[i])
     end
     Z2tensor
 end
@@ -306,7 +318,7 @@ function tr(A::AbstractZ2Array{T,N}) where {T,N}
     parity = A.parity
     tensor = A.tensor
     half = Int(length(parity[1])/2)
-    s = 0
+    s = 0.0
     @inbounds for i in 1:length(parity)
         parity[i][1:half] == parity[i][half+1:end] && (s += tr(tensor[i]))
     end
