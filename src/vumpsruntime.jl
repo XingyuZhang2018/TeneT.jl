@@ -78,9 +78,9 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     _, FR = rightenv(AR, AR, M)
     C = LRtoC(L,R)
     Ni, Nj = size(M)
-    verbose && print("random initial $(Ni)×$(Nj) vumps_χ$(χ) environment-> ")
-    atpye = typeof(AR)
-    AL, FL, FR = map(atpye, [AL, FL, FR])
+    atype = typeof(AR)
+    AL, FL, FR = map(atype, [AL, FL, FR])
+    verbose && print("random initial $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry vumps_χ$(χ) environment-> ")
     AL, C, AR, FL, FR
 end
 
@@ -88,7 +88,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     env = load(chkp_file)["env"]
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
-    verbose && print("vumps $(Ni)×$(Nj) environment load from $(chkp_file) -> ")   
+    verbose && print("vumps $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry environment load from $(chkp_file) -> ")   
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
     Zygote.@ignore begin
         AL, C, AR, FL, FR = map(Array{atype,2}, [env.AL, env.C, env.AR, env.FL, env.FR])
@@ -198,7 +198,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     atype = _arraytype(M[1,1])
     in_chkp_file_obs = infolder*"/obs_D$(D)_χ$(χ).jld2"
     if isfile(in_chkp_file_obs)   
-        verbose && println("←→ observable environment load from $(in_chkp_file_obs)")
+        verbose && println("←→ observable $(getsymmetry(M[1])) symmetry environment load from $(in_chkp_file_obs)")
         FL, FR = load(in_chkp_file_obs)["env"]
         Zygote.@ignore begin
             FL, FR = Array{atype,2}(FL), Array{atype,2}(FR)

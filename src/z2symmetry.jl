@@ -131,11 +131,11 @@ function setindex!(A::AbstractZ2Array{T,N}, x, index) where {T,N}
 end
 
 """
-    deven, dodd = bulkdims(N::Vector)
+    deven, dodd = bulkdims(N::Int...)
 
-find dims of 
+find dims of bulk
 """
-function bulkdims(N...)
+function bulkdims(N::Int...)
     bits = map(x -> Int(ceil(log2(x))), N)
     dodd = map((bits,N) -> sum([sum(bitarray(i - 1, bits)) % 2 for i = 1:N]), bits, N)
     deven = N .- dodd
@@ -280,6 +280,7 @@ function bulktimes!(parity, tensor, A, B, p)
 
     atype = _arraytype(Btensor[1])
     C = atype(Amatrix) * atype(Bmatrix)
+    @show Amatrix Bmatrix C
     for i in 1:length(matrix_i), j in 1:length(matrix_k)
         push!(parity, [matrix_i[i]; matrix_k[j]])
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
@@ -440,4 +441,82 @@ function sysvd!(A::AbstractZ2Array{T,N}) where {T,N}
     end
     Nm = min(N...)
     Z2tensor(parity, Utensor, (N[1],Nm), div), Z2tensor(parity, Stensor, (Nm,Nm), div), Z2tensor(parity, Vtensor, (Nm,N[2]), div)
+end
+
+"""
+p = getparity(L::Int)
+
+give the parity of length L
+"""
+function getparity(L::Int)
+    p = Vector{Vector{Int}}()
+    for i in CartesianIndices(Tuple(0:1 for i=1:L))
+        sum(i.I) % 2 == 0 && push!(p, collect(i.I))
+    end
+    p
+end
+
+"""
+div = division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
+
+give the reshape division of b by a, where b is the original shape and a is the new shape
+"""
+function division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
+    prod(a) != prod(b) && throw(error("$a and $b must have the same product"))
+    Na > Nb && throw(error("$a must be shorter than $b"))
+    div = Int[zeros(Int, Na)..., Nb]
+    for i in 2:Na
+        idiv = div[i-1] + 1
+        p = b[idiv]
+        while p != a[i-1]
+            idiv += 1 
+            p *= b[idiv]
+        end
+        div[i] = idiv
+    end
+    div
+end
+"""
+    Z2tensor(reparity, tensor, a, 1) = Z2reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
+
+reshape the Z2tensor to the new shape, but only for a <: 2^N
+"""
+function Z2reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
+    atype = _arraytype(A.tensor[1])
+    if length(a) < length(N)
+        div = division(a, N)
+        reparity = map(x->[[sum(x[div[i] + 1 : div[i + 1]]) for i in 1:(length(div)-1)]...] .% 2, A.parity)
+        # ureparity = unique(reparity) 
+        ureparity = getparity(length(a))
+        deven, dodd = bulkdims(a...) 
+        tensor = Vector{atype{T}}(undef, length(ureparity))
+        for i in 1:length(ureparity)
+            p = ureparity[i]
+            ind = findall(x->x in [p], reparity)
+            dims = Tuple(p[i] == 0 ? deven[i] : dodd[i] for i in 1:length(a))
+            resize = map(x->[[prod(x[div[i] + 1 : div[i + 1]]) for i in 1:(length(div)-1)]...], size.(A.tensor[ind]))
+            tensor[i] = reshape(vcat(map((x,a) -> reshape(x,a...), A.tensor[ind], resize)...), dims)
+        end
+        Z2tensor(ureparity, tensor, a, 1)
+    else
+        reparity = getparity(length(a))
+        tensor = Vector{atype{T}}(undef, length(reparity))
+        div = division(N, a)
+        parity = map(x->[[sum(x[div[i] + 1 : div[i + 1]]) for i in 1:(length(div)-1)]...] .% 2, reparity)
+        uparity = A.parity
+        deven, dodd = bulkdims(a...)
+        for i in 1:length(uparity)
+            p = uparity[i]
+            ind = findall(x->x in [p], parity)
+            dims = map(p -> Tuple(p[i] == 0 ? deven[i] : dodd[i] for i in 1:length(a)), reparity[ind])
+            resize = map(x->[[prod(x[div[i] + 1 : div[i + 1]]) for i in 1:(length(div)-1)]...], dims)
+            resize1 = Int[0, [resize[i][1] for i in 1:length(resize)]...]
+            for j in 1:length(ind)
+                re = (sum(resize1), resize[1][2:length(N)]...)
+                ylen = [sum(resize1[1:j])+1:sum(resize1[1:j+1]), [(:) for _ in 1:length(N)-1]...]
+                tensor[ind[j]] = reshape(reshape(A.tensor[i],re)[ylen...], dims[j])
+            end
+        end
+        Z2tensor(reparity, tensor, a, 1)
+    end
 end
