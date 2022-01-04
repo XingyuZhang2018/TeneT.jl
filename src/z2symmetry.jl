@@ -291,29 +291,28 @@ function bulktimes!(parity, tensor, A, B, p)
     end
 end
 
-function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
-    atype = _arraytype(A.tensor[1])
-    Tensor = atype(zeros(T, N))
-    bits = map(x -> Int(ceil(log2(x))), N)
-    @inbounds for i in CartesianIndices(Tensor)         
-        sum(sum.(bitarray.(i.I .- 1, bits))) % 2 == 0 && (CUDA.@allowscalar Tensor[i] = A[i])
-    end
-    Tensor
-end
-
 function Z2bitselection(maxN::Int)
-    q = [sum(bitarray(i-1,ceil(Int,log(2,maxN))))%2 for i=1:maxN]
+    q = [sum(bitarray(i-1,ceil(Int,log2(maxN)))) % 2 for i = 1:maxN]
     return [(q .== 0),(q .== 1)]
 end
 
-# have Bugs with CuArray, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
-function tensor2Z2tensor(tensor::AbstractArray{T,N}) where {T,N}
-    A = zerosZ2(_arraytype(tensor), eltype(tensor), size(tensor)...)
-    qlist = [Z2bitselection(size(tensor)[i]) for i =1:N]
-    for i in CartesianIndices(A.parity)
-        A.tensor[i] = tensor[[qlist[j][A.parity[i][j]+1] for j =1:N]...]
+function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
+    atype = _arraytype(A.tensor[1])
+    tensor = atype(zeros(T, N))
+    parity = A.parity
+    qlist = [Z2bitselection(size(A)[i]) for i = 1:length(N)]
+    for i in 1:length(parity)
+        CUDA.@allowscalar tensor[[qlist[j][parity[i][j]+1] for j = 1:length(N)]...] = A.tensor[i]
     end
-    return A
+    tensor
+end
+
+# have Bugs with CuArray, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
+function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
+    qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
+    parity = getparity(N)
+    tensor = [A[[qlist[j][parity[i][j]+1] for j = 1:N]...] for i in 1:length(parity)]
+    Z2tensor(parity, tensor, size(A), 1)
 end
 
 # for OMEinsum contract to get number
