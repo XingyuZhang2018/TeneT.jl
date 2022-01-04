@@ -1,9 +1,9 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, _to_subscript_indices
 using BitBasis
 using CUDA
 import CUDA: CuArray
 import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
-import OMEinsum: _compactify!, subindex
+import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat
 import Zygote: accum
 export AbstractZ2Array, Z2tensor
 
@@ -122,7 +122,11 @@ function getindex(A::AbstractZ2Array{T,N}, index) where {T,N}
     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
 end
 
-function setindex!(A::AbstractZ2Array{T,N}, x, index) where {T,N}
+# # for index []
+# getindex(A::AbstractZ2Array{T,()}) where {T} = A.tensor[1]
+# _to_subscript_indices(::AbstractZ2Array{T,()}) where {T} = ()
+
+function setindex!(A::AbstractZ2Array{T,N}, x::Number, index) where {T,N}
     typeof(index) <: CartesianIndex && (index = index.I)
     bits = map(x -> Int(ceil(log2(x))), N)
     parity = collect(sum.(bitarray.(index .- 1, bits))) .% 2
@@ -207,13 +211,13 @@ function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
         end
         return Z2tensor(A.parity, tensor, N, div)
     else
-        deven, dodd = bulkdims(a...)
+        deven, dodd = bulkdims(N...)
         parity = A.parity
         @inbounds for i in 1:length(tensor)
-            dims = Tuple(parity[i][j] == 0 ? deven[j] : dodd[j] for j in 1:length(a))
+            dims = Tuple(parity[i][j] == 0 ? deven[j] : dodd[j] for j in 1:length(N))
             tensor[i] = reshape(tensor[i], dims)
         end
-        return Z2tensor(parity, tensor, a, div)
+        return Z2tensor(parity, tensor, N, div)
     end
 end
 
@@ -280,7 +284,6 @@ function bulktimes!(parity, tensor, A, B, p)
 
     atype = _arraytype(Btensor[1])
     C = atype(Amatrix) * atype(Bmatrix)
-    @show Amatrix Bmatrix C
     for i in 1:length(matrix_i), j in 1:length(matrix_k)
         push!(parity, [matrix_i[i]; matrix_k[j]])
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
@@ -298,15 +301,18 @@ function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     Tensor
 end
 
-function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
-    atype = _arraytype(A)
-    dtype = eltype(A)
-    Z2tensor = zerosZ2(atype, dtype, size(A)...)
-    bits = map(x -> Int(ceil(log2(x))), size(A))
-    @inbounds for i in CartesianIndices(Z2tensor)         
-        sum(sum.(bitarray.(i.I .- 1, bits))) % 2 == 0 && (CUDA.@allowscalar Z2tensor[i] = A[i])
+function Z2bitselection(maxN::Int)
+    q = [sum(bitarray(i-1,ceil(Int,log(2,maxN))))%2 for i=1:maxN]
+    return [(q .== 0),(q .== 1)]
+end
+
+function tensor2Z2tensor(tensor::AbstractArray{T,N}) where {T,N}
+    A = zerosZ2(_arraytype(tensor), T, size(tensor)...)
+    qlist = [Z2bitselection(size(tensor)[i]) for i =1:N]
+    for i in CartesianIndices(A.parity)
+        A.tensor[i] = tensor[[qlist[j][A.parity[i][j]+1] for j =1:N]...]
     end
-    Z2tensor
+    return A
 end
 
 # for OMEinsum contract to get number
@@ -326,13 +332,46 @@ function tr(A::AbstractZ2Array{T,N}) where {T,N}
     s
 end
 
+# function einsum(::Tr, ixs, iy, xs::Tuple{<:AbstractZ2Array}, size_dict::Dict)
+#     x = xs[1]
+#     asZ2array(tr(x))
+# end
+
+# """
+#     asZ2array(a::Number) where {T,N}
+
+# fill `a` as a Z2Array
+# """
+# asZ2array(a::Number) = Z2tensor([Int[]], [[a]], (), 0)
+
+# for [] backward
+# function einsum(::Repeat, ixs, iy, xs::Tuple{<:AbstractZ2Array}, size_dict::Dict)
+#     ix, x = ixs[1], xs[1]
+#     @show ix, x
+#     @debug "Repeat" ix => iy size(x)
+#     ix1f = filter(i -> i ∈ ix, iy)
+#     res = if ix1f != ix
+#         einsum(Permutedims(), (ix,), ix1f, (x,), size_dict)
+#     else
+#         x
+#     end
+#     newshape = [l ∈ ix ? size_dict[l] : 1 for l in iy]
+#     repeat_dims = [l ∈ ix ? 1 : size_dict[l] for l in iy]
+#     repeat(reshape(res, newshape...), repeat_dims...)
+# end
+
 function _compactify!(y, x::AbstractZ2Array, indexer)
-    x = Array(Z2tensor2tensor(x))
+    x = Z2tensor2tensor(Array(x))
     @inbounds for ci in CartesianIndices(y)
         y[ci] = x[subindex(indexer, ci.I)]
     end
     return y
 end
+
+# only for ein"abab -> " case
+# function _compactify!(y, x::AbstractZ2Array, indexer)
+#     vcat(hcat(x.tensor[1],x.tensor[6]), hcat(x.tensor[3],x.tensor[8]))
+# end
 
 vec(A::AbstractZ2Array) = A
 
@@ -481,6 +520,7 @@ end
 
 reshape the Z2tensor to the new shape, but only for a <: 2^N
 """
+Z2reshape(A::AbstractZ2Array, a::Tuple{Vararg{Int}}) = Z2reshape(A, a...)
 function Z2reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
     atype = _arraytype(A.tensor[1])
     if length(a) < length(N)
@@ -520,3 +560,15 @@ function Z2reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
         Z2tensor(reparity, tensor, a, 1)
     end
 end
+
+# for ein"abab ->"(A)[]
+function dtr(A::AbstractZ2Array{T,N}) where {T,N}
+    parity = A.parity
+    tensor = A.tensor
+    s = 0.0
+    @inbounds for i in 1:length(parity)
+        parity[i][1] == parity[i][3] && parity[i][2] == parity[i][4] && (s += Array(ein"abab ->"(tensor[i]))[])
+    end
+    s
+end
+

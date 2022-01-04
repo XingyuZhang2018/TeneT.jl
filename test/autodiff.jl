@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, Z2tensor2tensor,AbstractZ2Array
+using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, Z2tensor2tensor,tensor2Z2tensor,AbstractZ2Array,dtr
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -11,21 +11,29 @@ CUDA.allowscalar(false)
 
 @testset "Z2 ad basic with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     # reshape
-    A = randinitial(Val(:Z2), atype, dtype, 3, 2, 3)
+    A = randinitial(Val(:Z2), atype, dtype, 3,2,3)
     Atensor = Z2tensor2tensor(A)
-    foo1(x) = norm(reshape(A*x, 6, 3))
-    foo2(x) = norm(reshape(Atensor*x, 6, 3))
+    foo1(x) = norm(reshape(A*x, 6,3))
+    foo2(x) = norm(reshape(Atensor*x, 6,3))
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 
-    A = randinitial(Val(:Z2), atype, dtype, 6, 3)
+    # wrong shape: actually don't change shape
+    A = randinitial(Val(:Z2), atype, dtype, 6,3)
     Atensor = Z2tensor2tensor(A)
-    foo3(x) = norm(reshape(A*x, 3, 2, 3))
-    foo4(x) = norm(reshape(Atensor*x, 3, 2, 3))
+    foo3(x) = norm(reshape(A*x, 3,2,3))
+    foo4(x) = norm(reshape(Atensor*x, 3,2,3))
     @test Zygote.gradient(foo3, 1)[1] ≈ num_grad(foo3, 1) ≈ Zygote.gradient(foo4, 1)[1] ≈ num_grad(foo4, 1)
 
+    A = randinitial(Val(:Z2), atype, dtype, 10,2,2,10)
+    B = randinitial(Val(:Z2), atype, dtype, 10,4,10)
+    foo9(x) = norm(Z2reshape(x, 10,4,10))
+    foo10(x) = norm(Z2reshape(x, 10,2,2,10))
+    @test Zygote.gradient(foo9, A)[1] ≈ num_grad(foo9, A)
+    @test Zygote.gradient(foo10, B)[1] ≈ num_grad(foo10, B)
+
     # * 
-    A = randinitial(Val(:Z2), atype, dtype, 3, 6)
-    B = randinitial(Val(:Z2), atype, dtype, 6, 3)
+    A = randinitial(Val(:Z2), atype, dtype, 3,6)
+    B = randinitial(Val(:Z2), atype, dtype, 6,3)
     Atensor = Z2tensor2tensor(A)
     Btensor = Z2tensor2tensor(B)
     foo5(A) = norm(A*B)
@@ -33,7 +41,7 @@ CUDA.allowscalar(false)
     @test Z2tensor2tensor(Zygote.gradient(foo5, A)[1]) ≈ Z2tensor2tensor(num_grad(foo5, A)) ≈ Zygote.gradient(foo6, Atensor)[1] ≈ num_grad(foo6, Atensor)
 
     # '
-    A = randinitial(Val(:Z2), atype, dtype, 6, 3)
+    A = randinitial(Val(:Z2), atype, dtype, 6,3)
     Atensor = Z2tensor2tensor(A)
     foo7(A) = norm(A')
     foo8(Atensor) = norm(Atensor')
@@ -59,6 +67,26 @@ end
         return norm(sum(B))
     end
     @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
+end
+
+@testset "Z2 last tr" begin
+    B = randZ2(Array, ComplexF64, 4,4)
+	Btensor = Z2tensor2tensor(B)
+    foo1(x) = norm(tr(x))
+    @test Z2tensor2tensor(Zygote.gradient(foo1, B)[1]) ≈ Z2tensor2tensor(num_grad(foo1, B)) ≈ Zygote.gradient(foo1, Btensor)[1] ≈ num_grad(foo1, Btensor)
+
+    B = randZ2(Array, ComplexF64, 2,2,2,2)
+    Btensor = Z2tensor2tensor(B)
+    foo2(x) = norm(ein"abcd,abcd -> "(x,x)[])
+    @test Z2tensor2tensor(Zygote.gradient(foo2, B)[1]) ≈ Z2tensor2tensor(num_grad(foo2, B)) ≈ Zygote.gradient(foo2, Btensor)[1] ≈ num_grad(foo2, Btensor)
+
+    B = randZ2(Array, ComplexF64, 4,4,4,4)
+    Btensor = Z2tensor2tensor(B)
+    foo3(x) = norm(ein"abab -> "(x)[])
+    foo4(x) = norm(dtr(x))
+    @test foo3(B) ≈ foo4(B)
+    @test Zygote.gradient(foo3, B)[1] ≈ Z2tensor2tensor(num_grad(foo3, B)) ≈ Zygote.gradient(foo3, Btensor)[1] ≈ num_grad(foo3, Btensor)
+    @test Zygote.gradient(foo4, B)[1] ≈ num_grad(foo3, B) ≈ num_grad(foo4, B)
 end
 
 @testset "QR factorization with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]

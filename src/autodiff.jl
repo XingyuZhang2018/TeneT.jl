@@ -70,8 +70,10 @@ function num_grad(f, a::AbstractZ2Array{T, N}; δ::Real=1e-5) where {T,N}
     b = Array(copy(a))
     intype = _arraytype(a.tensor[1])
     df = copy(a)
+    bits = map(x -> Int(ceil(log2(x))), N)
     for i in CartesianIndices(b)
-        if sum(i.I .- 1) % 2 == 0
+        parity = collect(sum.(bitarray.(i.I .- 1, bits))) .% 2
+        if sum(parity) % 2 == 0
             foo = x -> (ac = copy(b); ac[i] = x; f(intype(ac)))
             df[i] = num_grad(foo, b[i], δ=δ)
         end
@@ -616,10 +618,28 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
     return (λR, FR), back
 end
 
-function ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray})
-	result = parity_conserving(T)
-	function back(ΔT)
-		return NoTangent(), parity_conserving(ΔT)
-	end
-	return result, back
+ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(ΔT))
+
+ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array{T,N}, a::Int...) where {T,N} = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, N), a...)
+
+function ChainRulesCore.rrule(::typeof(tr), A::AbstractZ2Array{T,N}) where {T,N}
+    function back(dtrA)
+        dA = zerosinitial(A, size(A)...)
+        for i = 1:N[1]
+            dA[(i,i)] = dtrA
+        end
+        return NoTangent(), dA
+    end
+    tr(A), back
+end
+
+function ChainRulesCore.rrule(::typeof(dtr), A::AbstractZ2Array{T,N}) where {T,N}
+    function back(dtrA)
+        dA = zerosinitial(A, size(A)...)
+        for i = 1:N[1], j = 1:N[2]
+            dA[(i,j,i,j)] = dtrA
+        end
+        return NoTangent(), dA
+    end
+    dtr(A), back
 end
