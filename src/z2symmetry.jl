@@ -306,8 +306,9 @@ function Z2bitselection(maxN::Int)
     return [(q .== 0),(q .== 1)]
 end
 
+# have Bugs with CuArray, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 function tensor2Z2tensor(tensor::AbstractArray{T,N}) where {T,N}
-    A = zerosZ2(_arraytype(tensor), T, size(tensor)...)
+    A = zerosZ2(_arraytype(tensor), eltype(tensor), size(tensor)...)
     qlist = [Z2bitselection(size(tensor)[i]) for i =1:N]
     for i in CartesianIndices(A.parity)
         A.tensor[i] = tensor[[qlist[j][A.parity[i][j]+1] for j =1:N]...]
@@ -571,4 +572,3 @@ function dtr(A::AbstractZ2Array{T,N}) where {T,N}
     end
     s
 end
-
