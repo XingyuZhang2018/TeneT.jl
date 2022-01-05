@@ -24,7 +24,7 @@ ChainRulesCore = "1.11.2"
 IterTools = "1.4.0"
 JLD2 = "0.4.15"
 KrylovKit = "0.5.3"
-OMEinsum = "0.6.5"
+OMEinsum = "0.6.8"
 Zygote = "0.6.32"
 julia = "1.6"
 

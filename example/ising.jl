@@ -4,6 +4,7 @@ include("./exampleobs.jl")
 using Random
 using Test
 using VUMPS: tensor2Z2tensor, parity_conserving
+using CUDA
 using Zygote
 
 @testset "$(Ni)x$(Nj) ising forward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [Array], symmetry in [:none, :Z2]

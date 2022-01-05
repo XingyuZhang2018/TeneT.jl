@@ -3,7 +3,7 @@ using BitBasis
 using CUDA
 import CUDA: CuArray
 import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
-import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat
+import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export AbstractZ2Array, Z2tensor
 
@@ -187,8 +187,10 @@ function IZ2(atype, dtype, D)
     Z2tensor(parity, tensor, (D, D), 1)
 end
 
-# only for OMEinsum permutedims before reshape
-function permutedims(A::AbstractZ2Array{T,N}, perm) where {T,N}
+# only for OMEinsum binary permutedims before reshape
+permutedims(A::AbstractZ2Array, perm) = tensorpermute(A, perm)
+function tensorpermute(A::AbstractZ2Array{T,N}, perm) where {T,N}
+    length(perm) == 0 && return copy(A)
     parity = map(x->x[collect(perm)], A.parity)
     exchangeind = indexin(A.parity, parity)
     tensor = map(x->permutedims(x, perm), A.tensor)
