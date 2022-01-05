@@ -298,13 +298,13 @@ end
 
 function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     atype = _arraytype(A.tensor[1])
-    tensor = atype(zeros(T, N))
+    tensor = zeros(T, N)
     parity = A.parity
     qlist = [Z2bitselection(size(A)[i]) for i = 1:length(N)]
     for i in 1:length(parity)
-        CUDA.@allowscalar tensor[[qlist[j][parity[i][j]+1] for j = 1:length(N)]...] = A.tensor[i]
+        tensor[[qlist[j][parity[i][j]+1] for j = 1:length(N)]...] = Array(A.tensor[i])
     end
-    tensor
+    atype(tensor)
 end
 
 # have Bugs with CuArray, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
