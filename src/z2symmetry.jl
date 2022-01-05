@@ -137,7 +137,7 @@ end
 """
     deven, dodd = bulkdims(N::Int...)
 
-find dims of bulk
+find dims of Z2 tensor bulk
 """
 function bulkdims(N::Int...)
     bits = map(x -> Int(ceil(log2(x))), N)
@@ -309,9 +309,11 @@ end
 
 # have Bugs with CuArray, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
+    atype = _arraytype(A)
+    Aarray = Array(A)
     qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
     parity = getparity(N)
-    tensor = [A[[qlist[j][parity[i][j]+1] for j = 1:N]...] for i in 1:length(parity)]
+    tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
     Z2tensor(parity, tensor, size(A), 1)
 end
 

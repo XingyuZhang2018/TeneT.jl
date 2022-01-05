@@ -226,8 +226,8 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     _, FR = obs_FR(ARu, ARd, M, FR)
     Zygote.@ignore savefile && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
-        FL, FR = map(x->Array.(x), [FL, FR])
-        save(out_chkp_file_obs, "env", (FL, FR))
+        FLs, FRs = map(x->Array.(x), [FL, FR])
+        save(out_chkp_file_obs, "env", (FLs, FRs))
     end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
 end
