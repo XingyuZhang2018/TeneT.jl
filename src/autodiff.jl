@@ -620,7 +620,7 @@ end
 
 ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(ΔT))
 
-ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array{T,N}, a::Int...) where {T,N} = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, N), a...)
+ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array, a::Int...) = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), a...)
 
 function ChainRulesCore.rrule(::typeof(tr), A::AbstractZ2Array{T,N}) where {T,N}
     function back(dtrA)

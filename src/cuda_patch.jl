@@ -4,8 +4,7 @@ using OMEinsum
 using Zygote: @adjoint
 CUDA.allowscalar(false)
 
-import Base: getindex, _to_subscript_indices, zero
-import CUDA: CuArray
+import Base: getindex
 
 const CublasFloat = Union{Float64,Float32,ComplexF64,ComplexF32}
 const CublasReal = Union{Float64,Float32}

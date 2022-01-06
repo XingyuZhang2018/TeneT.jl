@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos,sysvd!
+using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos,sysvd!,_arraytype
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -19,6 +19,20 @@ CUDA.allowscalar(false)
 		(((i + j + k) - 3) % 2 != 0) && (s += T[i,j,k])
 	end
 	@test s == 0
+end
+
+@testset "general flatten reshape" begin
+    # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
+    a = randinitial(Val(:Z2), CuArray, Float64, 3, 3, 3, 3, 3, 3, 3, 3)
+    rea = Z2reshape(a, 9, 9, 9, 9)
+    rerea = Z2reshape(rea, 3, 3, 3, 3, 3, 3, 3, 3)
+    @test rerea ≈ a
+
+    # (χ,D,D,χ) -> (χ,D^2,χ)
+    a = randinitial(Val(:Z2), CuArray, Float64, 5, 3, 3, 5)
+    rea = Z2reshape(a, 5, 9, 5)
+    rerea = Z2reshape(rea, 5, 3, 3, 5)
+    @test rerea ≈ a
 end
 
 @testset "parity_conserving and tensor2Z2tensor tensor2Z2tensor compatibility" begin

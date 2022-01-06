@@ -4,8 +4,8 @@ _mattype(::CuArray{T}) where {T} = CuMatrix
 _mattype(::Adjoint{T, CuArray{T, 2 ,B}}) where {T,B} = CuMatrix
 _mattype(::Symmetric{T, CuArray{T, 2, B}}) where {T,B} = CuMatrix
 
-_arraytype(::Array{T}) where {T} = Array
-_arraytype(::CuArray{T}) where {T} = CuArray
+_arraytype(::Array) = Array
+_arraytype(::CuArray) = CuArray
 _arraytype(::Diagonal{T, Vector{T}}) where {T} = Array
 _arraytype(::Diagonal{T, CuArray{T, 1, B}}) where {T, B} = CuArray
 _arraytype(::Z2tensor{T}) where {T} = Z2tensor
