@@ -1,4 +1,4 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, _to_subscript_indices
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims
 using BitBasis
 using CUDA
 import CUDA: CuArray
@@ -108,7 +108,7 @@ function ≈(A::AbstractZ2Array, B::AbstractZ2Array)
     length(exchangeind) == length(A.parity) && A.tensor ≈ B.tensor[exchangeind]
 end
 
-function show(io::IOBuffer, A::Z2tensor)
+function show(::IOBuffer, A::Z2tensor)
     println("parity: \n", A.parity)
     println("tensor: \n", A.tensor)
 end

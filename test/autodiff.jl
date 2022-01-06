@@ -112,22 +112,20 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "loop_einsum mistake with  $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [Float64], symmetry in [:Z2]
+@testset "loop_einsum mistake with  $(symmetry) $atype{$dtype}" for atype in [CuArray], dtype in [Float64], symmetry in [:none, :Z2]
     Random.seed!(100)
     D = 2
     A = randinitial(Val(symmetry), atype, dtype, D, D, D)
-    B = randinitial(Val(symmetry), atype, dtype, D, D)
+    B = randinitial(Val(symmetry), atype, dtype, D, D, D, D)
 
     function foo(x)
         C = A * x
         D = B * x
-        E = ein"abc,abc -> "(C,C)[]
-        F = ein"ab,ab -> "(D,D)[]
+        E = ein"abc, abc->"(C, C)[]
+        F = dtr(D)
         return E/F
-        # E = ein"abc,abc -> "(C,C)[]
-        # F = ein"ab,ab -> "(D,D)[]
-        # return norm(E/F) mistake for GPU
-    end 
+    end
+
     @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 

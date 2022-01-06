@@ -643,3 +643,16 @@ function ChainRulesCore.rrule(::typeof(dtr), A::AbstractZ2Array{T,N}) where {T,N
     end
     dtr(A), back
 end
+
+function ChainRulesCore.rrule(::typeof(dtr), A::AbstractArray{T,N}) where {T,N}
+    function back(dtrA)
+        atype = _arraytype(A)
+        s = size(A)
+        dA = zeros(T, s...)
+        for i = 1:s[1], j = 1:s[2]
+            dA[i,j,i,j] = dtrA
+        end
+        return NoTangent(), atype(dA)
+    end
+    dtr(A), back
+end

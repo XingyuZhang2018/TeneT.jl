@@ -6,8 +6,6 @@ using CUDA.CUSPARSE
 using SparseArrays
 using Test
 using OMEinsum
-using SymEngine
-using ProfileView
 using Random
 CUDA.allowscalar(false)
 
