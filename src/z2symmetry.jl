@@ -1,4 +1,4 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, _to_subscript_indices
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose,conj! ,conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, _to_subscript_indices
 using BitBasis
 using CUDA
 import CUDA: CuArray
@@ -9,9 +9,16 @@ export AbstractZ2Array, Z2tensor
 
 """
     parity_conserving(T::Array)
-
 Transform an arbitray tensor which has arbitray legs and each leg have index 1 or 2 into parity conserving form
+----
+The following is faster but rely on updates of CUDA.jl(available in master branch)
 
+function parity_conserving!(T::Union{Array,CuArray})
+	bits = map(x -> Int(ceil(log2(x))), size(T))
+    T[map(x->sum(sum.(bitarray.((Tuple(x).-1) ,bits))) % 2 !== 0 ,CartesianIndices(T))].=0
+    return T
+end
+parity_conserving(T) = parity_conserving!(copy(T))
 """
 function parity_conserving(T::Union{Array,CuArray})
 	s = size(T)
@@ -31,17 +38,25 @@ struct Z2tensor{T, N} <: AbstractZ2Array{T,N}
     parity::Vector{Vector{Int}}
     tensor::Vector{AbstractArray{T}}
     division::Int
-    function Z2tensor(parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where T
-        new{T, N}(parity, tensor, division)
-    end
+end
+
+function Z2tensor(parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where T
+    Z2tensor{T, N}(parity, tensor, division)
 end
 
 ndims(::AbstractZ2Array{T,N}) where {T,N} = length(N)
 size(::AbstractZ2Array{T,N}) where {T,N} = N
 size(::AbstractZ2Array{T,N}, a) where {T,N} = N[a]
-conj(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(conj, A.tensor), N, A.division)
-map(conj, A::AbstractZ2Array) = conj(A)
+
+function conj!(A::AbstractZ2Array{T,N}) where {T,N}
+    conj!(A.tensor)
+    return A
+end
+conj(A::AbstractZ2Array{T,N}) where {T,N} = conj!(copy(A))
+conj!(v::Vector{AbstractArray{ComplexF64, N} where N}) = conj!.(v)
+
 norm(A::AbstractZ2Array{T,N}) where {T,N} = norm(A.tensor)
+
 
 *(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor * B, N, A.division)
 *(B::Number, A::AbstractZ2Array{T,N}) where {T,N} = A * B
@@ -54,15 +69,31 @@ broadcasted(/, A::AbstractZ2Array, B::Number) = A / B
 accum(A::AbstractZ2Array, B::AbstractZ2Array...) = +(A, B...)
 
 # for KrylovKit compatibility
-rmul!(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, rmul!.(A.tensor, B), N, A.division)
-lmul!(A::AbstractZ2Array, B::AbstractZ2Array) = A * B
+function rmul!(A::AbstractZ2Array{T,N}, B::Number) where {T,N}
+    rmul!.(A.tensor, B)
+    return A
+end
+
+"""
+    Not a genral mul!
+"""
+function lmul!(A::AbstractZ2Array, B::AbstractZ2Array)
+    C = A*B
+    for i = 1:length(C.parity)
+        setindex!(A.tensor,C.tensor[i],i)
+    end
+    return A
+end
+
 similar(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
 similar(A::AbstractZ2Array{T,N}, atype) where {T,N} = Z2tensor(A.parity, similar(A.tensor), N, A.division)
 diag(A::AbstractZ2Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
 copy(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(copy, A.tensor), N, A.division)
 function mul!(Y::AbstractZ2Array{T,N}, A::AbstractZ2Array{T,N}, B::Number) where {T,N}
-    Y = A*B
-    Z2tensor(Y.parity, Y.tensor, N, Y.division)
+    for i in 1:length(Y.parity)
+        Y.tensor[i] = A.tensor[i] * B
+    end
+    return Y
 end
 
 function axpy!(α::Number, A::AbstractZ2Array, B::AbstractZ2Array{T,N}) where {T,N}
