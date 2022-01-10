@@ -7,6 +7,7 @@ using OMEinsum
 using SparseArrays
 using Random
 using Test
+using BenchmarkTools
 CUDA.allowscalar(false)
 
 @testset "parity_conserving" for atype in [Array], dtype in [ComplexF64]
@@ -21,27 +22,28 @@ CUDA.allowscalar(false)
 	@test s == 0
 end
 
-@testset "general flatten reshape" begin
-    # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-    a = randinitial(Val(:Z2), CuArray, Float64, 3, 3, 3, 3, 3, 3, 3, 3)
-    rea = Z2reshape(a, 9, 9, 9, 9)
-    rerea = Z2reshape(rea, 3, 3, 3, 3, 3, 3, 3, 3)
-    @test rerea ≈ a
-
-    # (χ,D,D,χ) -> (χ,D^2,χ)
-    a = randinitial(Val(:Z2), CuArray, Float64, 5, 3, 3, 5)
-    rea = Z2reshape(a, 5, 9, 5)
-    rerea = Z2reshape(rea, 5, 3, 3, 5)
-    @test rerea ≈ a
-end
-
 @testset "parity_conserving and tensor2Z2tensor tensor2Z2tensor compatibility" begin
-    a = randinitial(Val(:none), Array, Float64, 3, 2)
+    a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
     a = parity_conserving(a)
     b = tensor2Z2tensor(a)
     c = Z2tensor2tensor(b)
     d = tensor2Z2tensor(c)
     @test a == c && b == d
+end
+
+@testset "Z2 Tensor with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+	Random.seed!(100)
+	@test Z2tensor <: AbstractZ2Array <: AbstractArray
+
+	A = randZ2(atype, dtype, 3,3,4)
+	Atensor = Z2tensor2tensor(A)
+	@test A isa Z2tensor
+
+	# permutedims
+	@test permutedims(Atensor,[3,2,1]) == Z2tensor2tensor(permutedims(A,[3,2,1]))
+
+	## reshape
+	@test reshape(Atensor,(9,4)) == reshape(Z2tensor2tensor(reshape(reshape(A,9,4),3,3,4)),(9,4))
 end
 
 @testset "reshape compatibility" begin
@@ -81,25 +83,24 @@ end
     @test cZ2t == cZ2
 end
 
-@testset "Z2 Tensor with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
-	Random.seed!(100)
-	@test Z2tensor <: AbstractZ2Array <: AbstractArray
+@testset "general flatten reshape" begin
+    # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
+    a = randinitial(Val(:Z2), CuArray, Float64, 3, 3, 3, 3, 3, 3, 3, 3)
+    rea = Z2reshape(a, 9, 9, 9, 9)
+    rerea = Z2reshape(rea, 3, 3, 3, 3, 3, 3, 3, 3)
+    @test rerea ≈ a
 
-	A = randZ2(atype, dtype, 3,3,4)
-	Atensor = Z2tensor2tensor(A)
-	@test A isa Z2tensor
-
-	# permutedims
-	@test permutedims(Atensor,[3,2,1]) == Z2tensor2tensor(permutedims(A,[3,2,1]))
-
-	## reshape
-	@test reshape(Atensor,(9,4)) == reshape(Z2tensor2tensor(reshape(reshape(A,9,4),3,3,4)),(9,4))
+    # (χ,D,D,χ) -> (χ,D^2,χ)
+    a = randinitial(Val(:Z2), CuArray, Float64, 5, 3, 3, 5)
+    rea = Z2reshape(a, 5, 9, 5)
+    rerea = Z2reshape(rea, 5, 3, 3, 5)
+    @test rerea ≈ a
 end
 
 @testset "OMEinsum Z2 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)
-	A = randZ2(atype, dtype, 3,3,4);
-	B = randZ2(atype, dtype, 4,3);
+	A = randZ2(atype, dtype, 3,3,4)
+	B = randZ2(atype, dtype, 4,3)
 	Atensor = Z2tensor2tensor(A)
 	Btensor = Z2tensor2tensor(B)
 	## binary contraction
@@ -127,9 +128,9 @@ end
 	@test Array(ein"abab -> "(Btensor))[] ≈ tr(reshape(B,4,4))
 	@test Array(ein"aabb -> "(Btensor))[] ≈ Array(ein"aabb-> "(B))[]
 
-	# VUMPS unit
+	## VUMPS unit
 	d = 2
-    D = 10
+    D = 5
     AL = randZ2(atype, dtype, D, d, D)
     M = randZ2(atype, dtype, d, d, d, d)
     FL = randZ2(atype, dtype, D, d, D)
@@ -138,7 +139,7 @@ end
 	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     @test tFL ≈ Z2tensor2tensor(FL) 
 
-	# autodiff test
+	## autodiff test
 	D,d = 3,2
 	FL = randZ2(atype, dtype, D, d, D)
 	S = randZ2(atype, dtype, D, d, D, D, d, D)
