@@ -66,11 +66,11 @@ function num_grad(f, a::AbstractArray; δ::Real=1e-5)
     return _arraytype(a)(df)
 end
 
-function num_grad(f, a::AbstractZ2Array{T, N}; δ::Real=1e-5) where {T,N}
+function num_grad(f, a::AbstractZ2Array; δ::Real=1e-5)
     b = Array(copy(a))
     intype = _arraytype(a.tensor[1])
     df = copy(a)
-    bits = map(x -> Int(ceil(log2(x))), N)
+    bits = map(x -> ceil(Int, log2(x)), size(a))
     for i in CartesianIndices(b)
         parity = collect(sum.(bitarray.(i.I .- 1, bits))) .% 2
         if sum(parity) % 2 == 0
@@ -139,19 +139,19 @@ end
 #     return reshape(A, a...), back
 # end
     
-@adjoint function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N} 
+@adjoint function reshape(A::AbstractZ2Array, a::Int...)
     function back(dAr)
         exchangeind = indexin(A.parity, dAr.parity)
-        s = size.(A.tensor)
-        dAtensor = reshape.(dAr.tensor[exchangeind], s)
-        return Z2tensor(A.parity, dAtensor, N, A.division), a...
+        s = map(size, A.tensor) 
+        dAtensor = map((x, y) -> reshape(x, y), dAr.tensor[exchangeind], s)
+        return Z2tensor(A.parity, dAtensor, A.size, A.dims, A.division), a...
     end
     return reshape(A, a...), back
 end
 
 @adjoint *(A::AbstractZ2Array, B::AbstractZ2Array) = A * B, dC -> (dC * B', A' * dC)
 
-@adjoint adjoint(A::AbstractZ2Array{T,N}) where {T,N} = adjoint(A), djA -> (adjoint(djA), )
+@adjoint adjoint(A::AbstractZ2Array) = adjoint(A), djA -> (adjoint(djA), )
 
 function ChainRulesCore.rrule(::typeof(Z2tensor2tensor), A::AbstractZ2Array)
     function back(dAt)
@@ -187,12 +187,12 @@ function bulkbackQR!(A, dA, Q, R, dQ, dR, p)
     m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
     m_i = unique(map(x->x[1:div], dQ.parity[ind_A]))
 
-    ind = [findfirst(x->x in [[i; m_j[1]]], dQ.parity) for i in m_i]
+    ind = [findfirst(x->x in [(i..., m_j[1]...)], dQ.parity) for i in m_i]
     dQm = vcat(dQ.tensor[ind]...)
     Qm = vcat(Q.tensor[ind]...)
     bulkidims = [size(dQ.tensor[i],1) for i in ind]
     bulkjdims = [size(dQm, 2)]
-    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], R.parity)
+    ind = findfirst(x->x in [(m_j[1]..., m_j[1]...)], R.parity)
     dRm = dR == ZeroTangent() ? ZeroTangent() : dR.tensor[ind]
     Rm = R.tensor[ind]
     
@@ -200,7 +200,7 @@ function bulkbackQR!(A, dA, Q, R, dQ, dR, p)
     dAm = (UpperTriangular(Rm + I * 1e-12) \ (dQm + Qm * _arraytype(Qm)(Hermitian(M, :L)))' )'
 
     for i in 1:length(m_i), j in 1:length(m_j)
-        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
+        ind = findfirst(x->x in [(m_i[i]..., m_j[j]...)], A.parity)
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end
@@ -233,12 +233,12 @@ function bulkbackLQ!(A, dA, L, Q, dL, dQ, p)
     m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
     m_i = unique(map(x->x[1:div], dQ.parity[ind_A]))
 
-    ind = [findfirst(x->x in [[m_i[1]; j]], dQ.parity) for j in m_j]
+    ind = [findfirst(x->x in [(m_i[1]..., j...)], dQ.parity) for j in m_j]
     dQm = hcat(dQ.tensor[ind]...)
     Qm = hcat(Q.tensor[ind]...)
     bulkidims = [size(dQm, 1)]
     bulkjdims = [size(dQ.tensor[i],2) for i in ind]
-    ind = findfirst(x->x in [[m_i[1]; m_i[1]]], L.parity)
+    ind = findfirst(x->x in [(m_i[1]..., m_i[1]...)], L.parity)
     dLm = dL == ZeroTangent() ? ZeroTangent() : dL.tensor[ind]
     Lm = L.tensor[ind]
     
@@ -246,7 +246,7 @@ function bulkbackLQ!(A, dA, L, Q, dL, dQ, p)
     dAm = LowerTriangular(Lm + I * 1e-12)' \ (dQm + _arraytype(Qm)(Hermitian(M, :L)) * Qm)
 
     for i in 1:length(m_i), j in 1:length(m_j)
-        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
+        ind = findfirst(x->x in [(m_i[i]..., m_j[j]...)], A.parity)
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end
@@ -618,17 +618,28 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
     return (λR, FR), back
 end
 
-ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(ΔT))
+ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(dT))
 
 ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array, a::Int...) = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), a...)
 
-function ChainRulesCore.rrule(::typeof(tr), A::AbstractZ2Array{T,N}) where {T,N}
+# function ChainRulesCore.rrule(::typeof(tr), A::AbstractZ2Array{T,N}) where {T,N}
+#     function back(dtrA)
+#         dA = zerosinitial(A, size(A)...)
+#         for i = 1:size(A,1)
+#             dA[(i,i)] = dtrA
+#         end
+#         return NoTangent(), dA
+#     end
+#     tr(A), back
+# end
+
+@adjoint function tr(A::AbstractZ2Array)
     function back(dtrA)
         dA = zerosinitial(A, size(A)...)
-        for i = 1:N[1]
-            dA[(i,i)] = dtrA
+        for i = 1:size(A,1)
+            dA[i,i] = dtrA
         end
-        return NoTangent(), dA
+        return (dA, )
     end
     tr(A), back
 end
@@ -636,8 +647,9 @@ end
 function ChainRulesCore.rrule(::typeof(dtr), A::AbstractZ2Array{T,N}) where {T,N}
     function back(dtrA)
         dA = zerosinitial(A, size(A)...)
-        for i = 1:N[1], j = 1:N[2]
-            dA[(i,j,i,j)] = dtrA
+        s = size(A)
+        for i = 1:s[1], j = 1:s[2]
+            dA[i,j,i,j] = dtrA
         end
         return NoTangent(), dA
     end

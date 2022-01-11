@@ -1,4 +1,4 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum
 using BitBasis
 using CUDA
 import CUDA: CuArray
@@ -9,9 +9,15 @@ export AbstractZ2Array, Z2tensor
 
 """
     parity_conserving(T::Array)
-
 Transform an arbitray tensor which has arbitray legs and each leg have index 1 or 2 into parity conserving form
-
+----
+The following is faster but rely on updates of CUDA.jl(available in master branch)
+function parity_conserving!(T::Union{Array,CuArray})
+	bits = map(x -> Int(ceil(log2(x))), size(T))
+    T[map(x->sum(sum.(bitarray.((Tuple(x).-1) ,bits))) % 2 !== 0 ,CartesianIndices(T))].=0
+    return T
+end
+parity_conserving(T) = parity_conserving!(copy(T))
 """
 function parity_conserving(T::Union{Array,CuArray})
 	s = size(T)
@@ -49,7 +55,7 @@ struct Z2tensor{T, N} <: AbstractZ2Array{T,N}
 end
 
 size(A::AbstractZ2Array) = A.size
-size(::AbstractZ2Array, a) = size(A)[a]
+size(A::AbstractZ2Array, a) = size(A)[a]
 conj(A::AbstractZ2Array) = Z2tensor(A.parity, map(conj, A.tensor), A.size, A.dims, A.division)
 map(conj, A::AbstractZ2Array) = conj(A)
 norm(A::AbstractZ2Array) = norm(A.tensor)
@@ -62,17 +68,21 @@ broadcasted(*, B::Number, A::AbstractZ2Array) = A * B
 broadcasted(/, A::AbstractZ2Array, B::Number) = A / B
 
 function +(A::AbstractZ2Array, B::AbstractZ2Array)
-    # exchangeind = indexin(B.parity, A.parity)
-    # Z2tensor(B.parity, A.tensor[exchangeind] + B.tensor, B.division)
-    @assert B.parity == A.parity
-    Z2tensor(B.parity, A.tensor + B.tensor, B.size, B.dims, B.division)
+    if B.parity == A.parity
+        Z2tensor(B.parity, A.tensor + B.tensor, B.size, B.dims, B.division)
+    else
+        exchangeind = indexin(B.parity, A.parity)
+        Z2tensor(B.parity, A.tensor[exchangeind] + B.tensor, B.size, B.dims, B.division)
+    end
 end
 
 function -(A::AbstractZ2Array, B::AbstractZ2Array)
-    # exchangeind = indexin(B.parity, A.parity)
-    # Z2tensor(B.parity, A.tensor[exchangeind] - B.tensor, B.division)
-    @assert B.parity == A.parity
-    Z2tensor(B.parity, A.tensor - B.tensor, B.size, B.dims, B.division)
+    if B.parity == A.parity
+        Z2tensor(B.parity, A.tensor - B.tensor, B.size, B.dims, B.division)
+    else
+        exchangeind = indexin(B.parity, A.parity)
+        Z2tensor(B.parity, A.tensor[exchangeind] - B.tensor, B.size, B.dims, B.division)
+    end
 end
 
 -(A::AbstractZ2Array) = Z2tensor(A.parity, map(-, A.tensor), A.size, A.dims, A.division)
@@ -83,10 +93,12 @@ CuArray(A::AbstractZ2Array) = Z2tensor(A.parity, map(CuArray, A.tensor), A.size,
 Array(A::AbstractZ2Array) = Z2tensor(A.parity, map(Array, A.tensor), A.size, A.dims, A.division)
 
 function dot(A::AbstractZ2Array, B::AbstractZ2Array) 
-    # exchangeind = indexin(A.parity, B.parity)
-    # dot(A.tensor, B.tensor[exchangeind])
-    @assert A.parity == B.parity
-    dot(A.tensor, B.tensor)
+    if A.parity == B.parity 
+        dot(A.tensor, B.tensor)
+    else
+        exchangeind = indexin(A.parity, B.parity)
+        dot(A.tensor, B.tensor[exchangeind])
+    end
 end
 
 function ≈(A::AbstractZ2Array{TA,NA}, B::AbstractZ2Array{TB,NB}) where {TA,NA,TB,NB}
@@ -104,7 +116,6 @@ end
 getindex(A::AbstractZ2Array, index::CartesianIndex) = getindex(A, index.I...)
 function getindex(A::AbstractZ2Array, index::Int...)
     bits = map(x -> ceil(Int, log2(x)), size(A))
-    # parity = collect(sum.(bitarray.(index .- 1, bits))) .% 2
     parity = map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits)
     sum(parity) % 2 != 0 && return 0.0
     ip = findfirst(x->x in [parity], A.parity)
@@ -154,7 +165,7 @@ function zerosZ2(atype, dtype, a...)
     tensor = Vector{atype{dtype}}()
     @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
         if sum(i.I) % 2 == 0
-            push!(parity,collect(i.I))
+            push!(parity, i.I)
             dims = Tuple(i.I[j] == 0 ? deven[j] : dodd[j] for j in 1:L)
             push!(tensor, atype(zeros(dtype, dims)))
         end
@@ -165,7 +176,7 @@ end
 
 function IZ2(atype, dtype, D)
     deven, dodd = bulkdims(D, D)
-    Z2tensor(((0, 0), (1, 1)), [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), ((deven...),(dodd...)), 1)
+    Z2tensor(((0, 0), (1, 1)), [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), (deven, dodd), 1)
 end
 
 # only for OMEinsum binary permutedims before reshape
@@ -176,12 +187,12 @@ function tensorpermute(A::AbstractZ2Array, perm)
     exchangeind = indexin(A.parity, parity)
     tensor = map(x -> permutedims(x, perm), A.tensor)[exchangeind]
     dims = Tuple(map(x -> x[collect(perm)], A.dims)[exchangeind])
-    Z2tensor(A.parity, tensor, A.size[collect(perm)], dims, 1)
+    Z2tensor(A.parity, tensor, A.size[collect(perm)], dims, A.division)
 end
 
 reshape(A::AbstractZ2Array, a::Tuple{Vararg{Int}}) = reshape(A, a...)
 function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
-    tensor = copy(A.tensor)
+    Atensor = A.tensor
     div = 1
     if length(a) < N
         sizeA = size(A)
@@ -190,12 +201,12 @@ function reshape(A::AbstractZ2Array{T,N}, a::Int...) where {T,N}
             div += 1
             p *= sizeA[div]
         end
-        # @show prod(size(tensor[1])[1:div]) prod(size(tensor[1])[div+1:end])
-        tensor = map(x -> reshape(x, prod(size(x)[1:div]), prod(size(x)[div+1:end])), tensor)
+        s = map(size, Atensor)
+        tensor = map((x, y) -> reshape(x, prod(y[1:div]), prod(y[div+1:end])), Atensor, s)
         return Z2tensor(A.parity, tensor, A.size, A.dims, div)
     else
-        tensor = map((x, y) -> reshape(x, y), tensor, A.dims)
-        return Z2tensor(A.parity, tensor, A.size, A.dims, div)
+        tensor = map((x, y) -> reshape(x, y), Atensor, A.dims)
+        return Z2tensor(A.parity, tensor, A.size, A.dims, A.division)
     end
 end
 
@@ -304,6 +315,8 @@ function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
 end
 
 # for OMEinsum contract to get number
+vec(A::AbstractZ2Array) = A
+
 function transpose(A::AbstractZ2Array{T,N}) where {T,N}
     tensor = map(transpose, A.tensor)
     Z2tensor(A.parity, tensor, A.size, A.dims, 0)
@@ -328,49 +341,69 @@ function _compactify!(y, x::AbstractZ2Array, indexer)
     return y
 end
 
-# only for ein"abab -> " case
-# function _compactify!(y, x::AbstractZ2Array, indexer)
-#     vcat(hcat(x.tensor[1],x.tensor[6]), hcat(x.tensor[3],x.tensor[8]))
-# end
+# for ein"abab ->"(A)[]
+function dtr(A::AbstractZ2Array{T,N}) where {T,N}
+    parity = A.parity
+    tensor = A.tensor
+    s = 0.0
+    @inbounds for i in 1:length(parity)
+        parity[i][1] == parity[i][3] && parity[i][2] == parity[i][4] && (s += Array(ein"abab ->"(tensor[i]))[])
+    end
+    s
+end
 
-vec(A::AbstractZ2Array) = A
 
 # for Zygote compatibility
 accum(A::AbstractZ2Array, B::AbstractZ2Array...) = +(A, B...)
+sum(()) = 0
 
 # for KrylovKit compatibility
-rmul!(A::AbstractZ2Array, B::Number) = Z2tensor(A.parity, map(x -> rmul!(x, B), A.tensor), A.size, A.dims, A.division)
-lmul!(A::AbstractZ2Array, B::AbstractZ2Array) = A * B
-similar(A::AbstractZ2Array) = Z2tensor(A.parity, map(similar, A.tensor), A.size, A.dims, A.division)
-similar(A::AbstractZ2Array, atype) = Z2tensor(A.parity, map(x -> atype(similar(x)), A.tensor), A.dims, A.division)
-diag(A::AbstractZ2Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
-copy(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(copy, A.tensor), A.dims, A.division)
+rmul!(A::AbstractZ2Array, B::Number) = (map(x -> rmul!(x, B), A.tensor); A)
 
-mul!(Y::AbstractZ2Array, A::AbstractZ2Array, B::Number) = Z2tensor(Y.parity, map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor), Y.dims, Y.division)
+function lmul!(A::AbstractZ2Array{T,N}, B::AbstractZ2Array) where {T,N}
+    C = A*B
+    for i = 1:2^(N-1)
+        setindex!(B.tensor, C.tensor[i], i)
+    end
+    return B
+end
+
+similar(A::AbstractZ2Array) = Z2tensor(A.parity, map(similar, A.tensor), A.size, A.dims, A.division)
+similar(A::AbstractZ2Array, atype) = Z2tensor(A.parity, map(x -> atype(similar(x)), A.tensor), A.size, A.dims, A.division)
+diag(A::AbstractZ2Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
+copy(A::AbstractZ2Array{T,N}) where {T,N} = Z2tensor(A.parity, map(copy, A.tensor), A.size, A.dims, A.division)
+
+mul!(Y::AbstractZ2Array, A::AbstractZ2Array, B::Number) = (map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor); Y)
 
 function axpy!(α::Number, A::AbstractZ2Array, B::AbstractZ2Array)
-    # exchangeind = indexin(B.parity, A.parity)
-    # Z2tensor(B.parity, map((x,y) -> axpy!(α, x, y), A.tensor[exchangeind], B.tensor), B.division)
-    @assert B.parity == A.parity
-    Z2tensor(B.parity, map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor), B.size, B.dims, B.division)
+    if B.parity == A.parity
+        map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor)
+    else
+        exchangeind = indexin(B.parity, A.parity)
+        map((x,y) -> axpy!(α, x, y), A.tensor[exchangeind], B.tensor)
+    end
+    return B
 end
 
 # for leftorth and rightorth compatibility
-Diagonal(A::AbstractZ2Array) = Z2tensor(A.parity, map(Diagonal, A.tensor), A.dims, A.division)
-sqrt(A::AbstractZ2Array) = Z2tensor(A.parity, map(x->sqrt.(x), A.tensor), A.dims, A.division)
+Diagonal(A::AbstractZ2Array) = Z2tensor(A.parity, map(Diagonal, A.tensor), A.size, A.dims, A.division)
+sqrt(A::AbstractZ2Array) = Z2tensor(A.parity, map(x->sqrt.(x), A.tensor), A.size, A.dims, A.division)
 broadcasted(sqrt, A::AbstractZ2Array) = sqrt(A)
 
 # only for order-three tensor's qr and lq
 function qrpos!(A::AbstractZ2Array{T,N}) where {T,N}
-    Qparity = Vector{Vector{Int}}()
-    Rparity = Vector{Vector{Int}}()
+    Qparity = []
+    Rparity = []
     atype = _arraytype(A.tensor[1])
     Qtensor = Vector{atype{T}}()
     Rtensor = Vector{atype{T}}()
 
     bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, 0)
     bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, 1)
-    Z2tensor(Qparity, Qtensor, A.dims, A.division), Z2tensor(Rparity, Rtensor, Tuple(map(x->x[end], A.dims)), 1)
+    Asize = A.size
+    Adims = A.dims
+    exchangeind = indexin(A.parity, Qparity)
+    Z2tensor(A.parity, Qtensor[exchangeind], Asize, Adims, A.division), Z2tensor(Tuple(Rparity), Rtensor, (Asize[end], Asize[end]), Tuple(map(size, Rtensor)), 1)
 end
 
 function bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, p)
@@ -382,34 +415,37 @@ function bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, p)
     matrix_j = unique(map(x->x[div+1:end], Aparity[ind_A]))
     matrix_i = unique(map(x->x[1:div], Aparity[ind_A]))
 
-    ind = [findfirst(x->x in [[i; matrix_j[1]]], Aparity) for i in matrix_i]
+    ind = [findfirst(x->x in [(i..., matrix_j[1]...)], Aparity) for i in matrix_i]
     Amatrix = vcat(Atensor[ind]...)
     bulkidims = [size(Atensor[i],1) for i in ind]
     bulkjdims = [size(Amatrix, 2)]
 
     Q, R = qrpos!(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_j)
-        push!(Qparity, [matrix_i[i]; matrix_j[j]])
+        push!(Qparity, (matrix_i[i]..., matrix_j[j]...))
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         push!(Qtensor, Q[idim, jdim])
     end
     for i in 1:length(matrix_j), j in 1:length(matrix_j)
-        push!(Rparity, [matrix_j[i]; matrix_j[j]])
+        push!(Rparity, (matrix_j[i]..., matrix_j[j]...))
         idim, jdim = sum(bulkjdims[1:i-1])+1:sum(bulkjdims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         push!(Rtensor, R[idim, jdim])
     end
 end
 
 function lqpos!(A::AbstractZ2Array{T,N}) where {T,N}
-    Lparity = Vector{Vector{Int}}()
-    Qparity = Vector{Vector{Int}}()
+    Lparity = []
+    Qparity = []
     atype = _arraytype(A.tensor[1])
     Ltensor = Vector{atype{T}}()
     Qtensor = Vector{atype{T}}()
 
     bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, 0)
     bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, 1)
-    Z2tensor(Lparity, Ltensor, Tuple(map(x->x[end], A.dims)), 1), Z2tensor(Qparity, Qtensor, A.dims, A.division)
+    Asize = A.size
+    Adims = A.dims
+    exchangeind = indexin(A.parity, Qparity)
+    Z2tensor(Tuple(Lparity), Ltensor, (Asize[1], Asize[1]), Tuple(map(size, Ltensor)), 1), Z2tensor(A.parity, Qtensor[exchangeind], Asize, Adims, A.division)
 end
 
 function bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, p)
@@ -425,7 +461,7 @@ function bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, p)
     for j in matrix_j
         h = []
         for i in matrix_i
-            ind = findfirst(x->x in [[i; j]], Aparity)
+            ind = findfirst(x->x in [(i..., j...)], Aparity)
             push!(h, Atensor[ind])   
         end
         vi = vcat(h...)
@@ -437,25 +473,25 @@ function bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, p)
     
     L, Q = lqpos!(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_i)
-        push!(Lparity, [matrix_i[i]; matrix_i[j]])
+        push!(Lparity, (matrix_i[i]..., matrix_i[j]...))
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkidims[1:j-1])+1:sum(bulkidims[1:j])
         push!(Ltensor, L[idim, jdim])
     end
     for i in 1:length(matrix_i), j in 1:length(matrix_j)
-        push!(Qparity, [matrix_i[i]; matrix_j[j]])
+        push!(Qparity, (matrix_i[i]..., matrix_j[j]...))
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         push!(Qtensor, Q[idim, jdim])
     end
 end
 
 # for ' in ACCtoALAR of VUMPS
-function adjoint(A::AbstractZ2Array{T, N}) where {T,N}
+function adjoint(A::AbstractZ2Array{T,N}) where {T,N}
     div = A.division 
     parity = map(x->x[[div+1:end;1:div]], A.parity)
     exchangeind = indexin(A.parity, parity)
     tensor = map(adjoint, A.tensor)[exchangeind]
-    dims = Tuple(map(x -> (x[div+1:end]..., x[1:div]...), A.dims))
-    Z2tensor(A.parity, tensor, (A.size[div+1:end]..., A.size[1:div]...), dims, N - div)
+    # dims = Tuple(map(x -> x[[div+1:end;1:div]], A.dims)[exchangeind])
+    Z2tensor(A.parity, tensor, A.size[[div+1:end;1:div]], A.dims[exchangeind], N - div)
 end
 
 # only for Z2 Matrix
@@ -473,13 +509,12 @@ function sysvd!(A::AbstractZ2Array{T,N}) where {T,N}
         push!(Stensor, S)
         push!(Vtensor, V)
     end
-    # Nm = Tuple(map(x->min(x...), A.dims))
-    # N1 = Tuple(map((x, y) -> (x[1], y), A.dims, Nm))
-    # N2 = Tuple(map((x, y) -> (y, x[2]), A.dims, Nm))
-    N1 = Tuple(map(size, Utensor))
-    Nm = Tuple(map(size, Stensor))
-    N2 = Tuple(map(size, Vtensor))
-    Z2tensor(parity, Utensor, N1, div), Z2tensor(parity, Stensor, Nm, div), Z2tensor(parity, Vtensor, N2, div)
+    Nm = Tuple(map(x->min(x...), A.dims))
+    N1 = Tuple(map((x, y) -> (x[1], y), A.dims, Nm))
+    N2 = Tuple(map((x, y) -> (y, x[2]), A.dims, Nm))
+    Asize = A.size
+    sm = min(Asize...)
+    Z2tensor(parity, Utensor, (Asize[1], sm), N1, div), Z2tensor(parity, Stensor, (sm, sm), (Nm, Nm), div), Z2tensor(parity, Vtensor, (sm, Asize[2]), N2, div)
 end
 
 """
@@ -537,7 +572,7 @@ function Z2reshape(A::AbstractZ2Array{T, N}, a::Int...) where {T, N}
             rebulkdims = Tuple(Int.(.+(redims[bulkind]...) ./ (length(bulkind) ./ length.(div))))
             rebulkdims1 = redims[bulkind[1]]
             silce = [[1:rebulkdims1[i], (rebulkdims1[i] == rebulkdims[i] ? 1 : 1+rebulkdims1[i]):rebulkdims[i]] for i in 1:length(rebulkdims)]
-            tensor = atype(zeros(rebulkdims))
+            tensor = atype(zeros(T, rebulkdims))
             bits = Int(log2(length(bulkind)))
             for j in 1:length(bulkind)
                 choose = bitarray(j - 1, bits) .+ 1
@@ -574,15 +609,4 @@ function Z2reshape(A::AbstractZ2Array{T, N}, a::Int...) where {T, N}
         dims = Tuple(map(size, retensors))
         Z2tensor(reparity, atype.(retensors), a, dims, 1)
     end
-end
-
-# for ein"abab ->"(A)[]
-function dtr(A::AbstractZ2Array{T,N}) where {T,N}
-    parity = A.parity
-    tensor = A.tensor
-    s = 0.0
-    @inbounds for i in 1:length(parity)
-        parity[i][1] == parity[i][3] && parity[i][2] == parity[i][4] && (s += Array(ein"abab ->"(tensor[i]))[])
-    end
-    s
 end

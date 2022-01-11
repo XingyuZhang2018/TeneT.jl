@@ -46,7 +46,7 @@ end
 	@test reshape(Atensor,(9,4)) == reshape(Z2tensor2tensor(reshape(reshape(A,9,4),3,3,4)),(9,4))
 end
 
-@testset "reshape compatibility" begin
+@testset "reshape parity_conserving compatibility" begin
     a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
     a = parity_conserving(a)
     a = reshape(a,3,2,4,3)
@@ -148,9 +148,42 @@ end
 	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 
-@testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]
+@testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:Z2]
     Random.seed!(100)
     d = 2
+    χ = 2
+
+    ## rmul!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    Acopy = copy(A)
+    @test A*2.0 == rmul!(A, 2.0)
+    @test A.tensor != Acopy.tensor
+
+    ## lmul!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    B = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    Bcopy = copy(B)
+    @test A*B == lmul!(A, B) 
+    @test B.tensor != Bcopy.tensor
+
+    ## mul!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    Y = similar(A)
+    Ycopy = copy(Y)
+    @test A*2.0 == mul!(Y, A, 2.0)
+    @test Y.tensor != Ycopy.tensor
+
+    ## axpy!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    B = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    Bcopy = copy(B)
+    @test A*2.0 + B == axpy!(2.0, A, B)
+    @test B.tensor != Bcopy.tensor
+end
+
+@testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]
+    Random.seed!(100)
+    d = 3
     D = 5
     AL = randZ2(atype, dtype, D, d, D)
     M = randZ2(atype, dtype, d, d, d, d)
@@ -161,11 +194,11 @@ end
     @test λs ≈ tλs
     @test Z2tensor2tensor(FLs[1]) ≈ tFLs[1]
 
-    λl,FL = λs[1],FLs[1]
+    λl,FL = λs[1], FLs[1]
     dFL = randZ2(atype, dtype, D, d, D)
     ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(AL, FR, M, conj(AL)), dFL, -λl, 1)
 
-    tλl,tFL = tλs[1],tFLs[1]
+    tλl,tFL = tλs[1], tFLs[1]
     tdFL = Z2tensor2tensor(dFL)
     tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tAL, tFR, tM, conj(tAL)), tdFL, -tλl, 1)
     @test Z2tensor2tensor(ξl) ≈ tξl
@@ -173,30 +206,30 @@ end
 
 @testset "Z2 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randZ2(atype, dtype, 4, 2, 4)
+    A = randZ2(atype, dtype, 5, 3, 5)
 	Atensor = Z2tensor2tensor(A)
-	A = reshape(A, 8, 4) 
-	Atensor = reshape(Atensor, 8, 4)
+	A = reshape(A, 15, 4) 
+	Atensor = reshape(Atensor, 15, 5)
 	Q, R = qrpos(A)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor*Rtensor ≈ Atensor
 	@test Q*R ≈ A
-	@test Z2tensor2tensor(reshape(Q, 4, 2, 4)) ≈ reshape(Qtensor, 4, 2, 4)
+	@test Z2tensor2tensor(reshape(Q, 5, 3, 5)) ≈ reshape(Qtensor, 5, 3, 5)
 	@test Z2tensor2tensor(R) ≈ Rtensor
 end
 
-@testset "Z2 lq with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "Z2 lq with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randZ2(atype, dtype, 4, 2, 4)
+    A = randZ2(atype, dtype, 4, 3, 4)
 	Atensor = Z2tensor2tensor(A)
-	A = reshape(A, 4, 8)
-	Atensor = reshape(Atensor, 4, 8)
+	A = reshape(A, 4, 12)
+	Atensor = reshape(Atensor, 4, 12)
 	L, Q = lqpos(A)
     Ltensor, Qtensor = lqpos(Atensor)
     @test Ltensor*Qtensor ≈ Atensor
 	@test L*Q ≈ A
 	@test Z2tensor2tensor(L) ≈ Ltensor
-	@test Z2tensor2tensor(reshape(Q, 4, 2, 4)) ≈ reshape(Qtensor, 4, 2, 4)
+	@test Z2tensor2tensor(reshape(Q, 4, 3, 4)) ≈ reshape(Qtensor, 4, 3, 4)
 end
 
 @testset "Z2 svd with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]

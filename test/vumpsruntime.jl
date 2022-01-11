@@ -30,6 +30,6 @@ end
 @testset "$(Ni)x$(Nj) obs_env with $(symmetry) $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array], dtype = [ComplexF64], symmetry in [:Z2]
     d = 2
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:Ni, j in 1:Nj]
-    env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./data2", outfolder = "./data2", show_every = 3, maxiter = 1)
+    env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./data2", outfolder = "./data2", show_every = 3, maxiter = 10)
     @test env !== nothing
 end
