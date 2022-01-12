@@ -2,7 +2,6 @@ using BenchmarkTools
 using VUMPS
 using KrylovKit
 using CUDA
-using CUDA.CUSPARSE
 using SparseArrays
 using Test
 using OMEinsum

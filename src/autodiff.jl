@@ -188,12 +188,12 @@ function bulkbackQR!(A, dA, Q, R, dQ, dR, p)
     m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
     m_i = unique(map(x->x[1:div], dQ.parity[ind_A]))
 
-    ind = [findfirst(x->x in [(i..., m_j[1]...)], dQ.parity) for i in m_i]
+    ind = [findfirst(x->x in [[i; m_j[1]]], dQ.parity) for i in m_i]
     dQm = vcat(dQ.tensor[ind]...)
     Qm = vcat(Q.tensor[ind]...)
     bulkidims = [size(dQ.tensor[i],1) for i in ind]
     bulkjdims = [size(dQm, 2)]
-    ind = findfirst(x->x in [(m_j[1]..., m_j[1]...)], R.parity)
+    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], R.parity)
     dRm = dR == ZeroTangent() ? ZeroTangent() : dR.tensor[ind]
     Rm = R.tensor[ind]
     
@@ -201,7 +201,7 @@ function bulkbackQR!(A, dA, Q, R, dQ, dR, p)
     dAm = (UpperTriangular(Rm + I * 1e-12) \ (dQm + Qm * _arraytype(Qm)(Hermitian(M, :L)))' )'
 
     for i in 1:length(m_i), j in 1:length(m_j)
-        ind = findfirst(x->x in [(m_i[i]..., m_j[j]...)], A.parity)
+        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end
@@ -235,12 +235,12 @@ function bulkbackLQ!(A, dA, L, Q, dL, dQ, p)
     m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
     m_i = unique(map(x->x[1:div], dQ.parity[ind_A]))
 
-    ind = [findfirst(x->x in [(m_i[1]..., j...)], dQ.parity) for j in m_j]
+    ind = [findfirst(x->x in [[m_i[1]; j]], dQ.parity) for j in m_j]
     dQm = hcat(dQ.tensor[ind]...)
     Qm = hcat(Q.tensor[ind]...)
     bulkidims = [size(dQm, 1)]
     bulkjdims = [size(dQ.tensor[i],2) for i in ind]
-    ind = findfirst(x->x in [(m_i[1]..., m_i[1]...)], L.parity)
+    ind = findfirst(x->x in [[m_i[1]; m_i[1]]], L.parity)
     dLm = dL == ZeroTangent() ? ZeroTangent() : dL.tensor[ind]
     Lm = L.tensor[ind]
     
@@ -248,7 +248,7 @@ function bulkbackLQ!(A, dA, L, Q, dL, dQ, p)
     dAm = LowerTriangular(Lm + I * 1e-12)' \ (dQm + _arraytype(Qm)(Hermitian(M, :L)) * Qm)
 
     for i in 1:length(m_i), j in 1:length(m_j)
-        ind = findfirst(x->x in [(m_i[i]..., m_j[j]...)], A.parity)
+        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end

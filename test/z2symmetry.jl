@@ -103,8 +103,8 @@ end
 	B = randZ2(atype, dtype, 4,3)
 	Atensor = Z2tensor2tensor(A)
 	Btensor = Z2tensor2tensor(B)
-	## binary contraction
 
+	## binary contraction
 	@test ein"abc,cd -> abd"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,cd -> abd"(A,B))
 	@test ein"abc,db -> adc"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"abc,db -> adc"(A,B))
 	@test ein"cba,dc -> abd"(Atensor,Btensor) ≈ Z2tensor2tensor(ein"cba,dc -> abd"(A,B))
