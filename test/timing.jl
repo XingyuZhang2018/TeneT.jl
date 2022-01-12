@@ -11,16 +11,16 @@ CUDA.allowscalar(false)
 
 @testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
     Random.seed!(100)
-    d = 16
+    d = 4
     χ = 50
-    FL = randinitial(Val(symmetry), atype, dtype, χ, d, χ)
-    M = randinitial(Val(symmetry), atype, dtype, d, d, d, d)
-    AL = randinitial(Val(symmetry), atype, dtype, χ, d, χ)
+    FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ)
+    M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2)
+    AL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ)
     # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
 end
 
-@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:Z2]
+@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
     Random.seed!(100)
     d = 4
     χ = 50

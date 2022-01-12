@@ -87,6 +87,8 @@ end
 
 -(A::AbstractZ2Array) = Z2tensor(A.parity, map(-, A.tensor), A.size, A.dims, A.division)
 
+indexin(A::AbstractArray, B::Tuple) = indexin(A, [B...])
+indexin(A::Tuple, B::AbstractArray) = indexin([A...], B)
 indexin(A::Tuple, B::Tuple) = indexin(A, [B...])
 
 CuArray(A::AbstractZ2Array) = Z2tensor(A.parity, map(CuArray, A.tensor), A.size, A.dims, A.division)
@@ -402,8 +404,8 @@ function qrpos!(A::AbstractZ2Array{T,N}) where {T,N}
     bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, 1)
     Asize = A.size
     Adims = A.dims
-    exchangeind = indexin(A.parity, Qparity)
-    Z2tensor(A.parity, Qtensor[exchangeind], Asize, Adims, A.division), Z2tensor(Tuple(Rparity), Rtensor, (Asize[end], Asize[end]), Tuple(map(size, Rtensor)), 1)
+    exchangeind = indexin(Qparity, A.parity)
+    Z2tensor(Tuple(Qparity), Qtensor, Asize, Adims[exchangeind], A.division), Z2tensor(Tuple(Rparity), Rtensor, (Asize[end], Asize[end]), Tuple(map(size, Rtensor)), 1)
 end
 
 function bulkQR!(Qparity, Qtensor, Rparity, Rtensor, A, p)
@@ -444,8 +446,8 @@ function lqpos!(A::AbstractZ2Array{T,N}) where {T,N}
     bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, 1)
     Asize = A.size
     Adims = A.dims
-    exchangeind = indexin(A.parity, Qparity)
-    Z2tensor(Tuple(Lparity), Ltensor, (Asize[1], Asize[1]), Tuple(map(size, Ltensor)), 1), Z2tensor(A.parity, Qtensor[exchangeind], Asize, Adims, A.division)
+    exchangeind = indexin(Qparity, A.parity)
+    Z2tensor(Tuple(Lparity), Ltensor, (Asize[1], Asize[1]), Tuple(map(size, Ltensor)), 1), Z2tensor(Tuple(Qparity), Qtensor, Asize, Adims[exchangeind], A.division)
 end
 
 function bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, p)

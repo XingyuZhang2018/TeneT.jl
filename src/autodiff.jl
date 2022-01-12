@@ -174,6 +174,7 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractZ2Array)
     Q, R = qrpos(A)
     function back((dQ, dR))
         dA = copy(A)
+        @assert Q.parity == Q.parity
         bulkbackQR!(A, dA, Q, R, dQ, dR, 0)
         bulkbackQR!(A, dA, Q, R, dQ, dR, 1)
         return NoTangent(), dA
@@ -220,6 +221,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractZ2Array)
     L, Q = lqpos(A)
     function back((dL, dQ))
         dA = copy(A)
+        @assert Q.parity == Q.parity
         bulkbackLQ!(A, dA, L, Q, dL, dQ, 0)
         bulkbackLQ!(A, dA, L, Q, dL, dQ, 1)
         return NoTangent(), dA

@@ -255,8 +255,7 @@ end
         end
         return s
     end
-    @show Zygote.gradient(foo1, 1)
-    # @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
+    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
 end
 
 @testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
