@@ -556,11 +556,18 @@ Z2reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,
 Z2reshape(A::AbstractZ2Array, a::Tuple{Vararg{Int}}) = Z2reshape(A, a...)
 function Z2reshape(A::AbstractZ2Array{T, N}, a::Int...) where {T, N}
     atype = _arraytype(A.tensor[1])
+    orderedparity = getparity(N)
+    if orderedparity == A.parity
+        Atensor = A.tensor
+    else
+        exchangeind = indexin(orderedparity, A.parity)
+        Atensor = A.tensor[exchangeind]
+    end
     if N > length(a)
         div = division(a, size(A))
-        reparity = [[sum(p[d]) % 2 for d in div] for p in A.parity]
+        reparity = [[sum(p[d]) % 2 for d in div] for p in orderedparity]
         redims = [[prod(dims[d]) for d in div] for dims in A.dims]
-        retensor = [reshape(t, s...) for (t, s) in zip(Array.(A.tensor), redims)]
+        retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
         ureparity = getparity(length(a))
         retensors = Vector{atype{T}}()
         for i in 1:length(ureparity)
@@ -589,8 +596,8 @@ function Z2reshape(A::AbstractZ2Array{T, N}, a::Int...) where {T, N}
         redims = [[rebulkdims[p[i] + 1][i] for i in 1:length(a)] for p in reparity]
         dims = [[prod(dims[d]) for d in div] for dims in redims]
         retensors = Array{Array,1}(undef, length(reparity))
-        for i in 1:length(A.parity)
-            p = A.parity[i]
+        for i in 1:length(orderedparity)
+            p = orderedparity[i]
             bulkind = findall(x->x in [p], parity)
             bulkdims = Int.(.+(dims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
             bulkdims1 = dims[bulkind[1]]
@@ -600,7 +607,7 @@ function Z2reshape(A::AbstractZ2Array{T, N}, a::Int...) where {T, N}
                 choose = bitarray(j - 1, bits) .+ 1
                 length(choose) == 1 && (choose = [choose[], choose[], choose[]])
                 choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
-                retensors[bulkind[j]] = reshape(Array(A.tensor[i])[choosesilce...], redims[bulkind[j]]...)
+                retensors[bulkind[j]] = reshape(Array(Atensor[i])[choosesilce...], redims[bulkind[j]]...)
             end
         end
         dims = map(x -> [size(x)...], retensors)
