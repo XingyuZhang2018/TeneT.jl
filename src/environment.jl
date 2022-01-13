@@ -78,7 +78,7 @@ function initialA(M, D)
     A = Array{atype, 2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        A[i,j] = randinitial(M[1,1], D, d, D)
+        A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
     end
     return A
 end
@@ -264,7 +264,7 @@ function FLint(AL, M)
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
         dL = size(M[i,j],1)
-        FL[i,j] = randinitial(AL[1,1], D, dL, D)
+        FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
     end
     return FL
 end
@@ -276,7 +276,7 @@ function FRint(AR, M)
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
         dR = size(M[i,j],3)
-        FR[i,j] = randinitial(AR[1,1], D, dR, D)
+        FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
     end
     return FR
 end

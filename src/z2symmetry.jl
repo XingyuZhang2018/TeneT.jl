@@ -1,4 +1,4 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum, zero
 using BitBasis
 using CUDA
 import CUDA: CuArray
@@ -176,6 +176,8 @@ function IZ2(atype, dtype, D)
     deven, dodd = bulkdims(D, D)
     Z2tensor([[0, 0], [1, 1]], [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), [[deven...], [dodd...]], 1)
 end
+
+zero(A::AbstractZ2Array) = Z2tensor(A.parity, map(zero, A.tensor), A.size, A.dims, A.division)
 
 # only for OMEinsum binary permutedims before reshape
 permutedims(A::AbstractZ2Array, perm) = tensorpermute(A, perm)
@@ -487,8 +489,8 @@ function adjoint(A::AbstractZ2Array{T,N}) where {T,N}
     parity = map(x->x[[div+1:end;1:div]], A.parity)
     exchangeind = indexin(A.parity, parity)
     tensor = map(adjoint, A.tensor)[exchangeind]
-    # dims = Tuple(map(x -> x[[div+1:end;1:div]], A.dims)[exchangeind])
-    Z2tensor(A.parity, tensor, A.size[[div+1:end;1:div]], A.dims[exchangeind], N - div)
+    dims = map(x -> x[[div+1:end;1:div]], A.dims)[exchangeind]
+    Z2tensor(A.parity, tensor, A.size[[div+1:end;1:div]], dims, N - div)
 end
 
 # only for Z2 Matrix
@@ -559,14 +561,16 @@ function Z2reshape(A::AbstractZ2Array{T, N}, a::Int...) where {T, N}
     orderedparity = getparity(N)
     if orderedparity == A.parity
         Atensor = A.tensor
+        Adims = A.dims
     else
         exchangeind = indexin(orderedparity, A.parity)
         Atensor = A.tensor[exchangeind]
+        Adims = A.dims[exchangeind]
     end
     if N > length(a)
         div = division(a, size(A))
         reparity = [[sum(p[d]) % 2 for d in div] for p in orderedparity]
-        redims = [[prod(dims[d]) for d in div] for dims in A.dims]
+        redims = [[prod(dims[d]) for d in div] for dims in Adims]
         retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
         ureparity = getparity(length(a))
         retensors = Vector{atype{T}}()
