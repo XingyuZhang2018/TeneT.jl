@@ -23,12 +23,24 @@ CUDA.allowscalar(false)
 end
 
 @testset "parity_conserving and tensor2Z2tensor tensor2Z2tensor compatibility" begin
-    a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
-    a = parity_conserving(a)
-    b = tensor2Z2tensor(a)
-    c = Z2tensor2tensor(b)
-    d = tensor2Z2tensor(c)
-    @test a == c && b == d
+    # a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
+    # a = parity_conserving(a)
+    # b = tensor2Z2tensor(a)
+    # c = Z2tensor2tensor(b)
+    # d = tensor2Z2tensor(c)
+    # @test a == c && b == d
+
+    using BitBasis
+    function swapgatedD(d::Int, D::Int)
+        S = ein"ij,kl->ikjl"(Matrix{ComplexF64}(I,d,d),Matrix{ComplexF64}(I,D,D))
+        for j = 1:D, i = 1:d
+            sum(bitarray(i-1,Int(ceil(log2(d)))))%2 != 0 && sum(bitarray(j-1,Int(ceil(log2(D)))))%2 != 0 && (S[i,j,:,:] .= -S[i,j,:,:])
+        end
+        return S
+    end
+    AI = ein"ij,kl->ikjl"(Matrix{ComplexF64}(I,2,2),Matrix{ComplexF64}(I,2,2))
+    @show tensor2Z2tensor(swapgatedD(4, 3)).tensor[1]
+    # @test AI == -tensor2Z2tensor(swapgatedD(4, 4)).tensor[8]
 end
 
 @testset "Z2 Tensor with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
@@ -85,9 +97,12 @@ end
 
 @testset "general flatten reshape" begin
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-    a = randinitial(Val(:Z2), CuArray, Float64, 3, 3, 3, 3, 3, 3, 3, 3)
-    rea = Z2reshape(a, 9, 9, 9, 9)
-    rerea = Z2reshape(rea, 3, 3, 3, 3, 3, 3, 3, 3)
+    a = randinitial(Val(:Z2), Array, Float64, 3,3,3,3,3,3,3,3)
+    atensor = Z2tensor2tensor(a)
+    rea = Z2reshape(a, 9,9,9,9)
+    rea2 = tensor2Z2tensor(reshape(atensor, 9,9,9,9))
+    @test rea !== rea2
+    rerea = Z2reshape(rea, 3,3,3,3,3,3,3,3)
     @test rerea ≈ a
 
     # (χ,D,D,χ) -> (χ,D^2,χ)

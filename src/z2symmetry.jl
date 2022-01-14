@@ -134,9 +134,10 @@ end
 find even and odd part dims of Z2 tensor bulk
 """
 function bulkdims(N::Int...)
-    bits = map(x -> ceil(Int, log2(x)), N)
-    dodd = map((bits, N) -> sum([sum(bitarray(i - 1, bits)) % 2 for i = 1:N]), bits, N)
-    deven = N .- dodd
+    # bits = map(x -> ceil(Int, log2(x)), N)
+    # dodd = map((bits, N) -> sum([sum(bitarray(i - 1, bits)) % 2 for i = 1:N]), bits, N)
+    deven = ceil.(Int, N ./ 2)
+    dodd = N .- deven
     deven, dodd
 end
 
@@ -362,7 +363,7 @@ rmul!(A::AbstractZ2Array, B::Number) = (map(x -> rmul!(x, B), A.tensor); A)
 function lmul!(A::AbstractZ2Array{T,N}, B::AbstractZ2Array) where {T,N}
     C = A*B
     for i = 1:2^(N-1)
-        setindex!(B.tensor, C.tensor[i], i)
+        B.tensor[i] = C.tensor[i]
     end
     return B
 end

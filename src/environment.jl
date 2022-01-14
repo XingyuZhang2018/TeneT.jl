@@ -76,9 +76,14 @@ function initialA(M, D)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype, 2}(undef, Ni, Nj)
+    symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        if symmetry == :Z2
+            A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        else
+            A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        end
     end
     return A
 end
@@ -261,10 +266,15 @@ function FLint(AL, M)
     Ni,Nj = size(AL)
     arraytype = _arraytype(AL[1,1])
     FL = Array{arraytype,2}(undef, Ni, Nj)
+    symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
         dL = size(M[i,j],1)
-        FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        if symmetry == :Z2
+            FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        else
+            FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        end
     end
     return FL
 end
@@ -273,10 +283,15 @@ function FRint(AR, M)
     Ni,Nj = size(AR)
     arraytype = _arraytype(AR[1,1])
     FR = Array{arraytype,2}(undef, Ni, Nj)
+    symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
         dR = size(M[i,j],3)
-        FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        if symmetry == :Z2
+            FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        else
+            FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        end
     end
     return FR
 end
