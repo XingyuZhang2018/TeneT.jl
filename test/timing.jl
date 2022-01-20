@@ -8,10 +8,10 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
-    d = 4
-    χ = 50
+    d = 3
+    χ = 30
     FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ)
     M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2)
     AL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ)
@@ -22,7 +22,7 @@ end
 @testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
     d = 3
-    χ = 20
+    χ = 30
     FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ)
     M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2)
     AL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ)

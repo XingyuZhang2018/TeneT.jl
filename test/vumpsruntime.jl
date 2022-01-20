@@ -7,7 +7,7 @@ using VUMPS: vumps, vumps_env
 @testset "$(Ni)x$(Nj) VUMPSRuntime with $(symmetry) $atype{$dtype}" for Ni = [1,2,3], Nj = [1,2,3], atype = [Array, CuArray], dtype = [ComplexF64], symmetry in [:none, :Z2]
     @test SquareLattice <: AbstractLattice
 
-    d = 2
+    d = 4
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:Ni, j in 1:Nj]
     rt = SquareVUMPSRuntime(M, Val(:random), 2)
 end
@@ -27,8 +27,8 @@ end
     @test env !== nothing
 end
 
-@testset "$(Ni)x$(Nj) obs_env with $(symmetry) $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array], dtype = [ComplexF64], symmetry in [:Z2]
-    d = 2
+@testset "$(Ni)x$(Nj) obs_env with $(symmetry) $atype{$dtype}" for Ni = [2], Nj = [2], atype = [CuArray], dtype = [ComplexF64], symmetry in [:Z2]
+    d = 4
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d) for i in 1:Ni, j in 1:Nj]
     env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./data2", outfolder = "./data2", show_every = 3, maxiter = 10)
     @test env !== nothing

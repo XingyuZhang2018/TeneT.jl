@@ -75,15 +75,16 @@ end
 function initialA(M, D)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
-    A = Array{atype, 2}(undef, Ni, Nj)
+    A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        if symmetry == :Z2
-            A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        else
-            A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        end
+        A[i,j] = randinitial(M[1,1], D,d,D)
+        # if symmetry == :Z2
+        #     A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        # else
+        #     A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        # end
     end
     return A
 end
@@ -139,9 +140,9 @@ a scalar factor `λ` such that ``λ AR R = L A``
 """
 function getAL(A,L)
     Ni,Nj = size(A)
-    arraytype = _arraytype(A[1,1])
-    AL = Array{arraytype,2}(undef, Ni, Nj)
-    Le = Array{arraytype,2}(undef, Ni, Nj)
+    atype = _arraytype(A[1,1])
+    AL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
+    Le = Array{atype{ComplexF64, 2}, 2}(undef, Ni, Nj)
     λ = zeros(Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         D, d, = size(A[i,j])
@@ -155,7 +156,7 @@ end
 
 function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
-    L = Array{_arraytype(A[1,1]), 2}(undef, Ni, Nj)
+    L = Array{_arraytype(A[1,1]){ComplexF64, 2}, 2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λ info sort(abs.(λ))
@@ -197,6 +198,7 @@ function rightorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     Ar, Lr = map(x->permutedims(x,(3,2,1)), A), map(x->permutedims(x,(2,1)), L)
     AL, L, λ = leftorth(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
     R, AR = map(x->permutedims(x,(2,1)), L), map(x->permutedims(x,(3,2,1)), AL)
+    AR = typeof(AL)(AR)
     return R, AR, λ
 end
 
@@ -209,8 +211,8 @@ end
 """
 function LRtoC(L, R)
     Ni, Nj = size(L)
-    arraytype = _arraytype(L[1,1])
-    C = Array{arraytype,2}(undef, Ni, Nj)
+    atype = _arraytype(L[1,1])
+    C = Array{atype{ComplexF64, 2}, 2}(undef, Ni, Nj)
     for j in 1:Nj,i in 1:Ni
         jr = j + 1 - (j + 1 > Nj) * Nj
         C[i,j] = L[i,j] * R[i,jr]
@@ -264,34 +266,36 @@ end
 
 function FLint(AL, M)
     Ni,Nj = size(AL)
-    arraytype = _arraytype(AL[1,1])
-    FL = Array{arraytype,2}(undef, Ni, Nj)
+    atype = _arraytype(AL[1,1])
+    FL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
         dL = size(M[i,j],1)
-        if symmetry == :Z2
-            FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
-        else
-            FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
-        end
+        FL[i,j] = randinitial(AL[1,1], D,dL,D)
+        # if symmetry == :Z2
+        #     FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        # else
+        #     FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        # end
     end
     return FL
 end
 
 function FRint(AR, M)
     Ni,Nj = size(AR)
-    arraytype = _arraytype(AR[1,1])
-    FR = Array{arraytype,2}(undef, Ni, Nj)
+    atype = _arraytype(AR[1,1])
+    FR = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
         dR = size(M[i,j],3)
-        if symmetry == :Z2
-            FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
-        else
-            FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
-        end
+        FR[i,j] = randinitial(AR[1,1], D,dR,D)
+        # if symmetry == :Z2
+        #     FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        # else
+        #     FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        # end
     end
     return FR
 end
@@ -545,8 +549,7 @@ end
 
 function ALCtoAC(AL,C)
     Ni,Nj = size(AL)
-    ACij = [ein"asc,cb -> asb"(AL[i],C[i]) for i=1:Ni*Nj]
-    reshape(ACij,Ni,Nj)
+    reshape([ein"asc,cb -> asb"(AL[i],C[i]) for i=1:Ni*Nj], Ni,Nj)
 end
 
 """
