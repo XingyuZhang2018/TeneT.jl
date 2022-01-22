@@ -22,6 +22,7 @@ Zygote.@nograd save
 Zygote.@nograd load
 Zygote.@nograd Random.seed!
 Zygote.@nograd randinitial
+Zygote.@nograd show_every_count
 
 @doc raw"
     num_grad(f, K::Real; [δ = 1e-5])

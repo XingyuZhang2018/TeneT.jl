@@ -79,12 +79,12 @@ function initialA(M, D)
     symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        A[i,j] = randinitial(M[1,1], D,d,D)
-        # if symmetry == :Z2
-        #     A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        # else
-        #     A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        # end
+        # A[i,j] = randinitial(M[1,1], D,d,D)
+        if symmetry == :Z2
+            A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        else
+            A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        end
     end
     return A
 end
@@ -272,12 +272,12 @@ function FLint(AL, M)
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
         dL = size(M[i,j],1)
-        FL[i,j] = randinitial(AL[1,1], D,dL,D)
-        # if symmetry == :Z2
-        #     FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
-        # else
-        #     FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
-        # end
+        # FL[i,j] = randinitial(AL[1,1], D,dL,D)
+        if symmetry == :Z2
+            FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        else
+            FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+        end
     end
     return FL
 end
@@ -290,12 +290,12 @@ function FRint(AR, M)
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
         dR = size(M[i,j],3)
-        FR[i,j] = randinitial(AR[1,1], D,dR,D)
-        # if symmetry == :Z2
-        #     FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
-        # else
-        #     FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
-        # end
+        # FR[i,j] = randinitial(AR[1,1], D,dR,D)
+        if symmetry == :Z2
+            FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        else
+            FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+        end
     end
     return FR
 end

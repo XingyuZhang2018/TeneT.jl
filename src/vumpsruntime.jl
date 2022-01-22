@@ -93,8 +93,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
         C = Array{atype{ComplexF64, 2}, 2}(env.C)
         if !(atype <: Union{CuArray, Array})
             intype = _arraytype(M[1,1].tensor[1])
-            AL, AR, FL, FR = map(x->map(intype{ComplexF64, 3}, x), [AL, AR, FL, FR])
-            C = map(intype{ComplexF64, 2}, C)
+            AL, C, AR, FL, FR = map(x->map(intype, x), [AL, C, AR, FL, FR])
         end
     end
     AL, C, AR, FL, FR
