@@ -1,6 +1,7 @@
 include("./exampletensors.jl")
 include("./exampleobs.jl")
 
+using CUDA
 using Random
 using Test
 using VUMPS: tensor2Z2tensor, parity_conserving
@@ -8,7 +9,7 @@ using Zygote
 
 @testset "$(Ni)x$(Nj) rand forward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [CuArray], symmetry in [:none, :Z2]
     Random.seed!(100)
-    m = randinitial(Val(:none), atype, ComplexF64, 2, 2, 2, 2)
+    m = randinitial(Val(:none), atype, ComplexF64, 4, 4, 4, 4)
     m = parity_conserving(m)
     symmetry == :Z2 && (m = tensor2Z2tensor(m))
     β = 0.2
@@ -17,9 +18,9 @@ using Zygote
     @show Z(env, M)
 end
 
-@testset "$(Ni)x$(Nj) rand backward with $(symmetry) symmetry $atype array" for Ni = [2], Nj = [2], atype = [Array], symmetry in [:none, :Z2]
+@testset "$(Ni)x$(Nj) rand backward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [CuArray], symmetry in [:none, :Z2]
     Random.seed!(100)
-    m = randinitial(Val(:none), atype, ComplexF64, 2, 2, 2, 2)
+    m = randinitial(Val(:none), atype, ComplexF64, 4, 4, 4, 4)
     m = parity_conserving(m)
     symmetry == :Z2 && (m = tensor2Z2tensor(m))
     function foo(β)

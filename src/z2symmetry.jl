@@ -63,8 +63,8 @@ norm(A::AbstractZ2Array) = norm(A.tensor)
 *(A::AbstractZ2Array, B::Number) = Z2tensor(A.parity, A.tensor * B, A.size, A.dims, A.division)
 *(B::Number, A::AbstractZ2Array{T,N}) where {T,N} = A * B
 /(A::AbstractZ2Array{T,N}, B::Number) where {T,N} = Z2tensor(A.parity, A.tensor / B, A.size, A.dims, A.division)
-broadcasted(*, A::AbstractZ2Array, B::Number) = A * B
-broadcasted(*, B::Number, A::AbstractZ2Array) = A * B
+broadcasted(*, A::AbstractZ2Array, B::Number) = Z2tensor(A.parity, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(*, B::Number, A::AbstractZ2Array) = Z2tensor(A.parity, A.tensor .* B, A.size, A.dims, A.division)
 broadcasted(/, A::AbstractZ2Array, B::Number) = A / B
 
 function +(A::AbstractZ2Array, B::AbstractZ2Array)
@@ -316,9 +316,9 @@ function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
 end
 
 # for OMEinsum contract to get number
-vec(A::AbstractZ2Array) = A
+# vec(A::AbstractZ2Array) = A
 
-function transpose(A::AbstractZ2Array{T,N}) where {T,N}
+function transpose(A::AbstractZ2Array)
     tensor = map(transpose, A.tensor)
     Z2tensor(A.parity, tensor, A.size, A.dims, 0)
 end
@@ -341,6 +341,9 @@ function _compactify!(y, x::AbstractZ2Array, indexer)
     end
     return y
 end
+
+broadcasted(*, A::AbstractZ2Array, B::Base.RefValue) = Z2tensor(A.parity, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(*, B::Base.RefValue, A::AbstractZ2Array) = Z2tensor(A.parity, A.tensor .* B, A.size, A.dims, A.division)
 
 # for ein"abab ->"(A)[]
 function dtr(A::AbstractZ2Array{T,N}) where {T,N}

@@ -1,7 +1,7 @@
 name = "VUMPS"
 uuid = "260a78e0-cbf2-49ba-8157-48058c700f32"
 authors = ["XingyuZhang2018 <zhangxingyu@iphy.ac.cn> and contributors"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
@@ -14,7 +14,6 @@ KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OMEinsum = "ebe7aa44-baf0-506c-a96f-8464559b3922"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
@@ -24,7 +23,6 @@ ChainRulesCore = "1.11.2"
 IterTools = "1.4.0"
 JLD2 = "0.4.15"
 KrylovKit = "0.5.3"
-OMEinsum = "0.6.8"
 Zygote = "0.6.32"
 julia = "1.6"
 
