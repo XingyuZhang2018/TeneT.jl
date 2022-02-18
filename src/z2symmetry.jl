@@ -56,11 +56,7 @@ end
 
 size(A::AbstractZ2Array) = A.size
 size(A::AbstractZ2Array, a) = size(A)[a]
-function conj!(A::AbstractZ2Array)
-    map(conj!, A.tensor)
-    A
-end
-conj(A::AbstractZ2Array) = conj!(copy(A))
+conj(A::AbstractZ2Array) = Z2tensor(A.parity, map(conj, A.tensor), A.size, A.dims, A.division)
 map(conj, A::AbstractZ2Array) = conj(A)
 norm(A::AbstractZ2Array) = norm(A.tensor)
 
