@@ -56,7 +56,11 @@ end
 
 size(A::AbstractZ2Array) = A.size
 size(A::AbstractZ2Array, a) = size(A)[a]
-conj(A::AbstractZ2Array) = Z2tensor(A.parity, map(conj, A.tensor), A.size, A.dims, A.division)
+function conj!(A::AbstractZ2Array)
+    map(conj!, A.tensor)
+    A
+end
+conj(A::AbstractZ2Array) = conj!(copy(A))
 map(conj, A::AbstractZ2Array) = conj(A)
 norm(A::AbstractZ2Array) = norm(A.tensor)
 
@@ -295,22 +299,19 @@ end
 
 function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     atype = _arraytype(A.tensor[1])
-    tensor = zeros(T, size(A))
+    tensor = atype(zeros(T, size(A)))
     parity = A.parity
     qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
     for i in 1:length(parity)
-        tensor[[qlist[j][parity[i][j]+1] for j = 1:N]...] = Array(A.tensor[i])
+        tensor[[qlist[j][parity[i][j]+1] for j = 1:N]...] = A.tensor[i]
     end
-    atype(tensor)
+    tensor
 end
 
-# have Bugs with CuArray, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
-    atype = _arraytype(A)
-    Aarray = Array(A)
     qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
     parity = getparity(N)
-    tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
+    tensor = [A[[qlist[j][parity[i][j]+1] for j = 1:N]...] for i in 1:length(parity)]
     dims = map(x -> [size(x)...], tensor)
     Z2tensor(parity, tensor, size(A), dims, 1)
 end
