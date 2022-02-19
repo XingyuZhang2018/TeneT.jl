@@ -117,15 +117,15 @@ end
     @btime CUDA.@sync rightorth($A)
 end
 
-# d = 4, χ = 50 for CUDA@v3.8.0 RTX 2060-6G
-# 3.498 s (1180788 allocations: 148.31 MiB)
-# 3.601 s (1206661 allocations: 149.36 MiB)
-# Test Summary:                                      |
-# leftenv and rightenv with none CuArray{ComplexF64} | No tests
-# 1.867 s (1545374 allocations: 74.50 MiB)
-# 1.852 s (1598603 allocations: 77.47 MiB)
-# Test Summary:                                    |
-# leftenv and rightenv with Z2 CuArray{ComplexF64} | No tests
+# d = 4, χ = 50 for CUDA@v3.8.1 RTX 2060-6G
+#     2.765 s (128788 allocations: 9.17 MiB)
+#     2.717 s (149190 allocations: 10.06 MiB)
+#   Test Summary:                                      |
+#   leftenv and rightenv with none CuArray{ComplexF64} | No tests
+#     1.894 s (1592272 allocations: 77.18 MiB)
+#     1.853 s (1645205 allocations: 80.13 MiB)
+#   Test Summary:                                    |
+#   leftenv and rightenv with Z2 CuArray{ComplexF64} | No tests
 
 # d = 4, χ = 50 for CUDA@v3.5.0 RTX 2060-6G
 # 3.286 s (137542 allocations: 10.15 MiB)
@@ -149,6 +149,15 @@ end
     @btime CUDA.@sync rightenv($AR, $AR, $M)
 end
 
+# d = 4, χ = 50 for CUDA@v3.8.1 RTX 2060-6G
+#     2.703 s (114543 allocations: 6.02 MiB)
+#     286.202 ms (78459 allocations: 4.34 MiB)
+#   Test Summary:                                |
+#   ACenv and Cenv with none CuArray{ComplexF64} | No tests
+#     1.830 s (1553011 allocations: 71.37 MiB)
+#     784.976 ms (679158 allocations: 31.28 MiB)
+#   Test Summary:                              |
+#   ACenv and Cenv with Z2 CuArray{ComplexF64} | No tests
 
 # d = 4, χ = 50 for CUDA@v3.5.0 RTX 2060-6G
 #     3.247 s (113480 allocations: 5.96 MiB)

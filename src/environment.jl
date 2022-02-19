@@ -211,13 +211,14 @@ end
 """
 function LRtoC(L, R)
     Ni, Nj = size(L)
-    atype = _arraytype(L[1,1])
-    C = Array{atype{ComplexF64, 2}, 2}(undef, Ni, Nj)
-    for j in 1:Nj,i in 1:Ni
-        jr = j + 1 - (j + 1 > Nj) * Nj
-        C[i,j] = L[i,j] * R[i,jr]
-    end
-    return C
+    # atype = _arraytype(L[1,1])
+    # C = Array{atype{ComplexF64, 2}, 2}(undef, Ni, Nj)
+    # for j in 1:Nj,i in 1:Ni
+    #     jr = j + 1 - (j + 1 > Nj) * Nj
+    #     C[i,j] = L[i,j] * R[i,jr]
+    # end
+    # return C
+    reshape([L[i] * R[i] for i=1:Ni*Nj], Ni,Nj) # incorrect initial but faster
 end
 
 """
@@ -266,36 +267,48 @@ end
 
 function FLint(AL, M)
     Ni,Nj = size(AL)
-    atype = _arraytype(AL[1,1])
-    FL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
+    # atype = _arraytype(AL[1,1])
+    # FL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     symmetry = getsymmetry(M[1,1])
-    for j = 1:Nj, i = 1:Ni
-        D = size(AL[i,j],1)
-        dL = size(M[i,j],1)
-        # FL[i,j] = randinitial(AL[1,1], D,dL,D)
-        if symmetry == :Z2
-            FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
-        else
-            FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
-        end
+    # for j = 1:Nj, i = 1:Ni
+    #     D = size(AL[i,j],1)
+    #     dL = size(M[i,j],1)
+    #     # FL[i,j] = randinitial(AL[1,1], D,dL,D)
+    #     if symmetry == :Z2
+    #         FL[i,j] = Z2reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+    #     else
+    #         FL[i,j] = reshape(randinitial(AL[1,1], D,Int(sqrt(dL)),Int(sqrt(dL)),D), D,dL,D)
+    #     end
+    # end
+    # return FL
+    if symmetry == :Z2
+        FL = [Z2reshape(randinitial(AL[i,j], size(AL[i,j],1),Int(sqrt(size(M[i,j],1))),Int(sqrt(size(M[i,j],1))),size(AL[i,j],1)), size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1)) for i=1:Ni, j=1:Nj]
+    else
+        FL = [reshape(randinitial(AL[i,j], size(AL[i,j],1),Int(sqrt(size(M[i,j],1))),Int(sqrt(size(M[i,j],1))),size(AL[i,j],1)), size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1)) for i=1:Ni, j=1:Nj]
     end
     return FL
 end
 
 function FRint(AR, M)
     Ni,Nj = size(AR)
-    atype = _arraytype(AR[1,1])
-    FR = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
+    # atype = _arraytype(AR[1,1])
+    # FR = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     symmetry = getsymmetry(M[1,1])
-    for j = 1:Nj, i = 1:Ni
-        D = size(AR[i,j],1)
-        dR = size(M[i,j],3)
-        # FR[i,j] = randinitial(AR[1,1], D,dR,D)
-        if symmetry == :Z2
-            FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
-        else
-            FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
-        end
+    # for j = 1:Nj, i = 1:Ni
+    #     D = size(AR[i,j],1)
+    #     dR = size(M[i,j],3)
+    #     # FR[i,j] = randinitial(AR[1,1], D,dR,D)
+    #     if symmetry == :Z2
+    #         FR[i,j] = Z2reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+    #     else
+    #         FR[i,j] = reshape(randinitial(AR[1,1], D,Int(sqrt(dR)),Int(sqrt(dR)),D), D,dR,D)
+    #     end
+    # end
+    # return FR
+    if symmetry == :Z2
+        FR = [Z2reshape(randinitial(AR[i,j], size(AR[i,j],1),Int(sqrt(size(M[i,j],3))),Int(sqrt(size(M[i,j],3))),size(AR[i,j],1)), size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1)) for i=1:Ni, j=1:Nj]
+    else
+        FR = [reshape(randinitial(AR[i,j], size(AR[i,j],1),Int(sqrt(size(M[i,j],3))),Int(sqrt(size(M[i,j],3))),size(AR[i,j],1)), size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1)) for i=1:Ni, j=1:Nj]
     end
     return FR
 end
