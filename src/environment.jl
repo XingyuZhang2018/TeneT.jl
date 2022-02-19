@@ -218,7 +218,7 @@ function LRtoC(L, R)
     #     C[i,j] = L[i,j] * R[i,jr]
     # end
     # return C
-    reshape([L[i] * R[i] for i=1:Ni*Nj], Ni,Nj) # incorrect initial but faster
+    [L[i,j] * R[i,j + 1 - (j + 1 > Nj) * Nj] for i=1:Ni, j=1:Nj]
 end
 
 """
