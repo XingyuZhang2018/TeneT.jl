@@ -295,19 +295,23 @@ end
 
 function Z2tensor2tensor(A::Z2tensor{T,N}) where {T,N}
     atype = _arraytype(A.tensor[1])
-    tensor = atype(zeros(T, size(A)))
+    tensor = zeros(T, size(A))
     parity = A.parity
     qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
     for i in 1:length(parity)
-        tensor[[qlist[j][parity[i][j]+1] for j = 1:N]...] = A.tensor[i]
+        tensor[[qlist[j][parity[i][j]+1] for j = 1:N]...] = Array(A.tensor[i])
     end
-    tensor
+    atype(tensor)
 end
 
+# have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
+# which is fixed in new vervion, but its allocation is abnormal
 function tensor2Z2tensor(A::AbstractArray{T,N}) where {T,N}
+    atype = _arraytype(A)
+    Aarray = Array(A)
     qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
     parity = getparity(N)
-    tensor = [A[[qlist[j][parity[i][j]+1] for j = 1:N]...] for i in 1:length(parity)]
+    tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
     dims = map(x -> [size(x)...], tensor)
     Z2tensor(parity, tensor, size(A), dims, 1)
 end
