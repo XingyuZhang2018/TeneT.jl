@@ -75,7 +75,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     AL, L = leftorth(A)
     R, AR = rightorth(AL)
     _, FL = leftenv(AL, AL, M)
-    _, FR = rightenv(AR, AR, M)
+    _, FR = rightenv(AR, AR, M, FL)
     C = LRtoC(L,R)
     Ni, Nj = size(M)
     verbose && print("random initial $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry vumps_χ$(χ) environment-> ")
@@ -125,7 +125,7 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     _, C = Cenv(C, FL, FR)
     ALp, ARp, _, _ = ACCtoALAR(AC, C)
     _, FL = leftenv(AL, ALp, M, FL)
-    _, FR = rightenv(AR, ARp, M, FR)
+    _, FR = rightenv(AR, ARp, M, FL)
     _, AC = ACenv(AC, FL, M, FR)
     _, C = Cenv(C, FL, FR)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
@@ -220,7 +220,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     end
 
     _, FL = obs_FL(ALu, ALd, M, FL)
-    _, FR = obs_FR(ARu, ARd, M, FR)
+    _, FR = obs_FR(ARu, ARd, M, FL)
     Zygote.@ignore savefile && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         FLs, FRs = map(x->map(Array, x), [FL, FR])
