@@ -1,0 +1,51 @@
+  1.935 ms (428 allocations: 21.25 KiB)
+Test Summary:                           |
+OMEinsum with none CuArray{ComplexF64}  | No tests
+  1.485 ms (5558 allocations: 265.28 KiB)
+Test Summary:                         |
+OMEinsum with Z2 CuArray{ComplexF64}  | No tests
+
+  108.134 ms (14270 allocations: 805.86 KiB)
+  34.577 ms (6694 allocations: 355.22 KiB)
+Test Summary:                           |
+KrylovKit with none CuArray{ComplexF64} | No tests
+  234.236 ms (196505 allocations: 8.88 MiB)
+  66.517 ms (86286 allocations: 4.04 MiB)
+Test Summary:                         |
+KrylovKit with Z2 CuArray{ComplexF64} | No tests
+
+  776.638 μs (143 allocations: 6.94 KiB)
+  1.061 ms (187 allocations: 945.86 KiB)
+Test Summary:                           |
+qr and lq with none CuArray{ComplexF64} | No tests
+  912.357 μs (750 allocations: 37.12 KiB)
+  1.204 ms (898 allocations: 511.22 KiB)
+Test Summary:                         |
+qr and lq with Z2 CuArray{ComplexF64} | No tests
+
+  853.103 ms (349044 allocations: 23.64 MiB)
+  813.226 ms (323347 allocations: 21.63 MiB)
+Test Summary:                                        |
+leftorth and rightorth with none CuArray{ComplexF64} | No tests
+  1.963 s (2186314 allocations: 96.69 MiB)
+  1.946 s (2188438 allocations: 96.80 MiB)
+Test Summary:                                      |
+leftorth and rightorth with Z2 CuArray{ComplexF64} | No tests
+
+  1.282 s (112364 allocations: 15.62 MiB)
+  1.310 s (128447 allocations: 16.35 MiB)
+Test Summary:                                      |
+leftenv and rightenv with none CuArray{ComplexF64} | No tests
+  2.712 s (1471575 allocations: 82.29 MiB)
+  2.022 s (1517175 allocations: 85.00 MiB)
+Test Summary:                                    |
+leftenv and rightenv with Z2 CuArray{ComplexF64} | No tests
+
+  1.280 s (108090 allocations: 5.64 MiB)
+  132.475 ms (74610 allocations: 4.11 MiB)
+Test Summary:                                |
+ACenv and Cenv with none CuArray{ComplexF64} | No tests
+  2.632 s (1459230 allocations: 67.27 MiB)
+  425.670 ms (658138 allocations: 29.72 MiB)
+Test Summary:                              |
+ACenv and Cenv with Z2 CuArray{ComplexF64} | No tests
