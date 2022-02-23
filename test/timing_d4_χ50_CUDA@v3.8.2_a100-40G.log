@@ -1,51 +1,51 @@
-  250.249 μs (432 allocations: 22.30 KiB)
+  251.739 μs (440 allocations: 22.67 KiB)
 Test Summary:                           |
 OMEinsum with none CuArray{ComplexF64}  | No tests
-  1.178 ms (5550 allocations: 269.03 KiB)
+  956.626 μs (5020 allocations: 254.38 KiB)
 Test Summary:                         |
 OMEinsum with Z2 CuArray{ComplexF64}  | No tests
 
-  35.505 ms (14438 allocations: 841.25 KiB)
-  5.468 ms (5629 allocations: 310.11 KiB)
+  35.358 ms (14681 allocations: 852.64 KiB)
+  5.506 ms (5733 allocations: 314.98 KiB)
 Test Summary:                           |
 KrylovKit with none CuArray{ComplexF64} | No tests
-  175.919 ms (196457 allocations: 9.01 MiB)
-  42.078 ms (80816 allocations: 3.83 MiB)
+  170.609 ms (180569 allocations: 8.58 MiB)
+  39.509 ms (74046 allocations: 3.65 MiB)
 Test Summary:                         |
 KrylovKit with Z2 CuArray{ComplexF64} | No tests
 
-  808.827 μs (183 allocations: 9.81 KiB)
-  1.091 ms (227 allocations: 948.73 KiB)
+  601.077 μs (193 allocations: 10.28 KiB)
+  1.341 ms (287 allocations: 2.53 MiB)
 Test Summary:                           |
 qr and lq with none CuArray{ComplexF64} | No tests
-  1.005 ms (874 allocations: 45.66 KiB)
-  1.226 ms (978 allocations: 516.97 KiB)
+  739.147 μs (856 allocations: 44.09 KiB)
+  1.165 ms (1008 allocations: 1.31 MiB)
 Test Summary:                         |
 qr and lq with Z2 CuArray{ComplexF64} | No tests
 
-  20.673 s (14440428 allocations: 2.19 GiB)
-  16.738 s (11603454 allocations: 1.76 GiB)
+  20.548 s (14444734 allocations: 2.19 GiB)
+  16.605 s (11607830 allocations: 1.76 GiB)
 Test Summary:                                        |
 leftorth and rightorth with none CuArray{ComplexF64} | No tests
-  1.889 s (2230568 allocations: 100.14 MiB)
-  1.936 s (2232140 allocations: 100.23 MiB)
+  1.904 s (2050228 allocations: 94.58 MiB)
+  1.918 s (2051937 allocations: 94.67 MiB)
 Test Summary:                                      |
 leftorth and rightorth with Z2 CuArray{ComplexF64} | No tests
 
-  175.582 ms (114007 allocations: 8.59 MiB)
-  176.099 ms (130087 allocations: 9.32 MiB)
+  171.800 ms (116079 allocations: 8.68 MiB)
+  174.738 ms (132639 allocations: 9.44 MiB)
 Test Summary:                                      |
 leftenv and rightenv with none CuArray{ComplexF64} | No tests
-  876.612 ms (1469399 allocations: 72.16 MiB)
-  890.278 ms (1514999 allocations: 74.87 MiB)
+  833.136 ms (1342807 allocations: 68.75 MiB)
+  850.620 ms (1390327 allocations: 71.55 MiB)
 Test Summary:                                    |
 leftenv and rightenv with Z2 CuArray{ComplexF64} | No tests
 
-  174.646 ms (105642 allocations: 5.62 MiB)
-  120.585 ms (75498 allocations: 4.16 MiB)
+  161.913 ms (107454 allocations: 5.70 MiB)
+  136.876 ms (76878 allocations: 4.23 MiB)
 Test Summary:                                |
 ACenv and Cenv with none CuArray{ComplexF64} | No tests
-  809.011 ms (1432854 allocations: 66.44 MiB)
-  405.559 ms (646990 allocations: 29.46 MiB)
+  821.149 ms (1305222 allocations: 62.99 MiB)
+  438.876 ms (592534 allocations: 27.82 MiB)
 Test Summary:                              |
 ACenv and Cenv with Z2 CuArray{ComplexF64} | No tests

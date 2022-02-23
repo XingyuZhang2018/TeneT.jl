@@ -248,44 +248,25 @@ function bulktimes!(parity, tensor, dims, A, B, p)
     ind_B = findall(x->x[1:divB] in matrix_j, Bparity)
     matrix_k = unique(map(x->x[divB+1:end], Bparity[ind_B]))
 
-    #opt push!
-    h, bulkidims, oribulkidims = [] , Int[], []
-    for i in matrix_i
-        v = []
-        ind = 0
-        for j in matrix_j
-            ind = findfirst(x->x in [[i; j]], Aparity)
-            push!(v, Atensor[ind])
-        end
-        push!(oribulkidims, Adims[ind][1:divA]) 
-        hi = hcat(v...)
-        push!(h, hi)
-        push!(bulkidims, size(hi)[1])
-    end
-    Amatrix = vcat(h...)
+    index = [findfirst(x->x in [[i; j]], Aparity) for i in matrix_i, j in matrix_j]
+    oribulkidims = map(ind -> Adims[ind][1:divA], index[:, 1])
+    bulkidims = map(ind -> size(Atensor[ind], 1), index[:, 1])
+    bulkjdims = map(ind -> size(Atensor[ind], 2), index[1, :])
+    Amatrix = hvcat(ntuple(i->length(bulkjdims), length(bulkidims)), Atensor[index']...)
 
-    v, bulkjdims, oribulkjdims = [], Int[], []
-    for k in matrix_k
-        h = []
-        ind = 0
-        for j in matrix_j
-            ind = findfirst(x->x in [[j; k]], Bparity)
-            push!(h, Btensor[ind])
-        end
-        push!(oribulkjdims, Bdims[ind][divB+1:end])
-        hj = vcat(h...)
-        push!(v, hj)
-        push!(bulkjdims, size(hj)[2])
-    end
-    Bmatrix = hcat(v...)
-
+    index = [findfirst(x->x in [[j; k]], Bparity) for j in matrix_j, k in matrix_k]
+    oribulkkdims = map(ind -> Bdims[ind][divB+1:end], index[1, :])
+    bulkkdims = map(ind -> size(Btensor[ind], 2), index[1, :])
+    Bmatrix = hvcat(ntuple(i->length(bulkkdims), length(bulkjdims)), Btensor[index']...)
+    
     atype = _arraytype(Btensor[1])
     C = atype(Amatrix) * atype(Bmatrix)
-    for i in 1:length(matrix_i), j in 1:length(matrix_k)
-        push!(parity, [matrix_i[i]; matrix_k[j]])
-        push!(dims, [oribulkidims[i]; oribulkjdims[j]])
-        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
-        push!(tensor, C[idim, jdim])
+
+    for i in 1:length(matrix_i), k in 1:length(matrix_k)
+        push!(parity, [matrix_i[i]; matrix_k[k]])
+        push!(dims, [oribulkidims[i]; oribulkkdims[k]])
+        idim, kdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])
+        push!(tensor, C[idim, kdim])
     end
 end
 
