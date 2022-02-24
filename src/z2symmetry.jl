@@ -241,6 +241,8 @@ function bulktimes!(parity, tensor, dims, A, B, p)
     Bparity, Btensor = B.parity, B.tensor
     Adims, Bdims = A.dims, B.dims
     divA, divB = A.division, B.division
+    atype = _arraytype(Btensor[1])
+    etype = eltype(Btensor[1])
 
     ind_A = findall(x->sum(x[divA+1:end]) % 2 == p, Aparity)
     matrix_j = unique(map(x->x[divA+1:end], Aparity[ind_A]))
@@ -252,14 +254,21 @@ function bulktimes!(parity, tensor, dims, A, B, p)
     oribulkidims = map(ind -> Adims[ind][1:divA], index[:, 1])
     bulkidims = map(ind -> size(Atensor[ind], 1), index[:, 1])
     bulkjdims = map(ind -> size(Atensor[ind], 2), index[1, :])
-    Amatrix = hvcat(ntuple(i->length(bulkjdims), length(bulkidims)), Atensor[index']...)
+    # Amatrix = hvcat(ntuple(i->length(bulkjdims), length(bulkidims)), Atensor[index']...)
+    Amatrix = atype == Array ? zeros(etype, sum(bulkidims), sum(bulkjdims)) : CUDA.zeros(etype, sum(bulkidims), sum(bulkjdims))
+    for i in 1:length(matrix_i), j in 1:length(matrix_j)
+        Amatrix[sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])] .= Atensor[index[i, j]]
+    end
 
     index = [findfirst(x->x in [[j; k]], Bparity) for j in matrix_j, k in matrix_k]
     oribulkkdims = map(ind -> Bdims[ind][divB+1:end], index[1, :])
     bulkkdims = map(ind -> size(Btensor[ind], 2), index[1, :])
-    Bmatrix = hvcat(ntuple(i->length(bulkkdims), length(bulkjdims)), Btensor[index']...)
+    # Bmatrix = hvcat(ntuple(i->length(bulkkdims), length(bulkjdims)), Btensor[index']...)
+    Bmatrix = atype == Array ? zeros(etype, sum(bulkjdims), sum(bulkkdims)) : CUDA.zeros(etype, sum(bulkjdims), sum(bulkkdims))
+    for j in 1:length(matrix_j), k in 1:length(matrix_k)
+        Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] .= Btensor[index[j, k]]
+    end
     
-    atype = _arraytype(Btensor[1])
     C = atype(Amatrix) * atype(Bmatrix)
 
     for i in 1:length(matrix_i), k in 1:length(matrix_k)

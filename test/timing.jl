@@ -18,6 +18,7 @@ CUDA.allowscalar(false)
     # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
     # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
+    # @btime CUDA.@sync ein"adf,abc -> fdbc"($FL,$AL)
 end
 
 @testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
