@@ -6,6 +6,7 @@ import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export AbstractZ2Array, Z2tensor
+export parity_conserving, randZ2, tensor2Z2tensor, Z2tensor2tensor, Z2reshape
 
 """
     parity_conserving(T::Array)
