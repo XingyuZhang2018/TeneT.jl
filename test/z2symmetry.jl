@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS: parity_conserving,Z2tensor,Z2tensor2tensor,qrpos,lqpos,sysvd!,_arraytype
+using VUMPS: qrpos,lqpos,sysvd!,_arraytype
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -155,12 +155,12 @@ end
     # @test tFL ≈ Z2tensor2tensor(FL) 
 
 	## autodiff test
-	D,d = 3,2
-	FL = randZ2(atype, dtype, D, d, D)
-	S = randZ2(atype, dtype, D, d, D, D, d, D)
-	FLtensor = Z2tensor2tensor(FL)
-	Stensor = Z2tensor2tensor(S)
-	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
+	# D,d = 3,2
+	# FL = randZ2(atype, dtype, D, d, D)
+	# S = randZ2(atype, dtype, D, d, D, D, d, D)
+	# FLtensor = Z2tensor2tensor(FL)
+	# Stensor = Z2tensor2tensor(S)
+	# @test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 
 @testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:Z2]
