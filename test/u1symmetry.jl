@@ -36,8 +36,9 @@ end
 	@test U1tensor <: AbstractU1Array <: AbstractArray
 
     # u1bulkdims division
-    @test u1bulkdims(5,8; parts = 3) == [[1, 3, 1], [2, 4, 2]]
-    @test u1bulkdims(5,8; parts = 5) == [[1, 1, 1, 1, 1], [1, 1, 4, 1, 1]]
+    @test u1bulkdims(2,4) == ([1,1], [1,2,1])
+    @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
+    @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
     for a = 5:8, b = 5:8
         @test sum(u1bulkdims(a,b)[1]) == a
         @test sum(u1bulkdims(a,b)[2]) == b
@@ -131,47 +132,55 @@ end
 	@test ein"abc,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cb -> a"(A,B))
 	@test ein"bac,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"bac,cb -> a"(A,B))
 	@test ein"cba,ab -> c"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,ab -> c"(A,B))
+    a = randU1(atype, dtype, [1,-1,1], 4,4,4)
+    b = randU1(atype, dtype, [1,-1,-1], 4,4,4)
+    c = ein"abc,bcd->ad"(a,b)
+    atensor = U1tensor2tensor(a)
+    btensor = U1tensor2tensor(b)
+    ctensor = U1tensor2tensor(c)
+    @test ctensor ≈ ein"abc,bcd->ad"(atensor,btensor)
 
-	# ## NestedEinsum
+	# NestedEinsum
     C = randU1(atype, dtype, [-1,1], 4,3)
     Ctensor = U1tensor2tensor(C)
 	@test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ U1tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ U1tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,C))
 
-	# ## constant
-	# @test Array(ein"abc,abc ->"(Atensor,Atensor))[] ≈ Array(ein"abc,abc ->"(A,A))[]
+	# constant
+    D = randU1(atype, dtype, [-1,-1,1], 3,3,4)
+    Dtensor = U1tensor2tensor(D)
+	@test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
 
-	# ## tr
-	# B = randU1(atype, dtype, 4,4)
-	# Btensor = U1tensor2tensor(B)
-	# @test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
+	# tr
+	B = randU1(atype, dtype, [1,-1], 4,4)
+	Btensor = U1tensor2tensor(B)
+	@test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
 
-	# B = randU1(atype, dtype, 2,2,2,2)
-	# Btensor = U1tensor2tensor(B)
-	# @test Array(ein"abab -> "(Btensor))[] ≈ tr(reshape(B,4,4))
-	# @test Array(ein"aabb -> "(Btensor))[] ≈ Array(ein"aabb-> "(B))[]
+	B = randU1(atype, dtype, [1,1,-1,-1], 4,4,4,4)
+	Btensor = U1tensor2tensor(B)
+	@test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
 
-	# ## VUMPS unit
-	# d = 2
-    # D = 5
-    # AL = randU1(atype, dtype, D, d, D)
-    # M = randU1(atype, dtype, d, d, d, d)
-    # FL = randU1(atype, dtype, D, d, D)
-    # tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
-	# tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
-	# FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-    # @test tFL ≈ U1tensor2tensor(FL) 
+	# VUMPS unit
+	d = 4
+    D = 5
+    AL = randU1(atype, dtype, [-1,1,1], D,d,D)
+    M = randU1(atype, dtype, [-1,1,1,-1], d,d,d,d)
+    FL = randU1(atype, dtype, [1,1,-1], D,d,D)
+    tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
+	tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
+	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+    @test tFL ≈ U1tensor2tensor(FL) 
 
-	## autodiff test
-	# D,d = 3,2
-	# FL = randU1(atype, dtype, D, d, D)
-	# S = randU1(atype, dtype, D, d, D, D, d, D)
-	# FLtensor = U1tensor2tensor(FL)
-	# Stensor = U1tensor2tensor(S)
-	# @test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
+	# autodiff test
+	D,d = 4,3
+	FL = randU1(atype, dtype, [1,1,1], D, d, D)
+	S = randU1(atype, dtype, [-1,-1,-1,-1,-1,-1], D, d, D, D, d, D)
+	FLtensor = U1tensor2tensor(FL)
+	Stensor = U1tensor2tensor(S)
+	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 
-@testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
-    Random.seed!(100)
+ @testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+    Random.seed!(100) 
     d = 2
     χ = 2
 

@@ -8,7 +8,7 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-# a100-40g                                              |  # 2060-40g                                            
+# a100-40g                                              |  # 2060-6g                                            
 # none         76.190 μs (152 allocations: 7.56 KiB)    |  1.524 ms (157 allocations: 7.86 KiB)  
 # Z2-hard     201.979 μs (616 allocations: 29.06 KiB)   |  846.100 μs (616 allocations: 29.09 KiB)
 # Z2-OMEinsum 314.069 μs (1454 allocations: 75.80 KiB)  |  908.300 μs (1436 allocations: 75.02 KiB)
@@ -34,7 +34,7 @@ CUDA.allowscalar(false)
     
         # bulktimes
         # even 
-        Amatrix = CUDA.zeros(ComplexF64, 400, 25)
+        Amatrix = CUDA.zeros(ComplexF64, 400, 25) # direct initial in GPU
         Amatrix[1:200, :] .= FLtensor[1]
         Amatrix[201:400, :] .= FLtensor[2]
         Bmatrix = CUDA.zeros(ComplexF64, 25, 400)
