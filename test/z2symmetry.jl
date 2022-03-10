@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS: qrpos,lqpos,sysvd!,_arraytype
+using VUMPS: qrpos,lqpos,sysvd!,_arraytype,zerosZ2
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -196,7 +196,7 @@ end
     @test B.tensor != Bcopy.tensor
 end
 
-@testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]
+@testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     d = 3
     D = 5
@@ -211,11 +211,10 @@ end
 
     λl,FL = λs[1], FLs[1]
     dFL = randZ2(atype, dtype, D, d, D)
-    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(AL, FR, M, conj(AL)), dFL, -λl, 1)
-
+    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosZ2(atype, dtype, D, d, D), dFL, -λl, 1)
     tλl,tFL = tλs[1], tFLs[1]
     tdFL = Z2tensor2tensor(dFL)
-    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tAL, tFR, tM, conj(tAL)), tdFL, -tλl, 1)
+    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
     @test Z2tensor2tensor(ξl) ≈ tξl
 end
 

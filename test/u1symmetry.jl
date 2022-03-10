@@ -45,16 +45,16 @@ end
     end
 
     # initial 
-    oi = [1,1,-1]
-    @test randU1(atype, dtype, oi, 6, 7, 5).size == (6,7,5)
-    @test zerosU1(atype, dtype, oi, 6, 7, 5).size == (6,7,5)
-    @test IU1(atype, dtype, [-1, 1], 6).size == (6,6)
+    dir = [1,1,-1]
+    @test randU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
+    @test zerosU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
+    @test IU1(atype, dtype, 6, dir = [1,-1]).size == (6,6)
 
     # tensor2U1tensor and U1tensor2tensor
-	A = randU1(atype, dtype, [1,1,-1], 3,3,4)
+	A = randU1(atype, dtype, 3,3,4, dir = dir)
     @test A isa U1tensor
 	Atensor = U1tensor2tensor(A)
-    AA = tensor2U1tensor(Atensor, [1,1,-1])
+    AA = tensor2U1tensor(Atensor, dir)
     @test A ≈ AA
 
 	# permutedims
@@ -120,8 +120,8 @@ end
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)
-	A = randU1(atype, dtype, [1,1,-1], 3,3,4)
-	B = randU1(atype, dtype, [1,-1], 4,3)
+	A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1])
+	B = randU1(atype, dtype, 4,3; dir = [1,-1])
 	Atensor = U1tensor2tensor(A)
 	Btensor = U1tensor2tensor(B)
 
@@ -132,8 +132,8 @@ end
 	@test ein"abc,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cb -> a"(A,B))
 	@test ein"bac,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"bac,cb -> a"(A,B))
 	@test ein"cba,ab -> c"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,ab -> c"(A,B))
-    a = randU1(atype, dtype, [1,-1,1], 4,4,4)
-    b = randU1(atype, dtype, [1,-1,-1], 4,4,4)
+    a = randU1(atype, dtype, 4,4,4; dir = [1,-1,1])
+    b = randU1(atype, dtype, 4,4,4; dir = [1,-1,-1])
     c = ein"abc,bcd->ad"(a,b)
     atensor = U1tensor2tensor(a)
     btensor = U1tensor2tensor(b)
@@ -141,30 +141,30 @@ end
     @test ctensor ≈ ein"abc,bcd->ad"(atensor,btensor)
 
 	# NestedEinsum
-    C = randU1(atype, dtype, [-1,1], 4,3)
+    C = randU1(atype, dtype, 4,3; dir = [-1,1])
     Ctensor = U1tensor2tensor(C)
 	@test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ U1tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ U1tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,C))
 
 	# constant
-    D = randU1(atype, dtype, [-1,-1,1], 3,3,4)
+    D = randU1(atype, dtype, 3,3,4; dir = [-1,-1,1])
     Dtensor = U1tensor2tensor(D)
 	@test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
 
-	# tr
-	B = randU1(atype, dtype, [1,-1], 4,4)
+	tr
+	B = randU1(atype, dtype, 4,4; dir = [1,-1])
 	Btensor = U1tensor2tensor(B)
 	@test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
 
-	B = randU1(atype, dtype, [1,1,-1,-1], 4,4,4,4)
+	B = randU1(atype, dtype, 4,4,4,4; dir = [1,1,-1,-1])
 	Btensor = U1tensor2tensor(B)
 	@test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
 
 	# VUMPS unit
-	d = 4
+	d = 3
     D = 5
-    AL = randU1(atype, dtype, [-1,1,1], D,d,D)
-    M = randU1(atype, dtype, [-1,1,1,-1], d,d,d,d)
-    FL = randU1(atype, dtype, [1,1,-1], D,d,D)
+    AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
+    M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
+    FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
     tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
 	tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
 	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
@@ -172,8 +172,8 @@ end
 
 	# autodiff test
 	D,d = 4,3
-	FL = randU1(atype, dtype, [1,1,1], D, d, D)
-	S = randU1(atype, dtype, [-1,-1,-1,-1,-1,-1], D, d, D, D, d, D)
+	FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
+	S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
 	FLtensor = U1tensor2tensor(FL)
 	Stensor = U1tensor2tensor(S)
 	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
@@ -184,54 +184,53 @@ end
     d = 2
     χ = 2
 
-    ## rmul!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    # rmul!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
     Acopy = copy(A)
     @test A*2.0 == rmul!(A, 2.0)
     @test A.tensor != Acopy.tensor
 
-    ## lmul!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
-    B = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    # lmul!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
+    B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
     Bcopy = copy(B)
     @test A*B == lmul!(A, B) 
     @test B.tensor != Bcopy.tensor
 
-    ## mul!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    # mul!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
     Y = similar(A)
     Ycopy = copy(Y)
     @test A*2.0 == mul!(Y, A, 2.0)
     @test Y.tensor != Ycopy.tensor
 
-    ## axpy!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ)
-    B = randinitial(Val(symmetry), atype, dtype, χ, χ)
+    # axpy!
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
+    B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
     Bcopy = copy(B)
     @test A*2.0 + B == axpy!(2.0, A, B)
     @test B.tensor != Bcopy.tensor
 end
 
-@testset "KrylovKit with $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64]
+@testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
-    d = 3
+    d = 4
     D = 5
-    AL = randU1(atype, dtype, D, d, D)
-    M = randU1(atype, dtype, d, d, d, d)
-    FL = randU1(atype, dtype, D, d, D)
-    tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
+    AL = randU1(atype, dtype, D, d, D; dir = [-1,1,1])
+    M = randU1(atype, dtype, d, d, d, d; dir = [-1,1,1,-1])
+    FL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
+    tAL, tM, tFL = map(U1tensor2tensor, [AL, M, FL])
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     tλs, tFLs, info = eigsolve(tFL -> ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL)), tFL, 1, :LM; ishermitian = false)
     @test λs ≈ tλs
     @test U1tensor2tensor(FLs[1]) ≈ tFLs[1]
 
     λl,FL = λs[1], FLs[1]
-    dFL = randU1(atype, dtype, D, d, D)
-    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(AL, FR, M, conj(AL)), dFL, -λl, 1)
-
+    dFL = randU1(atype, dtype, D, d, D; dir = [-1,-1,1])
+    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosU1(atype, dtype, D, d, D; dir = [-1,-1,1]), dFL, -λl, 1)
     tλl,tFL = tλs[1], tFLs[1]
     tdFL = U1tensor2tensor(dFL)
-    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tAL, tFR, tM, conj(tAL)), tdFL, -tλl, 1)
+    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
     @test U1tensor2tensor(ξl) ≈ tξl
 end
 

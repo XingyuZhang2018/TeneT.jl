@@ -20,27 +20,27 @@ getsymmetry(::AbstractU1Array) = :U1
 
 randinitial(::Val{:none}, atype, dtype, a...) = atype(rand(dtype, a...))
 randinitial(::Val{:Z2}, atype, dtype, a...) = randZ2(atype, dtype, a...)
-randinitial(::Val{:U1}, atype, dtype, a...) = randU1(atype, dtype, a...)
+randinitial(::Val{:U1}, atype, dtype, a...; dir) = randU1(atype, dtype, a...; dir = dir)
 
-function randinitial(A::AbstractArray{T, N}, a...) where {T, N}
+function randinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
-    randinitial(Val(getsymmetry(A)), atype, T, a...)
+    randinitial(Val(getsymmetry(A)), atype, T, a...; dir = dir)
 end
 
 Iinitial(::Val{:none}, atype, dtype, D) = atype{dtype}(I, D, D)
 Iinitial(::Val{:Z2}, atype, dtype, D) = IZ2(atype, dtype, D)
-Iinitial(::Val{:U1}, atype, dtype, D) = IU1(atype, dtype, D)
+Iinitial(::Val{:U1}, atype, dtype, D; dir) = IU1(atype, dtype, D; dir = dir)
 
-function Iinitial(A::AbstractArray{T, N}, D) where {T, N}
+function Iinitial(A::AbstractArray{T, N}, D; dir) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
-    Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D)
+    Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D; dir = dir)
 end
 
 zerosinitial(::Val{:none}, atype, dtype, a...) = atype(zeros(dtype, a...))
 zerosinitial(::Val{:Z2}, atype, dtype, a...) = zerosZ2(atype, dtype, a...)
-zerosinitial(::Val{:U1}, atype, dtype, a...) = zerosU1(atype, dtype, a...)
+zerosinitial(::Val{:U1}, atype, dtype, a...; dir) = zerosU1(atype, dtype, a...; dir = dir)
 
-function zerosinitial(A::AbstractArray{T, N}, a...) where {T, N}
+function zerosinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
-    zerosinitial(Val(getsymmetry(A)), atype, T, a...)
+    zerosinitial(Val(getsymmetry(A)), atype, T, a...; dir = dir)
 end
