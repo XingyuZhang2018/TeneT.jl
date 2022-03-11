@@ -125,13 +125,13 @@ end
 
 distribute dims of different part dims of U1 tensor bulk by average and midmax only for odd parts 
 """
-function u1bulkdims(size::Int...;parts = 6)
+function u1bulkdims(size::Int...;parts = 3)
     # bits = map(x -> ceil(Int, log2(x)), size)
     pn = map(size -> [sum(bitarray(i - 1, parts)) for i = 1:size], size)
     map(pn -> [sum(pn .== i) for i = 0:parts], pn)
 end
 
-function randU1(atype, dtype, a...; dir, parts = 6)
+function randU1(atype, dtype, a...; dir, parts = 3)
     L = length(a)
     bkdims = u1bulkdims(a...) # custom initial
     pn = Vector{Vector{Int}}()
@@ -151,7 +151,7 @@ function randU1(atype, dtype, a...; dir, parts = 6)
     U1tensor(pn, tensor, a, dims, 1)
 end
 
-function zerosU1(atype, dtype, a...; dir, parts = 6)
+function zerosU1(atype, dtype, a...; dir, parts = 3)
     L = length(a)
     bkdims = u1bulkdims(a...) # custom initial
     pn = Vector{Vector{Int}}()
@@ -171,7 +171,7 @@ end
 
 zero(A::AbstractU1Array) = U1tensor(A.pn, map(zero, A.tensor), A.size, A.dims, A.division)
 
-function IU1(atype, dtype, D; dir, parts = 6)
+function IU1(atype, dtype, D; dir, parts = 3)
     bkdims = u1bulkdims(D, D) # custom initial
     pn = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
@@ -205,7 +205,7 @@ end
 #     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...] = x
 # end
 
-function U1selection(maxN::Int; parts = 6)
+function U1selection(maxN::Int; parts = 3)
     # bit = ceil(Int, log2(maxN))
     q = [sum(bitarray(i-1, parts)) for i = 1:maxN]
     [q .== i for i in 0:parts]
@@ -228,7 +228,7 @@ p = getpn(size)
 
 give the pn of length L
 """
-function getpn(size, dir::Vector; parts = 6)
+function getpn(size, dir::Vector; parts = 3)
     bkdims = u1bulkdims(size...)
     # parts = length.(bkdims)
     L = length(size)
@@ -288,7 +288,7 @@ end
 
 core code for U1tensor product
 """
-function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}; parts = 6) where {TA,TB,NA,NB}
+function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}; parts = 3) where {TA,TB,NA,NB}
     pn = Vector{Vector{Int}}()
     dims = Vector{Vector{Int}}()
     atype = _arraytype(B.tensor[1])
@@ -299,12 +299,9 @@ function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}; parts = 6) wher
     Adir = sign.(sum(A.pn))[divA+1:end]
     Bdir = sign.(sum(B.pn)[1:divB])
     sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1tensor product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
-    # parts = max(map(x->max(abs.(x)...),A.pn)...) + 1
-    # midsame = intersect(map(x->x[divA+1:end], A.pn), map(x->-x[1:divB], B.pn))
-    # @show parts 
     if !(divA in [0, NA]) && !(divB in [0, NB]) 
         for p in unique(map(x->mod(sum(x[divA+1:end]), parts), A.pn))
-            # @show i
+            # @show p
             u1bulktimes!(pn, tensor, dims, A, B, p)
         end
     else
@@ -319,7 +316,7 @@ end
 
 fill into even and odd matrix,  p = 0 for even, p = 1 for odd, then dispatch to result tensor after product
 """
-function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
+function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 3)
     Apn, Atensor = A.pn, A.tensor
     Bpn, Btensor = B.pn, B.tensor
     Adims, Bdims = A.dims, B.dims
@@ -328,10 +325,10 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
     etype = eltype(Btensor[1])
 
     ind_A = findall(x->mod(sum(x[divA+1:end]), parts) == p, Apn)
-    matrix_j = unique(map(x->x[divA+1:end], Apn[ind_A]))
+    matrix_j = intersect(map(x->x[divA+1:end], Apn[ind_A]), map(x->-x[1:divB], Bpn))
+    ind_A = findall(x->x[divA+1:end] in matrix_j, Apn)
     matrix_i = unique(map(x->x[1:divA], Apn[ind_A]))
     ind_B = findall(x->x[1:divB] in -matrix_j, Bpn)
-    ind_B == [] && return
     matrix_k = unique(map(x->x[divB+1:end], Bpn[ind_B]))
 
     # @show Apn Bpn matrix_i matrix_j ind_B matrix_k
@@ -342,7 +339,9 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
     bulkjdims = map(ind -> size(Atensor[ind], 2), index[1, :])
     # Amatrix = hvcat(ntuple(i->length(bulkjdims), length(bulkidims)), Atensor[index']...)
     Amatrix = atype == Array ? zeros(etype, sum(bulkidims), sum(bulkjdims)) : CUDA.zeros(etype, sum(bulkidims), sum(bulkjdims))
+    # @show size(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_j)
+        # println(sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), ", ", sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), " ", index[i, j])
         Amatrix[sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])] .= Atensor[index[i, j]]
     end
 
@@ -366,7 +365,9 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
     # end
     # Bmatrix = hvcat(ntuple(i->length(bulkkdims), length(bulkjdims)), Btensor[index']...)
     Bmatrix = atype == Array ? zeros(etype, sum(bulkjdims), sum(bulkkdims)) : CUDA.zeros(etype, sum(bulkjdims), sum(bulkkdims))
+    # @show size(Bmatrix)
     for j in 1:length(matrix_j), k in 1:length(matrix_k)
+        # println(sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), ", ", sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k]), " ", index[j, k])
         Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] .= Btensor[index[j, k]]
     end
     
@@ -376,6 +377,7 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
         push!(pn, [matrix_i[i]; matrix_k[k]])
         push!(dims, [oribulkidims[i]; oribulkkdims[k]])
         idim, kdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])
+        # println(idim, ", ", kdim)
         push!(tensor, C[idim, kdim])
     end
 end
@@ -445,8 +447,6 @@ copy(A::AbstractU1Array{T,N}) where {T,N} = U1tensor(A.pn, map(copy, A.tensor), 
 function mul!(Y::AbstractU1Array, A::AbstractU1Array, B::Number)
     exchangeind = indexin(A.pn, Y.pn)
     map((Y, A) -> mul!(Y, A, B), Y.tensor[exchangeind], A.tensor)
-    # Y.pn = A.pn[exchangeind]
-    # Y = A*B
     Y
 end
 
@@ -454,9 +454,13 @@ function axpy!(α::Number, A::AbstractU1Array, B::AbstractU1Array)
     if B.pn == A.pn
         map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor)
     else
-        exchangeind = indexin(A.pn, B.pn)
-        # @show B.pn A.pn exchangeind B.tensor[2]
-        map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor[exchangeind])
+        if length(A.pn) > length(B.pn)
+            exchangeind = indexin(B.pn, A.pn)
+            map((x,y) -> axpy!(α, x, y), A.tensor[exchangeind], B.tensor)
+        else
+            exchangeind = indexin(A.pn, B.pn)
+            map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor[exchangeind])
+        end
     end
     return B
 end

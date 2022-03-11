@@ -126,57 +126,58 @@ end
 	Btensor = U1tensor2tensor(B)
 
 	# binary contraction
-	@test ein"abc,cd -> abd"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cd -> abd"(A,B))
-	@test ein"abc,db -> adc"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,db -> adc"(A,B))
-	@test ein"cba,dc -> abd"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,dc -> abd"(A,B))
-	@test ein"abc,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cb -> a"(A,B))
-	@test ein"bac,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"bac,cb -> a"(A,B))
-	@test ein"cba,ab -> c"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,ab -> c"(A,B))
-    a = randU1(atype, dtype, 4,4,4; dir = [1,-1,1])
-    b = randU1(atype, dtype, 4,4,4; dir = [1,-1,-1])
+	# @test ein"abc,cd -> abd"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cd -> abd"(A,B))
+	# @test ein"abc,db -> adc"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,db -> adc"(A,B))
+	# @test ein"cba,dc -> abd"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,dc -> abd"(A,B))
+	# @test ein"abc,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cb -> a"(A,B))
+	# @test ein"bac,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"bac,cb -> a"(A,B))
+	# @test ein"cba,ab -> c"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,ab -> c"(A,B))
+    a = randU1(atype, dtype, 3,7,5; dir = [1,-1,1])
+    b = randU1(atype, dtype, 7,5,3; dir = [1,-1,-1])
     c = ein"abc,bcd->ad"(a,b)
+    # @show a b c
     atensor = U1tensor2tensor(a)
     btensor = U1tensor2tensor(b)
     ctensor = U1tensor2tensor(c)
     @test ctensor ≈ ein"abc,bcd->ad"(atensor,btensor)
 
-	# NestedEinsum
-    C = randU1(atype, dtype, 4,3; dir = [-1,1])
-    Ctensor = U1tensor2tensor(C)
-	@test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ U1tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ U1tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,C))
+	# # NestedEinsum
+    # C = randU1(atype, dtype, 4,3; dir = [-1,1])
+    # Ctensor = U1tensor2tensor(C)
+	# @test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ U1tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ U1tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,C))
 
-	# constant
-    D = randU1(atype, dtype, 3,3,4; dir = [-1,-1,1])
-    Dtensor = U1tensor2tensor(D)
-	@test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
+	# # constant
+    # D = randU1(atype, dtype, 3,3,4; dir = [-1,-1,1])
+    # Dtensor = U1tensor2tensor(D)
+	# @test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
 
-	tr
-	B = randU1(atype, dtype, 4,4; dir = [1,-1])
-	Btensor = U1tensor2tensor(B)
-	@test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
+	# tr
+	# B = randU1(atype, dtype, 4,4; dir = [1,-1])
+	# Btensor = U1tensor2tensor(B)
+	# @test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
 
-	B = randU1(atype, dtype, 4,4,4,4; dir = [1,1,-1,-1])
-	Btensor = U1tensor2tensor(B)
-	@test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
+	# B = randU1(atype, dtype, 4,4,4,4; dir = [1,1,-1,-1])
+	# Btensor = U1tensor2tensor(B)
+	# @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
 
-	# VUMPS unit
-	d = 3
-    D = 5
-    AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
-    M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
-    FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
-    tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
-	tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
-	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-    @test tFL ≈ U1tensor2tensor(FL) 
+	# # VUMPS unit
+	# d = 3
+    # D = 5
+    # AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
+    # M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
+    # FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
+    # tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
+	# tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
+	# FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+    # @test tFL ≈ U1tensor2tensor(FL) 
 
-	# autodiff test
-	D,d = 4,3
-	FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
-	S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
-	FLtensor = U1tensor2tensor(FL)
-	Stensor = U1tensor2tensor(S)
-	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
+	# # autodiff test
+	# D,d = 4,3
+	# FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
+	# S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
+	# FLtensor = U1tensor2tensor(FL)
+	# Stensor = U1tensor2tensor(S)
+	# @test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 
  @testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]

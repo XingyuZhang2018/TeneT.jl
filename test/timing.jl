@@ -8,7 +8,7 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     d = 8
     χ = 50
