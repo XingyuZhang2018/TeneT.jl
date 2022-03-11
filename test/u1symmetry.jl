@@ -215,7 +215,7 @@ end
 @testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     d = 3
-    D = 8
+    D = 5
     AL = randU1(atype, dtype, D, d, D; dir = [-1,1,1])
     M = randU1(atype, dtype, d, d, d, d; dir = [-1,1,1,-1])
     FL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])

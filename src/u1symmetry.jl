@@ -97,8 +97,8 @@ function dot(A::AbstractU1Array, B::AbstractU1Array)
     if A.pn == B.pn 
         dot(A.tensor, B.tensor)
     else
-        exchangeind = indexin(A.pn, B.pn)
-        dot(A.tensor, B.tensor[exchangeind])
+        exchangeind = indexin(B.pn, A.pn)
+        dot(A.tensor[exchangeind], B.tensor)
     end
 end
 
@@ -141,8 +141,10 @@ function randU1(atype, dtype, a...; dir, parts = 6)
     @inbounds for i in CartesianIndices(Tuple(0:parts-1 for j=1:L))
         if sum(i.I .* dir) % parts == 0
             dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
-            push!(pn, collect(i.I.* dir))
-            push!(tensor, atype(rand(dtype, dims)))
+            if !(0 in dims)
+                push!(pn, collect(i.I.* dir))
+                push!(tensor, atype(rand(dtype, dims)))
+            end
         end
     end
     dims = map(x -> [size(x)...], tensor)
@@ -329,6 +331,7 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
     matrix_j = unique(map(x->x[divA+1:end], Apn[ind_A]))
     matrix_i = unique(map(x->x[1:divA], Apn[ind_A]))
     ind_B = findall(x->x[1:divB] in -matrix_j, Bpn)
+    ind_B == [] && return
     matrix_k = unique(map(x->x[divB+1:end], Bpn[ind_B]))
 
     # @show Apn Bpn matrix_i matrix_j ind_B matrix_k
@@ -439,15 +442,21 @@ similar(A::AbstractU1Array, atype) = U1tensor(A.pn, map(x -> atype(similar(x)), 
 diag(A::AbstractU1Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
 copy(A::AbstractU1Array{T,N}) where {T,N} = U1tensor(A.pn, map(copy, A.tensor), A.size, A.dims, A.division)
 
-mul!(Y::AbstractU1Array, A::AbstractU1Array, B::Number) = (map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor); Y)
+function mul!(Y::AbstractU1Array, A::AbstractU1Array, B::Number)
+    exchangeind = indexin(A.pn, Y.pn)
+    map((Y, A) -> mul!(Y, A, B), Y.tensor[exchangeind], A.tensor)
+    # Y.pn = A.pn[exchangeind]
+    # Y = A*B
+    Y
+end
 
 function axpy!(α::Number, A::AbstractU1Array, B::AbstractU1Array)
     if B.pn == A.pn
         map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor)
     else
-        exchangeind = indexin(B.pn, A.pn)
+        exchangeind = indexin(A.pn, B.pn)
         # @show B.pn A.pn exchangeind B.tensor[2]
-        map((x,y) -> axpy!(α, x, y), A.tensor[exchangeind], B.tensor)
+        map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor[exchangeind])
     end
     return B
 end
