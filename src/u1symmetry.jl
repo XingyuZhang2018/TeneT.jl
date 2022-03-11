@@ -125,21 +125,21 @@ end
 
 distribute dims of different part dims of U1 tensor bulk by average and midmax only for odd parts 
 """
-function u1bulkdims(size::Int...)
-    bits = map(x -> ceil(Int, log2(x)), size)
-    pn = map((bits, size) -> [sum(bitarray(i - 1, bits)) for i = 1:size], bits, size)
-    map((bits, pn) -> filter(x->x!=0, [sum(pn .== i) for i = 0:bits]), bits, pn)
+function u1bulkdims(size::Int...;parts = 6)
+    # bits = map(x -> ceil(Int, log2(x)), size)
+    pn = map(size -> [sum(bitarray(i - 1, parts)) for i = 1:size], size)
+    map(pn -> [sum(pn .== i) for i = 0:parts], pn)
 end
 
-function randU1(atype, dtype, a...; dir)
+function randU1(atype, dtype, a...; dir, parts = 6)
     L = length(a)
     bkdims = u1bulkdims(a...) # custom initial
     pn = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
-    parts = length.(bkdims)
+    # parts = length.(bkdims)
     shift = 1
-    @inbounds for i in CartesianIndices(Tuple(0:parts[j]-1 for j=1:L))
-        if sum(i.I .* dir) % max(parts...) == 0
+    @inbounds for i in CartesianIndices(Tuple(0:parts-1 for j=1:L))
+        if sum(i.I .* dir) % parts == 0
             dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
             push!(pn, collect(i.I.* dir))
             push!(tensor, atype(rand(dtype, dims)))
@@ -149,15 +149,15 @@ function randU1(atype, dtype, a...; dir)
     U1tensor(pn, tensor, a, dims, 1)
 end
 
-function zerosU1(atype, dtype, a...; dir)
+function zerosU1(atype, dtype, a...; dir, parts = 6)
     L = length(a)
     bkdims = u1bulkdims(a...) # custom initial
     pn = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
-    parts = length.(bkdims)
+    # parts = length.(bkdims)
     shift = 1
-    @inbounds for i in CartesianIndices(Tuple(0:(parts[j]-1) for j=1:L))
-        if sum(i.I .* dir) % max(parts...) == 0
+    @inbounds for i in CartesianIndices(Tuple(0:(parts-1) for j=1:L))
+        if sum(i.I .* dir) % parts == 0
             dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
             push!(pn, collect(i.I.* dir))
             push!(tensor, atype(zeros(dtype, dims)))
@@ -169,14 +169,14 @@ end
 
 zero(A::AbstractU1Array) = U1tensor(A.pn, map(zero, A.tensor), A.size, A.dims, A.division)
 
-function IU1(atype, dtype, D; dir)
+function IU1(atype, dtype, D; dir, parts = 6)
     bkdims = u1bulkdims(D, D) # custom initial
     pn = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
-    parts = length.(bkdims)
+    # parts = length.(bkdims)
     shift = 1
-    @inbounds for i in CartesianIndices(Tuple(0:(parts[j]-1) for j=1:2))
-        if sum(i.I .* dir) % max(parts...) == 0
+    @inbounds for i in CartesianIndices(Tuple(0:(parts-1) for j=1:2))
+        if sum(i.I .* dir) % parts == 0
             dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:2)
             push!(pn, collect(i.I .* dir))
             push!(tensor, atype{dtype}(I, dims))
@@ -203,10 +203,10 @@ end
 #     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...] = x
 # end
 
-function U1selection(maxN::Int)
-    bit = ceil(Int, log2(maxN))
-    q = [sum(bitarray(i-1, bit)) for i = 1:maxN]
-    [q .== i for i in 0:bit]
+function U1selection(maxN::Int; parts = 6)
+    # bit = ceil(Int, log2(maxN))
+    q = [sum(bitarray(i-1, parts)) for i = 1:maxN]
+    [q .== i for i in 0:parts]
 end
 
 function U1tensor2tensor(A::U1tensor{T,N}) where {T,N}
@@ -226,13 +226,13 @@ p = getpn(size)
 
 give the pn of length L
 """
-function getpn(size, dir::Vector)
+function getpn(size, dir::Vector; parts = 6)
     bkdims = u1bulkdims(size...)
-    parts = length.(bkdims)
+    # parts = length.(bkdims)
     L = length(size)
     pn = Vector{Vector{Int}}()
     shift = 1
-    @inbounds for i in CartesianIndices(Tuple(0:(parts[j]-1) for j=1:L))
+    @inbounds for i in CartesianIndices(Tuple(0:(parts-1) for j=1:L))
         dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
         !(0 in dims) && push!(pn, collect(i.I .* dir))
     end
@@ -286,7 +286,7 @@ end
 
 core code for U1tensor product
 """
-function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}) where {TA,TB,NA,NB}
+function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}; parts = 6) where {TA,TB,NA,NB}
     pn = Vector{Vector{Int}}()
     dims = Vector{Vector{Int}}()
     atype = _arraytype(B.tensor[1])
@@ -301,12 +301,12 @@ function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}) where {TA,TB,NA
     # midsame = intersect(map(x->x[divA+1:end], A.pn), map(x->-x[1:divB], B.pn))
     # @show parts 
     if !(divA in [0, NA]) && !(divB in [0, NB]) 
-        for matrix_i in unique(map(x->x[1:divA], A.pn))
+        for p in unique(map(x->mod(sum(x[divA+1:end]), parts), A.pn))
             # @show i
-            u1bulktimes!(pn, tensor, dims, A, B, [matrix_i])
+            u1bulktimes!(pn, tensor, dims, A, B, p)
         end
     else
-        u1bulktimes!(pn, tensor, dims, A, B, [[0 for _ in 1:divA]])
+        u1bulktimes!(pn, tensor, dims, A, B, 0)
     end
     pn == [[]] && return Array(tensor[1])[]
     U1tensor(pn, tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
@@ -317,7 +317,7 @@ end
 
 fill into even and odd matrix,  p = 0 for even, p = 1 for odd, then dispatch to result tensor after product
 """
-function u1bulktimes!(pn, tensor, dims, A, B, matrix_i)
+function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 6)
     Apn, Atensor = A.pn, A.tensor
     Bpn, Btensor = B.pn, B.tensor
     Adims, Bdims = A.dims, B.dims
@@ -325,10 +325,10 @@ function u1bulktimes!(pn, tensor, dims, A, B, matrix_i)
     atype = _arraytype(Btensor[1])
     etype = eltype(Btensor[1])
 
-    ind_A = findall(x->x[1:divA] in matrix_i, Apn)
+    ind_A = findall(x->mod(sum(x[divA+1:end]), parts) == p, Apn)
     matrix_j = unique(map(x->x[divA+1:end], Apn[ind_A]))
+    matrix_i = unique(map(x->x[1:divA], Apn[ind_A]))
     ind_B = findall(x->x[1:divB] in -matrix_j, Bpn)
-    ind_B == [] && return
     matrix_k = unique(map(x->x[divB+1:end], Bpn[ind_B]))
 
     # @show Apn Bpn matrix_i matrix_j ind_B matrix_k
@@ -347,24 +347,24 @@ function u1bulktimes!(pn, tensor, dims, A, B, matrix_i)
     oribulkkdims = []
     bulkkdims = Vector{Int}()
     # @show index
-    if nothing in index[1, :]
-        for j in 1:length(matrix_k)
-            for i in 1:length(matrix_j)
-                if index[i, j] !== nothing
-                    oribulkkdims = push!(oribulkkdims, Bdims[index[i, j]][divB+1:end])
-                    bulkkdims = push!(bulkkdims, size(Btensor[index[i, j]], 2))
-                    break
-                end 
-            end
-        end
-    else
+    # if nothing in index[1, :]
+    #     for j in 1:length(matrix_k)
+    #         for i in 1:length(matrix_j)
+    #             if index[i, j] !== nothing
+    #                 oribulkkdims = push!(oribulkkdims, Bdims[index[i, j]][divB+1:end])
+    #                 bulkkdims = push!(bulkkdims, size(Btensor[index[i, j]], 2))
+    #                 break
+    #             end 
+    #         end
+    #     end
+    # else
         oribulkkdims = map(ind -> Bdims[ind][divB+1:end], index[1, :])
         bulkkdims = map(ind -> size(Btensor[ind], 2), index[1, :])
-    end
+    # end
     # Bmatrix = hvcat(ntuple(i->length(bulkkdims), length(bulkjdims)), Btensor[index']...)
     Bmatrix = atype == Array ? zeros(etype, sum(bulkjdims), sum(bulkkdims)) : CUDA.zeros(etype, sum(bulkjdims), sum(bulkkdims))
     for j in 1:length(matrix_j), k in 1:length(matrix_k)
-        index[j, k] !== nothing && (Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] .= Btensor[index[j, k]])
+        Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] .= Btensor[index[j, k]]
     end
     
     C = Amatrix * Bmatrix

@@ -36,9 +36,9 @@ end
 	@test U1tensor <: AbstractU1Array <: AbstractArray
 
     # u1bulkdims division
-    @test u1bulkdims(2,4) == ([1,1], [1,2,1])
-    @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
-    @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
+    @test u1bulkdims(2,4) == ([1,1,0,0], [1,2,1,0])
+    @test u1bulkdims(5,8) == ([1,3,1,0], [1,3,3,1])
+    @test u1bulkdims(3,3,4) == ([1,2,0,0], [1,2,0,0], [1,2,1,0])
     for a = 5:8, b = 5:8
         @test sum(u1bulkdims(a,b)[1]) == a
         @test sum(u1bulkdims(a,b)[2]) == b
@@ -51,7 +51,7 @@ end
     @test IU1(atype, dtype, 6, dir = [1,-1]).size == (6,6)
 
     # tensor2U1tensor and U1tensor2tensor
-	A = randU1(atype, dtype, 3,3,4, dir = dir)
+	A = randU1(atype, dtype, 4,4,5, dir = dir)
     @test A isa U1tensor
 	Atensor = U1tensor2tensor(A)
     AA = tensor2U1tensor(Atensor, dir)
@@ -61,7 +61,7 @@ end
 	@test permutedims(Atensor,[3,2,1]) == U1tensor2tensor(permutedims(A,[3,2,1]))
 
 	# reshape
-	@test reshape(Atensor,(9,4)) == reshape(U1tensor2tensor(reshape(reshape(A,9,4),3,3,4)),(9,4))
+	@test reshape(Atensor,(16,5)) == reshape(U1tensor2tensor(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
 # @testset "reshape parity_conserving compatibility" begin
@@ -214,11 +214,12 @@ end
 
 @testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
-    d = 4
-    D = 5
+    d = 3
+    D = 8
     AL = randU1(atype, dtype, D, d, D; dir = [-1,1,1])
     M = randU1(atype, dtype, d, d, d, d; dir = [-1,1,1,-1])
     FL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
+    # @show AL
     tAL, tM, tFL = map(U1tensor2tensor, [AL, M, FL])
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     tλs, tFLs, info = eigsolve(tFL -> ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL)), tFL, 1, :LM; ishermitian = false)
@@ -228,9 +229,11 @@ end
     λl,FL = λs[1], FLs[1]
     dFL = randU1(atype, dtype, D, d, D; dir = [-1,-1,1])
     ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosU1(atype, dtype, D, d, D; dir = [-1,-1,1]), dFL, -λl, 1)
+    # @show info
     tλl,tFL = tλs[1], tFLs[1]
     tdFL = U1tensor2tensor(dFL)
     tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
+    # @show info
     @test U1tensor2tensor(ξl) ≈ tξl
 end
 

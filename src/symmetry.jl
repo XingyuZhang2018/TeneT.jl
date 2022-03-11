@@ -18,8 +18,8 @@ getsymmetry(::AbstractArray) = :none
 getsymmetry(::AbstractZ2Array) = :Z2
 getsymmetry(::AbstractU1Array) = :U1
 
-randinitial(::Val{:none}, atype, dtype, a...) = atype(rand(dtype, a...))
-randinitial(::Val{:Z2}, atype, dtype, a...) = randZ2(atype, dtype, a...)
+randinitial(::Val{:none}, atype, dtype, a...; dir) = atype(rand(dtype, a...))
+randinitial(::Val{:Z2}, atype, dtype, a...; dir) = randZ2(atype, dtype, a...)
 randinitial(::Val{:U1}, atype, dtype, a...; dir) = randU1(atype, dtype, a...; dir = dir)
 
 function randinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
