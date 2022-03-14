@@ -3,7 +3,7 @@ include("./exampleobs.jl")
 
 using Random
 using Test
-using VUMPS: tensor2Z2tensor, parity_conserving
+using VUMPS: asZ2Array, parity_conserving
 using CUDA
 using Zygote
 
@@ -12,7 +12,7 @@ using Zygote
     model = Ising(Ni, Nj, β)
     M = model_tensor(model)
     M = parity_conserving.(M)
-    symmetry == :Z2 && (M = tensor2Z2tensor.(M))
+    symmetry == :Z2 && (M = asZ2Array.(M))
     env = obs_env(M; χ = 20, verbose = true, savefile = true, infolder = "./example/data/$model/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
     @show Z(env, M) # 2.08450374046259
 end
@@ -23,7 +23,7 @@ end
     model = Ising(Ni, Nj, β)
     M = model_tensor(model)
     M = parity_conserving.(M)
-    symmetry == :Z2 && (M = tensor2Z2tensor.(M))
+    symmetry == :Z2 && (M = asZ2Array.(M))
     function foo(β)
         M = [β * M[1] for i in 1:Ni, j in 1:Nj]
         env = obs_env(M; χ = 20, verbose = true, savefile = true, infolder = "./example/data/$model/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)

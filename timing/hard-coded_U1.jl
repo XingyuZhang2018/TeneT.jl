@@ -99,7 +99,7 @@ CUDA.allowscalar(false)
     
         # permutedims
         map(x -> permutedims(x, (2, 1, 3, 4)), restensor)
-        # Z2tensor(resparity, restensor, ressize, resdims, 1)
+        # Z2Array(resparity, restensor, ressize, resdims, 1)
     end
 
     res = ein"adf,abc -> fdbc"(FL,AL)

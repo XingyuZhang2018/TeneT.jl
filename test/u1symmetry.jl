@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS: u1bulkdims, randU1, zerosU1, IU1
+using VUMPS: u1bulkdims, randU1, zerosU1, IU1, qrpos, lqpos, sysvd!
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -22,18 +22,18 @@ CUDA.allowscalar(false)
 	@test s == 0
 end
 
-@testset "parity_conserving and tensor2U1tensor tensor2U1tensor compatibility" begin
+@testset "parity_conserving and asU1Array asU1Array compatibility" begin
     # a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
     # a = parity_conserving(a)
-    # b = tensor2U1tensor(a)
-    # c = U1tensor2tensor(b)
-    # d = tensor2U1tensor(c)
+    # b = asU1Array(a)
+    # c = asArray(b)
+    # d = asU1Array(c)
     # @test a == c && b == d
 end
 
 @testset "U1 Tensor with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)
-	@test U1tensor <: AbstractU1Array <: AbstractArray
+	@test U1Array <: AbstractSymmetricArray <: AbstractArray
 
     # u1bulkdims division
     @test u1bulkdims(2,4) == ([1,1,0,0], [1,2,1,0])
@@ -50,26 +50,26 @@ end
     @test zerosU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
     @test IU1(atype, dtype, 6, dir = [1,-1]).size == (6,6)
 
-    # tensor2U1tensor and U1tensor2tensor
+    # asU1Array and asArray
 	A = randU1(atype, dtype, 4,4,5, dir = dir)
-    @test A isa U1tensor
-	Atensor = U1tensor2tensor(A)
-    AA = tensor2U1tensor(Atensor, dir)
+    @test A isa U1Array
+	Atensor = asArray(A)
+    AA = asU1Array(Atensor, dir = dir)
     @test A ≈ AA
 
 	# permutedims
-	@test permutedims(Atensor,[3,2,1]) == U1tensor2tensor(permutedims(A,[3,2,1]))
+	@test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]))
 
 	# reshape
-	@test reshape(Atensor,(16,5)) == reshape(U1tensor2tensor(reshape(reshape(A,16,5),4,4,5)),(16,5))
+	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
 # @testset "reshape parity_conserving compatibility" begin
 #     a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
 #     a = parity_conserving(a)
 #     a = reshape(a,3,2,4,3)
-#     b = tensor2U1tensor(a)
-#     c = U1tensor2tensor(b)
+#     b = asU1Array(a)
+#     c = asArray(b)
 #     @test a == c
 # end
 
@@ -79,12 +79,12 @@ end
 #     cU1 = U1reshape(bU1,2,2,2,2,2,2,2,2)
 #     @test aU1 == cU1
 
-#     a = U1tensor2tensor(aU1)
+#     a = asArray(aU1)
 #     b = reshape(a, 4,4,4,4) 
-#     bU1t = tensor2U1tensor(b)
+#     bU1t = asU1Array(b)
 #     @test bU1t == bU1
 #     c = reshape(b, 2,2,2,2,2,2,2,2)
-#     cU1t = tensor2U1tensor(c)
+#     cU1t = asU1Array(c)
 #     @test cU1t == cU1
 
 #     aU1 = randinitial(Val(:U1), Array, Float64, 10,2,2,10)
@@ -92,21 +92,21 @@ end
 #     cU1 = U1reshape(bU1,10,2,2,10)
 #     @test aU1 == cU1
 
-#     a = U1tensor2tensor(aU1)
+#     a = asArray(aU1)
 #     b = reshape(a, 10,4,10) 
-#     bU1t = tensor2U1tensor(b)
+#     bU1t = asU1Array(b)
 #     @test bU1t == bU1
 #     c = reshape(b, 10,2,2,10)
-#     cU1t = tensor2U1tensor(c)
+#     cU1t = asU1Array(c)
 #     @test cU1t == cU1
 # end
 
 # @testset "general flatten reshape" begin
 #     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
 #     a = randinitial(Val(:U1), Array, Float64, 3,3,3,3,3,3,3,3)
-#     atensor = U1tensor2tensor(a)
+#     atensor = asArray(a)
 #     rea = U1reshape(a, 9,9,9,9)
-#     rea2 = tensor2U1tensor(reshape(atensor, 9,9,9,9))
+#     rea2 = asU1Array(reshape(atensor, 9,9,9,9))
 #     @test rea !== rea2
 #     rerea = U1reshape(rea, 3,3,3,3,3,3,3,3)
 #     @test rerea ≈ a
@@ -122,62 +122,62 @@ end
 	Random.seed!(100)
 	A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1])
 	B = randU1(atype, dtype, 4,3; dir = [1,-1])
-	Atensor = U1tensor2tensor(A)
-	Btensor = U1tensor2tensor(B)
+	Atensor = asArray(A)
+	Btensor = asArray(B)
 
 	# binary contraction
-	# @test ein"abc,cd -> abd"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cd -> abd"(A,B))
-	# @test ein"abc,db -> adc"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,db -> adc"(A,B))
-	# @test ein"cba,dc -> abd"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,dc -> abd"(A,B))
-	# @test ein"abc,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"abc,cb -> a"(A,B))
-	# @test ein"bac,cb -> a"(Atensor,Btensor) ≈ U1tensor2tensor(ein"bac,cb -> a"(A,B))
-	# @test ein"cba,ab -> c"(Atensor,Btensor) ≈ U1tensor2tensor(ein"cba,ab -> c"(A,B))
+	@test ein"abc,cd -> abd"(Atensor,Btensor) ≈ asArray(ein"abc,cd -> abd"(A,B))
+	@test ein"abc,db -> adc"(Atensor,Btensor) ≈ asArray(ein"abc,db -> adc"(A,B))
+	@test ein"cba,dc -> abd"(Atensor,Btensor) ≈ asArray(ein"cba,dc -> abd"(A,B))
+	@test ein"abc,cb -> a"(Atensor,Btensor) ≈ asArray(ein"abc,cb -> a"(A,B))
+	@test ein"bac,cb -> a"(Atensor,Btensor) ≈ asArray(ein"bac,cb -> a"(A,B))
+	@test ein"cba,ab -> c"(Atensor,Btensor) ≈ asArray(ein"cba,ab -> c"(A,B))
     a = randU1(atype, dtype, 3,7,5; dir = [1,-1,1])
     b = randU1(atype, dtype, 7,5,3; dir = [1,-1,-1])
     c = ein"abc,bcd->ad"(a,b)
     # @show a b c
-    atensor = U1tensor2tensor(a)
-    btensor = U1tensor2tensor(b)
-    ctensor = U1tensor2tensor(c)
+    atensor = asArray(a)
+    btensor = asArray(b)
+    ctensor = asArray(c)
     @test ctensor ≈ ein"abc,bcd->ad"(atensor,btensor)
 
-	# # NestedEinsum
-    # C = randU1(atype, dtype, 4,3; dir = [-1,1])
-    # Ctensor = U1tensor2tensor(C)
-	# @test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ U1tensor2tensor(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ U1tensor2tensor(ein"(abc,cd),ed -> abe"(A,B,C))
+	# NestedEinsum
+    C = randU1(atype, dtype, 4,3; dir = [-1,1])
+    Ctensor = asArray(C)
+	@test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ asArray(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ asArray(ein"(abc,cd),ed -> abe"(A,B,C))
 
-	# # constant
-    # D = randU1(atype, dtype, 3,3,4; dir = [-1,-1,1])
-    # Dtensor = U1tensor2tensor(D)
-	# @test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
+	# constant
+    D = randU1(atype, dtype, 3,3,4; dir = [-1,-1,1])
+    Dtensor = asArray(D)
+	@test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
 
-	# tr
-	# B = randU1(atype, dtype, 4,4; dir = [1,-1])
-	# Btensor = U1tensor2tensor(B)
-	# @test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
+	tr
+	B = randU1(atype, dtype, 4,4; dir = [1,-1])
+	Btensor = asArray(B)
+	@test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[]
 
-	# B = randU1(atype, dtype, 4,4,4,4; dir = [1,1,-1,-1])
-	# Btensor = U1tensor2tensor(B)
-	# @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
+	B = randU1(atype, dtype, 4,4,4,4; dir = [1,1,-1,-1])
+	Btensor = asArray(B)
+	@test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
 
-	# # VUMPS unit
-	# d = 3
-    # D = 5
-    # AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
-    # M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
-    # FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
-    # tAL, tM, tFL = map(U1tensor2tensor,[AL, M, FL])
-	# tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
-	# FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-    # @test tFL ≈ U1tensor2tensor(FL) 
+	# VUMPS unit
+	d = 3
+    D = 5
+    AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
+    M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
+    FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
+    tAL, tM, tFL = map(asArray,[AL, M, FL])
+	tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
+	FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+    @test tFL ≈ asArray(FL) 
 
-	# # autodiff test
-	# D,d = 4,3
-	# FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
-	# S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
-	# FLtensor = U1tensor2tensor(FL)
-	# Stensor = U1tensor2tensor(S)
-	# @test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
+	# autodiff test
+	D,d = 4,3
+	FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
+	S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
+	FLtensor = asArray(FL)
+	Stensor = asArray(S)
+	@test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 
  @testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
@@ -221,55 +221,55 @@ end
     M = randU1(atype, dtype, d, d, d, d; dir = [-1,1,1,-1])
     FL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
     # @show AL
-    tAL, tM, tFL = map(U1tensor2tensor, [AL, M, FL])
+    tAL, tM, tFL = map(asArray, [AL, M, FL])
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     tλs, tFLs, info = eigsolve(tFL -> ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL)), tFL, 1, :LM; ishermitian = false)
     @test λs ≈ tλs
-    @test U1tensor2tensor(FLs[1]) ≈ tFLs[1]
+    @test asArray(FLs[1]) ≈ tFLs[1]
 
     λl,FL = λs[1], FLs[1]
     dFL = randU1(atype, dtype, D, d, D; dir = [-1,-1,1])
     ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosU1(atype, dtype, D, d, D; dir = [-1,-1,1]), dFL, -λl, 1)
     # @show info
     tλl,tFL = tλs[1], tFLs[1]
-    tdFL = U1tensor2tensor(dFL)
+    tdFL = asArray(dFL)
     tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
     # @show info
-    @test U1tensor2tensor(ξl) ≈ tξl
+    @test asArray(ξl) ≈ tξl
 end
 
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, 5, 3, 5)
-	Atensor = U1tensor2tensor(A)
-	A = reshape(A, 15, 4) 
+    A = randU1(atype, dtype, 5, 3, 5; dir = [-1,1,1])
+	Atensor = asArray(A)
+	A = reshape(A, 15, 5) 
 	Atensor = reshape(Atensor, 15, 5)
 	Q, R = qrpos(A)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor*Rtensor ≈ Atensor
 	@test Q*R ≈ A
-	@test U1tensor2tensor(reshape(Q, 5, 3, 5)) ≈ reshape(Qtensor, 5, 3, 5)
-	@test U1tensor2tensor(R) ≈ Rtensor
+	@test asArray(reshape(Q, 5, 3, 5)) ≈ reshape(Qtensor, 5, 3, 5)
+	@test asArray(R) ≈ Rtensor
 end
 
 @testset "U1 lq with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, 4, 3, 4)
-	Atensor = U1tensor2tensor(A)
+    A = randU1(atype, dtype, 4,3,4; dir = [-1,1,1])
+	Atensor = asArray(A)
 	A = reshape(A, 4, 12)
 	Atensor = reshape(Atensor, 4, 12)
 	L, Q = lqpos(A)
     Ltensor, Qtensor = lqpos(Atensor)
     @test Ltensor*Qtensor ≈ Atensor
 	@test L*Q ≈ A
-	@test U1tensor2tensor(L) ≈ Ltensor
-	@test U1tensor2tensor(reshape(Q, 4, 3, 4)) ≈ reshape(Qtensor, 4, 3, 4)
+	@test asArray(L) ≈ Ltensor
+	@test asArray(reshape(Q, 4, 3, 4)) ≈ reshape(Qtensor, 4, 3, 4)
 end
 
-@testset "U1 svd with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "U1 svd with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, 7,4)
-	Atensor = U1tensor2tensor(A)
+    A = randU1(atype, dtype, 7,4; dir = [-1,1])
+	Atensor = asArray(A)
 	U, S, V = sysvd!(copy(A))
     Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
     @test Utensor * Diagonal(Stensor) * Vtensor ≈ Atensor

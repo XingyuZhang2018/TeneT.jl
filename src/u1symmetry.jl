@@ -1,12 +1,12 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjdirnt, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum, zero
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum, zero
 using BitBasis
 using CUDA
 import CUDA: CuArray
 import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
-export AbstractU1Array, U1tensor
-export randU1, U1tensor2tensor, tensor2U1tensor
+export U1Array
+export randU1, asU1Array, asArray
 export dtr
 
 # """
@@ -34,9 +34,8 @@ export dtr
 # 	return reshape(p.*T,s...)
 # end
 
-abstract type AbstractU1Array{T,N} <: AbstractArray{T,N} end
 """
-    U1tensor{T, N}
+    U1Array{T, N}
 
 a struct to hold the N-order U1 tensors
 - `pn`(`particle number`): `N`-length Array
@@ -46,54 +45,54 @@ a struct to hold the N-order U1 tensors
 - `dims` size of `tensor`
 - `division`: division location for reshape
 """
-struct U1tensor{T, N} <: AbstractU1Array{T,N}
+struct U1Array{T, N} <: AbstractSymmetricArray{T,N}
     pn::Vector{Vector{Int}}
     tensor::Vector{AbstractArray{T}}
     size::Tuple{Vararg{Int, N}}
     dims::Vector{Vector{Int}}
     division::Int
-    function U1tensor(pn::Vector{Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
+    function U1Array(pn::Vector{Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
         new{T, N}(pn, tensor, size, dims, division)
     end
 end
 
-size(A::AbstractU1Array) = A.size
-size(A::AbstractU1Array, a) = size(A)[a]
-conj(A::AbstractU1Array) = U1tensor(-A.pn, map(conj, A.tensor), A.size, A.dims, A.division)
-map(conj, A::AbstractU1Array) = conj(A)
-norm(A::AbstractU1Array) = norm(A.tensor)
+size(A::U1Array) = A.size
+size(A::U1Array, a) = size(A)[a]
+conj(A::U1Array) = U1Array(-A.pn, map(conj, A.tensor), A.size, A.dims, A.division)
+map(conj, A::U1Array) = conj(A)
+norm(A::U1Array) = norm(A.tensor)
 
-*(A::AbstractU1Array, B::Number) = U1tensor(A.pn, A.tensor * B, A.size, A.dims, A.division)
-*(B::Number, A::AbstractU1Array{T,N}) where {T,N} = A * B
-/(A::AbstractU1Array{T,N}, B::Number) where {T,N} = U1tensor(A.pn, A.tensor / B, A.size, A.dims, A.division)
-broadcasted(*, A::AbstractU1Array, B::Number) = U1tensor(A.pn, A.tensor .* B, A.size, A.dims, A.division)
-broadcasted(*, B::Number, A::AbstractU1Array) = U1tensor(A.pn, A.tensor .* B, A.size, A.dims, A.division)
-broadcasted(/, A::AbstractU1Array, B::Number) = A / B
+*(A::U1Array, B::Number) = U1Array(A.pn, A.tensor * B, A.size, A.dims, A.division)
+*(B::Number, A::U1Array{T,N}) where {T,N} = A * B
+/(A::U1Array{T,N}, B::Number) where {T,N} = U1Array(A.pn, A.tensor / B, A.size, A.dims, A.division)
+broadcasted(*, A::U1Array, B::Number) = U1Array(A.pn, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(*, B::Number, A::U1Array) = U1Array(A.pn, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(/, A::U1Array, B::Number) = A / B
 
-function +(A::AbstractU1Array, B::AbstractU1Array)
+function +(A::U1Array, B::U1Array)
     if B.pn == A.pn
-        U1tensor(B.pn, A.tensor + B.tensor, B.size, B.dims, B.division)
+        U1Array(B.pn, A.tensor + B.tensor, B.size, B.dims, B.division)
     else
         exchangeind = indexin(B.pn, A.pn)
-        U1tensor(B.pn, A.tensor[exchangeind] + B.tensor, B.size, B.dims, B.division)
+        U1Array(B.pn, A.tensor[exchangeind] + B.tensor, B.size, B.dims, B.division)
     end
 end
 
-function -(A::AbstractU1Array, B::AbstractU1Array)
+function -(A::U1Array, B::U1Array)
     if B.pn == A.pn
-        U1tensor(B.pn, A.tensor - B.tensor, B.size, B.dims, B.division)
+        U1Array(B.pn, A.tensor - B.tensor, B.size, B.dims, B.division)
     else
         exchangeind = indexin(B.pn, A.pn)
-        U1tensor(B.pn, A.tensor[exchangeind] - B.tensor, B.size, B.dims, B.division)
+        U1Array(B.pn, A.tensor[exchangeind] - B.tensor, B.size, B.dims, B.division)
     end
 end
 
--(A::AbstractU1Array) = U1tensor(A.pn, map(-, A.tensor), A.size, A.dims, A.division)
+-(A::U1Array) = U1Array(A.pn, map(-, A.tensor), A.size, A.dims, A.division)
 
-CuArray(A::AbstractU1Array) = U1tensor(A.pn, map(CuArray, A.tensor), A.size, A.dims, A.division)
-Array(A::AbstractU1Array) = U1tensor(A.pn, map(Array, A.tensor), A.size, A.dims, A.division)
+CuArray(A::U1Array) = U1Array(A.pn, map(CuArray, A.tensor), A.size, A.dims, A.division)
+Array(A::U1Array) = U1Array(A.pn, map(Array, A.tensor), A.size, A.dims, A.division)
 
-function dot(A::AbstractU1Array, B::AbstractU1Array) 
+function dot(A::U1Array, B::U1Array) 
     if A.pn == B.pn 
         dot(A.tensor, B.tensor)
     else
@@ -102,19 +101,19 @@ function dot(A::AbstractU1Array, B::AbstractU1Array)
     end
 end
 
-function ≈(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}) where {TA,NA,TB,NB}
+function ≈(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,NA,TB,NB}
     NA != NB && throw(Base.error("$A and $B have different dimensions"))
     exchangeind = indexin(A.pn, B.pn)
     A.tensor ≈ B.tensor[exchangeind]
 end
 
-function ==(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}) where {TA,NA,TB,NB}
+function ==(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,NA,TB,NB}
     NA != NB && throw(Base.error("$A and $B have different dimensions"))
     exchangeind = indexin(A.pn, B.pn)
     A.tensor == B.tensor[exchangeind]
 end
 
-function show(::IOBuffer, A::U1tensor)
+function show(::IOBuffer, A::U1Array)
     println("particle number: \n", A.pn)
     println("dims: \n", A.dims)
     println("tensor: \n", A.tensor)
@@ -148,7 +147,7 @@ function randU1(atype, dtype, a...; dir, parts = 3)
         end
     end
     dims = map(x -> [size(x)...], tensor)
-    U1tensor(pn, tensor, a, dims, 1)
+    U1Array(pn, tensor, a, dims, 1)
 end
 
 function zerosU1(atype, dtype, a...; dir, parts = 3)
@@ -166,10 +165,10 @@ function zerosU1(atype, dtype, a...; dir, parts = 3)
         end
     end
     dims = map(x -> [size(x)...], tensor)
-    U1tensor(pn, tensor, a, dims, 1)
+    U1Array(pn, tensor, a, dims, 1)
 end
 
-zero(A::AbstractU1Array) = U1tensor(A.pn, map(zero, A.tensor), A.size, A.dims, A.division)
+zero(A::U1Array) = U1Array(A.pn, map(zero, A.tensor), A.size, A.dims, A.division)
 
 function IU1(atype, dtype, D; dir, parts = 3)
     bkdims = u1bulkdims(D, D) # custom initial
@@ -185,11 +184,11 @@ function IU1(atype, dtype, D; dir, parts = 3)
         end
     end
     dims = map(x -> [size(x)...], tensor)
-    U1tensor(pn, tensor, (D,D), dims, 1)
+    U1Array(pn, tensor, (D,D), dims, 1)
 end
 
-# getindex(A::AbstractU1Array, index::CartesianIndex) = getindex(A, index.I...)
-# function getindex(A::AbstractU1Array, index::Int...)
+# getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
+# function getindex(A::U1Array, index::Int...)
 #     bits = map(x -> ceil(Int, log2(x)), size(A))
 #     pn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits))
 #     sum(pn) % 2 != 0 && return 0.0
@@ -197,8 +196,8 @@ end
 #     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
 # end
 
-# setindex!(A::AbstractU1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-# function setindex!(A::AbstractU1Array, x::Number, index::Int...)
+# setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
+# function setindex!(A::U1Array, x::Number, index::Int...)
 #     bits = map(x -> ceil(Int, log2(x)), size(A))
 #     pn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits))
 #     ip = findfirst(x->x in [pn], A.pn)
@@ -211,7 +210,7 @@ function U1selection(maxN::Int; parts = 3)
     [q .== i for i in 0:parts]
 end
 
-function U1tensor2tensor(A::U1tensor{T,N}) where {T,N}
+function asArray(A::U1Array{T,N}) where {T,N}
     atype = _arraytype(A.tensor[1])
     tensor = zeros(T, size(A))
     pn = A.pn
@@ -243,7 +242,7 @@ end
 
 # have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 # which is fixed in new vervion, but its allocation is abnormal
-function tensor2U1tensor(A::AbstractArray{T,N}, dir::Vector) where {T,N}
+function asU1Array(A::AbstractArray{T,N}; dir::Vector) where {T,N}
     atype = _arraytype(A)
     Aarray = Array(A)
     qlist = [U1selection(size(A)[i]) for i = 1:N]
@@ -251,21 +250,21 @@ function tensor2U1tensor(A::AbstractArray{T,N}, dir::Vector) where {T,N}
     shift = 1
     tensor = [atype(Aarray[[qlist[j][abs(pn[i][j])+shift] for j = 1:N]...]) for i in 1:length(pn)]
     dims = map(x -> [size(x)...], tensor)
-    U1tensor(pn, tensor, size(A), dims, 1)
+    U1Array(pn, tensor, size(A), dims, 1)
 end
 
 # # only for OMEinsum binary permutedims before reshape
-permutedims(A::AbstractU1Array, perm) = tensorpermute(A, perm)
-function tensorpermute(A::AbstractU1Array, perm)
+permutedims(A::U1Array, perm) = tensorpermute(A, perm)
+function tensorpermute(A::U1Array, perm)
     length(perm) == 0 && return copy(A)
     pn = map(x -> x[collect(perm)], A.pn)
     tensor = map(x -> permutedims(x, perm), A.tensor)
     dims = map(x -> x[collect(perm)], A.dims)
-    U1tensor(pn, tensor, A.size[collect(perm)], dims, A.division)
+    U1Array(pn, tensor, A.size[collect(perm)], dims, A.division)
 end
 
-reshape(A::AbstractU1Array, a::Tuple{Vararg{Int}}) = reshape(A, a...)
-function reshape(A::AbstractU1Array{T,N}, a::Int...) where {T,N}
+reshape(A::U1Array, a::Tuple{Vararg{Int}}) = reshape(A, a...)
+function reshape(A::U1Array{T,N}, a::Int...) where {T,N}
     Atensor = A.tensor
     div = 1
     if length(a) < N
@@ -276,19 +275,19 @@ function reshape(A::AbstractU1Array{T,N}, a::Int...) where {T,N}
             p *= sizeA[div]
         end
         tensor = map((x, y) -> reshape(x, prod(y[1:div]), prod(y[div+1:end])), Atensor, A.dims)
-        return U1tensor(A.pn, tensor, A.size, A.dims, div)
+        return U1Array(A.pn, tensor, A.size, A.dims, div)
     else
         tensor = map((x, y) -> reshape(x, y...), Atensor, A.dims)
-        return U1tensor(A.pn, tensor, A.size, A.dims, A.division)
+        return U1Array(A.pn, tensor, A.size, A.dims, A.division)
     end
 end
 
 """
-    *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}) where {TA,TB,NA,NB}
+    *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
 
-core code for U1tensor product
+core code for U1Array product
 """
-function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}; parts = 3) where {TA,TB,NA,NB}
+function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}; parts = 3) where {TA,TB,NA,NB}
     pn = Vector{Vector{Int}}()
     dims = Vector{Vector{Int}}()
     atype = _arraytype(B.tensor[1])
@@ -298,17 +297,17 @@ function *(A::AbstractU1Array{TA,NA}, B::AbstractU1Array{TB,NB}; parts = 3) wher
 
     Adir = sign.(sum(A.pn))[divA+1:end]
     Bdir = sign.(sum(B.pn)[1:divB])
-    sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1tensor product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
+    sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
     if !(divA in [0, NA]) && !(divB in [0, NB]) 
         for p in unique(map(x->mod(sum(x[divA+1:end]), parts), A.pn))
             # @show p
-            u1bulktimes!(pn, tensor, dims, A, B, p)
+            u1bulktimes!(pn, tensor, dims, A, B, p; parts = parts)
         end
     else
-        u1bulktimes!(pn, tensor, dims, A, B, 0)
+        u1bulktimes!(pn, tensor, dims, A, B, 0; parts = parts)
     end
     pn == [[]] && return Array(tensor[1])[]
-    U1tensor(pn, tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
+    U1Array(pn, tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
 end
 
 """
@@ -329,6 +328,7 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 3)
     ind_A = findall(x->x[divA+1:end] in matrix_j, Apn)
     matrix_i = unique(map(x->x[1:divA], Apn[ind_A]))
     ind_B = findall(x->x[1:divB] in -matrix_j, Bpn)
+    ind_B == [] && return
     matrix_k = unique(map(x->x[divB+1:end], Bpn[ind_B]))
 
     # @show Apn Bpn matrix_i matrix_j ind_B matrix_k
@@ -338,7 +338,7 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 3)
     bulkidims = map(ind -> size(Atensor[ind], 1), index[:, 1])
     bulkjdims = map(ind -> size(Atensor[ind], 2), index[1, :])
     # Amatrix = hvcat(ntuple(i->length(bulkjdims), length(bulkidims)), Atensor[index']...)
-    Amatrix = atype == Array ? zeros(etype, sum(bulkidims), sum(bulkjdims)) : CUDA.zeros(etype, sum(bulkidims), sum(bulkjdims))
+    Amatrix = atype <: Array ? zeros(etype, sum(bulkidims), sum(bulkjdims)) : CUDA.zeros(etype, sum(bulkidims), sum(bulkjdims))
     # @show size(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_j)
         # println(sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), ", ", sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), " ", index[i, j])
@@ -364,7 +364,7 @@ function u1bulktimes!(pn, tensor, dims, A, B, p; parts = 3)
         bulkkdims = map(ind -> size(Btensor[ind], 2), index[1, :])
     # end
     # Bmatrix = hvcat(ntuple(i->length(bulkkdims), length(bulkjdims)), Btensor[index']...)
-    Bmatrix = atype == Array ? zeros(etype, sum(bulkjdims), sum(bulkkdims)) : CUDA.zeros(etype, sum(bulkjdims), sum(bulkkdims))
+    Bmatrix = atype <: Array ? zeros(etype, sum(bulkjdims), sum(bulkkdims)) : CUDA.zeros(etype, sum(bulkjdims), sum(bulkkdims))
     # @show size(Bmatrix)
     for j in 1:length(matrix_j), k in 1:length(matrix_k)
         # println(sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), ", ", sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k]), " ", index[j, k])
@@ -384,14 +384,14 @@ end
 
 
 # # for OMEinsum contract to get number
-# # vec(A::AbstractU1Array) = A
+# # vec(A::U1Array) = A
 
-function transpose(A::AbstractU1Array)
+function transpose(A::U1Array)
     tensor = map(transpose, A.tensor)
-    U1tensor(A.pn, tensor, A.size, A.dims, 0)
+    U1Array(A.pn, tensor, A.size, A.dims, 0)
 end
 
-function tr(A::AbstractU1Array{T,N}) where {T,N}
+function tr(A::U1Array{T,N}) where {T,N}
     pn = A.pn
     tensor = A.tensor
     half = Int(length(pn[1])/2)
@@ -402,19 +402,19 @@ function tr(A::AbstractU1Array{T,N}) where {T,N}
     s
 end
 
-# function _compactify!(y, x::AbstractU1Array, indexer)
-#     x = U1tensor2tensor(Array(x))
+# function _compactify!(y, x::U1Array, indexer)
+#     x = U1Array2tensor(Array(x))
 #     @inbounds @simd for ci in CartesianIndices(y)
 #         y[ci] = x[subindex(indexer, ci.I)]
 #     end
 #     return y
 # end
 
-# broadcasted(*, A::AbstractU1Array, B::Base.RefValue) = U1tensor(A.pn, A.tensor .* B, A.size, A.dims, A.division)
-# broadcasted(*, B::Base.RefValue, A::AbstractU1Array) = U1tensor(A.pn, A.tensor .* B, A.size, A.dims, A.division)
+# broadcasted(*, A::U1Array, B::Base.RefValue) = U1Array(A.pn, A.tensor .* B, A.size, A.dims, A.division)
+# broadcasted(*, B::Base.RefValue, A::U1Array) = U1Array(A.pn, A.tensor .* B, A.size, A.dims, A.division)
 
 # for ein"abab ->"(A)[]
-function dtr(A::AbstractU1Array{T,N}) where {T,N}
+function dtr(A::U1Array{T,N}) where {T,N}
     pn = A.pn
     tensor = A.tensor
     s = 0.0
@@ -426,12 +426,12 @@ end
 
 
 # for Zygote compatibility
-accum(A::AbstractU1Array, B::AbstractU1Array...) = +(A, B...)
+accum(A::U1Array, B::U1Array...) = +(A, B...)
 
 # for KrylovKit compatibility
-rmul!(A::AbstractU1Array, B::Number) = (map(x -> rmul!(x, B), A.tensor); A)
+rmul!(A::U1Array, B::Number) = (map(x -> rmul!(x, B), A.tensor); A)
 
-function lmul!(A::AbstractU1Array{T,N}, B::AbstractU1Array) where {T,N}
+function lmul!(A::U1Array{T,N}, B::U1Array) where {T,N}
     C = A*B
     for i = 1:length(B.pn)
         B.tensor[i] = C.tensor[i]
@@ -439,18 +439,18 @@ function lmul!(A::AbstractU1Array{T,N}, B::AbstractU1Array) where {T,N}
     return B
 end
 
-similar(A::AbstractU1Array) = U1tensor(A.pn, map(similar, A.tensor), A.size, A.dims, A.division)
-similar(A::AbstractU1Array, atype) = U1tensor(A.pn, map(x -> atype(similar(x)), A.tensor), A.size, A.dims, A.division)
-diag(A::AbstractU1Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
-copy(A::AbstractU1Array{T,N}) where {T,N} = U1tensor(A.pn, map(copy, A.tensor), A.size, A.dims, A.division)
+similar(A::U1Array) = U1Array(A.pn, map(similar, A.tensor), A.size, A.dims, A.division)
+similar(A::U1Array, atype) = U1Array(A.pn, map(x -> atype(similar(x)), A.tensor), A.size, A.dims, A.division)
+diag(A::U1Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
+copy(A::U1Array{T,N}) where {T,N} = U1Array(A.pn, map(copy, A.tensor), A.size, A.dims, A.division)
 
-function mul!(Y::AbstractU1Array, A::AbstractU1Array, B::Number)
+function mul!(Y::U1Array, A::U1Array, B::Number)
     exchangeind = indexin(A.pn, Y.pn)
     map((Y, A) -> mul!(Y, A, B), Y.tensor[exchangeind], A.tensor)
     Y
 end
 
-function axpy!(α::Number, A::AbstractU1Array, B::AbstractU1Array)
+function axpy!(α::Number, A::U1Array, B::U1Array)
     if B.pn == A.pn
         map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor)
     else
@@ -466,136 +466,127 @@ function axpy!(α::Number, A::AbstractU1Array, B::AbstractU1Array)
 end
 
 # # for leftorth and rightorth compatibility
-# Diagonal(A::AbstractU1Array) = U1tensor(A.pn, map(Diagonal, A.tensor), A.size, A.dims, A.division)
-# sqrt(A::AbstractU1Array) = U1tensor(A.pn, map(x->sqrt.(x), A.tensor), A.size, A.dims, A.division)
-# broadcasted(sqrt, A::AbstractU1Array) = sqrt(A)
+Diagonal(A::U1Array) = U1Array(A.pn, map(Diagonal, A.tensor), A.size, A.dims, A.division)
+sqrt(A::U1Array) = U1Array(A.pn, map(x->sqrt.(x), A.tensor), A.size, A.dims, A.division)
+broadcasted(sqrt, A::U1Array) = sqrt(A)
 
-# # only for order-three tensor's qr and lq
-# function qrpos!(A::AbstractU1Array{T,N}) where {T,N}
-#     Qpn = Vector{Vector{Int}}()
-#     Rpn = Vector{Vector{Int}}()
-#     atype = _arraytype(A.tensor[1])
-#     Qtensor = Vector{atype{T}}()
-#     Rtensor = Vector{atype{T}}()
+# only for order-three tensor's qr and lq
+function qrpos!(A::U1Array{T,N}; parts = 3) where {T,N}
+    Qpn = Vector{Vector{Int}}()
+    Rpn = Vector{Vector{Int}}()
+    atype = _arraytype(A.tensor[1])
+    Qtensor = Vector{atype{T}}()
+    Rtensor = Vector{atype{T}}()
 
-#     bulkQR!(Qpn, Qtensor, Rpn, Rtensor, A, 0)
-#     bulkQR!(Qpn, Qtensor, Rpn, Rtensor, A, 1)
-#     Asize = A.size
-#     Adims = A.dims
-#     exchangeind = indexin(Qpn, A.pn)
-#     U1tensor(Qpn, Qtensor, Asize, Adims[exchangeind], A.division), U1tensor(Rpn, Rtensor, (Asize[end], Asize[end]), map(x -> [size(x)...], Rtensor), 1)
-# end
+    for p in unique(map(x->mod(sum(x[A.division+1:end]), parts), A.pn))
+        # @show p
+        u1bulkQR!(Qpn, Qtensor, Rpn, Rtensor, A, p; parts = parts)
+    end
+    Asize = A.size
+    Adims = A.dims
+    exchangeind = indexin(Qpn, A.pn)
+    U1Array(Qpn, Qtensor, Asize, Adims[exchangeind], A.division), U1Array(Rpn, Rtensor, (Asize[end], Asize[end]), map(x -> [size(x)...], Rtensor), 1)
+end
 
-# function bulkQR!(Qpn, Qtensor, Rpn, Rtensor, A, p)
-#     Atensor = A.tensor
-#     Apn = A.pn
-#     div = A.division
+function u1bulkQR!(Qpn, Qtensor, Rpn, Rtensor, A, p; parts = 3)
+    Atensor = A.tensor
+    Apn = A.pn
+    Adiv = A.division
 
-#     ind_A = findall(x->sum(x[div+1:end]) % 2 == p, Apn)
-#     matrix_j = unique(map(x->x[div+1:end], Apn[ind_A]))
-#     matrix_i = unique(map(x->x[1:div], Apn[ind_A]))
+    ind_A = findall(x->mod(sum(x[Adiv+1:end]), parts) == p, Apn)
+    matrix_j = unique(map(x->x[Adiv+1:end], Apn[ind_A]))
+    matrix_i = unique(map(x->x[1:Adiv], Apn[ind_A]))
 
-#     ind = [findfirst(x->x in [[i; matrix_j[1]]], Apn) for i in matrix_i]
-#     Amatrix = vcat(Atensor[ind]...)
-#     bulkidims = [size(Atensor[i],1) for i in ind]
-#     bulkjdims = [size(Amatrix, 2)]
+    ind = [findfirst(x->x in [[i; matrix_j[1]]], Apn) for i in matrix_i]
+    Amatrix = vcat(Atensor[ind]...)
+    bulkidims = [size(Atensor[i],1) for i in ind]
+    bulkjdims = [size(Amatrix, 2)]
 
-#     Q, R = qrpos!(Amatrix)
-#     for i in 1:length(matrix_i), j in 1:length(matrix_j)
-#         push!(Qpn, [matrix_i[i]; matrix_j[j]])
-#         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
-#         push!(Qtensor, Q[idim, jdim])
-#     end
-#     for i in 1:length(matrix_j), j in 1:length(matrix_j)
-#         push!(Rpn, [matrix_j[i]; matrix_j[j]])
-#         idim, jdim = sum(bulkjdims[1:i-1])+1:sum(bulkjdims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
-#         push!(Rtensor, R[idim, jdim])
-#     end
-# end
-
-# function lqpos!(A::AbstractU1Array{T,N}) where {T,N}
-#     Lpn = Vector{Vector{Int}}()
-#     Qpn = Vector{Vector{Int}}()
-#     atype = _arraytype(A.tensor[1])
-#     Ltensor = Vector{atype{T}}()
-#     Qtensor = Vector{atype{T}}()
-
-#     bulkLQ!(Lpn, Ltensor, Qpn, Qtensor, A, 0)
-#     bulkLQ!(Lpn, Ltensor, Qpn, Qtensor, A, 1)
-#     Asize = A.size
-#     Adims = A.dims
-#     exchangeind = indexin(Qpn, A.pn)
-#     U1tensor(Lpn, Ltensor, (Asize[1], Asize[1]), map(x -> [size(x)...], Ltensor), 1), U1tensor(Qpn, Qtensor, Asize, Adims[exchangeind], A.division)
-# end
-
-# function bulkLQ!(Lpn, Ltensor, Qpn, Qtensor, A, p)
-#     Atensor = A.tensor
-#     Apn = A.pn
-#     div = A.division
-
-#     ind_A = findall(x->sum(x[div+1:end]) % 2 == p, Apn)
-#     matrix_j = unique(map(x->x[div+1:end], Apn[ind_A]))
-#     matrix_i = unique(map(x->x[1:div], Apn[ind_A]))
-
-#     v, bulkidims, bulkjdims = [] , Int[], Int[]
-#     for j in matrix_j
-#         h = []
-#         for i in matrix_i
-#             ind = findfirst(x->x in [[i; j]], Apn)
-#             push!(h, Atensor[ind])   
-#         end
-#         vi = vcat(h...)
-#         push!(v, vi)
-#         push!(bulkjdims, size(vi, 2))
-#     end
-#     Amatrix = hcat(v...)
-#     push!(bulkidims, size(Amatrix, 1))
+    Q, R = qrpos!(Amatrix)
+    for i in 1:length(matrix_i)
+        push!(Qpn, [matrix_i[i]; matrix_j[1]])
+        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), 1:sum(bulkjdims[1])
+        push!(Qtensor, Q[idim, jdim])
+    end
     
-#     L, Q = lqpos!(Amatrix)
-#     for i in 1:length(matrix_i), j in 1:length(matrix_i)
-#         push!(Lpn, [matrix_i[i]; matrix_i[j]])
-#         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkidims[1:j-1])+1:sum(bulkidims[1:j])
-#         push!(Ltensor, L[idim, jdim])
-#     end
-#     for i in 1:length(matrix_i), j in 1:length(matrix_j)
-#         push!(Qpn, [matrix_i[i]; matrix_j[j]])
-#         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
-#         push!(Qtensor, Q[idim, jdim])
-#     end
-# end
+    push!(Rpn, [-matrix_j[1]; matrix_j[1]])
+    idim, jdim = 1:sum(bulkjdims[1]), 1:sum(bulkjdims[1])
+    push!(Rtensor, R[idim, jdim])
+end
+
+function lqpos!(A::U1Array{T,N}; parts = 3) where {T,N}
+    Lpn = Vector{Vector{Int}}()
+    Qpn = Vector{Vector{Int}}()
+    atype = _arraytype(A.tensor[1])
+    Ltensor = Vector{atype{T}}()
+    Qtensor = Vector{atype{T}}()
+
+    for p in unique(map(x->mod(x[1], parts), A.pn))
+        u1bulkLQ!(Lpn, Ltensor, Qpn, Qtensor, A, p; parts = parts)
+    end
+    Asize = A.size
+    Adims = A.dims
+    exchangeind = indexin(Qpn, A.pn)
+    U1Array(Lpn, Ltensor, (Asize[1], Asize[1]), map(x -> [size(x)...], Ltensor), 1), U1Array(Qpn, Qtensor, Asize, Adims[exchangeind], A.division)
+end
+
+function u1bulkLQ!(Lpn, Ltensor, Qpn, Qtensor, A, p; parts = 3)
+    Atensor = A.tensor
+    Apn = A.pn
+    Adiv = A.division
+
+    ind_A = findall(x->mod(x[1], parts) == p, Apn)
+    matrix_j = unique(map(x->x[Adiv+1:end], Apn[ind_A]))
+    matrix_i = unique(map(x->x[1], Apn[ind_A]))
+
+    ind = [findfirst(x->x in [[matrix_i[1]; j]], Apn) for j in matrix_j]
+    Amatrix = hcat(Atensor[ind]...)
+    bulkidims = [size(Amatrix, 1)]
+    bulkjdims = [size(Atensor[i], 2) for i in ind]
+    
+    L, Q = lqpos!(Amatrix)
+
+    push!(Lpn, [matrix_i[1]; -matrix_i[1]])
+    idim, jdim = 1:sum(bulkidims[1]), 1:sum(bulkidims[1])
+    push!(Ltensor, L[idim, jdim])
+    for j in 1:length(matrix_j)
+        push!(Qpn, [matrix_i[1]; matrix_j[j]])
+        idim, jdim = 1:sum(bulkidims[1]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
+        push!(Qtensor, Q[idim, jdim])
+    end
+end
 
 # # for ' in ACCtoALAR of VUMPS
-# function adjdirnt(A::AbstractU1Array{T,N}) where {T,N}
-#     div = A.division 
-#     pn = map(x->x[[div+1:end;1:div]], A.pn)
-#     exchangeind = indexin(A.pn, pn)
-#     tensor = map(adjdirnt, A.tensor)[exchangeind]
-#     dims = map(x -> x[[div+1:end;1:div]], A.dims)[exchangeind]
-#     U1tensor(A.pn, tensor, A.size[[div+1:end;1:div]], dims, N - div)
-# end
+function adjoint(A::U1Array{T,N}) where {T,N}
+    div = A.division 
+    pn = map(x->-x[[div+1:end;1:div]], A.pn)
+    tensor = map(adjoint, A.tensor)
+    dims = map(x -> x[[div+1:end;1:div]], A.dims)
+    U1Array(pn, tensor, A.size[[div+1:end;1:div]], dims, N - div)
+end
 
-# # only for U1 Matrix
-# function sysvd!(A::AbstractU1Array{T,N}) where {T,N}
-#     tensor = A.tensor
-#     pn = A.pn
-#     div = A.division
-#     atype = _arraytype(tensor[1])
-#     Utensor = Vector{atype{T}}()
-#     Stensor = Vector{atype{T}}()
-#     Vtensor = Vector{atype{T}}()
-#     @inbounds @simd for t in tensor
-#         U, S, V = sysvd!(t)
-#         push!(Utensor, U)
-#         push!(Stensor, S)
-#         push!(Vtensor, V)
-#     end
-#     Nm = map(x->min(x...), A.dims)
-#     N1 = map((x, y) -> [x[1], y], A.dims, Nm)
-#     N2 = map((x, y) -> [y, x[2]], A.dims, Nm)
-#     Asize = A.size
-#     sm = min(Asize...)
-#     U1tensor(pn, Utensor, (Asize[1], sm), N1, div), U1tensor(pn, Stensor, (sm, sm), [Nm, Nm], div), U1tensor(pn, Vtensor, (sm, Asize[2]), N2, div)
-# end
+# only for U1 Matrix
+function sysvd!(A::U1Array{T,N}) where {T,N}
+    tensor = A.tensor
+    pn = A.pn
+    div = A.division
+    atype = _arraytype(tensor[1])
+    Utensor = Vector{atype{T}}()
+    Stensor = Vector{atype{T}}()
+    Vtensor = Vector{atype{T}}()
+    @inbounds @simd for t in tensor
+        U, S, V = sysvd!(t)
+        push!(Utensor, U)
+        push!(Stensor, S)
+        push!(Vtensor, V)
+    end
+    Nm = map(x->min(x...), A.dims)
+    N1 = map((x, y) -> [x[1], y], A.dims, Nm)
+    N2 = map((x, y) -> [y, x[2]], A.dims, Nm)
+    Asize = A.size
+    sm = min(Asize...)
+    U1Array(pn, Utensor, (Asize[1], sm), N1, div), U1Array(pn, Stensor, (sm, sm), [Nm for _ in 1:length(pn)], div), U1Array(pn, Vtensor, (sm, Asize[2]), N2, div)
+end
 
 # """
 #     div = division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
@@ -619,12 +610,12 @@ end
 # end
 
 # """
-#     U1reshape(A::AbstractU1Array{T, N}, a::Int...) where {T, N}
+#     U1reshape(A::U1Array{T, N}, a::Int...) where {T, N}
 
 # U1reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`
 # """
-# U1reshape(A::AbstractU1Array, a::Tuple{Vararg{Int}}) = U1reshape(A, a...)
-# function U1reshape(A::AbstractU1Array{T, N}, a::Int...) where {T, N}
+# U1reshape(A::U1Array, a::Tuple{Vararg{Int}}) = U1reshape(A, a...)
+# function U1reshape(A::U1Array{T, N}, a::Int...) where {T, N}
 #     atype = _arraytype(A.tensor[1])
 #     orderedpn = getpn(N)
 #     if orderedpn == A.pn
@@ -659,7 +650,7 @@ end
 #             push!(retensors, tensor)
 #         end
 #         dims = map(x -> [size(x)...], retensors)
-#         U1tensor(urepn, atype.(retensors), a, dims, 1)
+#         U1Array(urepn, atype.(retensors), a, dims, 1)
 #     else
 #         div = division(size(A), a)
 #         repn = getpn(length(a))
@@ -683,6 +674,6 @@ end
 #             end
 #         end
 #         dims = map(x -> [size(x)...], retensors)
-#         U1tensor(repn, atype.(retensors), a, dims, 1)
+#         U1Array(repn, atype.(retensors), a, dims, 1)
 #     end
 # end

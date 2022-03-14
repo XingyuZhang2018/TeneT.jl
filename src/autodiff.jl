@@ -67,7 +67,7 @@ function num_grad(f, a::AbstractArray; δ::Real=1e-5)
     return _arraytype(a)(df)
 end
 
-function num_grad(f, a::AbstractZ2Array; δ::Real=1e-5)
+function num_grad(f, a::Z2Array; δ::Real=1e-5)
     b = Array(copy(a))
     intype = _arraytype(a.tensor[1])
     df = copy(a)
@@ -110,12 +110,12 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
     return As, back
 end
 
-# function ChainRulesCore.rrule(::typeof(Z2tensor), parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where {T}
+# function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where {T}
 #     function back(dy) 
 #         @show dy.parity parity
-#         Z2tensor(dy.parity, dy.tensor, N, dy.division)
+#         Z2Array(dy.parity, dy.tensor, N, dy.division)
 #     end
-#     Z2tensor(parity, tensor, N, division),  back
+#     Z2Array(parity, tensor, N, division),  back
 # end
 
 # adjoint for QR factorization
@@ -130,48 +130,48 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     return (Q, R), back
 end
 
-# function ChainRulesCore.rrule(::typeof(reshape), A::AbstractZ2Array{T,N}, a::Int...)
+# function ChainRulesCore.rrule(::typeof(reshape), A::Z2Array{T,N}, a::Int...)
 #     function back(dAr)
 #         exchangeind = indexin(A.parity, dAr.parity)
 #         s = size.(A.tensor)
 #         dAtensor = reshape.(dAr.tensor[exchangeind], s)
-#         return Z2tensor(A.parity, dAtensor, N, A.division), a...
+#         return Z2Array(A.parity, dAtensor, N, A.division), a...
 #     end
 #     return reshape(A, a...), back
 # end
     
-@adjoint function reshape(A::AbstractZ2Array, a::Int...)
+@adjoint function reshape(A::Z2Array, a::Int...)
     function back(dAr)
         exchangeind = indexin(A.parity, dAr.parity)
         s = map(size, A.tensor) 
         dAtensor = map((x, y) -> reshape(x, y), dAr.tensor[exchangeind], s)
-        return Z2tensor(A.parity, dAtensor, A.size, A.dims, A.division), a...
+        return Z2Array(A.parity, dAtensor, A.size, A.dims, A.division), a...
     end
     return reshape(A, a...), back
 end
 
-@adjoint *(A::AbstractZ2Array, B::AbstractZ2Array) = A * B, dC -> (dC * B', A' * dC)
+@adjoint *(A::Z2Array, B::Z2Array) = A * B, dC -> (dC * B', A' * dC)
 
-@adjoint adjoint(A::AbstractZ2Array) = adjoint(A), djA -> (adjoint(djA), )
+@adjoint adjoint(A::Z2Array) = adjoint(A), djA -> (adjoint(djA), )
 
-function ChainRulesCore.rrule(::typeof(Z2tensor2tensor), A::AbstractZ2Array)
+function ChainRulesCore.rrule(::typeof(asArray), A::Z2Array)
     function back(dAt)
-        dA = tensor2Z2tensor(dAt)
+        dA = asZ2Array(dAt)
         return NoTangent(), dA
     end
-    Z2tensor2tensor(A), back
+    asArray(A), back
 end
 
-function ChainRulesCore.rrule(::typeof(tensor2Z2tensor), A::AbstractArray)
-    AZ2 = tensor2Z2tensor(A)
+function ChainRulesCore.rrule(::typeof(asZ2Array), A::AbstractArray)
+    AZ2 = asZ2Array(A)
     function back(dAZ2)
-        dA = Z2tensor2tensor(dAZ2)
+        dA = asArray(dAZ2)
         return NoTangent(), dA
     end
     AZ2, back
 end
 
-function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractZ2Array)
+function ChainRulesCore.rrule(::typeof(qrpos), A::Z2Array)
     Q, R = qrpos(A)
     function back((dQ, dR))
         dA = copy(A)
@@ -218,7 +218,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     return (L, Q), back
 end
 
-function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractZ2Array)
+function ChainRulesCore.rrule(::typeof(lqpos), A::Z2Array)
     L, Q = lqpos(A)
     function back((dL, dQ))
         dA = copy(A)
@@ -617,9 +617,9 @@ end
 
 ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(dT))
 
-ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array, a::Int...) = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), a...)
+ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, a::Int...) = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), a...)
 
-# function ChainRulesCore.rrule(::typeof(tr), A::AbstractZ2Array{T,N}) where {T,N}
+# function ChainRulesCore.rrule(::typeof(tr), A::Z2Array{T,N}) where {T,N}
 #     function back(dtrA)
 #         dA = zerosinitial(A, size(A)...)
 #         for i = 1:size(A,1)
@@ -630,7 +630,7 @@ ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array, a::Int...) = Z2res
 #     tr(A), back
 # end
 
-@adjoint function tr(A::AbstractZ2Array)
+@adjoint function tr(A::Z2Array)
     function back(dtrA)
         dA = zerosinitial(A, size(A)...)
         for i = 1:size(A,1)
@@ -641,7 +641,7 @@ ChainRulesCore.rrule(::typeof(Z2reshape), A::AbstractZ2Array, a::Int...) = Z2res
     tr(A), back
 end
 
-function ChainRulesCore.rrule(::typeof(dtr), A::AbstractZ2Array{T,N}) where {T,N}
+function ChainRulesCore.rrule(::typeof(dtr), A::Z2Array{T,N}) where {T,N}
     function back(dtrA)
         dA = zerosinitial(A, size(A)...)
         s = size(A)

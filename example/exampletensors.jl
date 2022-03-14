@@ -37,7 +37,7 @@ function mag_tensor(model::Ising; atype = Array)
     cβ, sβ = sqrt(cosh(β)), sqrt(sinh(β))
     q = 1/sqrt(2) * [cβ+sβ cβ-sβ; cβ-sβ cβ+sβ]
     m = ein"abcd,ai,bj,ck,dl -> ijkl"(a,q,q,q,q)
-    atype == Z2tensor ? (m = tensor2Z2tensor(m)) : (m = atype(m))
+    atype == Z2Array ? (m = asZ2Array(m)) : (m = atype(m))
     reshape([m for i=1:Ni*Nj], Ni, Nj)
 end
 

@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, Z2tensor2tensor,tensor2Z2tensor,AbstractZ2Array,dtr
+using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -12,14 +12,14 @@ CUDA.allowscalar(false)
 @testset "Z2 ad basic with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     ## reshape
     A = randinitial(Val(:Z2), atype, dtype, 3,2,3)
-    Atensor = Z2tensor2tensor(A)
+    Atensor = asArray(A)
     foo1(x) = norm(reshape(A*x, 6,3))
     foo2(x) = norm(reshape(Atensor*x, 6,3))
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 
     ## wrong shape: actually don't change shape
     A = randinitial(Val(:Z2), atype, dtype, 6,3)
-    Atensor = Z2tensor2tensor(A)
+    Atensor = asArray(A)
     foo3(x) = norm(reshape(A*x, 3,2,3))
     foo4(x) = norm(reshape(Atensor*x, 3,2,3))
     @test Zygote.gradient(foo3, 1)[1] ≈ num_grad(foo3, 1) ≈ Zygote.gradient(foo4, 1)[1] ≈ num_grad(foo4, 1)
@@ -35,18 +35,18 @@ CUDA.allowscalar(false)
     ## * 
     A = randinitial(Val(:Z2), atype, dtype, 3,6)
     B = randinitial(Val(:Z2), atype, dtype, 6,3)
-    Atensor = Z2tensor2tensor(A)
-    Btensor = Z2tensor2tensor(B)
+    Atensor = asArray(A)
+    Btensor = asArray(B)
     foo5(A) = norm(A*B)
     foo6(Atensor) = norm(Atensor*Btensor)
-    @test Z2tensor2tensor(Zygote.gradient(foo5, A)[1]) ≈ Z2tensor2tensor(num_grad(foo5, A)) ≈ Zygote.gradient(foo6, Atensor)[1] ≈ num_grad(foo6, Atensor)
+    @test asArray(Zygote.gradient(foo5, A)[1]) ≈ asArray(num_grad(foo5, A)) ≈ Zygote.gradient(foo6, Atensor)[1] ≈ num_grad(foo6, Atensor)
 
     ## '
     A = randinitial(Val(:Z2), atype, dtype, 6,3)
-    Atensor = Z2tensor2tensor(A)
+    Atensor = asArray(A)
     foo7(A) = norm(A')
     foo8(Atensor) = norm(Atensor')
-    @test Z2tensor2tensor(Zygote.gradient(foo7, A)[1]) ≈ Z2tensor2tensor(num_grad(foo7, A)) ≈ Zygote.gradient(foo8, Atensor)[1] ≈ num_grad(foo8, Atensor)
+    @test asArray(Zygote.gradient(foo7, A)[1]) ≈ asArray(num_grad(foo7, A)) ≈ Zygote.gradient(foo8, Atensor)[1] ≈ num_grad(foo8, Atensor)
 end
 
 @testset "matrix autodiff with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64], symmetry in [:none, :Z2]
@@ -72,21 +72,21 @@ end
 
 @testset "Z2 last tr" begin
     B = randZ2(Array, ComplexF64, 4,4)
-	Btensor = Z2tensor2tensor(B)
+	Btensor = asArray(B)
     foo1(x) = norm(tr(x))
-    @test Z2tensor2tensor(Zygote.gradient(foo1, B)[1]) ≈ Z2tensor2tensor(num_grad(foo1, B)) ≈ Zygote.gradient(foo1, Btensor)[1] ≈ num_grad(foo1, Btensor)
+    @test asArray(Zygote.gradient(foo1, B)[1]) ≈ asArray(num_grad(foo1, B)) ≈ Zygote.gradient(foo1, Btensor)[1] ≈ num_grad(foo1, Btensor)
 
     B = randZ2(Array, ComplexF64, 2,2,2,2)
-    Btensor = Z2tensor2tensor(B)
+    Btensor = asArray(B)
     foo2(x) = norm(ein"abcd,abcd -> "(x,x)[])
-    @test Z2tensor2tensor(Zygote.gradient(foo2, B)[1]) ≈ Z2tensor2tensor(num_grad(foo2, B)) ≈ Zygote.gradient(foo2, Btensor)[1] ≈ num_grad(foo2, Btensor)
+    @test asArray(Zygote.gradient(foo2, B)[1]) ≈ asArray(num_grad(foo2, B)) ≈ Zygote.gradient(foo2, Btensor)[1] ≈ num_grad(foo2, Btensor)
 
     B = randZ2(Array, ComplexF64, 4,4,4,4)
-    Btensor = Z2tensor2tensor(B)
+    Btensor = asArray(B)
     foo3(x) = norm(ein"abab -> "(x)[])
     foo4(x) = norm(dtr(x))
     @test foo3(B) ≈ foo4(B)
-    @test Zygote.gradient(foo3, B)[1] ≈ Z2tensor2tensor(num_grad(foo3, B)) ≈ Zygote.gradient(foo3, Btensor)[1] ≈ num_grad(foo3, Btensor)
+    @test Zygote.gradient(foo3, B)[1] ≈ asArray(num_grad(foo3, B)) ≈ Zygote.gradient(foo3, Btensor)[1] ≈ num_grad(foo3, Btensor)
     @test Zygote.gradient(foo4, B)[1] ≈ num_grad(foo3, B) ≈ num_grad(foo4, B)
 end
 
@@ -135,8 +135,8 @@ end
     D,d = 3,2
 	FL = randinitial(Val(:Z2), atype, dtype, D, d, D)
 	S = randinitial(Val(:Z2), atype, dtype, D, d, D, D, d, D)
-    FLtensor = Z2tensor2tensor(FL)
-	Stensor = Z2tensor2tensor(S)
+    FLtensor = asArray(FL)
+	Stensor = asArray(S)
     foo1(x) = norm(Array(ein"(abc,abcdef),def ->"(FL*x, S*x, FL*x))[])
     foo2(x) = norm(Array(ein"(abc,abcdef),def ->"(FLtensor*x, Stensor*x, FLtensor*x))[])
 	@test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)

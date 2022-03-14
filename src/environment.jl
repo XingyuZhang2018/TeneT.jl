@@ -76,15 +76,15 @@ function initialA(M, D)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
-    symmetry = getsymmetry(M[1,1])
+    # symmetry = getsymmetry(M[1,1])
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        # A[i,j] = randinitial(M[1,1], D,d,D)
-        if symmetry == :Z2
-            A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        else
-            A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        end
+        A[i,j] = randinitial(M[1,1], D,d,D; dir = [-1,1,1])
+        # if symmetry == :Z2
+        #     A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        # else
+        #     A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
+        # end
     end
     return A
 end
@@ -94,7 +94,7 @@ function cellones(A)
     D = size(A[1,1],1)
     Cell = Array{_arraytype(A[1,1]), 2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
-        Cell[i,j] = Iinitial(A[1,1], D)
+        Cell[i,j] = Iinitial(A[1,1], D; dir = [-1,1])
     end
     return Cell
 end
@@ -117,7 +117,7 @@ end
 L = cholesky!(ρ).U
 If ρ is not exactly positive definite, cholesky will fail
 """
-function getL!(A,L; kwargs...)
+function getL!(A,L; kwargs...) 
     Ni,Nj = size(A)
     for j = 1:Nj, i = 1:Ni
         λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
@@ -281,11 +281,12 @@ function FLint(AL, M)
     #     end
     # end
     # return FL
-    if symmetry == :Z2
-        FL = [Z2reshape(randinitial(AL[i,j], size(AL[i,j],1),Int(sqrt(size(M[i,j],1))),Int(sqrt(size(M[i,j],1))),size(AL[i,j],1)), size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1)) for i=1:Ni, j=1:Nj]
-    else
-        FL = [reshape(randinitial(AL[i,j], size(AL[i,j],1),Int(sqrt(size(M[i,j],1))),Int(sqrt(size(M[i,j],1))),size(AL[i,j],1)), size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1)) for i=1:Ni, j=1:Nj]
-    end
+    FL = [randinitial(AL[i,j], size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1); dir = [1,1,-1]) for i=1:Ni, j=1:Nj]
+    # if symmetry == :Z2
+    #     FL = [Z2reshape(randinitial(AL[i,j], size(AL[i,j],1),Int(sqrt(size(M[i,j],1))),Int(sqrt(size(M[i,j],1))),size(AL[i,j],1)), size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1)) for i=1:Ni, j=1:Nj]
+    # else
+    #     FL = [reshape(randinitial(AL[i,j], size(AL[i,j],1),Int(sqrt(size(M[i,j],1))),Int(sqrt(size(M[i,j],1))),size(AL[i,j],1)), size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1)) for i=1:Ni, j=1:Nj]
+    # end
     return FL
 end
 
@@ -305,11 +306,12 @@ function FRint(AR, M)
     #     end
     # end
     # return FR
-    if symmetry == :Z2
-        FR = [Z2reshape(randinitial(AR[i,j], size(AR[i,j],1),Int(sqrt(size(M[i,j],3))),Int(sqrt(size(M[i,j],3))),size(AR[i,j],1)), size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1)) for i=1:Ni, j=1:Nj]
-    else
-        FR = [reshape(randinitial(AR[i,j], size(AR[i,j],1),Int(sqrt(size(M[i,j],3))),Int(sqrt(size(M[i,j],3))),size(AR[i,j],1)), size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1)) for i=1:Ni, j=1:Nj]
-    end
+    FR = [randinitial(AR[i,j], size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1); dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
+    # if symmetry == :Z2
+    #     FR = [Z2reshape(randinitial(AR[i,j], size(AR[i,j],1),Int(sqrt(size(M[i,j],3))),Int(sqrt(size(M[i,j],3))),size(AR[i,j],1)), size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1)) for i=1:Ni, j=1:Nj]
+    # else
+    #     FR = [reshape(randinitial(AR[i,j], size(AR[i,j],1),Int(sqrt(size(M[i,j],3))),Int(sqrt(size(M[i,j],3))),size(AR[i,j],1)), size(AR[i,j],1),size(M[i,j],3),size(AR[i,j],1)) for i=1:Ni, j=1:Nj]
+    # end
     return FR
 end
 
@@ -336,7 +338,7 @@ function leftenv!(ALu, ALd, M, FL; kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
+            @show λLs norm(abs(λLs[1]) - abs(λLs[2]))
             if real(λLs[1]) > 0
                 FL[i,j] = FL1s[1]
                 λL[i,j] = λLs[1]
@@ -701,7 +703,7 @@ function norm_FLint(AL)
     norm_FL = Array{arraytype,2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         D = size(AL[i,j],1)
-        norm_FL[i,j] = randinitial(AL[1,1], D, D)
+        norm_FL[i,j] = randinitial(AL[1,1], D, D; dir = [1,1])
     end
     return norm_FL
 end
@@ -755,7 +757,7 @@ function norm_FRint(AR)
     norm_FR = Array{arraytype,2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         D = size(AR[i,j],1)
-        norm_FR[i,j] = randinitial(AR[1,1], D, D)
+        norm_FR[i,j] = randinitial(AR[1,1], D, D; dir = [-1,-1])
     end
     return norm_FR
 end
