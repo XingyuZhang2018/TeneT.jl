@@ -125,9 +125,8 @@ end
 distribute dims of different part dims of U1 tensor bulk by average and midmax only for odd parts 
 """
 function u1bulkdims(size::Int...;parts = 3)
-    # bits = map(x -> ceil(Int, log2(x)), size)
-    pn = map(size -> [sum(bitarray(i - 1, parts)) for i = 1:size], size)
-    map(pn -> [sum(pn .== i) for i = 0:parts], pn)
+    pn = map(size -> [sum(bitarray(i - 1, parts)) % parts for i = 1:size], size)
+    map(pn -> [sum(pn .== i) for i = 0:parts-1], pn)
 end
 
 function randU1(atype, dtype, a...; dir, parts = 3)
@@ -206,8 +205,8 @@ end
 
 function U1selection(maxN::Int; parts = 3)
     # bit = ceil(Int, log2(maxN))
-    q = [sum(bitarray(i-1, parts)) for i = 1:maxN]
-    [q .== i for i in 0:parts]
+    q = [sum(bitarray(i-1, parts)) % parts for i = 1:maxN]
+    [q .== i for i in 0:parts-1]
 end
 
 function asArray(A::U1Array{T,N}) where {T,N}
@@ -234,8 +233,10 @@ function getpn(size, dir::Vector; parts = 3)
     pn = Vector{Vector{Int}}()
     shift = 1
     @inbounds for i in CartesianIndices(Tuple(0:(parts-1) for j=1:L))
-        dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
-        !(0 in dims) && push!(pn, collect(i.I .* dir))
+        if sum(i.I .* dir) % parts == 0
+            dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
+            !(0 in dims) && push!(pn, collect(i.I .* dir))
+        end
     end
     pn
 end

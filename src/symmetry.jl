@@ -1,3 +1,5 @@
+export asArray, asSymmetryArray
+
 #helper functions to handle array types
 _mattype(::Array{T}) where {T} = Matrix
 _mattype(::CuArray{T}) where {T} = CuMatrix
@@ -19,8 +21,8 @@ getsymmetry(::AbstractArray) = :none
 getsymmetry(::Z2Array) = :Z2
 getsymmetry(::U1Array) = :U1
 
-randinitial(::Val{:none}, atype, dtype, a...; dir = :none) = atype(rand(dtype, a...))
-randinitial(::Val{:Z2}, atype, dtype, a...; dir = :none) = randZ2(atype, dtype, a...)
+randinitial(::Val{:none}, atype, dtype, a...; dir = nothing) = atype(rand(dtype, a...))
+randinitial(::Val{:Z2}, atype, dtype, a...; dir = nothing) = randZ2(atype, dtype, a...)
 randinitial(::Val{:U1}, atype, dtype, a...; dir) = randU1(atype, dtype, a...; dir = dir)
 
 function randinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
@@ -28,8 +30,8 @@ function randinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
     randinitial(Val(getsymmetry(A)), atype, T, a...; dir = dir)
 end
 
-Iinitial(::Val{:none}, atype, dtype, D; dir = :none) = atype{dtype}(I, D, D)
-Iinitial(::Val{:Z2}, atype, dtype, D; dir = :none) = IZ2(atype, dtype, D)
+Iinitial(::Val{:none}, atype, dtype, D; dir = nothing) = atype{dtype}(I, D, D)
+Iinitial(::Val{:Z2}, atype, dtype, D; dir = nothing) = IZ2(atype, dtype, D)
 Iinitial(::Val{:U1}, atype, dtype, D; dir) = IU1(atype, dtype, D; dir = dir)
 
 function Iinitial(A::AbstractArray{T, N}, D; dir) where {T, N}
@@ -37,8 +39,8 @@ function Iinitial(A::AbstractArray{T, N}, D; dir) where {T, N}
     Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D; dir = dir)
 end
 
-zerosinitial(::Val{:none}, atype, dtype, a...; dir = :none) = atype(zeros(dtype, a...))
-zerosinitial(::Val{:Z2}, atype, dtype, a...; dir = :none) = zerosZ2(atype, dtype, a...)
+zerosinitial(::Val{:none}, atype, dtype, a...; dir = nothing) = atype(zeros(dtype, a...))
+zerosinitial(::Val{:Z2}, atype, dtype, a...; dir = nothing) = zerosZ2(atype, dtype, a...)
 zerosinitial(::Val{:U1}, atype, dtype, a...; dir) = zerosU1(atype, dtype, a...; dir = dir)
 
 function zerosinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
@@ -47,3 +49,12 @@ function zerosinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
 end
 
 asArray(A::AbstractArray) = A
+function asSymmetryArray(A::AbstractArray, Symmetry; dir = nothing)
+    if Symmetry == :none
+        A
+    elseif Symmetry == :Z2
+        asZ2Array(A)
+    elseif Symmetry == :U1
+        asU1Array(A; dir)
+    end
+end

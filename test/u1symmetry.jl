@@ -36,9 +36,9 @@ end
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
 
     # u1bulkdims division
-    @test u1bulkdims(2,4) == ([1,1,0,0], [1,2,1,0])
-    @test u1bulkdims(5,8) == ([1,3,1,0], [1,3,3,1])
-    @test u1bulkdims(3,3,4) == ([1,2,0,0], [1,2,0,0], [1,2,1,0])
+    @test u1bulkdims(2,4; parts = 3) == ([1,1,0], [1,2,1])
+    @test u1bulkdims(5,8; parts = 4) == ([1,3,1,0], [1,3,3,1])
+    @test u1bulkdims(3,3,4; parts = 3) == ([1,2,0], [1,2,0], [1,2,1])
     for a = 5:8, b = 5:8
         @test sum(u1bulkdims(a,b)[1]) == a
         @test sum(u1bulkdims(a,b)[2]) == b
@@ -55,7 +55,9 @@ end
     @test A isa U1Array
 	Atensor = asArray(A)
     AA = asU1Array(Atensor, dir = dir)
+    AAtensor = asArray(AA)
     @test A ≈ AA
+    @test Atensor ≈ AAtensor
 
 	# permutedims
 	@test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]))
@@ -161,8 +163,8 @@ end
 	@test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
 
 	# VUMPS unit
-	d = 3
-    D = 5
+	d = 4
+    D = 10
     AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
     M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
     FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
@@ -215,8 +217,8 @@ end
 
 @testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
-    d = 3
-    D = 5
+    d = 4
+    D = 10
     AL = randU1(atype, dtype, D, d, D; dir = [-1,1,1])
     M = randU1(atype, dtype, d, d, d, d; dir = [-1,1,1,-1])
     FL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
@@ -240,35 +242,35 @@ end
 
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, 5, 3, 5; dir = [-1,1,1])
+    A = randU1(atype, dtype, 10, 4, 10; dir = [-1,1,1])
 	Atensor = asArray(A)
-	A = reshape(A, 15, 5) 
-	Atensor = reshape(Atensor, 15, 5)
+	A = reshape(A, 40, 10) 
+	Atensor = reshape(Atensor, 40, 10)
 	Q, R = qrpos(A)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor*Rtensor ≈ Atensor
 	@test Q*R ≈ A
-	@test asArray(reshape(Q, 5, 3, 5)) ≈ reshape(Qtensor, 5, 3, 5)
+	@test asArray(reshape(Q, 10, 4, 10)) ≈ reshape(Qtensor, 10, 4, 10)
 	@test asArray(R) ≈ Rtensor
 end
 
 @testset "U1 lq with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, 4,3,4; dir = [-1,1,1])
+    A = randU1(atype, dtype, 10,4,10; dir = [-1,1,1])
 	Atensor = asArray(A)
-	A = reshape(A, 4, 12)
-	Atensor = reshape(Atensor, 4, 12)
+	A = reshape(A, 10, 40)
+	Atensor = reshape(Atensor, 10, 40)
 	L, Q = lqpos(A)
     Ltensor, Qtensor = lqpos(Atensor)
     @test Ltensor*Qtensor ≈ Atensor
 	@test L*Q ≈ A
 	@test asArray(L) ≈ Ltensor
-	@test asArray(reshape(Q, 4, 3, 4)) ≈ reshape(Qtensor, 4, 3, 4)
+	@test asArray(reshape(Q, 10, 4, 10)) ≈ reshape(Qtensor, 10, 4, 10)
 end
 
 @testset "U1 svd with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, 7,4; dir = [-1,1])
+    A = randU1(atype, dtype, 40,10; dir = [-1,1])
 	Atensor = asArray(A)
 	U, S, V = sysvd!(copy(A))
     Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
