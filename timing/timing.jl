@@ -8,9 +8,26 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64]
     Random.seed!(100)
-    d = 8
+    d = 4
+    χ = 50
+    FL = randZ2(atype, dtype, ((χ,d^2),(χ)))
+    M = randZ2(atype, dtype, ((d^2,d^2),(d^2,d^2)))
+    AL = randZ2(atype, dtype, ((χ,d^2),(χ)))
+
+    function f(FL,M,AL)
+        # res = FL*reshape(AL, χ, χ*d^2)
+        # @show size(res)
+        permutedims(permutedims(FL*reshape(AL, χ, χ*d^2),(1,4,2,3)) * M, (2,4,1,3))*conj(AL)
+    end
+    # @time CUDA.@sync f(FL,M,AL)
+    @btime CUDA.@sync $f($FL, $M, $AL)
+end
+
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:Z2]
+    Random.seed!(100)
+    d = 4
     χ = 50
     FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
     M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])

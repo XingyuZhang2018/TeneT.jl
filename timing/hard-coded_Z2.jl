@@ -14,7 +14,7 @@ CUDA.allowscalar(false)
 # Z2-OMEinsum 314.069 μs (1454 allocations: 75.80 KiB)  |  908.300 μs (1436 allocations: 75.02 KiB)
 @testset "hard-coded with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:Z2]
     Random.seed!(100)
-    d = 8
+    d = 4
     χ = 50
     FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
     M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])
