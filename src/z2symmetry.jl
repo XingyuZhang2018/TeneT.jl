@@ -109,7 +109,7 @@ function zerosZ2(atype, dtype, s)
     parity = [[[0,1] for _ in 1:length(si)] for si in s]
     dims = [[z2indexdims(si[j]) for j in 1:length(si)] for si in s]
     bulkdims = z2fusedims.(dims)
-    tensor = [CUDA.zeros(dtype, bulkdims[1][i], bulkdims[2][i]) for i = 1:2]
+    tensor = [zeros(dtype, bulkdims[1][i], bulkdims[2][i]) for i = 1:2]
     Z2Array(parity, dims, tensor, (s[1]..., s[2]...))
 end
 

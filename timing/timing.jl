@@ -8,10 +8,10 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64]
+@testset "OMEinsum with $atype{$dtype} " for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     d = 4
-    χ = 50
+    χ = 30
     FL = randZ2(atype, dtype, ((χ,d^2),(χ)))
     M = randZ2(atype, dtype, ((d^2,d^2),(d^2,d^2)))
     AL = randZ2(atype, dtype, ((χ,d^2),(χ)))
@@ -23,6 +23,31 @@ CUDA.allowscalar(false)
     end
     # @time CUDA.@sync f(FL,M,AL)
     @btime CUDA.@sync $f($FL, $M, $AL)
+end
+
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:none]
+    Random.seed!(100)
+    d = 4
+    
+    for χ in 4:2:30
+        println("d = $(d) χ = $(χ)")
+        # FL = rand(atype, dtype, ((χ,d^2),(χ)))
+        # M = rand(atype, dtype, ((d^2,d^2),(d^2,d^2)))
+        # AL = rand(atype, dtype, ((χ,d^2),(χ)))
+        FL = rand(dtype, χ,d^2,χ)
+        M = rand(dtype, d^2,d^2,d^2,d^2)
+        AL = rand(dtype, χ,d^2,χ)
+        
+        # @show FL.pn M.pn AL.pn
+        # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+        t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
+        # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
+        # @btime CUDA.@sync ein"adf,abc -> fdbc"($FL,$AL)
+        message = "$d    $χ    $(round(t,digits=5))\n"
+        logfile = open("./timing/matrixrep_wang_contraction_$(atype)_$(symmetry)symmetry_d$(d)_.log", "a")
+        write(logfile, message)
+        close(logfile)
+    end
 end
 
 @testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:Z2]

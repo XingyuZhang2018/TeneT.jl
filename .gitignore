@@ -4,3 +4,5 @@
 /Manifest.toml
 .vscode/settings.json
 *.jld2
+*.log
+*.nb
