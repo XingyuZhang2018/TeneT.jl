@@ -36,9 +36,9 @@ end
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
 
     # u1bulkdims division
-    @test u1bulkdims(2,4; parts = 3) == ([1,1,0], [1,2,1])
-    @test u1bulkdims(5,8; parts = 4) == ([1,3,1,0], [1,3,3,1])
-    @test u1bulkdims(3,3,4; parts = 3) == ([1,2,0], [1,2,0], [1,2,1])
+    @test u1bulkdims(2,4) == ([1,1], [1,2,1])
+    @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
+    @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
     for a = 5:8, b = 5:8
         @test sum(u1bulkdims(a,b)[1]) == a
         @test sum(u1bulkdims(a,b)[2]) == b
@@ -233,11 +233,11 @@ end
     dFL = randU1(atype, dtype, D, d, D; dir = [-1,-1,1])
     ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosU1(atype, dtype, D, d, D; dir = [-1,-1,1]), dFL, -λl, 1)
     # @show info
-    tλl,tFL = tλs[1], tFLs[1]
-    tdFL = asArray(dFL)
-    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
-    # @show info
-    @test asArray(ξl) ≈ tξl
+    # tλl,tFL = tλs[1], tFLs[1]
+    # tdFL = asArray(dFL)
+    # tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
+    # # @show info
+    # @test asArray(ξl) ≈ tξl
 end
 
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
