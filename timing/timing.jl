@@ -8,18 +8,25 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2]
     Random.seed!(100)
-    d = 8
-    χ = 50
-    FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
-    M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])
-    AL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [1,1,-1])
-    # @show FL.pn M.pn AL.pn
-    # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-    @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
-    # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
-    # @btime CUDA.@sync ein"adf,abc -> fdbc"($FL,$AL)
+    d = 4
+    
+    for χ in 4:2:30
+        println("d = $(d) χ = $(χ)")
+        FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
+        M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])
+        AL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [1,1,-1])
+        # @show FL.pn M.pn AL.pn
+        # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+        t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
+        # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
+        # @btime CUDA.@sync ein"adf,abc -> fdbc"($FL,$AL)
+        message = "$d    $χ    $(round(t,digits=5))\n"
+        logfile = open("./timing/wang_contraction_$(atype)_$(symmetry)symmetry_d$(d)_.log", "a")
+        write(logfile, message)
+        close(logfile)
+    end
 end
 
 @testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
