@@ -455,12 +455,6 @@ accum(A::U1Array, B::U1Array...) = +(A, B...)
 # for KrylovKit compatibility
 rmul!(A::U1Array, B::Number) = (map(x -> rmul!(x, B), A.tensor); A)
 
-function axpby!(a::Number, X::U1Array, b::Number, Y::U1Array)
-    @show length(X.tensor) length(Y.tensor)
-    Y.tensor = a * X.tensor + b * Y.tensor
-    Y
-end
-
 function lmul!(A::U1Array{T,N}, B::U1Array) where {T,N}
     C = A*B
     for i = 1:length(B.qn)
@@ -501,16 +495,16 @@ sqrt(A::U1Array) = U1Array(A.qn, map(x->sqrt.(x), A.tensor), A.size, A.dims, A.d
 broadcasted(sqrt, A::U1Array) = sqrt(A)
 
 # only for order-three tensor's qr and lq
-function qrpos!(A::U1Array{T,N}; parts = 3) where {T,N}
+function qrpos!(A::U1Array{T,N}) where {T,N}
     Qqn = Vector{Vector{Int}}()
     Rqn = Vector{Vector{Int}}()
     atype = _arraytype(A.tensor[1])
     Qtensor = Vector{atype{T}}()
     Rtensor = Vector{atype{T}}()
 
-    for p in unique(map(x->mod(sum(x[A.division+1:end]), parts), A.qn))
+    for p in unique(map(x->sum(x[A.division+1:end]), A.qn))
         # @show p
-        u1bulkQR!(Qqn, Qtensor, Rqn, Rtensor, A, p; parts = parts)
+        u1bulkQR!(Qqn, Qtensor, Rqn, Rtensor, A, p)
     end
     Asize = A.size
     Adims = A.dims
@@ -518,12 +512,12 @@ function qrpos!(A::U1Array{T,N}; parts = 3) where {T,N}
     U1Array(Qqn, Qtensor, Asize, Adims[exchangeind], A.division), U1Array(Rqn, Rtensor, (Asize[end], Asize[end]), map(x -> [size(x)...], Rtensor), 1)
 end
 
-function u1bulkQR!(Qqn, Qtensor, Rqn, Rtensor, A, p; parts = 3)
+function u1bulkQR!(Qqn, Qtensor, Rqn, Rtensor, A, p)
     Atensor = A.tensor
     Aqn = A.qn
     Adiv = A.division
 
-    ind_A = findall(x->mod(sum(x[Adiv+1:end]), parts) == p, Aqn)
+    ind_A = findall(x->sum(x[Adiv+1:end]) == p, Aqn)
     matrix_j = unique(map(x->x[Adiv+1:end], Aqn[ind_A]))
     matrix_i = unique(map(x->x[1:Adiv], Aqn[ind_A]))
 
@@ -544,15 +538,15 @@ function u1bulkQR!(Qqn, Qtensor, Rqn, Rtensor, A, p; parts = 3)
     push!(Rtensor, R[idim, jdim])
 end
 
-function lqpos!(A::U1Array{T,N}; parts = 3) where {T,N}
+function lqpos!(A::U1Array{T,N}) where {T,N}
     Lqn = Vector{Vector{Int}}()
     Qqn = Vector{Vector{Int}}()
     atype = _arraytype(A.tensor[1])
     Ltensor = Vector{atype{T}}()
     Qtensor = Vector{atype{T}}()
 
-    for p in unique(map(x->mod(x[1], parts), A.qn))
-        u1bulkLQ!(Lqn, Ltensor, Qqn, Qtensor, A, p; parts = parts)
+    for p in unique(map(x->x[1], A.qn))
+        u1bulkLQ!(Lqn, Ltensor, Qqn, Qtensor, A, p)
     end
     Asize = A.size
     Adims = A.dims
@@ -560,12 +554,12 @@ function lqpos!(A::U1Array{T,N}; parts = 3) where {T,N}
     U1Array(Lqn, Ltensor, (Asize[1], Asize[1]), map(x -> [size(x)...], Ltensor), 1), U1Array(Qqn, Qtensor, Asize, Adims[exchangeind], A.division)
 end
 
-function u1bulkLQ!(Lqn, Ltensor, Qqn, Qtensor, A, p; parts = 3)
+function u1bulkLQ!(Lqn, Ltensor, Qqn, Qtensor, A, p)
     Atensor = A.tensor
     Aqn = A.qn
     Adiv = A.division
 
-    ind_A = findall(x->mod(x[1], parts) == p, Aqn)
+    ind_A = findall(x->x[1] == p, Aqn)
     matrix_j = unique(map(x->x[Adiv+1:end], Aqn[ind_A]))
     matrix_i = unique(map(x->x[1], Aqn[ind_A]))
 
@@ -619,35 +613,14 @@ function sysvd!(A::U1Array{T,N}) where {T,N}
 end
 
 # """
-#     div = division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
-
-# give the reshape division of b by a, where b is the original shape and a is the new shape.
-# """
-# function division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
-#     prod(a) != prod(b) && throw(Base.error("$a and $b must have the same product"))
-#     Na > Nb && throw(Base.error("$a must be shorter than $b"))
-#     div = Int[zeros(Int, Na)..., Nb]
-#     for i in 2:Na
-#         idiv = div[i-1] + 1
-#         p = b[idiv]
-#         while p != a[i-1]
-#             idiv += 1 
-#             p *= b[idiv]
-#         end
-#         div[i] = idiv
-#     end
-#     [div[i] + 1 : div[i+1] for i in 1:Na]
-# end
-
-# """
 #     U1reshape(A::U1Array{T, N}, a::Int...) where {T, N}
 
 # U1reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`
 # """
-# U1reshape(A::U1Array, a::Tuple{Vararg{Int}}) = U1reshape(A, a...)
-# function U1reshape(A::U1Array{T, N}, a::Int...) where {T, N}
+# U1reshape(A::U1Array, s::Tuple{Vararg{Int}}) = U1reshape(A, s...)
+# function U1reshape(A::U1Array{T, N}, s::Int...; olddir, newdir) where {T, N}
 #     atype = _arraytype(A.tensor[1])
-#     orderedqn = getqn(N)
+#     orderedqn = getqn(size(A), olddir)
 #     if orderedqn == A.qn
 #         Atensor = A.tensor
 #         Adims = A.dims
@@ -656,12 +629,12 @@ end
 #         Atensor = A.tensor[exchangeind]
 #         Adims = A.dims[exchangeind]
 #     end
-#     if N > length(a)
-#         div = division(a, size(A))
-#         reqn = [[sum(p[d]) % 2 for d in div] for p in orderedqn]
+#     if N > length(s)
+#         div = division(s, size(A))
+#         reqn = [[sum(p[d]) for d in div] for p in orderedqn]
 #         redims = [[prod(dims[d]) for d in div] for dims in Adims]
 #         retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
-#         ureqn = getqn(length(a))
+#         ureqn = getqn(s, newdir)
 #         retensors = Vector{atype{T}}()
 #         for i in 1:length(ureqn)
 #             p = ureqn[i]

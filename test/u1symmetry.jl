@@ -10,27 +10,6 @@ using Test
 using BenchmarkTools
 CUDA.allowscalar(false)
 
-@testset "parity_conserving" for atype in [Array], dtype in [ComplexF64]
-    Random.seed!(100)
-    D = 2
-    T = atype(rand(dtype,D,D,D))
-	T = parity_conserving(T)
-	s = 0
-	for i in 1:D, j in 1:D, k in 1:D
-		(((i + j + k) - 3) % 2 != 0) && (s += T[i,j,k])
-	end
-	@test s == 0
-end
-
-@testset "parity_conserving and asU1Array asU1Array compatibility" begin
-    # a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
-    # a = parity_conserving(a)
-    # b = asU1Array(a)
-    # c = asArray(b)
-    # d = asU1Array(c)
-    # @test a == c && b == d
-end
-
 @testset "U1 Tensor with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
@@ -66,58 +45,21 @@ end
 	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
-# @testset "reshape parity_conserving compatibility" begin
-#     a = randinitial(Val(:none), Array, Float64, 3, 8, 3)
-#     a = parity_conserving(a)
-#     a = reshape(a,3,2,4,3)
-#     b = asU1Array(a)
-#     c = asArray(b)
-#     @test a == c
-# end
-
-# @testset "reshape compatibility" begin
-#     aU1 = randinitial(Val(:U1), Array, Float64, 2,2,2,2,2,2,2,2)
-#     bU1 = U1reshape(aU1,4,4,4,4)
-#     cU1 = U1reshape(bU1,2,2,2,2,2,2,2,2)
-#     @test aU1 == cU1
-
-#     a = asArray(aU1)
-#     b = reshape(a, 4,4,4,4) 
-#     bU1t = asU1Array(b)
-#     @test bU1t == bU1
-#     c = reshape(b, 2,2,2,2,2,2,2,2)
-#     cU1t = asU1Array(c)
-#     @test cU1t == cU1
-
-#     aU1 = randinitial(Val(:U1), Array, Float64, 10,2,2,10)
-#     bU1 = U1reshape(aU1,10,4,10)
-#     cU1 = U1reshape(bU1,10,2,2,10)
-#     @test aU1 == cU1
-
-#     a = asArray(aU1)
-#     b = reshape(a, 10,4,10) 
-#     bU1t = asU1Array(b)
-#     @test bU1t == bU1
-#     c = reshape(b, 10,2,2,10)
-#     cU1t = asU1Array(c)
-#     @test cU1t == cU1
-# end
-
 # @testset "general flatten reshape" begin
-#     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-#     a = randinitial(Val(:U1), Array, Float64, 3,3,3,3,3,3,3,3)
-#     atensor = asArray(a)
-#     rea = U1reshape(a, 9,9,9,9)
-#     rea2 = asU1Array(reshape(atensor, 9,9,9,9))
-#     @test rea !== rea2
-#     rerea = U1reshape(rea, 3,3,3,3,3,3,3,3)
-#     @test rerea ≈ a
+    # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
+    # a = randinitial(Val(:U1), Array, Float64, 3,3,3,3,3,3,3,3; dir = [1,-1,1,-1,1,-1,1,-1])
+    # atensor = asArray(a)
+    # rea = U1reshape(a, 9,9,9,9)
+    # rea2 = asU1Array(reshape(atensor, 9,9,9,9); dir = [1,-1,1,-1,1,-1,1,-1])
+    # @test rea !== rea2
+    # rerea = U1reshape(rea, 3,3,3,3,3,3,3,3)
+    # @test rerea ≈ a
 
-#     # (χ,D,D,χ) -> (χ,D^2,χ)
-#     a = randinitial(Val(:U1), CuArray, Float64, 5, 3, 3, 5)
-#     rea = U1reshape(a, 5, 9, 5)
-#     rerea = U1reshape(rea, 5, 3, 3, 5)
-#     @test rerea ≈ a
+    # # (χ,D,D,χ) -> (χ,D^2,χ)
+    # a = randinitial(Val(:U1), CuArray, Float64, 5, 3, 3, 5)
+    # rea = U1reshape(a, 5, 9, 5)
+    # rerea = U1reshape(rea, 5, 3, 3, 5)
+    # @test rerea ≈ a
 # end
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
@@ -230,14 +172,13 @@ end
     @test asArray(FLs[1]) ≈ tFLs[1]
 
     λl,FL = λs[1], FLs[1]
-    dFL = randU1(atype, dtype, D, d, D; dir = [-1,-1,1])
-    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosU1(atype, dtype, D, d, D; dir = [-1,-1,1]), dFL, -λl, 1)
-    # @show info
-    # tλl,tFL = tλs[1], tFLs[1]
-    # tdFL = asArray(dFL)
-    # tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
-    # # @show info
-    # @test asArray(ξl) ≈ tξl
+    dFL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
+    dFL -= Array(ein"abc,abc ->"(conj(FL), dFL))[] * FL
+    @time ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), conj(dFL), -λl, 1) 
+    tλl,tFL = tλs[1], tFLs[1]
+    tdFL = asArray(dFL)
+    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), conj(tdFL), -tλl, 1)
+    @test asArray(ξl) ≈ tξl
 end
 
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]

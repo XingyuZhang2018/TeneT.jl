@@ -210,10 +210,11 @@ end
 
     λl,FL = λs[1], FLs[1]
     dFL = randZ2(atype, dtype, D, d, D)
-    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), zerosZ2(atype, dtype, D, d, D), dFL, -λl, 1)
+    dFL -= Array(ein"abc,abc ->"(conj(FL), dFL))[] * FL
+    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), conj(dFL), -λl, 1)
     tλl,tFL = tλs[1], tFLs[1]
     tdFL = asArray(dFL)
-    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), atype(zeros(dtype, D, d, D)), tdFL, -tλl, 1)
+    tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), conj(tdFL), -tλl, 1)
     @test asArray(ξl) ≈ tξl
 end
 
