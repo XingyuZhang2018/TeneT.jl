@@ -45,22 +45,22 @@ CUDA.allowscalar(false)
 	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
-# @testset "general flatten reshape" begin
+@testset "general flatten reshape" begin
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-    # a = randinitial(Val(:U1), Array, Float64, 3,3,3,3,3,3,3,3; dir = [1,-1,1,-1,1,-1,1,-1])
-    # atensor = asArray(a)
-    # rea = U1reshape(a, 9,9,9,9)
-    # rea2 = asU1Array(reshape(atensor, 9,9,9,9); dir = [1,-1,1,-1,1,-1,1,-1])
-    # @test rea !== rea2
-    # rerea = U1reshape(rea, 3,3,3,3,3,3,3,3)
-    # @test rerea ≈ a
+    a = randinitial(Val(:U1), Array, Float64, 3,3,3,3,3,3,3,3; dir = [-1,-1,1,1,1,1,-1,-1])
+    atensor = asArray(a)
+    rea = U1reshape(a, 9,9,9,9; olddir = [-1,-1,1,1,1,1,-1,-1], newdir = [-1,1,1,-1])
+    rea2 = asU1Array(reshape(atensor, 9,9,9,9); dir =  [-1,1,1,-1])
+    @test rea !== rea2
+    rerea = U1reshape(rea, 3,3,3,3,3,3,3,3; olddir = [-1,1,1,-1], newdir = [-1,-1,1,1,1,1,-1,-1])
+    @test rerea ≈ a
 
-    # # (χ,D,D,χ) -> (χ,D^2,χ)
-    # a = randinitial(Val(:U1), CuArray, Float64, 5, 3, 3, 5)
-    # rea = U1reshape(a, 5, 9, 5)
-    # rerea = U1reshape(rea, 5, 3, 3, 5)
-    # @test rerea ≈ a
-# end
+    # (χ,D,D,χ) -> (χ,D^2,χ)
+    a = randinitial(Val(:U1), CuArray, Float64, 5,3,3,5; dir = [-1,1,1,1])
+    rea = U1reshape(a, 5,9,5; olddir = [-1,1,1,1], newdir = [-1,1,1])
+    rerea = U1reshape(rea, 5,3,3,5; olddir = [-1,1,1], newdir = [-1,1,1,1])
+    @test rerea ≈ a
+end
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)

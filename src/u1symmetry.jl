@@ -5,7 +5,7 @@ import CUDA: CuArray
 import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
-export U1Array
+export U1Array, U1reshape
 export randU1, asU1Array, asArray
 export dtr
 
@@ -234,14 +234,10 @@ give the qn of length L
 """
 function getqn(s, dir::Vector{Int})
     qm = maxq.(s)
-    bkdims = u1bulkdims(s...)
-    L = length(s)
     qn = Vector{Vector{Int}}()
-    shift = 1
     @inbounds for i in CartesianIndices(Tuple(0:qm for qm in qm))
         if sum(i.I .* dir) == 0
-            dims = Tuple(bkdims[j][i.I[j]+shift] for j in 1:L)
-            !(0 in dims) && push!(qn, collect(i.I .* dir))
+            push!(qn, collect(i.I .* dir))
         end
     end
     qn
@@ -612,71 +608,77 @@ function sysvd!(A::U1Array{T,N}) where {T,N}
     U1Array(qn, Utensor, (Asize[1], sm), N1, div), U1Array(qn, Stensor, (sm, sm), [Nm for _ in 1:length(qn)], div), U1Array(qn, Vtensor, (sm, Asize[2]), N2, div)
 end
 
-# """
-#     U1reshape(A::U1Array{T, N}, a::Int...) where {T, N}
+"""
+    U1reshape(A::U1Array{T, N}, a::Int...) where {T, N}
 
-# U1reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`
-# """
-# U1reshape(A::U1Array, s::Tuple{Vararg{Int}}) = U1reshape(A, s...)
-# function U1reshape(A::U1Array{T, N}, s::Int...; olddir, newdir) where {T, N}
-#     atype = _arraytype(A.tensor[1])
-#     orderedqn = getqn(size(A), olddir)
-#     if orderedqn == A.qn
-#         Atensor = A.tensor
-#         Adims = A.dims
-#     else
-#         exchangeind = indexin(orderedqn, A.qn)
-#         Atensor = A.tensor[exchangeind]
-#         Adims = A.dims[exchangeind]
-#     end
-#     if N > length(s)
-#         div = division(s, size(A))
-#         reqn = [[sum(p[d]) for d in div] for p in orderedqn]
-#         redims = [[prod(dims[d]) for d in div] for dims in Adims]
-#         retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
-#         ureqn = getqn(s, newdir)
-#         retensors = Vector{atype{T}}()
-#         for i in 1:length(ureqn)
-#             p = ureqn[i]
-#             bulkind = findall(x->x in [p], reqn)
-#             rebulkdims = Int.(.+(redims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
-#             rebulkdims1 = redims[bulkind[1]]
-#             silce = [[1:rebulkdims1[i], (rebulkdims1[i] == rebulkdims[i] ? 1 : 1+rebulkdims1[i]):rebulkdims[i]] for i in 1:length(rebulkdims)]
-#             tensor = atype(zeros(T, rebulkdims...))
-#             bits = Int(log2(length(bulkind)))
-#             for j in 1:length(bulkind)
-#                 choose = bitarray(j - 1, bits) .+ 1
-#                 length(choose) == 1 && (choose = [choose[], choose[], choose[]])
-#                 choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
-#                 tensor[choosesilce...] = retensor[bulkind[j]]
-#             end
-#             push!(retensors, tensor)
-#         end
-#         dims = map(x -> [size(x)...], retensors)
-#         U1Array(ureqn, atype.(retensors), a, dims, 1)
-#     else
-#         div = division(size(A), a)
-#         reqn = getqn(length(a))
-#         qn = [[sum(p[d]) % 2 for d in div] for p in reqn]
-#         rebulkdims = bulkdims(a...)
-#         redims = [[rebulkdims[p[i] + 1][i] for i in 1:length(a)] for p in reqn]
-#         dims = [[prod(dims[d]) for d in div] for dims in redims]
-#         retensors = Array{Array,1}(undef, length(reqn))
-#         for i in 1:length(orderedqn)
-#             p = orderedqn[i]
-#             bulkind = findall(x->x in [p], qn)
-#             bulkdims = Int.(.+(dims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
-#             bulkdims1 = dims[bulkind[1]]
-#             silce = [[1:bulkdims1[i], (bulkdims1[i] == bulkdims[i] ? 1 : 1+bulkdims1[i]):bulkdims[i]] for i in 1:length(bulkdims)]
-#             bits = Int(log2(length(bulkind)))
-#             for j in 1:length(bulkind)
-#                 choose = bitarray(j - 1, bits) .+ 1
-#                 length(choose) == 1 && (choose = [choose[], choose[], choose[]])
-#                 choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
-#                 retensors[bulkind[j]] = reshape(Array(Atensor[i])[choosesilce...], redims[bulkind[j]]...)
-#             end
-#         end
-#         dims = map(x -> [size(x)...], retensors)
-#         U1Array(reqn, atype.(retensors), a, dims, 1)
-#     end
-# end
+U1reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`, and the high-oreder U1tensor is from randU1 or zerosU1 function.
+"""
+U1reshape(A::U1Array, s::Tuple{Vararg{Int}}) = U1reshape(A, s...)
+function U1reshape(A::U1Array{T, N}, s::Int...; olddir, newdir) where {T, N}
+    atype = _arraytype(A.tensor[1])
+    orderedqn = getqn(size(A), olddir)
+    if orderedqn == A.qn
+        Atensor = A.tensor
+        Adims = A.dims
+    else
+        orderedqn = intersect(orderedqn, A.qn)
+        exchangeind = indexin(orderedqn, A.qn)
+        Atensor = A.tensor[exchangeind]
+        Adims = A.dims[exchangeind]
+    end
+    if N > length(s)
+        div = division(s, size(A))
+        reqn = [[sum(p[d]) for d in div] for p in orderedqn]
+        redims = [[prod(dims[d]) for d in div] for dims in Adims]
+        retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
+        ureqn = intersect(getqn(s, newdir), reqn)
+        retensors = Vector{atype{T}}()
+        inddims = u1bulkdims(size(A)...)
+        for i in 1:length(ureqn)
+            q = ureqn[i]
+            bulkind = findall(x->x in [q], reqn)
+            oriqn = A.qn[bulkind]
+        
+            indqnfrom = [unique(map(x->x[div], oriqn)) for div in div]
+            rebulkdims = [[prod(map((x,y)->x[abs(y)+1], inddims[div[i]], indqnfrom)) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
+            # indqnfrom = [[[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]]]
+            # rebulkdims = [[1, 4], [1, 4], [1, 4], [1, 4]]
+            silce = [[(sum(rebulkdims[1:(i-1)]) + 1) : sum(rebulkdims[1:i]) for i in 1:length(rebulkdims)] for rebulkdims in rebulkdims]
+            tensor = atype(zeros(T, map(sum, rebulkdims)...))
+            parts = map(length, silce)
+            cartind = CartesianIndices(Tuple(parts))
+            for j in 1:length(bulkind)
+                choosesilce = map((s,i)->s[i], silce, cartind[j].I)
+                tensor[choosesilce...] = retensor[bulkind[j]]
+            end
+            push!(retensors, tensor)
+        end
+        dims = map(x -> collect(size(x)), retensors)
+        U1Array(ureqn, map(atype, retensors), s, dims, 1)
+    else
+        div = division(size(A), s)
+        reqn = getqn(s, newdir)
+        qn = [[sum(p[d]) for d in div] for p in reqn]
+        rebulkdims = u1bulkdims(s...)
+        redims = [[rebulkdims[i][abs(qn[i]) + 1] for i in 1:length(qn)] for qn in reqn]
+        dims = [[prod(redims[d]) for d in div] for redims in redims]
+        retensors = Array{Array,1}(undef, length(reqn))
+        inddims = u1bulkdims(s...)
+        for i in 1:length(orderedqn)
+            q = orderedqn[i]
+            bulkind = findall(x->x in [q], qn)
+            oriqn = reqn[bulkind]
+            indqnfrom = [unique(map(x->x[div], oriqn)) for div in div]
+            bulkdims = [[prod(map((x,y)->x[abs(y)+1], inddims[div[i]], indqnfrom)) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
+            silce = [[(sum(bulkdims[1:(i-1)]) + 1) : sum(bulkdims[1:i]) for i in 1:length(bulkdims)] for bulkdims in bulkdims]
+            parts = map(length, silce)
+            cartind = CartesianIndices(Tuple(parts))
+            for j in 1:length(bulkind)
+                choosesilce = map((s,i)->s[i], silce, cartind[j].I)
+                retensors[bulkind[j]] = reshape(Array(Atensor[i])[choosesilce...], redims[bulkind[j]]...)
+            end
+        end
+        dims = map(x -> collect(size(x)), retensors)
+        U1Array(reqn, map(atype, retensors), s, dims, 1)
+    end
+end

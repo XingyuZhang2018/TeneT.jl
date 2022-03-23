@@ -10,9 +10,9 @@ CUDA.allowscalar(false)
 
 @testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
-    d = 4
+    d = 8
     
-    for χ in 4:2:30
+    for χ in 10:10:90
         println("d = $(d) χ = $(χ)")
         FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
         M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])
