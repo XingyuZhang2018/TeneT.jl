@@ -1,4 +1,4 @@
-export asArray, asSymmetryArray
+export asArray, asSymmetryArray, symmetryreshape
 
 #helper functions to handle array types
 _mattype(::Array{T}) where {T} = Matrix
@@ -49,12 +49,22 @@ function zerosinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
 end
 
 asArray(A::AbstractArray) = A
-function asSymmetryArray(A::AbstractArray, Symmetry; dir = nothing)
-    if Symmetry == :none
+function asSymmetryArray(A::AbstractArray, symmetry; dir = nothing)
+    if symmetry == :none
         A
-    elseif Symmetry == :Z2
+    elseif symmetry == :Z2
         asZ2Array(A)
-    elseif Symmetry == :U1
+    elseif symmetry == :U1
         asU1Array(A; dir)
+    end
+end
+
+function symmetryreshape(A::AbstractArray, symmetry, s...; olddir = nothing, newdir = nothing)
+    if symmetry == :none
+        reshape(A, s...)
+    elseif symmetry == :Z2
+        Z2reshape(A, s...)
+    elseif symmetry == :U1
+        U1reshape(A, s...; olddir = olddir, newdir = newdir)
     end
 end

@@ -192,22 +192,28 @@ function IU1(atype, dtype, D; dir)
     U1Array(qn, tensor, (D, D), dims, 1)
 end
 
-# getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
-# function getindex(A::U1Array, index::Int...)
-#     bits = map(x -> ceil(Int, log2(x)), size(A))
-#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits))
-#     sum(qn) % 2 != 0 && return 0.0
-#     ip = findfirst(x->x in [qn], A.qn)
-#     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
-# end
+getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
+function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
+    bits = map(x -> ceil(Int, log2(x)), size(A))
+    qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
+    Adir = sign.(sum(A.qn))
+    sum(qn.*Adir) != 0 && return 0.0
+    ind = findfirst(x->x in [qn.*Adir], A.qn)
+    qlist = [U1selection(size(A, i)) for i = 1:N]
+    position = [sum(qlist[i][qn[i]+1][1:index[i]]) for i in 1:N]
+    CUDA.@allowscalar A.tensor[ind][position...]
+end
 
-# setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-# function setindex!(A::U1Array, x::Number, index::Int...)
-#     bits = map(x -> ceil(Int, log2(x)), size(A))
-#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits))
-#     ip = findfirst(x->x in [qn], A.qn)
-#     CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...] = x
-# end
+setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
+function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
+    bits = map(x -> ceil(Int, log2(x)), size(A))
+    qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
+    Adir = sign.(sum(A.qn))
+    ind = findfirst(x->x in [qn.*Adir], A.qn)
+    qlist = [U1selection(size(A, i)) for i = 1:N]
+    position = [sum(qlist[i][qn[i]+1][1:index[i]]) for i in 1:N]
+    CUDA.@allowscalar A.tensor[ind][position...] = x
+end
 
 function U1selection(maxs::Int)
     mq = maxq(maxs)
@@ -298,9 +304,9 @@ function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     tensor = Vector{atype{T}}()
     divA, divB = A.division, B.division
 
-    Adir = sign.(sum(A.qn))[divA+1:end]
-    Bdir = sign.(sum(B.qn)[1:divB])
-    sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
+    # Adir = sign.(sum(A.qn))[divA+1:end]
+    # Bdir = sign.(sum(B.qn)[1:divB])
+    # sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
     if !(divA in [0, NA]) && !(divB in [0, NB]) 
         for p in unique(map(x->sum(x[divA+1:end]), A.qn))
             # @show p
@@ -613,7 +619,7 @@ end
 
 U1reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`, and the high-oreder U1tensor is from randU1 or zerosU1 function.
 """
-U1reshape(A::U1Array, s::Tuple{Vararg{Int}}) = U1reshape(A, s...)
+U1reshape(A::U1Array, s::Tuple{Vararg{Int}}; olddir, newdir) = U1reshape(A, s...; olddir=olddir, newdir=newdir)
 function U1reshape(A::U1Array{T, N}, s::Int...; olddir, newdir) where {T, N}
     atype = _arraytype(A.tensor[1])
     orderedqn = getqn(size(A), olddir)

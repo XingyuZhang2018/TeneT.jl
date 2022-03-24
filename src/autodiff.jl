@@ -82,6 +82,22 @@ function num_grad(f, a::Z2Array; δ::Real=1e-5)
     return intype(df)
 end
 
+function num_grad(f, a::U1Array; δ::Real=1e-5)
+    b = Array(copy(a))
+    intype = _arraytype(a.tensor[1])
+    df = copy(a)
+    bits = map(x -> ceil(Int, log2(x)), size(a))
+    Adir = sign.(sum(a.qn))
+    for i in CartesianIndices(b)
+        qn = collect(sum.(bitarray.(i.I .- 1, bits))) 
+        if sum(qn.*Adir) == 0
+            foo = x -> (ac = copy(b); ac[i] = x; f(intype(ac)))
+            df[i] = num_grad(foo, b[i], δ=δ)
+        end
+    end
+    return intype(df)
+end
+
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)
@@ -617,7 +633,9 @@ end
 
 ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(dT))
 
-ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, a::Int...) = Z2reshape(A, a), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), a...)
+ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, s::Int...) = Z2reshape(A, s), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), s...)
+
+ChainRulesCore.rrule(::typeof(U1reshape), A::U1Array, s::Int...; olddir, newdir) = U1reshape(A, s; olddir=olddir, newdir=newdir), dAr -> (NoTangent(), U1reshape(dAr, size(A); olddir=newdir, newdir=olddir), s...)
 
 # function ChainRulesCore.rrule(::typeof(tr), A::Z2Array{T,N}) where {T,N}
 #     function back(dtrA)

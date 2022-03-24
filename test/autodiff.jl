@@ -9,32 +9,33 @@ using Test
 using Zygote
 CUDA.allowscalar(false)
 
-@testset "Z2 ad basic with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
+@testset "ad basic with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
+    Random.seed!(100)
     ## reshape
-    A = randinitial(Val(:Z2), atype, dtype, 3,2,3)
+    A = randinitial(Val(symmetry), atype, dtype, 3,2,3; dir = [-1,1,1])
     Atensor = asArray(A)
     foo1(x) = norm(reshape(A*x, 6,3))
     foo2(x) = norm(reshape(Atensor*x, 6,3))
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 
     ## wrong shape: actually don't change shape
-    A = randinitial(Val(:Z2), atype, dtype, 6,3)
+    A = randinitial(Val(symmetry), atype, dtype, 6,3; dir = [-1,1])
     Atensor = asArray(A)
     foo3(x) = norm(reshape(A*x, 3,2,3))
     foo4(x) = norm(reshape(Atensor*x, 3,2,3))
     @test Zygote.gradient(foo3, 1)[1] ≈ num_grad(foo3, 1) ≈ Zygote.gradient(foo4, 1)[1] ≈ num_grad(foo4, 1)
 
-    ## Z2 reshape
-    A = randinitial(Val(:Z2), atype, dtype, 10,3,3,10)
-    B = randinitial(Val(:Z2), atype, dtype, 10,4,10)
-    foo9(x) = norm(Z2reshape(x, 10,9,10))
-    foo10(x) = norm(Z2reshape(x, 10,2,2,10))
+    ## symmetry reshape
+    A = randinitial(Val(symmetry), atype, dtype, 10,3,3,10; dir = [-1,1,1,1])
+    B = randinitial(Val(symmetry), atype, dtype, 10,4,10; dir = [-1,1,1])
+    foo9(A) = norm(symmetryreshape(A, symmetry, 10,9,10; olddir = [-1,1,1,1], newdir = [-1,1,1]))
+    foo10(B) = norm(symmetryreshape(B, symmetry, 10,2,2,10; olddir = [-1,1,1], newdir = [-1,1,1,1]))
     @test Zygote.gradient(foo9, A)[1] ≈ num_grad(foo9, A)    # for d <: any
     @test Zygote.gradient(foo10, B)[1] ≈ num_grad(foo10, B)  # for d <: 2^N
 
     ## * 
-    A = randinitial(Val(:Z2), atype, dtype, 3,6)
-    B = randinitial(Val(:Z2), atype, dtype, 6,3)
+    A = randinitial(Val(symmetry), atype, dtype, 3,6; dir = [-1,1])
+    B = randinitial(Val(symmetry), atype, dtype, 6,3; dir = [-1,1])
     Atensor = asArray(A)
     Btensor = asArray(B)
     foo5(A) = norm(A*B)
@@ -42,16 +43,16 @@ CUDA.allowscalar(false)
     @test asArray(Zygote.gradient(foo5, A)[1]) ≈ asArray(num_grad(foo5, A)) ≈ Zygote.gradient(foo6, Atensor)[1] ≈ num_grad(foo6, Atensor)
 
     ## '
-    A = randinitial(Val(:Z2), atype, dtype, 6,3)
+    A = randinitial(Val(symmetry), atype, dtype, 6,3; dir = [-1,1])
     Atensor = asArray(A)
     foo7(A) = norm(A')
     foo8(Atensor) = norm(Atensor')
     @test asArray(Zygote.gradient(foo7, A)[1]) ≈ asArray(num_grad(foo7, A)) ≈ Zygote.gradient(foo8, Atensor)[1] ≈ num_grad(foo8, Atensor)
 end
 
-@testset "matrix autodiff with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64], symmetry in [:none, :Z2]
+@testset "matrix autodiff with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [Float64], symmetry in [:U1]
     Random.seed!(100)
-    A = randinitial(Val(symmetry), atype, dtype, 4, 4)
+    A = randinitial(Val(symmetry), atype, dtype, 4,4; dir = [-1,1])
     @test Zygote.gradient(norm, A)[1] ≈ num_grad(norm, A)
 
     function foo1(x) 
@@ -61,7 +62,7 @@ end
 
     # example to solve differential of array of array
     # use `[]` list then reshape
-    A = [randinitial(Val(symmetry), atype, dtype, 2, 2) for i in 1:2, j in 1:2]
+    A = [randinitial(Val(symmetry), atype, dtype, 2,2; dir = [-1,1]) for i in 1:2, j in 1:2]
     function foo2(x)
         # B[i,j] = A[i,j].*x   # mistake
         B = reshape([A[i]*x for i=1:4],2,2)
@@ -90,7 +91,7 @@ end
     @test Zygote.gradient(foo4, B)[1] ≈ num_grad(foo3, B) ≈ num_grad(foo4, B)
 end
 
-@testset "QR factorization with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "QR factorization with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
     M = randinitial(Val(symmetry), atype, dtype, 5, 3, 5)
     function foo(M)
@@ -102,7 +103,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M)  atol = 1e-8
 end
 
-@testset "LQ factorization with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "LQ factorization with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
     M = randinitial(Val(symmetry), atype, dtype, 5, 3, 5)
     function foo(M)
@@ -113,7 +114,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "loop_einsum mistake with  $(symmetry) $atype{$dtype}" for atype in [CuArray], dtype in [Float64], symmetry in [:none, :Z2]
+@testset "loop_einsum mistake with  $(symmetry) $atype{$dtype}" for atype in [CuArray], dtype in [Float64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
     D = 2
     A = randinitial(Val(symmetry), atype, dtype, D, D, D)
@@ -142,7 +143,7 @@ end
 	@test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) ≈ Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 end
 
-@testset "$(Ni)x$(Nj) leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:Ni, j in 1:Nj]
@@ -258,7 +259,7 @@ end
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
 end
 
-@testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2], Ni = [2], Nj = [2]
+@testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D) for i in 1:Ni, j in 1:Nj]

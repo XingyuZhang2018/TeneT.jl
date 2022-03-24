@@ -95,7 +95,7 @@ function cellones(A)
     atype = _arraytype(A[1,1])
     Cell = Array{atype, 2}(undef, Ni, Nj)
     dir = :none
-    atype <: U1Array && (dir = sign.(sum(A[1,1].pn))[[1,3]])
+    atype <: U1Array && (dir = sign.(sum(A[1,1].qn))[[1,3]])
     for j = 1:Nj, i = 1:Ni
         Cell[i,j] = Iinitial(A[1,1], D; dir = dir)
     end
@@ -271,14 +271,14 @@ end
 function FLint(AL, M)
     Ni,Nj = size(AL)
     dir = nothing
-    typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].pn)[1]), -sign(sum(M[1].pn)[1]), sign(sum(AL[1].pn)[1])])
+    typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
     [randinitial(AL[i,j], size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1); dir = dir) for i=1:Ni, j=1:Nj]
 end
 
 function FRint(AR, M)
     Ni,Nj = size(AR)
     dir = nothing
-    typeof(AR[1]) <: U1Array && (dir = [-sign((sum(AR[1].pn))[3]), -sign((sum(M[1].pn))[3]), sign((sum(AR[1].pn))[3])])
+    typeof(AR[1]) <: U1Array && (dir = [-sign((sum(AR[1].qn))[3]), -sign((sum(M[1].qn))[3]), sign((sum(AR[1].qn))[3])])
     [randinitial(AR[i,j], size(AR[i,j],3),size(M[i,j],3),size(AR[i,j],3); dir = dir) for i=1:Ni, j=1:Nj]
 end
 
@@ -305,7 +305,8 @@ function leftenv!(ALu, ALd, M, FL; kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs norm(abs(λLs[1]) - abs(λLs[2]))
+            @warn "leftenv may have multiple eigenvalues"
+            @show λLs
             if real(λLs[1]) > 0
                 FL[i,j] = FL1s[1]
                 λL[i,j] = λLs[1]
@@ -344,6 +345,7 @@ function rightenv!(ARu, ARd, M, FR; kwargs...)
         @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
+            @warn "rightenv may have multiple eigenvalues"
             @show λRs
             if real(λRs[1]) > 0
                 FR[i,j] = FR1s[1]
@@ -436,6 +438,7 @@ function ACenv!(AC, FL, M, FR; kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
         info.converged == 0 && @warn "ACenv Not converged"
         if length(λACs) > 1 && norm(abs(λACs[1]) - abs(λACs[2])) < 1e-12
+            @warn "ACenv may have multiple eigenvalues"
             @show λACs
             if real(λACs[1]) > 0
                 AC[i,j] = ACs[1]
@@ -479,6 +482,7 @@ function Cenv!(C, FL, FR; kwargs...)
         @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
         info.converged == 0 && @warn "Cenv Not converged"
         if length(λCs) > 1 && norm(abs(λCs[1]) - abs(λCs[2])) < 1e-12
+            @warn "Cenv may have multiple eigenvalues"
             @show λCs
             if real(λCs[1]) > 0
                 C[i,j] = Cs[1]
@@ -609,6 +613,7 @@ function obs_FL!(ALu, ALd, M, FL; kwargs...)
         @debug "obs_FL eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "obs_FL Not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
+            @warn "obs_FL may have multiple eigenvalues"
             @show λLs
             if real(λLs[1]) > 0
                 FL[i,j] = FL1s[1]
@@ -648,6 +653,7 @@ function obs_FR!(ARu, ARd, M, FR; kwargs...)
         @debug "obs_FR! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "obs_FR! Not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
+            @warn "obs_FR may have multiple eigenvalues"
             @show λRs
             if real(λRs[1]) > 0
                 FR[i,j] = FR1s[1]

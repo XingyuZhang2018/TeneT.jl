@@ -56,7 +56,7 @@ end
     @test rerea ≈ a
 
     # (χ,D,D,χ) -> (χ,D^2,χ)
-    a = randinitial(Val(:U1), CuArray, Float64, 5,3,3,5; dir = [-1,1,1,1])
+    a = randinitial(Val(:U1), Array, Float64, 5,3,3,5; dir = [-1,1,1,1])
     rea = U1reshape(a, 5,9,5; olddir = [-1,1,1,1], newdir = [-1,1,1])
     rerea = U1reshape(rea, 5,3,3,5; olddir = [-1,1,1], newdir = [-1,1,1,1])
     @test rerea ≈ a

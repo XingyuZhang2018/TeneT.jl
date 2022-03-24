@@ -28,7 +28,7 @@ end
 
 @testset "leftorth and rightorth with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(9)
-    D, d = 10, 4
+    D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
     AL, L, λ = leftorth(A)
     R, AR, λ = rightorth(A)
@@ -53,7 +53,7 @@ end
 
 @testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(100)
-    D, d = 10, 4
+    D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
 
@@ -71,7 +71,7 @@ end
 
 @testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(100)
-    D, d = 10, 4
+    D, d = 5, 3
     Au = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
     Ad = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [1,-1,-1]) for i in 1:2, j in 1:2]
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
@@ -92,7 +92,7 @@ end
 
 @testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(100)
-    D, d = 10, 4
+    D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
 
@@ -108,14 +108,14 @@ end
     λC, C = Cenv(C, FL, FR)
     for j = 1:Nj, i = 1:Ni
         jr = j + 1 - Nj * (j==Nj)
-        @test λAC[i,j] * AC[i,j] ≈ ACmap(AC[i,j], FL[:,j], FR[:,j], M[:,j], i)
-        @test λC[i,j] * C[i,j] ≈ Cmap(C[i,j], FL[:,jr], FR[:,j], i)
+        @test λAC[i,j] * AC[i,j] ≈ ACmap(AC[i,j], FL[:,j], FR[:,j], M[:,j], i) atol = 1e-8
+        @test λC[i,j] * C[i,j] ≈ Cmap(C[i,j], FL[:,jr], FR[:,j], i) atol = 1e-8
     end
 end
 
 @testset "bcvumps unit test with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(100)
-    D, d = 10, 4
+    D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
     M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
 
@@ -136,7 +136,7 @@ end
 
 @testset "norm leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(10)
-    D, d = 10, 4
+    D, d = 5, 3
     Au = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
     Ad = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,-1,1]) for i in 1:2, j in 1:2]
     ALu, = leftorth(Au)
