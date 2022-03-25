@@ -309,7 +309,7 @@ function asZ2Array(A::AbstractArray{T,N}) where {T,N}
 end
 
 # for OMEinsum contract to get number
-# vec(A::Z2Array) = A
+vec(A::Z2Array) = A
 
 function transpose(A::Z2Array)
     tensor = map(transpose, A.tensor)

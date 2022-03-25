@@ -159,8 +159,8 @@ end
 
 @testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
-    d = 4
-    D = 10
+    d = 3
+    D = 5
     AL = randU1(atype, dtype, D, d, D; dir = [-1,1,1])
     M = randU1(atype, dtype, d, d, d, d; dir = [-1,1,1,-1])
     FL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
@@ -168,13 +168,13 @@ end
     tAL, tM, tFL = map(asArray, [AL, M, FL])
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     tλs, tFLs, info = eigsolve(tFL -> ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL)), tFL, 1, :LM; ishermitian = false)
-    @test λs ≈ tλs
-    @test asArray(FLs[1]) ≈ tFLs[1]
+    @test λs[1] ≈ tλs[1]
+    @test asArray(FLs[1]) ≈ tFLs[1] 
 
     λl,FL = λs[1], FLs[1]
     dFL = randU1(atype, dtype, D, d, D; dir = [1,1,-1])
     dFL -= Array(ein"abc,abc ->"(conj(FL), dFL))[] * FL
-    @time ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), conj(dFL), -λl, 1) 
+    ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), conj(dFL), -λl, 1) 
     tλl,tFL = tλs[1], tFLs[1]
     tdFL = asArray(dFL)
     tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), conj(tdFL), -tλl, 1)

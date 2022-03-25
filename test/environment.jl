@@ -51,7 +51,7 @@ end
     end
 end
 
-@testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
+@testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
@@ -62,6 +62,13 @@ end
     _, AR, = rightorth(A)
     λR,FR = rightenv(AR, AR, M)
 
+    ALt = asArray(AL)
+    ARt = asArray(AR)
+    Mt = asArray(M)
+    λLt, FLt = leftenv(ALt, ALt, Mt)
+    λRt, FRt = rightenv(ARt, ARt, Mt)
+    @test λL ≈ λLt 
+    @test λR ≈ λRt
     for j = 1:Nj, i = 1:Ni
         ir = Ni + 1 - i
         @test λL[i,j] * FL[i,j] ≈ FLmap(AL[i,:], conj(AL[ir,:]), M[i,:], FL[i,j], j)
@@ -90,7 +97,7 @@ end
     end
 end
 
-@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
+@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
@@ -103,9 +110,14 @@ end
 
     C = LRtoC(L, R)
     AC = ALCtoAC(AL, C)
-
+    
     λAC, AC = ACenv(AC, FL, M, FR)
     λC, C = Cenv(C, FL, FR)
+    ACt, Ct, Mt, FLt, FRt = map(asArray, [AC, C, M, FL, FR])
+    λACt, ACt = ACenv(ACt, FLt, Mt, FRt)
+    λCt, Ct = Cenv(Ct, FLt, FRt)
+    @test λAC ≈ λACt
+    @test λC ≈ λCt
     for j = 1:Nj, i = 1:Ni
         jr = j + 1 - Nj * (j==Nj)
         @test λAC[i,j] * AC[i,j] ≈ ACmap(AC[i,j], FL[:,j], FR[:,j], M[:,j], i) atol = 1e-8

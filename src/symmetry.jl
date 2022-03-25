@@ -43,7 +43,7 @@ zerosinitial(::Val{:none}, atype, dtype, a...; dir = nothing) = atype(zeros(dtyp
 zerosinitial(::Val{:Z2}, atype, dtype, a...; dir = nothing) = zerosZ2(atype, dtype, a...)
 zerosinitial(::Val{:U1}, atype, dtype, a...; dir) = zerosU1(atype, dtype, a...; dir = dir)
 
-function zerosinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
+function zerosinitial(A::AbstractArray{T, N}, a...; dir = nothing) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
     zerosinitial(Val(getsymmetry(A)), atype, T, a...; dir = dir)
 end

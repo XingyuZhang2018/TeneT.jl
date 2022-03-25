@@ -2,7 +2,7 @@ import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, s
 using BitBasis
 using CUDA
 import CUDA: CuArray
-import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
+import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!, axpby!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export U1Array, U1reshape
@@ -72,9 +72,13 @@ broadcasted(/, A::U1Array, B::Number) = A / B
 function +(A::U1Array, B::U1Array)
     if B.qn == A.qn
         U1Array(B.qn, A.tensor + B.tensor, B.size, B.dims, B.division)
-    else
+    elseif length(A.qn) > length(B.qn)  && all(A.qn[1:length(B.qn)] == B.qn)        # for axpby! and the longer one is zeros
         exchangeind = indexin(B.qn, A.qn)
         U1Array(B.qn, A.tensor[exchangeind] + B.tensor, B.size, B.dims, B.division)
+        # length(A.qn) !== length(B.qn) && @warn "quantum number not match"
+    else
+        exchangeind = indexin(A.qn, B.qn)
+        U1Array(A.qn, A.tensor + B.tensor[exchangeind], A.size, A.dims, A.division)
     end
 end
 
@@ -82,8 +86,9 @@ function -(A::U1Array, B::U1Array)
     if B.qn == A.qn
         U1Array(B.qn, A.tensor - B.tensor, B.size, B.dims, B.division)
     else
-        exchangeind = indexin(B.qn, A.qn)
-        U1Array(B.qn, A.tensor[exchangeind] - B.tensor, B.size, B.dims, B.division)
+        length(A.qn) !== length(B.qn) && @warn "qn not match"
+        exchangeind = indexin(A.qn, B.qn)
+        U1Array(A.qn, A.tensor - B.tensor[exchangeind], A.size, A.dims, A.division)
     end
 end
 
@@ -95,9 +100,13 @@ Array(A::U1Array) = U1Array(A.qn, map(Array, A.tensor), A.size, A.dims, A.divisi
 function dot(A::U1Array, B::U1Array) 
     if A.qn == B.qn 
         dot(A.tensor, B.tensor)
-    else
+    elseif length(A.qn) > length(B.qn)
         exchangeind = indexin(B.qn, A.qn)
         dot(A.tensor[exchangeind], B.tensor)
+    else
+        # length(A.qn) !== length(B.qn) && @warn "dot product of U1Array with different quantum numbers"
+        exchangeind = indexin(A.qn, B.qn)
+        dot(A.tensor, B.tensor[exchangeind])
     end
 end
 
@@ -304,9 +313,9 @@ function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     tensor = Vector{atype{T}}()
     divA, divB = A.division, B.division
 
-    # Adir = sign.(sum(A.qn))[divA+1:end]
-    # Bdir = sign.(sum(B.qn)[1:divB])
-    # sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
+    Adir = sign.(sum(A.qn))[divA+1:end]
+    Bdir = sign.(sum(B.qn)[1:divB])
+    sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
     if !(divA in [0, NA]) && !(divB in [0, NB]) 
         for p in unique(map(x->sum(x[divA+1:end]), A.qn))
             # @show p
@@ -318,7 +327,6 @@ function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     qn == [[]] && return Array(tensor[1])[]
     U1Array(qn, tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
 end
-
 
 function no_nothing_col(index)
     indexcol = Int[]
@@ -428,16 +436,16 @@ function tr(A::U1Array{T,N}) where {T,N}
     s
 end
 
-# function _compactify!(y, x::U1Array, indexer)
-#     x = U1Array2tensor(Array(x))
-#     @inbounds @simd for ci in CartesianIndices(y)
-#         y[ci] = x[subindex(indexer, ci.I)]
-#     end
-#     return y
-# end
+function _compactify!(y, x::U1Array, indexer)
+    x = asArray(Array(x))
+    @inbounds @simd for ci in CartesianIndices(y)
+        y[ci] = x[subindex(indexer, ci.I)]
+    end
+    return y
+end
 
-# broadcasted(*, A::U1Array, B::Base.RefValue) = U1Array(A.qn, A.tensor .* B, A.size, A.dims, A.division)
-# broadcasted(*, B::Base.RefValue, A::U1Array) = U1Array(A.qn, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(*, A::U1Array, B::Base.RefValue) = U1Array(A.qn, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(*, B::Base.RefValue, A::U1Array) = U1Array(A.qn, A.tensor .* B, A.size, A.dims, A.division)
 
 # for ein"abab ->"(A)[]
 function dtr(A::U1Array{T,N}) where {T,N}
@@ -471,6 +479,7 @@ diag(A::U1Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(
 copy(A::U1Array{T,N}) where {T,N} = U1Array(A.qn, map(copy, A.tensor), A.size, A.dims, A.division)
 
 function mul!(Y::U1Array, A::U1Array, B::Number)
+    length(Y.qn) !== length(A.qn) && @warn "mul!(Y, A, B) : length(A.qn) !== length(B.qn)"
     exchangeind = indexin(A.qn, Y.qn)
     map((Y, A) -> mul!(Y, A, B), Y.tensor[exchangeind], A.tensor)
     Y
@@ -480,15 +489,22 @@ function axpy!(α::Number, A::U1Array, B::U1Array)
     if B.qn == A.qn
         map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor)
     else
-        if length(A.qn) > length(B.qn)
-            exchangeind = indexin(B.qn, A.qn)
-            map((x,y) -> axpy!(α, x, y), A.tensor[exchangeind], B.tensor)
-        else
-            exchangeind = indexin(A.qn, B.qn)
-            map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor[exchangeind])
-        end
+        length(A.qn) !== length(B.qn) && @warn "axpy!(A, B) is not implemented for A.qn != B.qn"
+        exchangeind = indexin(A.qn, B.qn)
+        map((x,y) -> axpy!(α, x, y), A.tensor, B.tensor[exchangeind])
     end
     return B
+end
+
+function axpby!(α::Number, x::U1Array, β::Number, y::U1Array)
+    if x.qn == y.qn
+        map((x,y) -> axpby!(α, x, β, y), x.tensor, y.tensor)
+    else
+        length(x.qn) !== length(y.qn) && @warn "axpby!(x, β, y) is not implemented for x.qn != y.qn"
+        exchangeind = indexin(y.qn, x.qn)
+        map((x,y) -> axpby!(α, x, β, y), x.tensor[exchangeind], y.tensor)
+    end
+    return y
 end
 
 # # for leftorth and rightorth compatibility

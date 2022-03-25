@@ -72,11 +72,11 @@ function ρmap(ρ,Ai,J)
     return ρ
 end
 
-function initialA(M, D; dir = :none)
+function initialA(M, D; dir = nothing)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
-    # symmetry = getsymmetry(M[1,1])
+    typeof(M[1]) <: U1Array && (sign(sum(M[1].qn)[4]) == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
         A[i,j] = randinitial(M[1,1], D,d,D; dir = dir)
@@ -221,7 +221,7 @@ function LRtoC(L, R)
     #     C[i,j] = L[i,j] * R[i,jr]
     # end
     # return C
-    [L[i,j] * R[i,j + 1 - (j + 1 > Nj) * Nj] for i=1:Ni, j=1:Nj]
+    [L[i,j] * R[i, j+1 - (j+1 > Nj) * Nj] for i=1:Ni, j=1:Nj]
 end
 
 """
