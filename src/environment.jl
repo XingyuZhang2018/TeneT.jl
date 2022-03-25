@@ -72,10 +72,11 @@ function ρmap(ρ,Ai,J)
     return ρ
 end
 
-function initialA(M, D; dir = nothing)
+function initialA(M, D)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
+    dir = nothing
     typeof(M[1]) <: U1Array && (sign(sum(M[1].qn)[4]) == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)

@@ -66,12 +66,12 @@ julia> size(rt.AL[1,1]) == (4,2,4)
 true
 ```
 "
-function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; dir = nothing, verbose=false)
-    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ; dir = dir, verbose=verbose)...)
+function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false)
+    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ;  verbose=verbose)...)
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int; dir = nothing, verbose=false)
-    A = initialA(M, χ; dir = dir)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int; verbose=false)
+    A = initialA(M, χ)
     AL, L = leftorth(A)
     R, AR = rightorth(AL, L)
     _, FL = leftenv(AL, AL, M)
@@ -82,7 +82,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     AL, C, AR, FL, FR
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int; dir = nothing, verbose=false)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int; verbose=false)
     env = load(chkp_file)["env"]
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
@@ -160,7 +160,6 @@ sometimes the finally observable is symetric, so we can use the same up and down
 function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf)
     verbose && (direction == "up" ? print("↑ ") : print("↓ "))
     downfromup && direction == "down" && (direction = "up")
-    direction == "up" ? (dir = [-1,1,1]) : (dir = [1,-1,-1])
 
     D = size(M[1,1],1)
     savefile && mkpath(outfolder)
@@ -169,7 +168,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     if isfile(in_chkp_file)                               
         rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
     else
-        rtup = SquareVUMPSRuntime(M, Val(:random), χ; dir = dir, verbose = verbose)
+        rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose)
     end
     env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 

@@ -72,7 +72,7 @@ broadcasted(/, A::U1Array, B::Number) = A / B
 function +(A::U1Array, B::U1Array)
     if B.qn == A.qn
         U1Array(B.qn, A.tensor + B.tensor, B.size, B.dims, B.division)
-    elseif length(A.qn) > length(B.qn)  && all(A.qn[1:length(B.qn)] == B.qn)        # for axpby! and the longer one is zeros
+    elseif length(A.qn) > length(B.qn)        # for axpby! and the longer one is zeros
         exchangeind = indexin(B.qn, A.qn)
         U1Array(B.qn, A.tensor[exchangeind] + B.tensor, B.size, B.dims, B.division)
         # length(A.qn) !== length(B.qn) && @warn "quantum number not match"
