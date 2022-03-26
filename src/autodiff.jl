@@ -161,22 +161,9 @@ end
 
 @adjoint adjoint(A::AbstractSymmetricArray) = adjoint(A), djA -> (adjoint(djA), )
 
-function ChainRulesCore.rrule(::typeof(asArray), A::Z2Array)
-    function back(dAt)
-        dA = asZ2Array(dAt)
-        return NoTangent(), dA
-    end
-    asArray(A), back
-end
+ChainRulesCore.rrule(::typeof(asArray), A::Z2Array) = asArray(A), dAt -> (NoTangent(), asSymmetryArray(dAt, getsymmetry(A); dir = getdir(A)))
 
-function ChainRulesCore.rrule(::typeof(asZ2Array), A::AbstractArray)
-    AZ2 = asZ2Array(A)
-    function back(dAZ2)
-        dA = asArray(dAZ2)
-        return NoTangent(), dA
-    end
-    AZ2, back
-end
+ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; dir) = asSymmetryArray(A, symmetry; dir = dir), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
 
 # function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where {T}
 #     function back(dy) 

@@ -58,6 +58,7 @@ end
 
 size(A::U1Array) = A.size
 size(A::U1Array, a) = size(A)[a]
+getdir(A::U1Array) = sign.(sum(A.qn))       # failed when A.qn = [[0,0,0...]]
 conj(A::U1Array) = U1Array(-A.qn, map(conj, A.tensor), A.size, A.dims, A.division)
 map(conj, A::U1Array) = conj(A)
 norm(A::U1Array) = norm(A.tensor)
@@ -313,8 +314,8 @@ function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     tensor = Vector{atype{T}}()
     divA, divB = A.division, B.division
 
-    Adir = sign.(sum(A.qn))[divA+1:end]
-    Bdir = sign.(sum(B.qn)[1:divB])
+    Adir = getdir(A)[divA+1:end]
+    Bdir = getdir(B)[1:divB]
     sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
     if !(divA in [0, NA]) && !(divB in [0, NB]) 
         for p in unique(map(x->sum(x[divA+1:end]), A.qn))

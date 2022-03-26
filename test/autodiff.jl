@@ -11,6 +11,12 @@ CUDA.allowscalar(false)
 
 @testset "ad basic with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
+    ## asArray and asSymmetryArray
+    A = randinitial(Val(symmetry), atype, dtype, 3,2,3; dir = [-1,1,1])
+    Atensor = asArray(A)
+    foo(Atensor) = norm(asSymmetryArray(Atensor, symmetry; dir = [-1,1,1]))
+    @test Zygote.gradient(foo, Atensor)[1] ≈ num_grad(foo, Atensor)
+
     ## reshape
     A = randinitial(Val(symmetry), atype, dtype, 3,2,3; dir = [-1,1,1])
     Atensor = asArray(A)

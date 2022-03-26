@@ -1,4 +1,5 @@
-export asArray, asSymmetryArray, symmetryreshape
+export asArray, asSymmetryArray, symmetryreshape, getsymmetry, getdir
+export _mattype, _arraytype
 
 #helper functions to handle array types
 _mattype(::Array{T}) where {T} = Matrix
@@ -20,6 +21,9 @@ _arraytype(::Transpose{T, CuArray{T, 2, B}}) where {T,B} = CuArray
 getsymmetry(::AbstractArray) = :none
 getsymmetry(::Z2Array) = :Z2
 getsymmetry(::U1Array) = :U1
+
+getdir(::AbstractArray) = nothing
+getdir(::Z2Array) = nothing
 
 randinitial(::Val{:none}, atype, dtype, a...; dir = nothing) = atype(rand(dtype, a...))
 randinitial(::Val{:Z2}, atype, dtype, a...; dir = nothing) = randZ2(atype, dtype, a...)
