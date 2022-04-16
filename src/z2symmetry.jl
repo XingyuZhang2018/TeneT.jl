@@ -187,10 +187,10 @@ permutedims(A::Z2Array, perm) = tensorpermute(A, perm)
 function tensorpermute(A::Z2Array, perm)
     length(perm) == 0 && return copy(A)
     parity = map(x -> x[collect(perm)], A.parity)
-    exchangeind = indexin(A.parity, parity)
-    tensor = map(x -> permutedims(x, perm), A.tensor)[exchangeind]
-    dims = map(x -> x[collect(perm)], A.dims)[exchangeind]
-    Z2Array(A.parity, tensor, A.size[collect(perm)], dims, A.division)
+    # exchangeind = indexin(A.parity, parity)
+    tensor = map(x -> permutedims(x, perm), A.tensor)
+    dims = map(x -> x[collect(perm)], A.dims)
+    Z2Array(parity, tensor, A.size[collect(perm)], dims, A.division)
 end
 
 reshape(A::Z2Array, a::Tuple{Vararg{Int}}) = reshape(A, a...)

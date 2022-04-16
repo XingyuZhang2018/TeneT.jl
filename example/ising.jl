@@ -8,20 +8,20 @@ using CUDA
 using LinearAlgebra: norm
 using Zygote
 
-@testset "$(Ni)x$(Nj) ising forward with $(symmetry) symmetry $atype array" for Ni = [2], Nj = [2], atype = [Array], symmetry in [:Z2, :U1]
+@testset "$(Ni)x$(Nj) ising forward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [Array], symmetry in [:U1]
     β = 0.2
     model = Ising(Ni, Nj, β)
     M = model_tensor(model)
     # M = parity_conserving.(M)
     # symmetry == :Z2 && (M = asZ2Array.(M))
-    M = asSymmetryArray.(M, symmetry; dir = [-1,1,1,-1])
+    M = asSymmetryArray.(M, Val(symmetry); dir = [-1,1,1,-1])
     env = obs_env(M; χ = 10, verbose = true, savefile = false, infolder = "./example/data/$model/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
     Zsymmetry = Z(env, M)
 
     M = asArray.(M)
     env = obs_env(M; χ = 10, verbose = true, savefile = false, infolder = "./example/data/$model/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
     Znone = Z(env, M)
-    @show norm(Zsymmetry-Znone)
+    @show norm(Zsymmetry-Znone) Zsymmetry Znone
     @test Zsymmetry ≈ Znone
 end
 

@@ -24,6 +24,7 @@ Zygote.@nograd Random.seed!
 Zygote.@nograd randinitial
 Zygote.@nograd show_every_count
 Zygote.@nograd _initializect_square
+Zygote.@nograd U1reshapeinfo
 
 @doc raw"
     num_grad(f, K::Real; [δ = 1e-5])
@@ -88,7 +89,7 @@ function num_grad(f, a::U1Array; δ::Real=1e-5)
     intype = _arraytype(a.tensor[1])
     df = copy(a)
     bits = map(x -> ceil(Int, log2(x)), size(a))
-    Adir = sign.(sum(a.qn))
+    Adir = getdir(a)
     for i in CartesianIndices(b)
         qn = collect(sum.(bitarray.(i.I .- 1, bits))) 
         if sum(qn.*Adir) == 0
@@ -152,7 +153,7 @@ end
         exchangeind = indexin(A.qn, dAr.qn)
         s = map(size, A.tensor) 
         dAtensor = map((x, y) -> reshape(x, y), dAr.tensor[exchangeind], s)
-        return U1Array(A.qn, dAtensor, A.size, A.dims, A.division), a...
+        return U1Array(A.qn, A.dir, dAtensor, A.size, A.dims, A.division), a...
     end
     return reshape(A, a...), back
 end
@@ -161,9 +162,16 @@ end
 
 @adjoint adjoint(A::AbstractSymmetricArray) = adjoint(A), djA -> (adjoint(djA), )
 
-ChainRulesCore.rrule(::typeof(asArray), A::Z2Array) = asArray(A), dAt -> (NoTangent(), asSymmetryArray(dAt, getsymmetry(A); dir = getdir(A)))
+ChainRulesCore.rrule(::typeof(asArray), A::AbstractSymmetricArray) = asArray(A), dAt -> (NoTangent(), asSymmetryArray(dAt, Val(getsymmetry(A)); dir = getdir(A)))
 
-ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; dir) = asSymmetryArray(A, symmetry; dir = dir), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
+ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; kwarg...) = asSymmetryArray(A, symmetry; kwarg...), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
+
+# function ChainRulesCore.rrule(::typeof(symmetryreshape), A::AbstractArray, s...; kwarg...)
+#     reA, choosesilces, chooseinds = symmetryreshape(A, s...; kwarg...)
+#     back = dA -> (NoTangent(), symmetryreshape(dA, s; choosesilces = choosesilces, chooseinds = chooseinds, reqn = A.qn, redims = A.dims), NoTangent()...)
+#     (reA, choosesilces, chooseinds), back
+# end
+
 
 # function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where {T}
 #     function back(dy) 
@@ -712,7 +720,13 @@ ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = pari
 
 ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, s::Int...) = Z2reshape(A, s), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), s...)
 
-ChainRulesCore.rrule(::typeof(U1reshape), A::U1Array, s::Int...; olddir, newdir) = U1reshape(A, s; olddir=olddir, newdir=newdir), dAr -> (NoTangent(), U1reshape(dAr, size(A); olddir=newdir, newdir=olddir), s...)
+function ChainRulesCore.rrule(::typeof(U1reshape), A::U1Array, s::Int...; kwarg...)
+    reA, reinfo = U1reshape(A, s; kwarg...)
+    function back((dAr,))
+        return NoTangent(), U1reshape(dAr, size(A); reinfo = reinfo)[1], s...
+    end
+    return (reA, reinfo), back
+end
 
 @adjoint function tr(A::AbstractSymmetricArray)
     function back(dtrA)
@@ -728,7 +742,7 @@ end
 
 function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) where {T,N}
     function back(dtrA)
-        typeof(A) <: U1Array ? (dir = sign.(sum(A.qn))) : (dir = nothing)
+        dir = getdir(A)
         dA = zerosinitial(A, size(A)...; dir = dir)
         s = size(A)
         for i = 1:s[1], j = 1:s[2]

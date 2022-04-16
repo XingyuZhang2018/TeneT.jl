@@ -8,21 +8,37 @@ using VUMPS: parity_conserving
 using Zygote
 
 @testset "$(Ni)x$(Nj) rand forward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [Array], symmetry in [:U1]
-    Random.seed!(10)
-    m = randinitial(Val(symmetry), atype, ComplexF64, 4, 4, 4, 4; dir = [-1,1,1,-1])
-    # m = asArray(m)
-    # m = parity_conserving(m)
-    # m = asSymmetryArray(m, symmetry; dir = [-1,1,1,-1])
-    β = 0.2
-    M = [β * m for i in 1:Ni, j in 1:Nj]
-    env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
+    Random.seed!(100)
+    # T = asSymmetryArray(m, Val(symmetry); dir = [-1,-1,1,1,1])
+    # T = randinitial(Val(symmetry), atype, ComplexF64, 2,2,4,2,2; dir = [-1,-1,1,1,1])
+    D = 2
+    χ = 10
+    T = rand(ComplexF64, D,D,4,D,D) 
+    T = T + permutedims(conj(T), [4,2,3,1,5])
+    T = asSymmetryArray(T, Val(:U1); dir = [-1,-1,1,1,1])
+    T = asArray(T)
+
+    T = asSymmetryArray(T, Val(symmetry); dir = [-1,-1,1,1,1])
+    m = ein"abcde, fgchi -> gbhdiefa"(T, conj(T))
+    mρ = ein"abcde, fgjhi -> gbhdiefajc"(T, conj(T))
+    rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
+    remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, 4,4)
+    β = 1
+    M = [β * rem for i in 1:Ni, j in 1:Nj]
+    env = obs_env(M; χ = χ, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
+    ρmatrix(M, T, env, remρ)
     Zsymmetry = Z(env, M)
-    m = asArray(m)
-    M = [β * m for i in 1:Ni, j in 1:Nj]
+    @show Zsymmetry 
+
+    T = asArray(T)
+    m = ein"abcde, fgchi -> gbhdiefa"(T, conj(T))
+    rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
+    M = [β * rem for i in 1:Ni, j in 1:Nj]
     env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./example/data/$(Ni)x$(Nj)rand/$(symmetry)_none/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$(symmetry)_none/", maxiter = 10, miniter = 10, updown = false)
     Znone = Z(env, M)
+    @show Znone
     @show norm(Zsymmetry-Znone)
-    @test Zsymmetry ≈ Znone
+    # @test Zsymmetry ≈ Znone
 end
 
 @testset "$(Ni)x$(Nj) rand backward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [Array], symmetry in [:U1]

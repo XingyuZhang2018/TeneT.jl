@@ -76,16 +76,13 @@ function initialA(M, D)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
-    dir = nothing
-    typeof(M[1]) <: U1Array && (sign(sum(M[1].qn)[4]) == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
+    # dir = nothing
+    # typeof(M[1]) <: U1Array && (getdir(M[1])[4] == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
+    # typeof(M[1]) <: U1Array && (direction == "up" ? (dir = [-1, -1, 1, 1]) : (dir = [1, 1, -1, -1]))
     for j = 1:Nj, i = 1:Ni
         d = size(M[i,j], 4)
-        A[i,j] = randinitial(M[1,1], D,d,D; dir = dir)
-        # if symmetry == :Z2
-        #     A[i,j] = Z2reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        # else
-        #     A[i,j] = reshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D), D,d,D)
-        # end
+        # A[i,j] = randinitial(M[1,1], D,d,D; dir = [-1, 1, 1]) # ordinary random initial
+        A[i,j] = symmetryreshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = [-1, -1, 1, 1]), D,d,D)[1] # for double-layer ipeps
     end
     return A
 end
@@ -95,8 +92,8 @@ function cellones(A)
     D = size(A[1,1],1)
     atype = _arraytype(A[1,1])
     Cell = Array{atype, 2}(undef, Ni, Nj)
-    dir = :none
-    atype <: U1Array && (dir = sign.(sum(A[1,1].qn))[[1,3]])
+    dir = nothing
+    atype <: U1Array && (dir = getdir(A[1,1])[[1,3]])
     for j = 1:Nj, i = 1:Ni
         Cell[i,j] = Iinitial(A[1,1], D; dir = dir)
     end
@@ -271,16 +268,19 @@ end
 
 function FLint(AL, M)
     Ni,Nj = size(AL)
-    dir = nothing
-    typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
-    [randinitial(AL[i,j], size(AL[i,j],1),size(M[i,j],1),size(AL[i,j],1); dir = dir) for i=1:Ni, j=1:Nj]
+    D, d = size(AL[1],1), size(M[1],1)
+    # typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
+    # typeof(AL[1]) <: U1Array && (dir = [-getdir(AL[1])[1], -1, 1, getdir(AL[1])[1]])
+    # [randinitial(AL[i,j], D,d,D; dir = [1,1,-1]) for i=1:Ni, j=1:Nj]
+    [symmetryreshape(randinitial(AL[i,j], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = [1,-1,1,-1], q = [0]), D,d,D)[1] for i=1:Ni, j=1:Nj]
 end
 
 function FRint(AR, M)
     Ni,Nj = size(AR)
-    dir = nothing
-    typeof(AR[1]) <: U1Array && (dir = [-sign((sum(AR[1].qn))[3]), -sign((sum(M[1].qn))[3]), sign((sum(AR[1].qn))[3])])
-    [randinitial(AR[i,j], size(AR[i,j],3),size(M[i,j],3),size(AR[i,j],3); dir = dir) for i=1:Ni, j=1:Nj]
+    D, d = size(AR[1],3), size(M[1],3)
+    # typeof(AR[1]) <: U1Array && (dir = [-sign((sum(AR[1].qn))[3]), 1, -1, sign((sum(AR[1].qn))[3])])
+    # [randinitial(AR[i,j], D,d,D; dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
+    [symmetryreshape(randinitial(AR[i,j], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = [-1,1,-1,1], q = [0]), D,d,D)[1] for i=1:Ni, j=1:Nj]
 end
 
 """

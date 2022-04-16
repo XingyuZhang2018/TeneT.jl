@@ -25,50 +25,48 @@ getsymmetry(::U1Array) = :U1
 getdir(::AbstractArray) = nothing
 getdir(::Z2Array) = nothing
 
-randinitial(::Val{:none}, atype, dtype, a...; dir = nothing) = atype(rand(dtype, a...))
-randinitial(::Val{:Z2}, atype, dtype, a...; dir = nothing) = randZ2(atype, dtype, a...)
-randinitial(::Val{:U1}, atype, dtype, a...; dir) = randU1(atype, dtype, a...; dir = dir)
+randinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(rand(dtype, a...))
+randinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = randZ2(atype, dtype, a...)
+randinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = randU1(atype, dtype, a...; kwarg...)
 
-function randinitial(A::AbstractArray{T, N}, a...; dir) where {T, N}
+function randinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
-    randinitial(Val(getsymmetry(A)), atype, T, a...; dir = dir)
+    randinitial(Val(getsymmetry(A)), atype, T, a...; kwarg...)
 end
 
-Iinitial(::Val{:none}, atype, dtype, D; dir = nothing) = atype{dtype}(I, D, D)
-Iinitial(::Val{:Z2}, atype, dtype, D; dir = nothing) = IZ2(atype, dtype, D)
-Iinitial(::Val{:U1}, atype, dtype, D; dir) = IU1(atype, dtype, D; dir = dir)
+Iinitial(::Val{:none}, atype, dtype, D; kwarg...) = atype{dtype}(I, D, D)
+Iinitial(::Val{:Z2}, atype, dtype, D; kwarg...) = IZ2(atype, dtype, D)
+Iinitial(::Val{:U1}, atype, dtype, D; kwarg...) = IU1(atype, dtype, D; kwarg...)
 
-function Iinitial(A::AbstractArray{T, N}, D; dir) where {T, N}
+function Iinitial(A::AbstractArray{T, N}, D; kwarg...) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
-    Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D; dir = dir)
+    Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D; kwarg...)
 end
 
-zerosinitial(::Val{:none}, atype, dtype, a...; dir = nothing) = atype(zeros(dtype, a...))
-zerosinitial(::Val{:Z2}, atype, dtype, a...; dir = nothing) = zerosZ2(atype, dtype, a...)
-zerosinitial(::Val{:U1}, atype, dtype, a...; dir) = zerosU1(atype, dtype, a...; dir = dir)
+zerosinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(zeros(dtype, a...))
+zerosinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = zerosZ2(atype, dtype, a...)
+zerosinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = zerosU1(atype, dtype, a...; kwarg...)
 
-function zerosinitial(A::AbstractArray{T, N}, a...; dir = nothing) where {T, N}
+function zerosinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
-    zerosinitial(Val(getsymmetry(A)), atype, T, a...; dir = dir)
+    zerosinitial(Val(getsymmetry(A)), atype, T, a...; kwarg...)
 end
 
 asArray(A::AbstractArray) = A
-function asSymmetryArray(A::AbstractArray, symmetry; dir = nothing)
-    if symmetry == :none
-        A
-    elseif symmetry == :Z2
-        asZ2Array(A)
-    elseif symmetry == :U1
-        asU1Array(A; dir)
-    end
-end
 
-function symmetryreshape(A::AbstractArray, symmetry, s...; olddir = nothing, newdir = nothing)
-    if symmetry == :none
-        reshape(A, s...)
-    elseif symmetry == :Z2
-        Z2reshape(A, s...)
-    elseif symmetry == :U1
-        U1reshape(A, s...; olddir = olddir, newdir = newdir)
-    end
-end
+"""
+    asSymmetryArray(A::AbstractArray, symmetry; dir = nothing)
+
+Transform Array to a SymmetryArray.
+now supports:
+    `:none`
+    `:Z2`
+    `:U1`
+"""
+asSymmetryArray(A::AbstractArray, ::Val{:none}; kwarg...) = A
+asSymmetryArray(A::AbstractArray, ::Val{:Z2}; kwarg...) = asZ2Array(A)
+asSymmetryArray(A::AbstractArray, ::Val{:U1}; kwarg...) = asU1Array(A; kwarg...)
+
+symmetryreshape(A::AbstractArray, s...; kwarg...) = reshape(A, s...), nothing, nothing
+symmetryreshape(A::Z2Array, s...; kwarg...) = Z2reshape(A, s...), nothing, nothing
+symmetryreshape(A::U1Array, s...; kwarg...) = U1reshape(A, s...; kwarg...)

@@ -67,7 +67,7 @@ true
 ```
 "
 function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false)
-    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ;  verbose=verbose)...)
+    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ; verbose=verbose)...)
 end
 
 function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int; verbose=false)
@@ -188,6 +188,7 @@ If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment ar
 """
 function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf)
     M /= norm(M)
+    Random.seed!(100)
     envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
@@ -210,17 +211,18 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     if updown 
         Ni, Nj = size(ALu)
-        Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
-        Md = reshape(Md, Ni, Nj)
+        Md = [permutedims(M[uptodown(i,Ni,Nj)], (3,4,1,2)) for i = 1:Ni*Nj]
+        Md = reshape(conj(Md), Ni, Nj)
 
+        Random.seed!(100)
         envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
-        ALd, ARd, Cd = conj(ALu), conj(ARu), conj(Cu)
+        ALd, ARd, Cd = ALu, ARu, Cu
     end
 
-    _, FL = obs_FL(ALu, ALd, M, FL)
-    _, FR = obs_FR(ARu, ARd, M, conj(FL))
+    _, FL = obs_FL(ALu, conj(ALd), M, FL)
+    _, FR = obs_FR(ARu, conj(ARd), M, FR)
     Zygote.@ignore savefile && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         FLs, FRs = map(x->map(Array, x), [FL, FR])

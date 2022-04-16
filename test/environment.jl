@@ -10,7 +10,7 @@ CUDA.allowscalar(false)
 
 @testset "qr with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
-    A = randinitial(Val(symmetry), atype, dtype, 10,10; dir = [-1, 1])
+    A = randinitial(Val(symmetry), atype, dtype, 10,10; dir = [-1, 1], q = [-1, 0, 1])
     Q, R = qrpos(A)
     @test Q*R ≈ A
     @test all(real.(diag(R)) .> 0)
@@ -19,23 +19,24 @@ end
 
 @testset "lq with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
-    A = randinitial(Val(symmetry), atype, dtype, 10, 10; dir = [1,-1])
+    A = randinitial(Val(symmetry), atype, dtype, 10, 10; dir = [1,-1], q = [-1, 0, 1])
     L, Q = lqpos(A)
     @test L*Q ≈ A
     @test all(real.(diag(L)) .> 0)
     @test all(imag.(diag(L)) .≈ 0)
 end
 
-@testset "leftorth and rightorth with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
-    Random.seed!(9)
-    D, d = 5, 3
-    A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
+@testset "leftorth and rightorth with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
+    Random.seed!(100)
+    χ, D = 4, 4
+    # A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:Ni, j in 1:Nj]
+    A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]
     AL, L, λ = leftorth(A)
     R, AR, λ = rightorth(A)
     for j = 1:Nj,i = 1:Ni
         M = ein"cda,cdb -> ab"(AL[i,j],conj(AL[i,j]))
         M = asArray(M)
-        @test (Array(M) ≈ I(D))
+        @test (Array(M) ≈ I(χ))
 
         LA = ein"ab, bcd -> acd"(L[i,j], A[i,j])
         ALL = ein"abc, cd -> abd"(AL[i,j], L[i,j]) * λ[i,j]
@@ -43,7 +44,7 @@ end
 
         M = ein"acd,bcd -> ab"(AR[i,j],conj(AR[i,j]))
         M = asArray(M)
-        @test (Array(M) ≈ I(D))
+        @test (Array(M) ≈ I(χ))
 
         AxR = ein"abc, cd -> abd"(A[i,j], R[i,j])
         RAR = ein"ab, bcd -> acd"(R[i,j], AR[i,j]) * λ[i,j]
@@ -51,11 +52,14 @@ end
     end
 end
 
-@testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]
+@testset "leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
-    D, d = 5, 3
-    A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
-    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
+    χ, D = 4, 4
+    A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]
+    T = [randinitial(Val(symmetry), atype, dtype, Int(sqrt(D)),Int(sqrt(D)),4,Int(sqrt(D)),Int(sqrt(D)); dir = [-1,-1,1,1,1], q=[0,1,2]) for i in 1:Ni, j in 1:Nj]
+    # M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:Ni, j in 1:Nj]
+    TT = [ein"abcde, fgchi -> gbhdiefa"(T[i,j], conj(T[i,j])) for i in 1:Ni, j in 1:Nj]
+    M = [symmetryreshape(TT[i,j], D,D,D,D)[1] for i in 1:Ni, j in 1:Nj]
 
     AL, = leftorth(A)
     λL,FL = leftenv(AL, AL, M)
@@ -76,12 +80,15 @@ end
     end
 end
 
-@testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
+@testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
-    D, d = 5, 3
-    Au = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
-    Ad = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [1,-1,-1]) for i in 1:2, j in 1:2]
-    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
+    D, d = 2, 4
+    Au = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, D,Int(sqrt(d)),Int(sqrt(d)),D; dir = [-1, -1, 1, 1]), D,d,D)[1] for i in 1:Ni, j in 1:Nj]
+    Ad = conj(Au)
+    T = [randinitial(Val(symmetry), atype, dtype, D,D,d,D,D; dir = [-1,-1,1,1,1], q=[0]) for i in 1:Ni, j in 1:Nj]
+    # M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:Ni, j in 1:Nj]
+    TT = [ein"abcde, fgchi -> gbhdiefa"(T[i,j], conj(T[i,j])) for i in 1:Ni, j in 1:Nj]
+    M = [symmetryreshape(TT[i,j], D^2,D^2,D^2,D^2)[1] for i in 1:Ni, j in 1:Nj]
 
     ALu, = leftorth(Au)
     ALd, = leftorth(Ad)
@@ -97,11 +104,14 @@ end
     end
 end
 
-@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]
+@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
-    D, d = 5, 3
-    A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
-    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
+    χ, D = 4, 4
+    A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]
+    T = [randinitial(Val(symmetry), atype, dtype, Int(sqrt(D)),Int(sqrt(D)),4,Int(sqrt(D)),Int(sqrt(D)); dir = [-1,-1,1,1,1], q=[0]) for i in 1:Ni, j in 1:Nj]
+    # M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:Ni, j in 1:Nj]
+    TT = [ein"abcde, fgchi -> gbhdiefa"(T[i,j], conj(T[i,j])) for i in 1:Ni, j in 1:Nj]
+    M = [symmetryreshape(TT[i,j], D,D,D,D)[1] for i in 1:Ni, j in 1:Nj]
 
     AL, L = leftorth(A)
     λL,FL = leftenv(AL, AL, M)
@@ -125,11 +135,14 @@ end
     end
 end
 
-@testset "bcvumps unit test with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
+@testset "bcvumps unit test with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
-    D, d = 5, 3
-    A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
-    M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:2, j in 1:2]
+    χ, D = 4, 4
+    A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]
+    T = [randinitial(Val(symmetry), atype, dtype, Int(sqrt(D)),Int(sqrt(D)),4,Int(sqrt(D)),Int(sqrt(D)); dir = [-1,-1,1,1,1], q=[0]) for i in 1:Ni, j in 1:Nj]
+    # M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:Ni, j in 1:Nj]
+    TT = [ein"abcde, fgchi -> gbhdiefa"(T[i,j], conj(T[i,j])) for i in 1:Ni, j in 1:Nj]
+    M = [symmetryreshape(TT[i,j], D,D,D,D)[1] for i in 1:Ni, j in 1:Nj]
 
     AL, L = leftorth(A)
     λL,FL = leftenv(AL, AL, M)
@@ -144,13 +157,23 @@ end
     AL, AR = ACCtoALAR(AC, C)
     err = error(AL,C,AR,FL,M,FR)
     @test err !== nothing
+
+    for j = 1:Nj,i = 1:Ni
+        M = ein"cda,cdb -> ab"(AL[i,j],conj(AL[i,j]))
+        M = asArray(M)
+        @test (Array(M) ≈ I(χ))
+
+        M = ein"acd,bcd -> ab"(AR[i,j],conj(AR[i,j]))
+        M = asArray(M)
+        @test (Array(M) ≈ I(χ))
+    end
 end
 
 @testset "norm leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
     Random.seed!(10)
     D, d = 5, 3
-    Au = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:2, j in 1:2]
-    Ad = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,-1,1]) for i in 1:2, j in 1:2]
+    Au = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:Ni, j in 1:Nj]
+    Ad = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,-1,1]) for i in 1:Ni, j in 1:Nj]
     ALu, = leftorth(Au)
     ALd, = leftorth(Ad)
     λL, FL_norm = norm_FL(ALu, ALd)
