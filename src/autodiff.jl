@@ -284,7 +284,7 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::U1Array)
     function back((dQ, dR))
         dA = copy(A)
         @assert Q.qn == dQ.qn
-        for q in unique(map(x->sum(x[A.division+1:end]), A.qn))
+        for q in unique(map(x->sum(x[A.division+1:end] .* A.dir[A.division+1:end]), A.qn))
             bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
         end
         return NoTangent(), dA
@@ -294,7 +294,7 @@ end
 
 function bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
     div = dQ.division
-    ind_A = findall(x->sum(x[div+1:end]) == q, dQ.qn)
+    ind_A = findall(x->sum(x[div+1:end].* dQ.dir[dQ.division+1:end]) == q, dQ.qn)
     m_j = unique(map(x->x[div+1:end], dQ.qn[ind_A]))
     m_i = unique(map(x->x[1:div], dQ.qn[ind_A]))
 
@@ -303,7 +303,7 @@ function bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
     Qm = vcat(Q.tensor[ind]...)
     bulkidims = [size(dQ.tensor[i],1) for i in ind]
     bulkjdims = [size(dQm, 2)]
-    ind = findfirst(x->x in [[-m_j[1]; m_j[1]]], R.qn)
+    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], R.qn)
     dRm = dR == ZeroTangent() ? ZeroTangent() : dR.tensor[ind]
     Rm = R.tensor[ind]
     
@@ -322,7 +322,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::U1Array)
     function back((dL, dQ))
         dA = copy(A)
         @assert Q.qn == Q.qn
-        for q in unique(map(x->x[1], A.qn))
+        for q in unique(map(x->x[1] * A.dir[1], A.qn))
             bulkbackLQ!(A, dA, L, Q, dL, dQ, q)
         end
         return NoTangent(), dA
@@ -332,7 +332,7 @@ end
 
 function bulkbackLQ!(A::U1Array, dA, L, Q, dL, dQ, q)
     div = dQ.division
-    ind_A = findall(x->x[1] == q, dQ.qn)
+    ind_A = findall(x->x[1] * dQ.dir[1] == q, dQ.qn)
     m_j = unique(map(x->x[div+1:end], dQ.qn[ind_A]))
     m_i = unique(map(x->x[1], dQ.qn[ind_A]))
 
@@ -341,7 +341,7 @@ function bulkbackLQ!(A::U1Array, dA, L, Q, dL, dQ, q)
     Qm = hcat(Q.tensor[ind]...)
     bulkidims = [size(dQm, 1)]
     bulkjdims = [size(dQ.tensor[i],2) for i in ind]
-    ind = findfirst(x->x in [[m_i[1]; -m_i[1]]], L.qn)
+    ind = findfirst(x->x in [[m_i[1]; m_i[1]]], L.qn)
     dLm = dL == ZeroTangent() ? ZeroTangent() : dL.tensor[ind]
     Lm = L.tensor[ind]
     

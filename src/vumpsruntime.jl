@@ -125,7 +125,7 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     _, C = Cenv(C, FL, FR)
     ALp, ARp, _, _ = ACCtoALAR(AC, C)
     _, FL = leftenv(AL, ALp, M, FL)
-    _, FR = rightenv(AR, ARp, M, FR)
+    _, FR = rightenv(AR, ARp, M, conj(FL))
     _, AC = ACenv(AC, FL, M, FR)
     _, C = Cenv(C, FL, FR)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
@@ -222,7 +222,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     end
 
     _, FL = obs_FL(ALu, conj(ALd), M, FL)
-    _, FR = obs_FR(ARu, conj(ARd), M, FR)
+    _, FR = obs_FR(ARu, conj(ARd), M, conj(FL))
     Zygote.@ignore savefile && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         FLs, FRs = map(x->map(Array, x), [FL, FR])

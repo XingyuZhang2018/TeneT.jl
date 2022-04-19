@@ -86,7 +86,7 @@ end
     @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 end
 
-@testset "last tr with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
+@testset "last tr with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     A = randinitial(Val(symmetry), atype, dtype, 4,4; dir = [-1,1])
 	Atensor = asArray(A)
@@ -107,7 +107,7 @@ end
     @test Zygote.gradient(foo4, A)[1] ≈ num_grad(foo3, A) ≈ num_grad(foo4, A)
 end
 
-@testset "QR factorization with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
+@testset "QR factorization with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     M = randinitial(Val(symmetry), atype, dtype, 5,3,5; dir = [-1,1,1])
     function foo(M)
@@ -119,7 +119,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M)  atol = 1e-8
 end
 
-@testset "LQ factorization with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
+@testset "LQ factorization with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     M = randinitial(Val(symmetry), atype, dtype, 5,3,5; dir = [-1,1,1])
     function foo(M)
@@ -194,7 +194,7 @@ end
     @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
 end
 
-@testset "$(Ni)x$(Nj) ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
     D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D,d,D; dir = [-1,1,1]) for i in 1:Ni, j in 1:Nj]
@@ -238,7 +238,7 @@ end
     @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-8
 end
 
-@testset "$(Ni)x$(Nj) ACCtoALAR with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) ACCtoALAR with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
     D, d = 5, 3
     A = [randinitial(Val(symmetry), atype, dtype, D,d,D; dir = [-1,1,1]) for i in 1:Ni, j in 1:Nj]

@@ -169,6 +169,14 @@ give the maximum `q` value for a given dimensions `D`
 """
 maxq(D::Int) = floor(Int, log2(D))
 
+
+"""
+    minuseven!(A)
+
+return the negative of the array with even indices
+"""
+minuseven(A) = (A = Array{Int}(A); A[[i % 2 == 0 for i in 1:length(A)]] .*= -1; A)
+
 """
     bkdims = u1bulkdims(size::Int...)
 
@@ -664,7 +672,7 @@ function adjoint(A::U1Array{T,N}) where {T,N}
     qn = map(x->x[[div+1:end;1:div]], A.qn)
     tensor = map(adjoint, A.tensor)
     dims = map(x -> x[[div+1:end;1:div]], A.dims)
-    U1Array(qn, A.dir, tensor, A.size[[div+1:end;1:div]], dims, N - div)
+    U1Array(qn, -A.dir[[div+1:end;1:div]], tensor, A.size[[div+1:end;1:div]], dims, N - div)
 end
 
 # only for U1 Matrix
