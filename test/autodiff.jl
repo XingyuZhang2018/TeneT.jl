@@ -275,7 +275,7 @@ end
         return s
     end
     @test Zygote.gradient(foo1, 1)[1] !== nothing
-    # @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
+    # @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2 # num_grad isn't stable for U1 symmetry
 end
 
 @testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]

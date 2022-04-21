@@ -22,6 +22,8 @@ Zygote.@nograd save
 Zygote.@nograd load
 Zygote.@nograd Random.seed!
 Zygote.@nograd randinitial
+Zygote.@nograd Iinitial
+Zygote.@nograd zerosinitial
 Zygote.@nograd show_every_count
 Zygote.@nograd _initializect_square
 Zygote.@nograd U1reshapeinfo
@@ -165,6 +167,14 @@ end
 ChainRulesCore.rrule(::typeof(asArray), A::AbstractSymmetricArray) = asArray(A), dAt -> (NoTangent(), asSymmetryArray(dAt, Val(getsymmetry(A)); dir = getdir(A)))
 
 ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; kwarg...) = asSymmetryArray(A, symmetry; kwarg...), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
+
+function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
+    function back(dA)
+        exchangeind = indexin(qn, dA.qn)
+        return NoTangent(), NoTangent(), NoTangent(), dA.tensor[exchangeind], NoTangent(), NoTangent(), NoTangent()...
+    end
+    U1Array(qn, dir, tensor, size, dims, division), back
+end
 
 # function ChainRulesCore.rrule(::typeof(symmetryreshape), A::AbstractArray, s...; kwarg...)
 #     reA, choosesilces, chooseinds = symmetryreshape(A, s...; kwarg...)

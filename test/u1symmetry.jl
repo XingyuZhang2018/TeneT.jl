@@ -17,32 +17,33 @@ CUDA.allowscalar(false)
     # u1bulkdims division
     @test u1bulkdims(2,4) == ([1,1], [1,2,1])
     @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
-    # @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
-    # for a = 5:8, b = 5:8
-    #     @test sum(u1bulkdims(a,b)[1]) == a
-    #     @test sum(u1bulkdims(a,b)[2]) == b
-    # end
+    @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
+    for a = 5:8, b = 5:8
+        @test sum(u1bulkdims(a,b)[1]) == a
+        @test sum(u1bulkdims(a,b)[2]) == b
+    end
 
-    # # initial 
-    # dir = [1,1,-1]
-    # @test randU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
-    # @test zerosU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
-    # @test IU1(atype, dtype, 6, dir = [1,-1]).size == (6,6)
+    # initial 
+    dir = [1,1,-1]
+    @test randU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
+    @test zerosU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
+    @test IU1(atype, dtype, 6, dir = [1,-1]).size == (6,6)
 
-    # # asU1Array and asArray
-	# A = randU1(atype, dtype, 4,4,5, dir = dir)
-    # @test A isa U1Array
-	# Atensor = asArray(A)
-    # AA = asU1Array(Atensor, dir = dir)
-    # AAtensor = asArray(AA)
-    # @test A ≈ AA
-    # @test Atensor ≈ AAtensor
+    # asU1Array and asArray
+	A = randU1(atype, dtype, 4,4,5, dir = dir)
+    @show A
+    @test A isa U1Array
+	Atensor = asArray(A)
+    AA = asU1Array(Atensor, dir = dir)
+    AAtensor = asArray(AA)
+    @test A ≈ AA
+    @test Atensor ≈ AAtensor
 
-	# # permutedims
-	# @test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]))
+	# permutedims
+	@test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]))
 
 	# # reshape
-	# @test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
+	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
 

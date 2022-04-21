@@ -402,7 +402,7 @@ end
 """
     u1bulktimes!(qn, tensor, A, B, p)
 
-fill into even and odd matrix,  p = 0 for even, p = 1 for odd, then dispatch to result tensor after product
+fill into different particle number,  then dispatch to result tensor after product
 """
 function u1bulktimes!(qn, tensor, dims, A, B, p)
     Aqn, Atensor = A.qn, A.tensor

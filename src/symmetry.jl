@@ -1,5 +1,6 @@
 export asArray, asSymmetryArray, symmetryreshape, getsymmetry, getdir
 export _mattype, _arraytype
+export randinitial, zerosinitial
 
 #helper functions to handle array types
 _mattype(::Array{T}) where {T} = Matrix
