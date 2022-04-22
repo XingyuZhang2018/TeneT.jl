@@ -14,7 +14,7 @@ using Zygote
     d = 2
     D = 2
     χ = 2
-    q = [1]
+    q = [0]
     T = rand(ComplexF64, D,D,d,D,D) 
     # T = T + permutedims(conj(T), [4,2,3,1,5])
     T = asSymmetryArray(T, Val(:U1); dir = [-1,-1,1,1,1], q=q)
@@ -25,23 +25,23 @@ using Zygote
     remori = asArray(m)
     mρ = ein"abcde, fgjhi -> gbhdiefajc"(T, conj(T))
     rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
-    remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, d,d)
+    # remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, d,d)
     β = 1
     M = [β * rem for i in 1:Ni, j in 1:Nj]
     env = obs_env(M; χ = χ, verbose = true, savefile = false, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
-    ρmatrix(M, T, env, remρ)
-    Zsymmetry = Z(env, M)
-    @show Zsymmetry 
+    # # ρmatrix(M, T, env, remρ)
+    # Zsymmetry = Z(env, M)
+    # @show Zsymmetry 
 
-    T = asArray(T)
-    m = ein"abcde, fgchi -> gbhdiefa"(T, conj(T))
-    @test remori ≈ m
-    rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
-    M = [β * rem for i in 1:Ni, j in 1:Nj]
-    env = obs_env(M; χ = χ, verbose = true, savefile = false, infolder = "./example/data/$(Ni)x$(Nj)rand/$(symmetry)_none/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$(symmetry)_none/", maxiter = 10, miniter = 10, updown = false)
-    Znone = Z(env, M)
-    @show Znone
-    @show norm(Zsymmetry-Znone)
+    # T = asArray(T)
+    # m = ein"abcde, fgchi -> gbhdiefa"(T, conj(T))
+    # @test remori ≈ m
+    # rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
+    # M = [β * rem for i in 1:Ni, j in 1:Nj]
+    # env = obs_env(M; χ = χ, verbose = true, savefile = false, infolder = "./example/data/$(Ni)x$(Nj)rand/$(symmetry)_none/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$(symmetry)_none/", maxiter = 10, miniter = 10, updown = false)
+    # Znone = Z(env, M)
+    # @show Znone
+    # @show norm(Zsymmetry-Znone)
     # @test Zsymmetry ≈ Znone
 end
 

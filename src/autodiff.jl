@@ -93,7 +93,7 @@ function num_grad(f, a::U1Array; δ::Real=1e-5)
     bits = map(x -> ceil(Int, log2(x)), size(a))
     Adir = getdir(a)
     for i in CartesianIndices(b)
-        qn = collect(sum.(bitarray.(i.I .- 1, bits))) 
+        qn = collect(sum.(minuseven.(bitarray.(i.I .- 1, bits)))) 
         if sum(qn.*Adir) == 0
             foo = x -> (ac = copy(b); ac[i] = x; f(intype(ac)))
             df[i] = num_grad(foo, b[i], δ=δ)

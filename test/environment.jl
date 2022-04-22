@@ -10,7 +10,7 @@ CUDA.allowscalar(false)
 
 @testset "qr with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
-    A = randinitial(Val(symmetry), atype, dtype, 10,10; dir = [-1, 1], q = [-1, 0, 1])
+    A = randinitial(Val(symmetry), atype, dtype, 10,10; dir = [-1, 1], q = [0])
     Q, R = qrpos(A)
     @test Q*R ≈ A
     @test all(real.(diag(R)) .> 0)
@@ -19,7 +19,7 @@ end
 
 @testset "lq with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none, :Z2, :U1]
     Random.seed!(100)
-    A = randinitial(Val(symmetry), atype, dtype, 10, 10; dir = [1,-1], q = [-1, 0, 1])
+    A = randinitial(Val(symmetry), atype, dtype, 10, 10; dir = [1,-1], q = [0])
     L, Q = lqpos(A)
     @test L*Q ≈ A
     @test all(real.(diag(L)) .> 0)

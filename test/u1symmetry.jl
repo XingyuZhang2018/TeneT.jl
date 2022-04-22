@@ -15,23 +15,22 @@ CUDA.allowscalar(false)
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
 
     # u1bulkdims division
-    @test u1bulkdims(2,4) == ([1,1], [1,2,1])
-    @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
-    @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
-    for a = 5:8, b = 5:8
-        @test sum(u1bulkdims(a,b)[1]) == a
-        @test sum(u1bulkdims(a,b)[2]) == b
-    end
+    # @test u1bulkdims(2,4) == ([1,1], [1,2,1])
+    # @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
+    # @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
+    # for a = 5:8, b = 5:8
+    #     @test sum(u1bulkdims(a,b)[1]) == a
+    #     @test sum(u1bulkdims(a,b)[2]) == b
+    # end
 
     # initial 
     dir = [1,1,-1]
-    @test randU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
+    @test randU1(atype, dtype, 6,7,5; dir = dir).size == (6,7,5)
     @test zerosU1(atype, dtype, 6,7,5, dir = dir).size == (6,7,5)
     @test IU1(atype, dtype, 6, dir = [1,-1]).size == (6,6)
 
-    # asU1Array and asArray
+    # # asU1Array and asArray
 	A = randU1(atype, dtype, 4,4,5, dir = dir)
-    @show A
     @test A isa U1Array
 	Atensor = asArray(A)
     AA = asU1Array(Atensor, dir = dir)
@@ -49,8 +48,8 @@ end
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
 	Random.seed!(100)
-	A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1], q=[0, 1])
-	B = randU1(atype, dtype, 4,3; dir = [1,-1], q=[0, 2])
+	A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1], q=[0])
+	B = randU1(atype, dtype, 4,3; dir = [1,-1], q=[0])
 	Atensor = asArray(A)
 	Btensor = asArray(B)
 
@@ -172,7 +171,7 @@ end
 
 @testset "general flatten reshape" begin
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-    D = 2
+    D, χ = 2, 10
     # a = randinitial(Val(:U1), Array, ComplexF64, D,D,D,D,D,D,D,D; dir = [1,-1,-1,1,-1,1,1,-1])
     a = randinitial(Val(:U1), Array, ComplexF64, D,D,4,D,D; dir = [-1,-1,1,1,1], q=[0])
     a = ein"abcde, fgchi -> gbhdiefa"(a, conj(a))
@@ -184,23 +183,14 @@ end
     rerea = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo)[1]
     @test asArray(rerea) ≈ asArray(a)
 
-    # (χ,D,D,χ) -> (χ,D^2,χ)
-    a = randinitial(Val(:U1), Array, ComplexF64, 5,3,3,5; dir = [-1,1,-1,1])
+    # # (χ,D,D,χ) -> (χ,D^2,χ)
+    a = randinitial(Val(:U1), Array, ComplexF64, χ,D,D,χ; dir = [-1,1,-1,1])
     atensor = asArray(a)
-    rea, reinfo  = U1reshape(a, 5,9,5)
-    rea2 = asU1Array(reshape(atensor, 5,9,5); dir =  [-1,1,1])
+    rea, reinfo  = U1reshape(a, χ,D^2,χ)
+    rea2 = asU1Array(reshape(atensor, χ,D^2,χ); dir =  [-1,-1,1])
     @test rea !== rea2
-    rerea = U1reshape(rea, 5,3,3,5; reinfo = reinfo)[1]
+    rerea = U1reshape(rea, χ,D,D,χ; reinfo = reinfo)[1]
     @test rerea ≈ a
-
-    # A = randinitial(Val(:U1), Array, ComplexF64, 3,2,3; dir = [-1,1,1])
-    # At = asArray(A)
-    # 工 = ein"acb, dce-> adbe"(A, conj(A))
-    # 工t = ein"acb, dce-> adbe"(At, conj(At))
-    # @test asArray(工) ≈ 工t
-    # @show 工.qn
-    # randA = randinitial(Val(:U1), Array, ComplexF64, 2,2,2,2; dir = [-1,1,1,-1])
-    # @show randA.qn
 end
 
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [Float64]
@@ -248,7 +238,6 @@ end
     A = randU1(atype, dtype, 40,10; dir = [-1,1])
 	Atensor = asArray(A)
 	U, S, V = sysvd!(copy(A))
-    @show S
     Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
     @test Utensor * Diagonal(Stensor) * Vtensor ≈ Atensor
 	@test U * Diagonal(S) * V ≈ A
