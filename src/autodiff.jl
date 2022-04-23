@@ -176,6 +176,14 @@ function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::V
     U1Array(qn, dir, tensor, size, dims, division), back
 end
 
+function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
+    function back(dA)
+        exchangeind = indexin(parity, dA.parity)
+        return NoTangent(), NoTangent(), dA.tensor[exchangeind], NoTangent(), NoTangent(), NoTangent()...
+    end
+    Z2Array(parity, tensor, size, dims, division), back
+end
+
 # function ChainRulesCore.rrule(::typeof(symmetryreshape), A::AbstractArray, s...; kwarg...)
 #     reA, choosesilces, chooseinds = symmetryreshape(A, s...; kwarg...)
 #     back = dA -> (NoTangent(), symmetryreshape(dA, s; choosesilces = choosesilces, chooseinds = chooseinds, reqn = A.qn, redims = A.dims), NoTangent()...)

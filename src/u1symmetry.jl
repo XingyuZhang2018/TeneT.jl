@@ -742,14 +742,15 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo = nothing) where {T, N}
         inddims = u1bulkdims(size(A)...)   # only correct for random initial bits division U1Array
         choosesilces = [[] for _ in 1:length(ureqn)]
         chooseinds = [[] for _ in 1:length(ureqn)]
-        length(div) == 4 ? (shift = [abs(min(map(q->q[2], Aqn)...)) + 1 for _ in 1:4]) : (shift = [abs(min(map(q->q[1], Aqn)...)) + 1, abs(min(map(q->q[2], Aqn)...)) + 1, abs(min(map(q->q[1], Aqn)...)) + 1])
+        qrange = getqrange(size(A)...)
+        shift = getshift(qrange)
         for i in 1:length(ureqn)
             q = ureqn[i]
             bulkind = findall(x->x in [q], reqn)
             oriqn = Aqn[bulkind]
         
             indqnfrom = [unique(map(x->x[div], oriqn)) for div in div]
-            rebulkdims = [[prod(map((x,y)->x[y+shift[i]], inddims[div[i]], indqnfrom)) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
+            rebulkdims = [[prod(map((x,y,s)->x[y+s], inddims[div[i]], indqnfrom, shift[div[i]])) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
             # @show indqnfrom
             # indqnfrom = [[[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]]]
             # rebulkdims = [[1, 4], [1, 4], [1, 4], [1, 4]]
@@ -795,14 +796,15 @@ function U1reshapeinfo(s, sizeA, dir)
     choosesilces = [[] for _ in 1:length(ureqn)]
     chooseinds = [[] for _ in 1:length(ureqn)]
     Aqn = A.qn
-    length(div) == 4 ? (shift = [abs(min(map(q->q[2], Aqn)...)) + 1 for _ in 1:4]) : (shift = [abs(min(map(q->q[1], Aqn)...)) + 1, abs(min(map(q->q[2], Aqn)...)) + 1, abs(min(map(q->q[1], Aqn)...)) + 1])
+    qrange = getqrange(size(A)...)
+    shift = getshift(qrange)
     for i in 1:length(ureqn)
         q = ureqn[i]
         bulkind = findall(x->x in [q], reqn)
         oriqn = Aqn[bulkind]
     
         indqnfrom = [unique(map(x->x[div], oriqn)) for div in div]
-        rebulkdims = [[prod(map((x,y)->x[y+shift[i]], inddims[div[i]], indqnfrom)) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
+        rebulkdims = [[prod(map((x,y,s)->x[y+s], inddims[div[i]], indqnfrom, shift[div[i]])) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
         # @show indqnfrom
         # indqnfrom = [[[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]]]
         # rebulkdims = [[1, 4], [1, 4], [1, 4], [1, 4]]

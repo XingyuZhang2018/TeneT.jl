@@ -159,6 +159,7 @@ sometimes the finally observable is symetric, so we can use the same up and down
 """
 function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf)
     verbose && (direction == "up" ? print("↑ ") : print("↓ "))
+    directionori = direction
     downfromup && direction == "down" && (direction = "up")
 
     D = size(M[1,1],1)
@@ -176,6 +177,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
+        # out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
         save(out_chkp_file, "env", envsave)
     end
     env
@@ -211,7 +213,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     if updown 
         Ni, Nj = size(ALu)
-        Md = [permutedims(M[uptodown(i,Ni,Nj)], (3,4,1,2)) for i = 1:Ni*Nj]
+        Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
         Md = reshape(conj(Md), Ni, Nj)
 
         Random.seed!(100)

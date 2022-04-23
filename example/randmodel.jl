@@ -25,13 +25,13 @@ using Zygote
     remori = asArray(m)
     mρ = ein"abcde, fgjhi -> gbhdiefajc"(T, conj(T))
     rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
-    # remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, d,d)
+    remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, d,d)
     β = 1
     M = [β * rem for i in 1:Ni, j in 1:Nj]
     env = obs_env(M; χ = χ, verbose = true, savefile = false, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
-    # # ρmatrix(M, T, env, remρ)
-    # Zsymmetry = Z(env, M)
-    # @show Zsymmetry 
+    ρmatrix(M, T, env, remρ)
+    Zsymmetry = Z(env, M)
+    @show Zsymmetry 
 
     # T = asArray(T)
     # m = ein"abcde, fgchi -> gbhdiefa"(T, conj(T))

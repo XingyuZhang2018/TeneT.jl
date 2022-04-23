@@ -302,7 +302,7 @@ function leftenv!(ALu, ALd, M, FL; kwargs...)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
-        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=1000 , ishermitian = false, kwargs...)
+        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=100 , ishermitian = false, kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
@@ -342,7 +342,7 @@ function rightenv!(ARu, ARd, M, FR; kwargs...)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=1000 , ishermitian = false, kwargs...)
+        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=100 , ishermitian = false, kwargs...)
         @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
@@ -435,7 +435,7 @@ function ACenv!(AC, FL, M, FR; kwargs...)
     Ni,Nj = size(AC)
     λAC = zeros(eltype(AC[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
-        λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
+        λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=100 ,ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
         info.converged == 0 && @warn "ACenv Not converged"
         if length(λACs) > 1 && norm(abs(λACs[1]) - abs(λACs[2])) < 1e-12
@@ -479,7 +479,7 @@ function Cenv!(C, FL, FR; kwargs...)
     λC = zeros(eltype(C[1,1]),Ni,Nj)
     for j = 1:Nj, i = 1:Ni
         jr = j + 1 - (j==Nj) * Nj
-        λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
+        λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=100 ,ishermitian = false, kwargs...)
         @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
         info.converged == 0 && @warn "Cenv Not converged"
         if length(λCs) > 1 && norm(abs(λCs[1]) - abs(λCs[2])) < 1e-12

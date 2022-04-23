@@ -171,7 +171,7 @@ end
 
 @testset "general flatten reshape" begin
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-    D, χ = 2, 10
+    D, χ = 4, 10
     # a = randinitial(Val(:U1), Array, ComplexF64, D,D,D,D,D,D,D,D; dir = [1,-1,-1,1,-1,1,1,-1])
     a = randinitial(Val(:U1), Array, ComplexF64, D,D,4,D,D; dir = [-1,-1,1,1,1], q=[0])
     a = ein"abcde, fgchi -> gbhdiefa"(a, conj(a))
