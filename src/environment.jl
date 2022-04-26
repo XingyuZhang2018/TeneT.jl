@@ -270,7 +270,7 @@ function FLint(AL, M)
     Ni,Nj = size(AL)
     D, d = size(AL[1],1), size(M[1],1)
     # typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
-    # typeof(AL[1]) <: U1Array && (dir = [-getdir(AL[1])[1], -1, 1, getdir(AL[1])[1]])
+    # typeof(AL[1]) <: U1Array && (dir = [1, -1, 1, -1])
     # [randinitial(AL[i,j], D,d,D; dir = [1,1,-1]) for i=1:Ni, j=1:Nj]
     [symmetryreshape(randinitial(AL[i,j], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = [1,-1,1,-1], q = [0]), D,d,D)[1] for i=1:Ni, j=1:Nj]
 end

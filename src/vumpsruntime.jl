@@ -125,7 +125,7 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     _, C = Cenv(C, FL, FR)
     ALp, ARp, _, _ = ACCtoALAR(AC, C)
     _, FL = leftenv(AL, ALp, M, FL)
-    _, FR = rightenv(AR, ARp, M, conj(FL))
+    _, FR = rightenv(AR, ARp, M, FR)
     _, AC = ACenv(AC, FL, M, FR)
     _, C = Cenv(C, FL, FR)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
@@ -177,12 +177,15 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
-        # out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
+        out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
         save(out_chkp_file, "env", envsave)
     end
     env
 end
 
+conjM(M::U1Array) = U1Array(map(x->x .* [-1,1,-1,1], M.qn), M.dir .* [1,-1,1,-1], map(conj, M.tensor), M.size, M.dims, M.division)
+
+conjM(M::AbstractArray) = conj(M)
 """
     M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR = obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf)
 
@@ -214,7 +217,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     if updown 
         Ni, Nj = size(ALu)
         Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
-        Md = reshape(conj(Md), Ni, Nj)
+        Md = reshape(conjM.(Md), Ni, Nj)
 
         Random.seed!(100)
         envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every)

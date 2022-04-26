@@ -8,11 +8,11 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
-    d = 8
+    d = 4
     
-    for χ in 10:10:90
+    for χ in [50]
         println("d = $(d) χ = $(χ)")
         FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
         M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])
@@ -29,7 +29,7 @@ CUDA.allowscalar(false)
     end
 end
 
-@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
     d = 4
     χ = 50
@@ -65,7 +65,7 @@ end
     @btime CUDA.@sync rightorth($A)
 end
 
-@testset "leftenv and rightenv with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "leftenv and rightenv with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
     d = 4
     χ = 50
@@ -78,7 +78,7 @@ end
     @btime CUDA.@sync rightenv($AR, $AR, $M)
 end
 
-@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
     d = 4
     χ = 50
