@@ -299,6 +299,11 @@ function getqn(s, dir::Vector{Int}, q::Vector{Int}=[0])
     qn
 end
 
+function deletezerobulk(A::U1Array)
+    nozeroind = norm.(A.tensor) .> 1e-10
+    U1Array(A.qn[nozeroind], A.dir, A.tensor[nozeroind], A.size, A.dims[nozeroind], A.division)
+end
+
 # have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 # which is fixed in new vervion, but its allocation is abnormal
 function asU1Array(A::AbstractArray{T,N}; dir::Vector{Int}, q::Vector{Int}=[0]) where {T,N}
@@ -309,7 +314,7 @@ function asU1Array(A::AbstractArray{T,N}; dir::Vector{Int}, q::Vector{Int}=[0]) 
     shift = 1
     tensor = [atype(Aarray[[qlist[j][abs(qn[i][j])+shift] for j = 1:N]...]) for i in 1:length(qn)]
     dims = map(x -> collect(size(x)), tensor)
-    U1Array(qn, dir, tensor, size(A), dims, 1)
+    deletezerobulk(U1Array(qn, dir, tensor, size(A), dims, 1))
 end
 
 # # only for OMEinsum binary permutedims before reshape
@@ -349,17 +354,57 @@ core code for U1Array product
 function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     qn = Vector{Vector{Int}}()
     dims = Vector{Vector{Int}}()
+    # qn_para = Vector{Vector{Vector{Int}}}()
+    # dims_para = Vector{Vector{Vector{Int}}}()
     atype = _arraytype(B.tensor[1])
     T = TA == ComplexF64 || TB == ComplexF64 ? ComplexF64 : Float64
     tensor = Vector{atype{T}}()
+    # tensor_para = Vector{Vector{atype{T}}}()
     divA, divB = A.division, B.division
 
     Adir = getdir(A)[divA+1:end]
     Bdir = getdir(B)[1:divB]
     sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
+
     for p in unique(map(qn -> sum(qn[divA+1:end] .* A.dir[divA+1:end]), A.qn))
         u1bulktimes!(qn, tensor, dims, A, B, p)
     end
+    # for _ in 1:Threads.nthreads()
+    #     push!(qn_para, Vector{Vector{Int}}())
+    #     push!(dims_para, Vector{Vector{Int}}())
+    #     push!(tensor_para, Vector{atype{T}}())
+    # end
+    
+    # Threads.@threads for p in unique(map(qn -> sum(qn[divA+1:end] .* A.dir[divA+1:end]), A.qn))
+    #     pi = Threads.threadid()
+    #     u1bulktimes!(qn_para[pi], tensor_para[pi], dims_para[pi], A, B, p)
+    # end
+    # qn = vcat(qn_para...)
+    # dims = vcat(dims_para...)
+    # tensor = vcat(tensor_para...)
+
+    qn == [[]] && return Array(tensor[1])[]
+    U1Array(qn, [A.dir[1:divA]..., B.dir[divB+1:end]...], tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
+
+    # Aqn, Atensor = A.qn, A.tensor
+    # Bqn, Btensor = B.qn, B.tensor
+    # Adims, Bdims = A.dims, B.dims
+    # LA, LB = length(Aqn), length(Bqn)
+
+    # Threads.@threads for k in 1:LA*LB
+    #     i,j = ktoij(k, LA, LB)
+    #     if Aqn[i][divA+1:end] == Bqn[j][1:divB]
+    #         pi = Threads.threadid()
+    #         push!(qn_para[pi], [Aqn[i][1:divA]; Bqn[j][divB+1:end]])
+    #         push!(dims_para[pi], [Adims[i][1:divA]; Bdims[j][divB+1:end]])
+    #         push!(tensor_para[pi], Atensor[i] * Btensor[j])
+    #     end
+    # end
+
+    # qn = vcat(qn_para...)
+    # dims = vcat(dims_para...)
+    # tensor = vcat(tensor_para...)
+
     # uqn = unique(qn)
     # udims = Vector{Vector{Int}}()
     # utensor = Vector{atype{T}}()
@@ -369,8 +414,8 @@ function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     #     push!(udims, dims[ind][1])
     # end
     # uqn == [[]] && return Array(utensor[1])[]
-    qn == [[]] && return Array(tensor[1])[]
-    U1Array(qn, [A.dir[1:divA]..., B.dir[divB+1:end]...], tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
+
+    # U1Array(uqn, [A.dir[1:divA]..., B.dir[divB+1:end]...], utensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), udims, divA)
 end
 
 function no_nothing_col(index)
@@ -755,7 +800,7 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo = nothing) where {T, N}
         end
         dims = map(x -> collect(size(x)), retensors)
         dir = [A.dir[d][end] for d in div]     # last dir of reshape
-        U1Array(map(qn->qn .* dir, ureqn), dir, map(atype, retensors), s, dims, 1), (choosesilces, chooseinds, Aqn, A.dir, Adims)
+        deletezerobulk(U1Array(map(qn->qn .* dir, ureqn), dir, map(atype, retensors), s, dims, 1)), (choosesilces, chooseinds, Aqn, A.dir, Adims)
     else
         choosesilces, chooseinds, reqn, redir, redims = reinfo
         retensors = Array{Array,1}(undef, sum(length.(chooseinds)))
@@ -770,7 +815,7 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo = nothing) where {T, N}
             end
         end
         dims = map(x -> collect(size(x)), retensors)
-        U1Array(reqn, redir, map(atype, retensors), s, dims, 1), (choosesilces, chooseinds, reqn, redims)
+        deletezerobulk(U1Array(reqn, redir, map(atype, retensors), s, dims, 1)), (choosesilces, chooseinds, reqn, redims)
     end
 end
 

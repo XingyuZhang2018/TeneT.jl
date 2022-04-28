@@ -211,7 +211,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     if updown 
         Ni, Nj = size(ALu)
-        Md = [permutedims(M[uptodown(i,Ni,Nj)], (3,4,1,2)) for i = 1:Ni*Nj]
+        Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
         Md = reshape(conj(Md), Ni, Nj)
 
         Random.seed!(100)
