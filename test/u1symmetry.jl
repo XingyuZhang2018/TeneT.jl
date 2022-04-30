@@ -10,7 +10,7 @@ using Test
 using BenchmarkTools
 CUDA.allowscalar(false)
 
-@testset "U1 Tensor with $atype{$dtype}" for atype in [Array], dtype in [Float64]
+@testset "U1 Tensor with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64]
 	Random.seed!(100)
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
 
@@ -46,7 +46,7 @@ CUDA.allowscalar(false)
 end
 
 
-@testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [Float64]
+@testset "OMEinsum U1 with $atype{$dtype}" for atype in [CuArray], dtype in [Float64]
 	Random.seed!(100)
 	A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1], q=[0])
 	B = randU1(atype, dtype, 4,3; dir = [1,-1], q=[0])

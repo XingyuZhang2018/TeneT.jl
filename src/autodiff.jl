@@ -11,19 +11,10 @@ export num_grad
 
 Zygote.@nograd StopFunction
 Zygote.@nograd error
-Zygote.@nograd FLint
-Zygote.@nograd FRint
-Zygote.@nograd leftorth
-Zygote.@nograd rightorth
 Zygote.@nograd ALCtoAC
-Zygote.@nograd LRtoC
-Zygote.@nograd initialA
 Zygote.@nograd save
 Zygote.@nograd load
 Zygote.@nograd Random.seed!
-Zygote.@nograd randinitial
-Zygote.@nograd Iinitial
-Zygote.@nograd zerosinitial
 Zygote.@nograd show_every_count
 Zygote.@nograd _initializect_square
 Zygote.@nograd U1reshapeinfo
@@ -193,13 +184,14 @@ end
 # end
 
 
-# function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{<:Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, N::Tuple{Vararg}, division::Int) where {T}
-#     function back(dy) 
-#         @show dy.parity parity
-#         Z2Array(dy.parity, dy.tensor, N, dy.division)
-#     end
-#     Z2Array(parity, tensor, N, division),  back
-# end
+function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
+    function back(dA)
+        exchangeind = indexin(parity, dA.parity)
+        return NoTangent(), NoTangent(), dA.tensor[exchangeind], NoTangent(), NoTangent(), NoTangent()...
+    end
+    U1Array(parity, tensor, size, dims, division), back
+end
+
 
 # adjoint for QR factorization
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
@@ -424,10 +416,11 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
     λL, FL = leftenv(ALu, ALd, M, FL)
     Ni, Nj = size(ALu)
     function back((dλL, dFL))
-        dALu = [zero(x) for x in ALu]
-        dALd = [zero(x) for x in ALd]
-        dM = [zero(x) for x in M]
-        for j = 1:Nj, i = 1:Ni
+        dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
+        dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
+        dM = [[zero(x) for x in M] for _ in 1:nthreads()]
+        @threads for k = 1:Ni*Nj
+            i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
             dFL[i,j] -= Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] * FL[i,j]
@@ -435,11 +428,14 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
             info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], FL[i,j], ξl, j, J; ifconj = true)
-                dALu[i,J] += dAiJ
-                dALd[ir,J] += dAipJ
-                dM[i,J] += dMiJ
+                dALu[threadid()][i,J] += dAiJ
+                dALd[threadid()][ir,J] += dAipJ
+                dM[threadid()][i,J] += dMiJ
             end
         end
+        dALu = reduce(+, dALu)
+        dM = reduce(+, dM)
+        dALd = reduce(+, dALd)
         return NoTangent(), dALu, dALd, dM, NoTangent()
     end
     return (λL, FL), back
@@ -449,10 +445,11 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
     λR, FR = rightenv(ARu, ARd, M, FR)
     Ni, Nj = size(ARu)
     function back((dλ, dFR))
-        dARu = [zero(x) for x in ARu]
-        dARd = [zero(x) for x in ARd]
-        dM = [zero(x) for x in M]
-        for j = 1:Nj, i = 1:Ni
+        dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
+        dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
+        dM = [[zero(x) for x in M] for _ in 1:nthreads()]
+        @threads for k = 1:Ni*Nj
+            i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
             dFR[i,jr] -= Array(ein"abc,abc ->"(conj(FR[i,jr]), dFR[i,jr]))[] * FR[i,jr]
@@ -460,11 +457,14 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
             info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], ξr, FR[i,jr], j, J; ifconj = true)
-                dARu[i,J] += dAiJ
-                dARd[ir,J] += dAipJ
-                dM[i,J] += dMiJ
+                dARu[threadid()][i,J] += dAiJ
+                dARd[threadid()][ir,J] += dAipJ
+                dM[threadid()][i,J] += dMiJ
             end
         end
+        dARu = reduce(+, dARu)
+        dM = reduce(+, dM)
+        dARd = reduce(+, dARd)
         return NoTangent(), dARu, dARd, dM, NoTangent()
     end
     return (λR, FR), back
@@ -560,10 +560,11 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
     λAC, AC = ACenv(AC, FL, M, FR)
     Ni, Nj = size(AC)
     function back((dλ, dAC))
-        dFL = [zero(x) for x in FL]
-        dM = [zero(x) for x in M]
-        dFR = [zero(x) for x in FR]
-        for j = 1:Nj, i = 1:Ni
+        dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
+        dM = [[zero(x) for x in M] for _ in 1:nthreads()]
+        dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
+        @threads for k = 1:Ni*Nj
+            i,j = ktoij(k, Ni, Nj)
             if dAC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
                 dAC[i,j] -= Array(ein"abc,abc ->"(conj(AC[i,j]), dAC[i,j]))[] * AC[i,j]
@@ -574,12 +575,15 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
                 # @show info ein"abc,abc ->"(AC[i,j], ξAC)[] ein"abc,abc -> "(AC[i,j], dAC[i,j])[]
                 for II = 1:Ni
                     dFLIj, dMIj, dFRIj = ACdFMmap(FL[:,j], M[:,j], FR[:,j], AC[i,j], ξAC, i, II)
-                    dFL[II,j] += dFLIj
-                    dM[II,j] += dMIj
-                    dFR[II,j] += dFRIj
+                    dFL[threadid()][II,j] += dFLIj
+                    dM[threadid()][II,j] += dMIj
+                    dFR[threadid()][II,j] += dFRIj
                 end
             end
         end
+        dFL = reduce(+, dFL)
+        dM = reduce(+, dM)
+        dFR = reduce(+, dFR)
         return NoTangent(), NoTangent(), dFL, dM, dFR
     end
     return (λAC, AC), back
@@ -662,9 +666,10 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     λC, C = Cenv(C, FL, FR)
     Ni, Nj = size(C)
     function back((dλ, dC))
-        dFL = [zero(x) for x in FL]
-        dFR = [zero(x) for x in FR]
-        for j = 1:Nj, i = 1:Ni
+        dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
+        dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
+        @threads for k = 1:Ni*Nj
+            i,j = ktoij(k, Ni, Nj)
             if dC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
                 jr = j + 1 - (j==Nj) * Nj
@@ -676,11 +681,13 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
                 # @show info ein"ab,ab ->"(C[i,j], ξC)[] ein"ab,ab -> "(C[i,j], dC[i,j])[]
                 for II = 1:Ni
                     dFLIjp, dFRIj = CdFMmap(FL[:,jr], FR[:,j], C[i,j], ξC, i, II)
-                    dFL[II,jr] += dFLIjp
-                    dFR[II,j] += dFRIj
+                    dFL[threadid()][II,jr] += dFLIjp
+                    dFR[threadid()][II,j] += dFRIj
                 end
             end
         end
+        dFL = reduce(+, dFL)
+        dFR = reduce(+, dFR)
         return NoTangent(), NoTangent(), dFL, dFR
     end
     return (λC, C), back
@@ -690,10 +697,11 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
     λL, FL = obs_FL(ALu, ALd, M, FL)
     Ni, Nj = size(ALu)
     function back((dλL, dFL))
-        dALu = [zero(x) for x in ALu]
-        dALd = [zero(x) for x in ALd]
-        dM = [zero(x) for x in M]
-        for j = 1:Nj, i = 1:Ni
+        dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
+        dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
+        dM = [[zero(x) for x in M] for _ in 1:nthreads()]
+        @threads for k = 1:Ni*Nj
+            i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
             dFL[i,j] -= Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] * FL[i,j]
@@ -701,11 +709,14 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
             info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ALu[i,:], ALd[ir,:], M[i,:], FL[i,j], ξl, j, J)
-                dALu[i,J] += dAiJ
-                dALd[ir,J] += dAipJ
-                dM[i,J] += dMiJ
+                dALu[threadid()][i,J] += dAiJ
+                dALd[threadid()][ir,J] += dAipJ
+                dM[threadid()][i,J] += dMiJ
             end
         end
+        dALu = reduce(+, dALu)
+        dM = reduce(+, dM)
+        dALd = reduce(+, dALd)
         return NoTangent(), dALu, dALd, dM, NoTangent()
     end
     return (λL, FL), back
@@ -715,10 +726,11 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
     λR, FR = obs_FR(ARu, ARd, M, FR)
     Ni, Nj = size(ARu)
     function back((dλ, dFR))
-        dARu = [zero(x) for x in ARu]
-        dARd = [zero(x) for x in ARd]
-        dM = [zero(x) for x in M]
-        for j = 1:Nj, i = 1:Ni
+        dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
+        dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
+        dM = [[zero(x) for x in M] for _ in 1:nthreads()]
+        @threads for k = 1:Ni*Nj
+            i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
             dFR[i,jr] -= Array(ein"abc,abc ->"(conj(FR[i,jr]), dFR[i,jr]))[] * FR[i,jr]
@@ -726,11 +738,14 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
             info.converged == 0 && @warn "ad's linsolve not converge"
             for J = 1:Nj
                 dAiJ, dAipJ, dMiJ = dAMmap(ARu[i,:], ARd[ir,:], M[i,:], ξr, FR[i,jr], j, J)
-                dARu[i,J] += dAiJ
-                dARd[ir,J] += dAipJ
-                dM[i,J] += dMiJ
+                dARu[threadid()][i,J] += dAiJ
+                dARd[threadid()][ir,J] += dAipJ
+                dM[threadid()][i,J] += dMiJ
             end
         end
+        dARu = reduce(+, dARu)
+        dM = reduce(+, dM)
+        dARd = reduce(+, dARd)
         return NoTangent(), dARu, dARd, dM, NoTangent()
     end
     return (λR, FR), back
