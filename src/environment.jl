@@ -282,7 +282,7 @@ function FRint(AR, M)
     Ni,Nj = size(AR)
     D, d = size(AR[1],3), size(M[1],3)
     dir = nothing
-    typeof(AL[1]) <: U1Array && (dir = [-1, getdir(M[1])[3], -getdir(M[1])[3], 1])
+    typeof(AR[1]) <: U1Array && (dir = [-1, getdir(M[1])[3], -getdir(M[1])[3], 1])
     # [randinitial(AR[i,j], D,d,D; dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
     [symmetryreshape(randinitial(AR[i,j], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = dir, q = [0]), D,d,D)[1] for i=1:Ni, j=1:Nj]
 end

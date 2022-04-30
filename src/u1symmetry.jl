@@ -98,22 +98,24 @@ function -(A::U1Array, B::U1Array)
     if B.qn == A.qn
         U1Array(B.qn, B.dir, A.tensor - B.tensor, B.size, B.dims, B.division)
     else
-        atype = typeof(A.tensor[1])
-        qn = intersect(A.qn, B.qn)
-        tensor = Vector{atype}(A.tensor[indexin(qn, A.qn)] - B.tensor[indexin(qn, B.qn)])
-        extraqn = setdiff(A.qn, B.qn)            # setdiff result is related to order
-        if length(extraqn) !== 0
-            push!(qn, extraqn...)
-            push!(tensor, A.tensor[indexin(extraqn, A.qn)]...)
-        end
-        extraqn = setdiff(B.qn, A.qn)
-        if length(extraqn) !== 0
-            push!(qn, extraqn...)
-            push!(tensor, -B.tensor[indexin(extraqn, B.qn)]...)
-        end
+        # atype = typeof(A.tensor[1])
+        # qn = intersect(A.qn, B.qn)
+        # tensor = Vector{atype}(A.tensor[indexin(qn, A.qn)] - B.tensor[indexin(qn, B.qn)])
+        # extraqn = setdiff(A.qn, B.qn)            # setdiff result is related to order
+        # if length(extraqn) !== 0
+        #     push!(qn, extraqn...)
+        #     push!(tensor, A.tensor[indexin(extraqn, A.qn)]...)
+        # end
+        # extraqn = setdiff(B.qn, A.qn)
+        # if length(extraqn) !== 0
+        #     push!(qn, extraqn...)
+        #     push!(tensor, -B.tensor[indexin(extraqn, B.qn)]...)
+        # end
 
-        dims = map(x -> collect(size(x)), tensor)
-        U1Array(qn, A.dir, tensor, A.size, dims, A.division)
+        # dims = map(x -> collect(size(x)), tensor)
+        # U1Array(qn, A.dir, tensor, A.size, dims, A.division)
+        exchangeind = indexin(B.qn, A.qn)
+        U1Array(B.qn, B.dir, A.tensor[exchangeind] - B.tensor, B.size, B.dims, B.division)
     end
 end
 
@@ -300,7 +302,7 @@ function getqn(s, dir::Vector{Int}, q::Vector{Int}=[0])
 end
 
 function deletezerobulk(A::U1Array)
-    nozeroind = norm.(A.tensor) .> 1e-10
+    nozeroind = norm.(A.tensor) .> 1e-30
     U1Array(A.qn[nozeroind], A.dir, A.tensor[nozeroind], A.size, A.dims[nozeroind], A.division)
 end
 
@@ -366,6 +368,8 @@ function *(A::U1Array{TA,NA}, B::U1Array{TB,NB}) where {TA,TB,NA,NB}
     Bdir = getdir(B)[1:divB]
     sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
 
+    # oridims = [prod(A.size[1:divA]), prod(A.size[divA+1:end])], [prod(B.size[1:divB]), prod(B.size[divB+1:end])]
+    # @show oridims
     for p in unique(map(qn -> sum(qn[divA+1:end] .* A.dir[divA+1:end]), A.qn))
         u1bulktimes!(qn, tensor, dims, A, B, p)
     end
@@ -501,6 +505,7 @@ function u1bulktimes!(qn, tensor, dims, A, B, p)
         index[j, k] !== nothing && (Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] .= Btensor[index[j, k]])
     end
     
+    # @show size(Amatrix), size(Bmatrix)
     C = Amatrix * Bmatrix
 
     for i in 1:length(matrix_i), k in 1:length(matrix_k)
@@ -571,9 +576,9 @@ function mul!(Y::U1Array, A::U1Array, B::Number)
         map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor)
     else
         # @warn "mul!(Y, A, B) : length(A.qn) !== length(B.qn)"
-        # exchangeind = indexin(A.qn, Y.qn)  # A.qn is a subset of Y.qn
-        # map((Y, A) -> mul!(Y, A, B), Y.tensor[exchangeind], A.tensor)
-        Y = A*B
+        exchangeind = indexin(A.qn, Y.qn)  # A.qn is a subset of Y.qn
+        map((Y, A) -> mul!(Y, A, B), Y.tensor[exchangeind], A.tensor)
+        # Y = A*B
     end
     # @show length.([Y.qn, Y.tensor])
     Y
@@ -593,23 +598,27 @@ function axpy!(α::Number, X::U1Array, Y::U1Array)
         #     push!(Y.tensor, α * X.tensor[ind]...)
         #     push!(Y.dims, X.dims[ind]...)
         # end
-        Y = α * X + Y
+        # length(X.qn) !== length(Y.qn) && throw(Base.error("$A and $B have different qn"))
+        exchangeind = indexin(Y.qn, X.qn)
+        map((x,y) -> axpy!(α, x, y), X.tensor[exchangeind], Y.tensor)
     end
-    # @show 33333333333 length.([Y.qn, Y.tensor]) length.([X.qn, X.tensor])
-    return Y
+    return deletezerobulk(Y)
 end
 
-function axpby!(α::Number, x::U1Array, β::Number, y::U1Array)
-    if x.qn == y.qn
-        map((x,y) -> axpby!(α, x, β, y), x.tensor, y.tensor)
-    else
-        # length(x.qn) !== length(y.qn) && @warn "axpby!(x, β, y) is not implemented for x.qn != y.qn"
-        y = α * x + β * y
-        # exchangeind = indexin(y.qn, x.qn)
-        # map((x,y) -> axpby!(α, x, β, y), x.tensor[exchangeind], y.tensor)
-    end
-    return y
-end
+# function axpby!(α::Number, x::U1Array, β::Number, y::U1Array)
+#     # if x.qn == y.qn
+#     #     map((x,y) -> axpby!(α, x, β, y), x.tensor, y.tensor)
+#     # else
+#     #     # length(x.qn) !== length(y.qn) && @warn "axpby!(x, β, y) is not implemented for x.qn != y.qn"
+#     #     y = α * x + β * y
+#     #     # exchangeind = indexin(y.qn, x.qn)
+#     #     # map((x,y) -> axpby!(α, x, β, y), x.tensor[exchangeind], y.tensor)
+#     # end
+
+#     x.qn !== y.qn && @warn "axpby!(x, β, y) is not implemented for x.qn != y.qn"
+#     map((x,y) -> axpby!(α, x, β, y), x.tensor, y.tensor)
+#     return y
+# end
 
 # # for leftorth and rightorth compatibility
 Diagonal(A::U1Array) = U1Array(A.qn, A.dir, map(Diagonal, A.tensor), A.size, A.dims, A.division)

@@ -11,19 +11,10 @@ export num_grad
 
 Zygote.@nograd StopFunction
 Zygote.@nograd error
-Zygote.@nograd FLint
-Zygote.@nograd FRint
-Zygote.@nograd leftorth
-Zygote.@nograd rightorth
 Zygote.@nograd ALCtoAC
-Zygote.@nograd LRtoC
-Zygote.@nograd initialA
 Zygote.@nograd save
 Zygote.@nograd load
 Zygote.@nograd Random.seed!
-Zygote.@nograd randinitial
-Zygote.@nograd Iinitial
-Zygote.@nograd zerosinitial
 Zygote.@nograd show_every_count
 Zygote.@nograd _initializect_square
 Zygote.@nograd U1reshapeinfo
