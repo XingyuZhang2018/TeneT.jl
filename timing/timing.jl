@@ -8,11 +8,55 @@ using OMEinsum
 using Random
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
+@testset "matrix product $atype"  for atype in [CuArray], dtype in [ComplexF64]
+    # function foo(D)
+    #     a = atype(zeros(dtype, D,D))
+    #     b = atype(zeros(dtype, D,D))
+    #     a * b
+    # end
+    # for D in 200:100:1000
+    #     println("$atype D = $(D)")
+    #     a = atype(zeros(dtype, D,D))
+    #     b = atype(zeros(dtype, D,D))
+
+    #     t = minimum(@benchmark(CUDA.@sync $a * $b)).time / 1e6
+
+    #     message = "$D    $(round(t,digits=5))\n"
+    #     logfile = open("./timing/matrix_product_$(atype).log", "a")
+    #     write(logfile, message)
+    #     close(logfile)
+    # end
+
+    # D = 100
+    # a = atype(zeros(dtype, D,D))
+    # b = atype(zeros(dtype, D,D))
+    # function foo1()
+    #     a * b 
+    # end
+    # function foo2()
+    #     a = CUDA.zeros(dtype, D,D)
+    #     b = CUDA.zeros(dtype, D,D)
+    #     a * b
+    # end
+    # function foo3()
+    #     a = atype(zeros(dtype, D,D))
+    #     b = atype(zeros(dtype, D,D))
+    #     a * b
+    # end
+    # @btime CUDA.@sync $foo1()
+    # @btime CUDA.@sync $foo2()
+    # @btime CUDA.@sync $foo3()
+
+    a = CUDA.zeros(dtype, 3,3)
+    a[1:2,1:2] = rand(2,2)
+    @show typeof(a)
+end
+
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
-    d = 4
+    d = 8
     
-    for χ in [50]
+    for χ in [64]
         println("d = $(d) χ = $(χ)")
         FL = randinitial(Val(symmetry), atype, dtype, χ, d^2, χ; dir = [-1,1,1])
         M = randinitial(Val(symmetry), atype, dtype, d^2, d^2, d^2, d^2; dir = [-1,1,1,-1])
@@ -27,10 +71,6 @@ CUDA.allowscalar(false)
         # write(logfile, message)
         # close(logfile)
     end
-
-    # a = atype(rand(dtype,100,100))
-    # b = atype(rand(dtype,100,100))
-    # @btime $a * $b
 end
 
 @testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
@@ -69,7 +109,7 @@ end
     @btime CUDA.@sync rightorth($A)
 end
 
-@testset "leftenv and rightenv with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
+@testset "leftenv and rightenv with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:U1], Ni in [1], Nj in [1]
     Random.seed!(100)
     χ, D = 20, 4
     A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,D,D,χ; dir = [-1, -1, 1, 1]), χ,D^2,χ)[1] for i in 1:Ni, j in 1:Nj]

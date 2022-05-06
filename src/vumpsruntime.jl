@@ -177,7 +177,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
-        out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
+        # out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
         save(out_chkp_file, "env", envsave)
     end
     env
