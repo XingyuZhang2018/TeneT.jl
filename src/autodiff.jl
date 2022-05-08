@@ -90,7 +90,7 @@ function num_grad(f, a::U1Array; δ::Real=1e-5)
             df[i] = num_grad(foo, b[i], δ=δ)
         end
     end
-    return intype(df)
+    return intype(deletezerobulk(df))
 end
 
 # patch since it's currently broken otherwise
@@ -768,7 +768,7 @@ end
         dA = similar(A)
         atype = _arraytype(A.tensor[1])
         for i in 1:length(A.tensor)
-            dA.tensor[i] = atype(Matrix(I,dA.dims[i]...)*dtrA)
+            dA.tensor[i] = atype(Matrix(I,dA.dims[i]...) * dtrA)
         end
         return (dA, )
     end
@@ -777,21 +777,17 @@ end
 
 function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) where {T,N}
     function back(dtrA)
-        dir = getdir(A)
-        dA = zerosinitial(A, size(A)...; dir = dir)
-        s = size(A)
-        for i = 1:s[1], j = 1:s[2]
-            dA[i,j,i,j] = dtrA # getindex is slow here, need to optimize
+        dA = zero(A)
+        for i in 1:length(A.tensor)
+            if A.qn[i][1] == A.qn[i][3] && A.qn[i][2] == A.qn[i][4]
+                d1 = dA.dims[i][1]
+                d2 = dA.dims[i][2]
+                for j = 1:d1, k = 1:d2
+                    dA.tensor[i][j,k,j,k] = dtrA
+                end
+            end
         end
-        # dA = similar(A)
-        # for i in 1:length(A.tensor)
-        #     d1 = dA.dims[i][1]
-        #     d2 = dA.dims[i][2]
-        #     for j = 1:d1, k = 1:d2
-        #         dA.tensor[i][j,k,j,k] = dtrA
-        #     end
-        # end
-        return NoTangent(), dA
+        return NoTangent(), deletezerobulk(dA)
     end
     dtr(A), back
 end

@@ -48,9 +48,11 @@ function ρmatrix(M, T, env, remρ)
     χ = size(ACu[1], 1)
     D = Int(sqrt(size(M[1], 1)))
     if getsymmetry(T) == :U1
-        FLinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [1,-1,1,-1])
-        ACinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [-1,-1,1,1])
-        FRinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [-1,1,-1,1])
+        indqn = getqrange(χ,D,D,χ)
+        indims = u1bulkdims(χ,D,D,χ)
+        FLinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [1,-1,1,-1], indqn, indims)
+        ACinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [-1,-1,1,1], indqn, indims)
+        FRinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [-1,1,-1,1], indqn, indims)
     end
 
     reFLu = reshape([symmetryreshape(FLu[i], χ,D,D,χ; reinfo = FLinfo)[1] for i=1:Ni*Nj], Ni,Nj)

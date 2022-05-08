@@ -69,32 +69,39 @@ function ρmap(ρ,Ai,J)
     return ρ
 end
 
-function initialA(M, D)
+function initialA(M, D; U1info)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     # dir = nothing
     # typeof(M[1]) <: U1Array && (getdir(M[1])[4] == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
     # typeof(M[1]) <: U1Array && (direction == "up" ? (dir = [-1, -1, 1, 1]) : (dir = [1, 1, -1, -1]))
+    indD, indχ, dimsD, dimsχ = U1info
     @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         d = size(M[i,j], 4)
         # A[i,j] = randinitial(M[1,1], D,d,D; dir = [-1, 1, 1]) # ordinary random initial
-        A[i,j] = symmetryreshape(randinitial(M[1,1], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = [-1, -1, 1, 1]), D,d,D)[1] # for double-layer ipeps
+        indqn = [indχ, indD, indD, indχ]
+        indims = [dimsχ, dimsD, dimsD, dimsχ]
+        A[i,j] = symmetryreshape(randinitial(M[1,1], D, Int(sqrt(d)), Int(sqrt(d)), D; 
+        dir = [-1, -1, 1, 1], indqn = indqn, indims = indims
+        ), 
+        D, d, D; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] # for double-layer ipeps
     end
     return A
 end
 
-function cellones(A)
+function cellones(A; U1info)
+    _, indχ, _, dimsχ = U1info
     Ni, Nj = size(A)
-    D = size(A[1,1],1)
+    χ = size(A[1,1],1)
     atype = _arraytype(A[1,1])
     Cell = Array{atype, 2}(undef, Ni, Nj)
     dir = nothing
     atype <: U1Array && (dir = getdir(A[1,1])[[1,3]])
     @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
-        Cell[i,j] = Iinitial(A[1,1], D; dir = dir)
+        Cell[i,j] = Iinitial(A[1,1], χ; dir = dir, indqn = [indχ, indχ], indims = [dimsχ, dimsχ])
     end
     return Cell
 end
@@ -176,7 +183,7 @@ Given an MPS tensor `A`, return a left-canonical MPS tensor `AL`, a gauge transf
 a scalar factor `λ` such that ``λ AL L = L A``, where an initial guess for `L` can be
 provided.
 """
-function leftorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
+function leftorth(A, L = cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     L = getL!(A, L; kwargs...)
     AL, Le, λ = getAL(A, L;kwargs...)
     numiter = 1
@@ -197,7 +204,7 @@ Given an MPS tensor `A`, return a gauge transform R, a right-canonical MPS tenso
 a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for `R` can be
 provided.
 """
-function rightorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
+function rightorth(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     Ar, Lr = map(x->permutedims(x,(3,2,1)), A), map(x->permutedims(x,(2,1)), L)
     AL, L, λ = leftorth(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
     R, AR = map(x->permutedims(x,(2,1)), L), map(x->permutedims(x,(3,2,1)), AL)
@@ -268,23 +275,34 @@ function FRmap(ARi, ARip, Mi, FR, J)
     return FRm
 end
 
-function FLint(AL, M)
+function FLint(AL, M; U1info)
+    indD, indχ, dimsD, dimsχ = U1info
     Ni,Nj = size(AL)
     D, d = size(AL[1],1), size(M[1],1)
     # typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
     dir = nothing
     typeof(AL[1]) <: U1Array && (dir = [1, getdir(M[1])[1], -getdir(M[1])[1], -1])
     # [randinitial(AL[i,j], D,d,D; dir = [1,1,-1]) for i=1:Ni, j=1:Nj]
-    [symmetryreshape(randinitial(AL[i,j], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = dir, q = [0]), D,d,D)[1] for i=1:Ni, j=1:Nj]
+    indqn = [indχ, indD, indD, indχ]
+    indims = [dimsχ, dimsD, dimsD, dimsχ]
+    [symmetryreshape(randinitial(AL[i,j], D, Int(sqrt(d)), Int(sqrt(d)), D; 
+        dir = dir, indqn = indqn, indims = indims
+        ), D, d, D; 
+        reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] for i=1:Ni, j=1:Nj]
 end
 
-function FRint(AR, M)
+function FRint(AR, M; U1info)
+    indD, indχ, dimsD, dimsχ = U1info
     Ni,Nj = size(AR)
     D, d = size(AR[1],3), size(M[1],3)
     dir = nothing
     typeof(AR[1]) <: U1Array && (dir = [-1, getdir(M[1])[3], -getdir(M[1])[3], 1])
     # [randinitial(AR[i,j], D,d,D; dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
-    [symmetryreshape(randinitial(AR[i,j], D,Int(sqrt(d)),Int(sqrt(d)),D; dir = dir, q = [0]), D,d,D)[1] for i=1:Ni, j=1:Nj]
+    indqn = [indχ, indD, indD, indχ]
+    indims = [dimsχ, dimsD, dimsD, dimsχ]
+    [symmetryreshape(randinitial(AR[i,j], D, Int(sqrt(d)), Int(sqrt(d)), D; 
+    dir = dir, indqn = indqn, indims = indims),
+     D, d, D; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] for i=1:Ni, j=1:Nj]
 end
 
 """

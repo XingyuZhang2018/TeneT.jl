@@ -9,25 +9,27 @@ using VUMPS: parity_conserving
 using Zygote
 
 
-@testset "$(Ni)x$(Nj) rand forward with $(symmetry) symmetry $atype array" for Ni = [2], Nj = [2], atype = [CuArray], symmetry in [:U1]
+@testset "$(Ni)x$(Nj) rand forward with $(symmetry) symmetry $atype array" for Ni = [1], Nj = [1], atype = [Array], symmetry in [:U1]
     Random.seed!(100)
     # T = asSymmetryArray(m, Val(symmetry); dir = [-1,-1,1,1,1])
     # T = randinitial(Val(symmetry), atype, ComplexF64, 2,2,4,2,2; dir = [-1,-1,1,1,1])
     d = 2
     D = 2
     χ = 10
-    q = [1]
+    q = [0]
     T = atype(rand(ComplexF64, D,D,d,D,D))
     # T = T + permutedims(conj(T), [4,2,3,1,5])
-    T = asSymmetryArray(T, Val(:U1); dir = [-1,-1,1,1,1], q=q)
-    T = asArray(T)
+    indqn = getqrange(D,D,d,D,D)
+    indims = u1bulkdims(D,D,d,D,D)
+    T = asSymmetryArray(T, Val(symmetry); dir = [-1,-1,1,1,1], indqn = indqn, indims = indims, q = q)
+    T = asArray(T; indqn = indqn, indims = indims)
 
-    T = asSymmetryArray(T, Val(symmetry); dir = [-1,-1,1,1,1], q=q)
+    T = asSymmetryArray(T, Val(symmetry); dir = [-1,-1,1,1,1], indqn = indqn, indims = indims, q = q)
     m = ein"abcde, fgchi -> gbhdiefa"(T, conj(T))
-    remori = asArray(m)
+    remori = asArray(m; indqn = getqrange(D,D,D,D,D,D,D,D), indims = u1bulkdims(D,D,D,D,D,D,D,D))
     mρ = ein"abcde, fgjhi -> gbhdiefajc"(T, conj(T))
-    rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2)
-    remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, d,d)
+    rem, reinfo = symmetryreshape(m, D^2,D^2,D^2,D^2; indqn = getqrange(D,D,D,D,D,D,D,D), indims = u1bulkdims(D,D,D,D,D,D,D,D))
+    remρ, = symmetryreshape(mρ, D^2,D^2,D^2,D^2, d, d; indqn = getqrange(D,D,D,D,D,D,D,D,d,d), indims = u1bulkdims(D,D,D,D,D,D,D,D,d,d))
     β = 1
     M = [β * rem for i in 1:Ni, j in 1:Nj]
     env = obs_env(M; χ = χ, verbose = true, savefile = false, infolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", outfolder = "./example/data/$(Ni)x$(Nj)rand/$symmetry/", maxiter = 10, miniter = 10, updown = false)
