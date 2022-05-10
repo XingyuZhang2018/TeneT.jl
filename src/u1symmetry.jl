@@ -23,7 +23,7 @@ a struct to hold the N-order U1 tensors
 struct U1Array{T, N} <: AbstractSymmetricArray{T,N}
     qn::Vector{Vector{Int}}
     dir::Vector{Int}
-    tensor::Vector{AbstractArray{T}}
+    tensor::Vector{<:AbstractArray{T}}
     size::Tuple{Vararg{Int, N}}
     dims::Vector{Vector{Int}}
     division::Int
@@ -155,7 +155,6 @@ minuseven(A) = (A = Array{Int}(A); A[[i % 2 == 0 for i in 1:length(A)]] .*= -1; 
 
 getq(s::Int...) = map(s -> [sum(bitarray(i - 1, maxq(s) + 1)) for i = 1:s], s)
 getqrange(s::Int...) = (q = getq(s...); [map(q -> sort(unique(q)), q)...])
-getshift(qrange) = map(q -> abs(q[1]), qrange) .+ 1
 
 """
     bkdims = u1bulkdims(size::Int...)
@@ -252,7 +251,7 @@ end
 function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
     mq = maxq(maxs)
-    q = [sum(bitarray(i-1, mq + 1)) for i = 1:maxs]
+    q = [sum(bitarray(i - 1, mq + 1)) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
@@ -286,7 +285,7 @@ function getqn(dir::Vector{Int}, indqn::Vector{Vector{Int}}; q::Vector{Int}=[0])
 end
 
 function deletezerobulk(A::U1Array)
-    nozeroind = norm.(A.tensor) .> 1e-30
+    nozeroind = norm.(A.tensor) .!== 0
     U1Array(A.qn[nozeroind], A.dir, A.tensor[nozeroind], A.size, A.dims[nozeroind], A.division)
 end
 
@@ -444,17 +443,16 @@ function u1bulktimes!(qn, tensor, dims, A, B, p)
     atype = _arraytype(Btensor[1])
     etype = eltype(Btensor[1])
 
-    ind_A = findall(x->sum(x[divA+1:end] .* A.dir[divA+1:end]) == p, Aqn)
-    matrix_j = intersect(map(x->x[divA+1:end], Aqn[ind_A]), map(x->x[1:divB], Bqn))
-    ind_A = findall(x->x[divA+1:end] in matrix_j, Aqn)
-    matrix_i = unique(map(x->x[1:divA], Aqn[ind_A]))
-    ind_B = findall(x->x[1:divB] in matrix_j, Bqn)
-    ind_B == [] && return
-    matrix_k = unique(map(x->x[divB+1:end], Bqn[ind_B]))
+    ind_A = [sum(Aqn[divA+1:end] .* A.dir[divA+1:end]) == p for Aqn in Aqn]
+    matrix_j = intersect!(map(x->x[divA+1:end], Aqn[ind_A]), map(x->x[1:divB], Bqn))
+    ind_A = [Aqn[divA+1:end] in matrix_j for Aqn in Aqn]
+    matrix_i = unique!(map(x->x[1:divA], Aqn[ind_A]))
+    ind_B = [Bqn[1:divB] in matrix_j for Bqn in Bqn]
+    sum(ind_B) == 0 && return
+    matrix_k = unique!(map(x->x[divB+1:end], Bqn[ind_B]))
 
     # @show Aqn Bqn matrix_i matrix_j ind_A ind_B matrix_k
-    index = [findfirst(x->x in [[i; j]], Aqn) for i in matrix_i, j in matrix_j]
-    # @show index
+    index = indexin([[i; j] for i in matrix_i, j in matrix_j], Aqn)
     if nothing in index
         indexcol = no_nothing_col(index)
         indexrow = no_nothing_row(index)
@@ -471,10 +469,10 @@ function u1bulktimes!(qn, tensor, dims, A, B, p)
     # @show size(Amatrix)
     for i in 1:length(matrix_i), j in 1:length(matrix_j)
         # println(sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), ", ", sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), " ", index[i, j])
-        index[i, j] !== nothing && (Amatrix[sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])] .= Atensor[index[i, j]])
+        index[i, j] !== nothing && (Amatrix[sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])] = Atensor[index[i, j]])
     end
 
-    index = [findfirst(x->x in [[j; k]], Bqn) for j in matrix_j, k in matrix_k]
+    index = indexin([[j; k] for j in matrix_j, k in matrix_k], Bqn)
     oribulkkdims = []
     bulkkdims = Vector{Int}()
     indexrow = nothing in index ? no_nothing_row(index) : index[1, :]
@@ -485,11 +483,12 @@ function u1bulktimes!(qn, tensor, dims, A, B, p)
     # @show size(Bmatrix)
     for j in 1:length(matrix_j), k in 1:length(matrix_k)
         # println(sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), ", ", sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k]), " ", index[j, k])
-        index[j, k] !== nothing && (Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] .= Btensor[index[j, k]])
+        index[j, k] !== nothing && (Bmatrix[sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])] = Btensor[index[j, k]])
     end
     
     # @show size(Amatrix), size(Bmatrix)
     C = Amatrix * Bmatrix
+    # C = zeros(etype, sum(bulkidims), sum(bulkkdims))
 
     for i in 1:length(matrix_i), k in 1:length(matrix_k)
         push!(qn, [matrix_i[i]; matrix_k[k]])

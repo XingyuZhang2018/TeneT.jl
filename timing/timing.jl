@@ -5,53 +5,66 @@ using KrylovKit
 using CUDA
 using Test
 using OMEinsum
+using ProfileView
 using Random
+
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
-    indD = [0, 1]
-    indχ = [-1, 0, 1]
-    dimsD = [1, 1]
-    dimsχ = [1, 2, 1]
+    indD = [0, 1, 2]
+    indχ = [-2, -1, 0, 1, 2]
+    dimsD = [1, 2, 1]
+    dimsχ = [1, 4, 6, 4, 1]
     D = sum(dimsD)
     χ = sum(dimsχ)
-    for χ in [χ]
-        println("D = $(D) χ = $(χ)")
-        FL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [-1, -1, 1, 1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
+    # for χ in [χ]
+    #     println("D = $(D) χ = $(χ)")
+        AL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [-1, -1, 1, 1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
         M = symmetryreshape(randinitial(Val(symmetry), atype, dtype, D, D, D, D, D, D, D, D; dir = [1,-1,-1,1,-1, 1, 1,-1], indqn = [indD for _ in 1:8], indims = [dimsD for _ in 1:8]), D^2, D^2, D^2, D^2; reinfo = (nothing, nothing, nothing, [indD for _ in 1:8], [dimsD for _ in 1:8], nothing, nothing))[1]
-        AL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
-        # @show FL.pn M.pn AL.pn
+        FL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
+    #     # @show FL.pn M.pn AL.pn
         # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        # t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
-        # # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
+    #     # t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
+    #     # # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
         @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
-        # message = "$D    $χ    $(round(t,digits=5))\n"
-        # logfile = open("./timing/wang_contraction_$(atype)_$(symmetry)symmetry_d$(D)_.log", "a")
-        # write(logfile, message)
-        # close(logfile)
-    end
-
+    #     # message = "$D    $χ    $(round(t,digits=5))\n"
+    #     # logfile = open("./timing/wang_contraction_$(atype)_$(symmetry)symmetry_d$(D)_.log", "a")
+    #     # write(logfile, message)
+    #     # close(logfile)
+    # end
+    # function profile_test(n)
+    #     for _ = 1:n
+    #         ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+    #     end
+    # end
+    # ProfileView.@profview profile_test(1)
+    # ProfileView.@profview profile_test(10)
     # a = atype(rand(dtype,100,100))
     # b = atype(rand(dtype,100,100))
     # @btime $a * $b
 end
 
-@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none]
+@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none]
     Random.seed!(100)
-    D = 4
-    χ = 50
-    FL = randinitial(Val(symmetry), atype, dtype, χ, D^2, χ)
-    M = randinitial(Val(symmetry), atype, dtype, D^2, D^2, D^2, D^2)
-    AL = randinitial(Val(symmetry), atype, dtype, χ, D^2, χ)
+    indD = [0, 1, 2]
+    indχ = [-2, -1, 0, 1, 2]
+    dimsD = [1, 2, 1]
+    dimsχ = [1, 4, 6, 4, 1]
+    D = sum(dimsD)
+    χ = sum(dimsχ)
+
+    AL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [-1, -1, 1, 1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
+    M = symmetryreshape(randinitial(Val(symmetry), atype, dtype, D, D, D, D, D, D, D, D; dir = [1,-1,-1,1,-1, 1, 1,-1], indqn = [indD for _ in 1:8], indims = [dimsD for _ in 1:8]), D^2, D^2, D^2, D^2; reinfo = (nothing, nothing, nothing, [indD for _ in 1:8], [dimsD for _ in 1:8], nothing, nothing))[1]
+    FL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
     # @time CUDA.@sync λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     @btime CUDA.@sync λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,$AL,$M,conj($AL)), $FL, 1, :LM; ishermitian = false)
 
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     λl, FL = λs[1], FLs[1]
-    dFL = randinitial(Val(symmetry), atype, dtype, χ, D^2, χ)
-    # @time CUDA.@sync ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(AL, FR, M, conj(AL)), dFL, -λl, 1)
-    @btime CUDA.@sync ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"($AL, FR, $M, conj($AL)), $dFL, -$λl, 1)
+    dFL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
+    dFL -= Array(ein"abc,abc ->"(conj(FL), dFL))[] * FL
+    @btime CUDA.@sync ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, $AL, $M, conj($AL)), conj($dFL), -$λl, 1) 
 end
 
 @testset "qr and lq with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
