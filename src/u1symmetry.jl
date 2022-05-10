@@ -473,8 +473,6 @@ function u1bulktimes!(qn, tensor, dims, A, B, p)
     end
 
     index = indexin([[j; k] for j in matrix_j, k in matrix_k], Bqn)
-    oribulkkdims = []
-    bulkkdims = Vector{Int}()
     indexrow = nothing in index ? no_nothing_row(index) : index[1, :]
     oribulkkdims = map(ind -> Bdims[ind][divB+1:end], indexrow)
     bulkkdims = map(ind -> size(Btensor[ind], 2), indexrow)
