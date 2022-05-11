@@ -53,60 +53,62 @@ end
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
-    A = randU1(atype, dtype, [1, 1, -1], [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1], [1, 3, 1]])
-    B = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1,3,1], [1, 1, 1]])
-    Atensor = asArray(A, [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1], [1, 3, 1]])
-    Btensor = asArray(B, [[-1, 0, 1] for _ in 1:2], [[1,3,1], [1, 1, 1]])
+    A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1])
+    B = randU1(atype, dtype, 4,3; dir = [1,-1])
+    Atensor = asArray(A)
+    Btensor = asArray(B)
 
     # binary contraction
-    @test ein"abc,cd -> abd"(Atensor,Btensor) ≈ asArray(ein"abc,cd -> abd"(A,B), [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1],  [1, 1, 1]])
-    @test ein"abc,db -> adc"(Atensor,Btensor) ≈ asArray(ein"abc,db -> adc"(A,B), [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 3, 1],  [1, 3, 1]])
-    @test ein"cba,dc -> abd"(Atensor,Btensor) ≈ asArray(ein"cba,dc -> abd"(A,B), [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1],  [1, 3, 1]])
-    @test ein"abc,cb -> a"(Atensor,Btensor) ≈ asArray(ein"abc,cb -> a"(A,B), [[-1, 0, 1]], [[1, 1, 1]])
-    @test ein"bac,cb -> a"(Atensor,Btensor) ≈ asArray(ein"bac,cb -> a"(A,B), [[-1, 0, 1]], [[1, 1, 1]])
-    @test ein"cba,ab -> c"(Atensor,Btensor) ≈ asArray(ein"cba,ab -> c"(A,B), [[-1, 0, 1]], [[1, 1, 1]]) 
-    a = randU1(atype, dtype, [1,-1,1], [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [2, 3, 2], [1, 3, 1]])
-    b = randU1(atype, dtype, [1,-1,-1], [[-1, 0, 1] for _ in 1:3], [[2, 3, 2], [1,3,1], [1, 1, 1]])
-    atensor = asArray(a, [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [2, 3, 2], [1, 3, 1]])
-    btensor = asArray(b, [[-1, 0, 1] for _ in 1:3], [[2, 3, 2], [1,3,1], [1, 1, 1]])    
-    @test ein"abc,bcd->ad"(atensor, btensor) ≈ asArray(ein"abc,bcd->ad"(a, b), [[-1, 0, 1] for _ in 1:2], [[1, 1, 1], [1, 1, 1]]) 
+    @test ein"abc,cd -> abd"(Atensor,Btensor) ≈ asArray(ein"abc,cd -> abd"(A,B))
+    @test ein"abc,db -> adc"(Atensor,Btensor) ≈ asArray(ein"abc,db -> adc"(A,B))
+    @test ein"cba,dc -> abd"(Atensor,Btensor) ≈ asArray(ein"cba,dc -> abd"(A,B))
+    @test ein"abc,cb -> a"(Atensor,Btensor) ≈ asArray(ein"abc,cb -> a"(A,B))
+    @test ein"bac,cb -> a"(Atensor,Btensor) ≈ asArray(ein"bac,cb -> a"(A,B))
+    @test ein"cba,ab -> c"(Atensor,Btensor) ≈ asArray(ein"cba,ab -> c"(A,B))
+    a = randU1(atype, dtype, 3,7,5; dir = [1,-1,1])
+    b = randU1(atype, dtype, 7,5,3; dir = [1,-1,-1])
+    c = ein"abc,bcd->ad"(a,b)
+    # @show a b c
+    atensor = asArray(a)
+    btensor = asArray(b)
+    ctensor = asArray(c)
+    @test ctensor ≈ ein"abc,bcd->ad"(atensor,btensor)
 
-	# NestedEinsum
-    C = randU1(atype, dtype, [-1,1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 1], [1, 1, 1]])
-    Ctensor = asArray(C, [[-1, 0, 1] for _ in 1:2], [[1,2,1], [1, 1, 1]])
-    @test ein"(abc,cd),ed -> abe"(Atensor, Btensor, Ctensor) ≈ asArray(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A, B), C), [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1], [1, 2, 1]]) ≈ asArray(ein"(abc,cd),ed -> abe"(A, B, C), [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1], [1, 2, 1]])
+    # NestedEinsum
+    C = randU1(atype, dtype, 4,3; dir = [-1,1])
+    Ctensor = asArray(C)
+    @test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ asArray(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ asArray(ein"(abc,cd),ed -> abe"(A,B,C))
 
     # constant
-    D = randU1(atype, dtype, [-1,-1,1], [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1], [1, 3, 1]])
-    Dtensor = asArray(D, [[-1, 0, 1] for _ in 1:3], [[1, 1, 1], [1, 1, 1], [1, 3, 1]])
+    D = randU1(atype, dtype, 3,3,4; dir = [-1,-1,1])
+    Dtensor = asArray(D)
     @test Array(ein"abc,abc ->"(Atensor,Dtensor))[] ≈ Array(ein"abc,abc ->"(A,D))[]
 
     # tr
-    B = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1,2,1], [1,2,1]])
-    Btensor = asArray(B, [[-1, 0, 1] for _ in 1:2], [[1,2,1], [1,2,1]])
+    B = randU1(atype, dtype, 4,4; dir = [1,-1], q=[0])
+    Btensor = asArray(B)
     @test Array(ein"aa ->"(Btensor))[] ≈ Array(ein"aa ->"(B))[] 
-    B = randU1(atype, dtype, [-1,-1,1,1], [[-1, 0, 1] for _ in 1:4], [[1,2,1] for _ in 1:4])
-    Btensor = asArray(B, [[-1, 0, 1] for _ in 1:4], [[1,2,1] for _ in 1:4])
-    @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)
+    B = randU1(atype, dtype, 4,4,4,4; dir = [-1,-1,1,1])
+    Btensor = asArray(B)
+    @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)  
 
     # VUMPS unit
-    χ, d = 5, 3
-    AL = randU1(atype, dtype, [-1, 1, 1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    M = randU1(atype, dtype, [-1, 1, 1, -1], [[-1, 0, 1] for _ in 1:4], [[1, 1, 1] for _ in 1:4])
-    FL = randU1(atype, dtype, [1, 1, -1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    tAL = asArray(AL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    tM = asArray(M, [[-1, 0, 1] for _ in 1:4], [[1, 1, 1] for _ in 1:4])
-    tFL = asArray(FL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
+    d = 4
+    D = 10
+    AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
+    M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
+    FL = randU1(atype, dtype, D,d,D; dir = [1,1,-1])
+    tAL, tM, tFL = map(asArray,[AL, M, FL])
     tFL = ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL))
     FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-    @test tFL ≈ asArray(FL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]]) 
-
+    @test tFL ≈ asArray(FL)
+         
     # autodiff test
-    χ, d = 5, 3
-    FL = randU1(atype, dtype, [1, 1, 1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    S = randU1(atype, dtype, [-1,-1,-1,-1,-1,-1], [[-1, 0, 1] for _ in 1:6], [[1, 3, 1], [1, 1, 1], [1, 3, 1], [1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    FLtensor = asArray(FL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    Stensor = asArray(S, [[-1, 0, 1] for _ in 1:6], [[1, 3, 1], [1, 1, 1], [1, 3, 1], [1, 3, 1], [1, 1, 1], [1, 3, 1]])
+    D,d = 4,3
+    FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
+    S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
+    FLtensor = asArray(FL)
+    Stensor = asArray(S)
     @test ein"(abc,abcdef),def ->"(FL, S, FL)[] ≈ ein"(abc,abcdef),def ->"(FLtensor, Stensor, FLtensor)[]
 end
 

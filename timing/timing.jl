@@ -10,12 +10,12 @@ using Random
 
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array, CuArray], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     indD = [0, 1, 2]
     indχ = [-2, -1, 0, 1, 2]
-    dimsD = [1, 2, 1]
-    dimsχ = [1, 4, 6, 4, 1]
+    dimsD = [1, 3, 4]
+    dimsχ = [10, 20, 40, 20, 10]
     D = sum(dimsD)
     χ = sum(dimsχ)
     # for χ in [χ]
@@ -45,7 +45,7 @@ CUDA.allowscalar(false)
     # @btime $a * $b
 end
 
-@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none]
+@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     indD = [0, 1, 2]
     indχ = [-2, -1, 0, 1, 2]
@@ -62,19 +62,20 @@ end
 
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     λl, FL = λs[1], FLs[1]
-    dFL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
+    dFL = zero(FL)
     dFL -= Array(ein"abc,abc ->"(conj(FL), dFL))[] * FL
     @btime CUDA.@sync ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, $AL, $M, conj($AL)), conj($dFL), -$λl, 1) 
 end
 
-@testset "qr and lq with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
+@testset "qr and lq with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
-    D = 4
-    χ = 50
-    A = randinitial(Val(symmetry), atype, dtype, D^2*χ, χ)
+    indχ = collect(-5:5)
+    dimsχ = [10 for _ in 1:11]
+    χ = sum(dimsχ)
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [-1, 1], indqn = [indχ, indχ], indims = [dimsχ, dimsχ])
+    # qrpos(A)
     @btime CUDA.@sync qrpos($A)
-    B = randinitial(Val(symmetry), atype, dtype, χ, D^2*χ)
-    @btime CUDA.@sync lqpos($B)
+    @btime CUDA.@sync lqpos($A)
 end
 
 @testset "leftorth and rightorth with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:none, :Z2]
