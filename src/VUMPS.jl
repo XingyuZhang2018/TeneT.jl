@@ -1,7 +1,5 @@
 module VUMPS
 
-export randinitial
-
 include("cuda_patch.jl")
 include("environment.jl")
 include("fixedpoint.jl")

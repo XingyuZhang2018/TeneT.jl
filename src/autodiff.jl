@@ -333,7 +333,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::U1Array)
     L, Q = lqpos(A)
     function back((dL, dQ))
         dA = copy(A)
-        @assert Q.qn == Q.qn
+        @assert Q.qn == dQ.qn
         for q in unique(map(x->x[1] * A.dir[1], A.qn))
             bulkbackLQ!(A, dA, L, Q, dL, dQ, q)
         end
@@ -419,7 +419,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -448,7 +448,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -563,7 +563,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dAC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -668,7 +668,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     function back((dλ, dC))
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -700,7 +700,7 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
@@ -729,7 +729,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
@@ -777,7 +777,8 @@ end
 
 function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) where {T,N}
     function back(dtrA)
-        dA = zero(A)
+        atype = _arraytype(A.tensor[1])
+        dA = Array(zero(A))
         for i in 1:length(A.tensor)
             if A.qn[i][1] == A.qn[i][3] && A.qn[i][2] == A.qn[i][4]
                 d1 = dA.dims[i][1]
@@ -787,7 +788,7 @@ function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) whe
                 end
             end
         end
-        return NoTangent(), deletezerobulk(dA)
+        return NoTangent(), atype(deletezerobulk(dA))
     end
     dtr(A), back
 end

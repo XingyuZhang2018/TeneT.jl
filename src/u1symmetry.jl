@@ -37,7 +37,7 @@ size(A::U1Array, a) = size(A)[a]
 getdir(A::U1Array) = A.dir
 conj(A::U1Array) = U1Array(A.qn, -A.dir, map(conj, A.tensor), A.size, A.dims, A.division)
 map(conj, A::U1Array) = conj(A)
-norm(A::U1Array) = norm(A.tensor)
+norm(A::U1Array) = norm(AofA2A(A.tensor)
 
 *(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor * B, A.size, A.dims, A.division)
 *(B::Number, A::U1Array{T,N}) where {T,N} = A * B
@@ -98,22 +98,29 @@ end
 CuArray(A::U1Array) = U1Array(A.qn, A.dir, map(CuArray, A.tensor), A.size, A.dims, A.division)
 Array(A::U1Array) = U1Array(A.qn, A.dir, map(Array, A.tensor), A.size, A.dims, A.division)
 
+AofA2A(AA) = vcat(map(vec, AA)...)
+
 function dot(A::U1Array, B::U1Array) 
+    # @show "dot"
     if A.qn == B.qn 
-        dot(A.tensor, B.tensor)
+        # @show 11111111
+        # sum(map(dot, A.tensor, B.tensor))
+        dot(AofA2A(A.tensor), AofA2A(B.tensor))
     # elseif length(A.qn) > length(B.qn)
     #     # @warn "dot product of U1Array with different quantum numbers"
     #     # setdiff(B.qn, A.qn) !== [] && @show setdiff(B,A)
     #     exchangeind = indexin(B.qn, A.qn)
-    #     dot(A.tensor[exchangeind], B.tensor)
+    #     dot(AofA2A(AofA2A(A.tensor)[exchangeind], AofA2A(B.tensor)
     else
+        # @show 2222222222
         # @warn "dot product of U1Array with different quantum numbers"
-        commonqn = intersect(A.qn, B.qn)
+        # commonqn = intersect(A.qn, B.qn)
         # @show commonqn A.qn B.qn
-        # exchangeind = indexin(A.qn, B.qn)
+        exchangeind = indexin(A.qn, B.qn)
         # @show indexin(commonqn, A.qn) indexin(commonqn, B.qn)
-        commonqn == [] && return 0.0
-        dot(A.tensor[indexin(commonqn, A.qn)], B.tensor[indexin(commonqn, B.qn)])
+        # commonqn == [] && return 0.0
+        # dot(AofA2A(AofA2A(A.tensor)[indexin(commonqn, A.qn)]), AofA2A(AofA2A(B.tensor[indexin(commonqn, B.qn)]))
+        dot(AofA2A(A.tensor), AofA2A(B.tensor[exchangeind]))
     end
 end
 
@@ -224,31 +231,31 @@ function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}} = get
     U1Array(qn, dir, tensor, (D, D), dims, 1)
 end
 
-getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
-function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
-    bits = map(x -> ceil(Int, log2(x)), size(A))
-    qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
-    # sum(qn.*Adir) != 0 && return 0.0
-    ind = findfirst(x->x in [qn], A.qn)
-    ind === nothing && return 0.0
-    qlist = [U1selection(size(A, i)) for i = 1:N]
-    qrange = getqrange(size(A)...)
-    shift = getshift(qrange)
-    position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-    CUDA.@allowscalar A.tensor[ind][position...]
-end
+# getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
+# function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
+#     bits = map(x -> ceil(Int, log2(x)), size(A))
+#     qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
+#     # sum(qn.*Adir) != 0 && return 0.0
+#     ind = findfirst(x->x in [qn], A.qn)
+#     ind === nothing && return 0.0
+#     qlist = [U1selection(size(A, i)) for i = 1:N]
+#     qrange = getqrange(size(A)...)
+#     shift = getshift(qrange)
+#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
+#     CUDA.@allowscalar A.tensor[ind][position...]
+# end
 
-setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
-    bits = map(x -> ceil(Int, log2(x)), size(A))
-    qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
-    ind = findfirst(x->x in [qn], A.qn)
-    qlist = [U1selection(size(A, i)) for i = 1:N]
-    qrange = getqrange(size(A)...)
-    shift = getshift(qrange)
-    position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-    CUDA.@allowscalar A.tensor[ind][position...] = x
-end
+# setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
+# function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
+#     bits = map(x -> ceil(Int, log2(x)), size(A))
+#     qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
+#     ind = findfirst(x->x in [qn], A.qn)
+#     qlist = [U1selection(size(A, i)) for i = 1:N]
+#     qrange = getqrange(size(A)...)
+#     shift = getshift(qrange)
+#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
+#     CUDA.@allowscalar A.tensor[ind][position...] = x
+# end
 
 function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
@@ -350,14 +357,18 @@ function *(A::U1Array{T,NA}, B::U1Array{T,NB}) where {T,NA,NB}
     Adims, Bdims = A.dims, B.dims
     Adiv, Bdiv = A.division, B.division
 
-    Adir = getdir(A)[Adiv+1:end]
-    Bdir = getdir(B)[1:Bdiv]
-    sum(Adir .+ Bdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-Adir), got: $(Bdir)"))
+    timesAdir = getdir(A)[Adiv+1:end]
+    timesBdir = getdir(B)[1:Bdiv]
+    sum(timesAdir .+ timesBdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-timesAdir), got: $(timesBdir)"))
 
     # oridims = [prod(A.size[1:Adiv]), prod(A.size[Adiv+1:end])], [prod(B.size[1:Bdiv]), prod(B.size[Bdiv+1:end])]
-    # @show oridims
+    # @show unique!(map(qn -> sum(qn[Adiv+1:end] .* A.dir[Adiv+1:end]), Aqn))
     for q in unique!(map(qn -> sum(qn[Adiv+1:end] .* A.dir[Adiv+1:end]), Aqn))
         u1bulktimes!(qn, tensor, dims, Aqn, Atensor, Adims, Adiv, A.dir, Bqn, Btensor, Bdims, Bdiv, q)
+        # Aindex, Bindex = findABindex!(qn, Aqn, Adiv, A.dir, Bqn, Bdiv, q)
+        # if Aindex != 0
+        #     u1bulktimes!(tensor, dims, Aindex, Bindex, Atensor, Adims, Adiv, Btensor, Bdims, Bdiv)
+        # end
     end
     # for _ in 1:Threads.nthreads()
     #     push!(qn_para, Vector{Vector{Int}}())
@@ -497,42 +508,59 @@ function u1bulktimes!(qn, tensor, dims, Aqn, Atensor, Adims, Adiv, Adir, Bqn, Bt
     end
 end
 
-function findABindex(qn, Aqn, Adiv, Adir, Bqn, Bdiv, q)
-    ind_A = [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
-    matrix_j = intersect!(map(x->x[Adiv+1:end], Aqn[ind_A]), map(x->x[1:Bdiv], Bqn))
-    ind_A = [Aqn[Adiv+1:end] in matrix_j for Aqn in Aqn]
-    matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
-    ind_B = [Bqn[1:Bdiv] in matrix_j for Bqn in Bqn]
-    sum(ind_B) == 0 && return 0
-    matrix_k = unique!(map(x->x[Bdiv+1:end], Bqn[ind_B]))
+# function findABindex!(qn, Aqn, Adiv, Adir, Bqn, Bdiv, q)
+#     ind_A = [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
+#     matrix_j = intersect!(map(x->x[Adiv+1:end], Aqn[ind_A]), map(x->x[1:Bdiv], Bqn))
+#     ind_A = [Aqn[Adiv+1:end] in matrix_j for Aqn in Aqn]
+#     matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
+#     ind_B = [Bqn[1:Bdiv] in matrix_j for Bqn in Bqn]
+#     sum(ind_B) == 0 && return 0, 0
+#     matrix_k = unique!(map(x->x[Bdiv+1:end], Bqn[ind_B]))
 
-    Aindex = indexin([[i; j] for i in matrix_i, j in matrix_j], Aqn)
-    Bindex = indexin([[j; k] for j in matrix_j, k in matrix_k], Bqn)
-    for i in 1:length(matrix_i), k in 1:length(matrix_k)
-        push!(qn, [matrix_i[i]; matrix_k[k]])
-    end
+#     Aindex = indexin([[i; j] for i in matrix_i, j in matrix_j], Aqn)
+#     Bindex = indexin([[j; k] for j in matrix_j, k in matrix_k], Bqn)
+#     # @show Bindex [[j; k] for j in matrix_j, k in matrix_k] Bqn
+#     for i in 1:length(matrix_i), k in 1:length(matrix_k)
+#         push!(qn, [matrix_i[i]; matrix_k[k]])
+#     end
 
-    return Aindex, Bindex
-end
+#     return Aindex, Bindex
+# end
 
-function u1bulktimes!(Aindex, Bindex, Atensor, Adims, tensor, dims)
-    if nothing in Aindex
-        indexcol = no_nothing_col(Aindex)
-        indexrow = no_nothing_row(Aindex)
-    else
-        indexcol = index[:, 1]
-        indexrow = index[1, :]
-    end
-    oribulkidims = map(ind -> Adims[ind][1:Adiv], indexcol)
-    bulkidims = map(ind -> size(Atensor[ind], 1), indexcol)
-    bulkjdims = map(ind -> size(Atensor[ind], 2), indexrow)
-    indexrow = Bindex[1, :]
+# function u1bulktimes!(tensor, dims, Aindex, Bindex, Atensor, Adims, Adiv, Btensor, Bdims, Bdiv)
+#     if nothing in Aindex
+#         indexcol = no_nothing_col(Aindex)
+#         indexrow = no_nothing_row(Aindex)
+#     else
+#         indexcol = @view Aindex[:, 1]
+#         indexrow = @view Aindex[1, :]
+#     end
 
-    Amatrix = zeros(ComplexF64, sum(bulkidims), sum(bulkjdims))
-    for i in 1:length(matrix_i), j in 1:length(matrix_j)
-        index[i, j] !== nothing && (Amatrix[sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])] = Atensor[index[i, j]])
-    end
-end
+#     oribulkidims = map(ind -> Adims[ind][1:Adiv], indexcol)
+#     bulkidims = map(ind -> size(Atensor[ind], 1), indexcol)
+#     bulkjdims = map(ind -> size(Atensor[ind], 2), indexrow)
+#     indexrow = nothing in Bindex ? no_nothing_row(Bindex) : (@view Bindex[1, :])
+#     oribulkkdims = map(ind -> Bdims[ind][Bdiv+1:end], indexrow)
+#     bulkkdims = map(ind -> size(Btensor[ind], 2), indexrow)
+
+#     Amatrix = [zeros(ComplexF64, bulkidims, sum(bulkjdims)) for  bulkidims in bulkidims]
+#     for i in 1:size(Aindex, 1), j in 1:size(Aindex, 2)
+#         Aindex[i, j] !== nothing && (Amatrix[i][:, sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])] .= Atensor[Aindex[i, j]])
+#     end 
+
+#     Bmatrix = [zeros(ComplexF64, sum(bulkjdims), bulkkdims) for bulkkdims in bulkkdims]
+#     for j in 1:size(Bindex, 1), k in 1:size(Bindex, 2)
+#         # println(sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), ", ", sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k]), " ", index[j, k])
+#         Bindex[j, k] !== nothing && (Bmatrix[k][sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j]), :] .= Btensor[Bindex[j, k]])
+#     end
+
+
+#     for i in 1:size(Aindex, 1), k in 1:size(Bindex, 2)
+#         push!(dims, [oribulkidims[i]; oribulkkdims[k]])
+#         push!(tensor, Amatrix[i] * Bmatrix[k])
+#     end
+#     # end
+# end
 
 # # for OMEinsum contract to get number
 # # vec(A::U1Array) = A

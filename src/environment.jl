@@ -77,7 +77,7 @@ function initialA(M, D; U1info)
     # typeof(M[1]) <: U1Array && (getdir(M[1])[4] == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
     # typeof(M[1]) <: U1Array && (direction == "up" ? (dir = [-1, -1, 1, 1]) : (dir = [1, 1, -1, -1]))
     indD, indχ, dimsD, dimsχ = U1info
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         d = size(M[i,j], 4)
         # A[i,j] = randinitial(M[1,1], D,d,D; dir = [-1, 1, 1]) # ordinary random initial
@@ -99,7 +99,7 @@ function cellones(A; U1info)
     Cell = Array{atype, 2}(undef, Ni, Nj)
     dir = nothing
     atype <: U1Array && (dir = getdir(A[1,1])[[1,3]])
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         Cell[i,j] = Iinitial(A[1,1], χ; dir = dir, indqn = [indχ, indχ], indims = [dimsχ, dimsχ])
     end
@@ -126,7 +126,7 @@ If ρ is not exactly positive definite, cholesky will fail
 """
 function getL!(A,L; kwargs...) 
     Ni,Nj = size(A)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
         @debug "getL eigsolve" λ info sort(abs.(λ))
@@ -152,7 +152,7 @@ function getAL(A,L)
     AL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     Le = Array{atype{ComplexF64, 2}, 2}(undef, Ni, Nj)
     λ = zeros(Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         D, d, = size(A[i,j])
         Q, R = qrpos!(reshape(ein"ab,bcd -> acd"(L[i,j], A[i,j]), D*d, D))
@@ -166,7 +166,7 @@ end
 function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
     L = Array{_arraytype(A[1,1]){ComplexF64, 2}, 2}(undef, Ni, Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λ info sort(abs.(λ))
@@ -322,7 +322,7 @@ leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = leftenv!(ALu, ALd, M, copy(
 function leftenv!(ALu, ALd, M, FL; kwargs...) 
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = i + 1 - Ni * (i==Ni)
         λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=100 , ishermitian = false, kwargs...)
@@ -363,7 +363,7 @@ rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = rightenv!(ARu, ARd, M, cop
 function rightenv!(ARu, ARd, M, FR; kwargs...) 
     Ni,Nj = size(ARu)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = i + 1 - Ni * (i==Ni)
         λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=100 , ishermitian = false, kwargs...)
@@ -458,7 +458,7 @@ ACenv(AC, FL, M, FR; kwargs...) = ACenv!(copy(AC), FL, M, FR; kwargs...)
 function ACenv!(AC, FL, M, FR; kwargs...)
     Ni,Nj = size(AC)
     λAC = zeros(eltype(AC[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
@@ -502,7 +502,7 @@ Cenv(C, FL, FR; kwargs...) = Cenv!(copy(C), FL, FR; kwargs...)
 function Cenv!(C, FL, FR; kwargs...)
     Ni,Nj = size(C)
     λC = zeros(eltype(C[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         jr = j + 1 - (j==Nj) * Nj
         λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=100 ,ishermitian = false, kwargs...)
@@ -609,7 +609,7 @@ function error(AL,C,AR,FL,M,FR)
     Ni,Nj = size(AL)
     AC = ALCtoAC(AL, C)
     err = [0.0 for _ = 1:nthreads()]
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         MAC = ACmap(AC[i,j], FL[:,j], FR[:,j], M[:,j], i)
         MAC -= ein"(apc,dpc),dsb -> asb"(MAC,conj(AR[i,j]),AR[i,j])
@@ -635,7 +635,7 @@ obs_FL(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = obs_FL!(ALu, ALd, M, copy(FL
 function obs_FL!(ALu, ALd, M, FL; kwargs...) 
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = Ni + 1 - i
         λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
@@ -676,7 +676,7 @@ obs_FR(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = obs_FR!(ARu, ARd, M, copy(FR
 function obs_FR!(ARu, ARd, M, FR; kwargs...) 
     Ni,Nj = size(ARu)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = Ni + 1 - i
         λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
@@ -704,7 +704,7 @@ function norm_FLint(AL)
     Ni,Nj = size(AL)
     arraytype = _arraytype(AL[1,1])
     norm_FL = Array{arraytype,2}(undef, Ni, Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         D = size(AL[i,j],1)
         norm_FL[i,j] = randinitial(AL[1,1], D, D; dir = [1,1])
@@ -735,7 +735,7 @@ norm_FL(ALu, ALd, FL_norm = norm_FLint(ALu); kwargs...) = norm_FL!(ALu, ALd, FL_
 function norm_FL!(ALu, ALd, FL_norm; kwargs...)
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL_norm[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λLs, FL_norms, info= eigsolve(X->norm_FLmap(ALu[i,:], ALd[i,:], X, j), FL_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "norm_FL eigsolve" λLs info sort(abs.(λLs))
@@ -760,7 +760,7 @@ function norm_FRint(AR)
     Ni,Nj = size(AR)
     arraytype = _arraytype(AR[1,1])
     norm_FR = Array{arraytype,2}(undef, Ni, Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         D = size(AR[i,j],1)
         norm_FR[i,j] = randinitial(AR[1,1], D, D; dir = [-1,-1])
@@ -791,7 +791,7 @@ norm_FR(ARu, ARd, FR_norm = norm_FRint(ARu); kwargs...) = norm_FR!(ARu, ARd, FR_
 function norm_FR!(ARu, ARd, FR_norm; kwargs...)
     Ni,Nj = size(ARu)
     λL = zeros(eltype(FR_norm[1,1]),Ni,Nj)
-    @threads for k = 1:Ni*Nj
+    for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λLs, FR_norms, info= eigsolve(X->norm_FRmap(ARu[i,:], ARd[i,:], X, j), FR_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "norm_FR! eigsolve" λLs info sort(abs.(λLs))
