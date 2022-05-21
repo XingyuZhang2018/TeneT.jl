@@ -13,41 +13,41 @@ CUDA.allowscalar(false)
 @testset "U1 Tensor with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
 	Random.seed!(100)
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
-    @show getqrange(2,4,2,4) u1bulkdims(2,4,2,4)
-    # u1bulkdims division
-    # @test u1bulkdims(2,4) == ([1,1], [1,2,1])
-    # @test u1bulkdims(5,8) == ([1,3,1], [1,3,3,1])
-    # @test u1bulkdims(3,3,4) == ([1,2], [1,2], [1,2,1])
-    # for a = 5:8, b = 5:8
-    #     @test sum(u1bulkdims(a,b)[1]) == a
-    #     @test sum(u1bulkdims(a,b)[2]) == b
-    # end
+
+    # getbulkdims division
+    @test getbulkdims(2,4) == [[1,1], [1,2,1]]
+    @test getbulkdims(5,8) == [[1,3,1], [1,3,3,1]]
+    @test getbulkdims(3,3,4) == [[1,2], [1,2], [1,2,1]]
+    for a = 5:8, b = 5:8
+        @test sum(getbulkdims(a,b)[1]) == a
+        @test sum(getbulkdims(a,b)[2]) == b
+    end
 
     # # initial 
-    # dir = [-1, 1, 1]
-    # indqn = [[-1, 0, 1] for _ in 1:3]
-    # indims = [[1,2,1], [1,2,1], [1,3,1]]
-    # randinial = randU1(atype, dtype, dir, indqn, indims)
-    # zeroinial = zerosU1(atype, dtype, dir, indqn, indims)
-    # Iinial = IU1(atype, dtype, [-1,1], [[-1, 0, 1] for _ in 1:2], [[1, 1, 1] for _ in 1:2])
-    # @test size(randinial) == (4,4,5)
-    # @test size(zeroinial) == (4,4,5)
-    # @test size(Iinial) == (3,3)
+    dir = [-1, 1, 1]
+    indqn = [[-1, 0, 1] for _ in 1:3]
+    indims = [[1,2,1], [1,2,1], [1,3,1]]
+    randinial = randU1(atype, dtype, 4, 4, 5; dir = dir, indqn = indqn, indims = indims)
+    @test randinial isa U1Array
+    zeroinial = zerosU1(atype, dtype, 4, 4, 5; dir = dir, indqn = indqn, indims = indims)
+    Iinial = IU1(atype, dtype, 3; dir = [-1,1], indqn = [[-1, 0, 1] for _ in 1:2], indims = [[1, 2, 1] for _ in 1:2])
+    @test size(randinial) == (4,4,5)
+    @test size(zeroinial) == (4,4,5)
+    @test size(Iinial) == (3,3)
 
-    # # asU1Array and asArray
-	# A = randU1(atype, dtype, dir, indqn, indims)
-    # @test A isa U1Array
-	# Atensor = asArray(A, indqn = indqn, indims = indims)
-    # AA = asU1Array(Atensor, dir, indqn = indqn, indims = indims)
-    # AAtensor = asArray(AA, indqn = indqn, indims = indims)
-    # @test A ≈ AA
-    # @test Atensor ≈ AAtensor
+    # asU1Array and asArray
+	A = randU1(atype, dtype, 4, 4, 5; dir = dir)
+	Atensor = asArray(A)
+    AA = asU1Array(Atensor; dir = dir)
+    AAtensor = asArray(AA)
+    @test A ≈ AA
+    @test Atensor ≈ AAtensor
 
-	# # permutedims
-	# @test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]), indqn[[3,2,1]], indims[[3,2,1]])
+	# permutedims
+	@test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]))
 
-	# # # reshape
-	# @test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5), indqn, indims),(16,5))
+	# reshape
+	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
 
@@ -226,25 +226,26 @@ end
 
 @testset "general flatten reshape" begin
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-    D, χ = 4, 10
+    D, χ = 4, 2
     # a = randinitial(Val(:U1), Array, ComplexF64, D,D,D,D,D,D,D,D; dir = [1,-1,-1,1,-1,1,1,-1])
     indqn = [[-1, 0, 1] for _ in 1:5]
     indims = [[1, 2, 1] for _ in 1:5]
     a = randU1(Array, ComplexF64, D, D, 4, D, D; dir = [-1,-1,1,1,1], indqn = indqn, indims = indims)
     a = ein"abcde, fgchi -> gbhdiefa"(a, conj(a))
 
+    # @show size.(a.tensor)[[1,2,3]] a.dims[[1,2,3]]
     indqn = [[-1, 0, 1] for _ in 1:8]
     indims = [[1, 2, 1] for _ in 1:8]
     rea, reinfo = U1reshape(a, D^2,D^2,D^2,D^2; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))
     rerea = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo)[1]
-    @test rerea ≈ a
+    # @test rerea ≈ a
 
-    # (χ,D,D,χ) -> (χ,D^2,χ)
+    # # (χ,D,D,χ) -> (χ,D^2,χ)
     D, χ = 2, 5
     indqn = [[-2, -1, 0, 1, 2], [0, 1], [0, 1], [-2, -1, 0, 1, 2]]
     indims = [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1, 1, 1, 1]]
     a = randU1(Array, ComplexF64, χ,D,D,χ; dir = [-1,1,-1,1], indqn = indqn, indims = indims)
     rea, reinfo  = U1reshape(a, χ,D^2,χ; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))
     rerea = U1reshape(rea, χ,D,D,χ; reinfo = reinfo)[1]
-    @test rerea ≈ a
+    # @test rerea ≈ a
 end

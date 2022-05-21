@@ -13,12 +13,12 @@ using CUDA:i32
 LinearAlgebra.BLAS.set_num_threads(8)
 CUDA.allowscalar(false)
 
-@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+@testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     indD = [0, 1, 2]
     indχ = [-2, -1, 0, 1, 2]
-    dimsD = [1, 2, 1]
-    dimsχ = [1, 4, 6, 4, 1]    
+    dimsD = [1, 3, 4]
+    dimsχ = [10, 20, 40, 20, 10]
     D = sum(dimsD)
     χ = sum(dimsχ)
     # for χ in [χ]
@@ -28,14 +28,14 @@ CUDA.allowscalar(false)
         FL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
 
         # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        FLm = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        @show FLm.qn sort(FLm.qn)
+        # FLm = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+        # @show FLm.qn sort(FLm.qn)
 #         FLm2 = ein"((adf,abc),dgeb),fgh -> ceh"(FLm,AL,M,conj(AL))
-#         @show indexin(FLm.qn, FL.qn) indexin(FLm2.qn, FL.qn) indexin(FLm2.qn, FLm.qn)
+        # @show indexin(FLm.qn, FL.qn) indexin(FLm2.qn, FL.qn) indexin(FLm2.qn, FLm.qn)
 # # 
     #     # t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
     #     # # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
-        # @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
+        @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
     #     # message = "$D    $χ    $(round(t,digits=5))\n"
     #     # logfile = open("./timing/wang_contraction_$(atype)_$(symmetry)symmetry_d$(D)_.log", "a")
     #     # write(logfile, message)
