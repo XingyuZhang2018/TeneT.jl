@@ -92,7 +92,7 @@ end
     Btensor = asArray(B)
     @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)  
 
-    # VUMPS unit
+    # # VUMPS unit
     d = 4
     D = 10
     AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
@@ -103,7 +103,7 @@ end
     FL = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     @test tFL ≈ asArray(FL)
          
-    # autodiff test
+    # # autodiff test
     D,d = 4,3
     FL = randU1(atype, dtype, D, d, D; dir = [1,1,1])
     S = randU1(atype, dtype, D, d, D, D, d, D; dir = [-1,-1,-1,-1,-1,-1])
@@ -114,64 +114,64 @@ end
 
 @testset "inplace function with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100) 
+    d = 2
     χ = 5
 
     # rmul!
-    A = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1,-1], q=[0])
     Acopy = copy(A)
     @test A*2.0 == rmul!(A, 2.0)
     @test A.tensor != Acopy.tensor
 
     # lmul!
-    A = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
-    B = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
+    B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
     Bcopy = copy(B)
     @test A*B == lmul!(A, B) 
     @test B.tensor != Bcopy.tensor
 
     # mul!
-    A = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
     Y = similar(A)
     Ycopy = copy(Y)
     @test A*2.0 == mul!(Y, A, 2.0)
     @test Y.tensor != Ycopy.tensor
 
     # axpy!
-    A = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
-    B = randU1(atype, dtype, [1, -1], [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
+    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1, -1])
+    B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1, -1])
     Bcopy = copy(B)
-    At = asArray(A, [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
-    Bt = asArray(B, [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
+    At = asArray(A)
+    Bt = asArray(B)
     Bcopyt = asArray(Bcopy)
     @test A*2.0 + B == axpy!(2.0, A, B) == B
     @test B.tensor != Bcopy.tensor
-    @test Bt + 2.0*At == axpy!(2.0, At, Bt) == asArray(axpy!(2.0, A, Bcopy), [[-1, 0, 1] for _ in 1:2], [[1, 2, 2] for _ in 1:2])
+    @test Bt + 2.0*At == axpy!(2.0, At, Bt) == asArray(axpy!(2.0, A, Bcopy))
 end
 
 @testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     χ, d = 5, 3
-    AL = randU1(atype, dtype, [-1, 1, 1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    M = randU1(atype, dtype, [-1, 1, 1, -1], [[-1, 0, 1] for _ in 1:4], [[1, 1, 1] for _ in 1:4])
-    FL = randU1(atype, dtype, [1, 1, -1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-
-    tAL = asArray(AL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
-    tM = asArray(M, [[-1, 0, 1] for _ in 1:4], [[1, 1, 1] for _ in 1:4])
-    tFL = asArray(FL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
+    AL = randU1(atype, dtype, χ,d,χ; dir = [-1,1,1])
+    M = randU1(atype, dtype, d,d,d,d; dir = [-1,1,1,-1])
+    FL = randU1(atype, dtype, χ,d,χ; dir = [1,1,-1])
+    tAL = asArray(AL)
+    tM = asArray(M)
+    tFL = asArray(FL)
 
     λs, FLs, info = eigsolve(FL -> ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
     tλs, tFLs, info = eigsolve(tFL -> ein"((adf,abc),dgeb),fgh -> ceh"(tFL,tAL,tM,conj(tAL)), tFL, 1, :LM; ishermitian = false)
     @test λs[1] ≈ tλs[1]
-    @test asArray(FLs[1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]]) ≈ tFLs[1] 
+    @test asArray(FLs[1]) ≈ tFLs[1] 
 
     λl,FL = λs[1], FLs[1]
-    dFL = randU1(atype, dtype, [1, 1, -1], [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
+    dFL = randU1(atype, dtype, χ,d,χ; dir = [1,1,-1])
     dFL -= Array(ein"abc,abc ->"(conj(FL), dFL))[] * FL
     ξl, info = linsolve(FR -> ein"((ceh,abc),dgeb),fgh -> adf"(FR, AL, M, conj(AL)), conj(dFL), -λl, 1) 
     tλl, tFL = tλs[1], tFLs[1]
-    tdFL = asArray(dFL, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]])
+    tdFL = asArray(dFL)
     tξl, info = linsolve(tFR -> ein"((ceh,abc),dgeb),fgh -> adf"(tFR, tAL, tM, conj(tAL)), conj(tdFL), -tλl, 1)
-    @test asArray(ξl, [[-1, 0, 1] for _ in 1:3], [[1, 3, 1], [1, 1, 1], [1, 3, 1]]) ≈ tξl
+    @test asArray(ξl) ≈ tξl
 end
 
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
