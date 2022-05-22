@@ -74,7 +74,7 @@ end
     ctensor = asArray(c)
     @test ctensor ≈ ein"abc,bcd->ad"(atensor,btensor)
 
-    # NestedEinsum
+    # # NestedEinsum
     C = randU1(atype, dtype, 4,3; dir = [-1,1])
     Ctensor = asArray(C)
     @test ein"(abc,cd),ed -> abe"(Atensor,Btensor,Ctensor) ≈ asArray(ein"abd,ed -> abe"(ein"abc,cd -> abd"(A,B),C)) ≈ asArray(ein"(abc,cd),ed -> abe"(A,B,C))

@@ -16,8 +16,9 @@ _arraytype(::Z2Array{T}) where {T} = Z2Array
 _arraytype(::U1Array{T}) where {T} = U1Array
 _arraytype(::Adjoint{T, Matrix{T}}) where {T} = Matrix
 _arraytype(::Adjoint{T, CuArray{T, 2, B}}) where {T,B} = CuArray
+_arraytype(::Transpose{T, Vector{T}}) where {T} = Vector
 _arraytype(::Transpose{T, Matrix{T}}) where {T} = Matrix
-_arraytype(::Transpose{T, CuArray{T, 2, B}}) where {T,B} = CuArray
+_arraytype(::Transpose{T, CuArray{T, N, B}}) where {T,N,B} = CuArray
 
 getsymmetry(::AbstractArray) = :none
 getsymmetry(::Z2Array) = :Z2

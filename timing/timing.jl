@@ -46,8 +46,8 @@ CUDA.allowscalar(false)
     #         CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
     #     end
     # end
-    # ProfileView.@profview profile_test(1)
-    # ProfileView.@profview profile_test(10)
+    # # ProfileView.@profview profile_test(1)
+    # ProfileView.@profview profile_test(20)
     # a = atype(rand(dtype,100,100))
     # b = atype(rand(dtype,100,100))
     # @btime $a * $b
@@ -56,13 +56,15 @@ end
 @testset "dot with $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64]
     Random.seed!(100)
 
-    N = 100
-    A = [atype(rand(dtype, N, N)) for _ in 1:20]
-    B = [atype(rand(dtype, N, N)) for _ in 1:20]
+    # N = 100
+    # A = [atype(rand(dtype, N, N)) for _ in 1:20]
+    # B = [atype(rand(dtype, N, N)) for _ in 1:20]
 
-    @btime CUDA.@sync dot(vcat(vec.($A)...), vcat(vec.($B)...))
-    @btime CUDA.@sync dot(vcat(vec.($A)...), vcat(vec.($B)...))
-
+    # @btime CUDA.@sync dot(vcat(vec.($A)...), vcat(vec.($B)...))
+    # @btime CUDA.@sync dot(vcat(vec.($A)...), vcat(vec.($B)...))
+    A = rand(100)
+    foo(A) = [reshape(A[10*(i-1)+1:10*i], 2, 5) for i in 1:10]
+    @btime $foo($A)
 end
 
 
