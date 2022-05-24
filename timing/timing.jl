@@ -6,19 +6,18 @@ using CUDA
 using LinearAlgebra: dot
 using Test
 using OMEinsum
-using ProfileView
+# using ProfileView
 using Random
 using LinearAlgebra
-using CUDA:i32
-LinearAlgebra.BLAS.set_num_threads(8)
+# LinearAlgebra.BLAS.set_num_threads(8)
 CUDA.allowscalar(false)
 
 @testset "OMEinsum with $symmetry $atype{$dtype} " for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     indD = [0, 1, 2]
     indχ = [-2, -1, 0, 1, 2]
-    dimsD = [1, 3, 4]
-    dimsχ = [10, 20, 40, 20, 10]
+    dimsD = [1, 2, 1]
+    dimsχ = [1, 4, 6, 4, 1]
     
     D = sum(dimsD)
     χ = sum(dimsχ)
@@ -29,7 +28,7 @@ CUDA.allowscalar(false)
         FL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
 
         # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        # @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
+        @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
     #     # t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
         
     #     # message = "$D    $χ    $(round(t,digits=5))\n"
@@ -37,16 +36,13 @@ CUDA.allowscalar(false)
     #     # write(logfile, message)
     #     # close(logfile)
     # end
-    function profile_test(n)
-        for _ = 1:n
-            CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        end
-    end
-    ProfileView.@profview profile_test(1)
-    ProfileView.@profview profile_test(20)
-    # a = atype(rand(dtype,100,100))
-    # b = atype(rand(dtype,100,100))
-    # @btime $a * $b
+    # function profile_test(n)
+    #     for _ = 1:n
+    #         CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+    #     end
+    # end
+    # ProfileView.@profview profile_test(1)
+    # ProfileView.@profview profile_test(20)
 end
 
 @testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]

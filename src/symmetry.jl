@@ -32,7 +32,7 @@ randinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = randZ2(atype, dtype, a..
 randinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = randU1(atype, dtype, a...; kwarg...)
 
 function randinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
-    atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
+    atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor)
     randinitial(Val(getsymmetry(A)), atype, T, a...; kwarg...)
 end
 
@@ -41,7 +41,7 @@ Iinitial(::Val{:Z2}, atype, dtype, D; kwarg...) = IZ2(atype, dtype, D)
 Iinitial(::Val{:U1}, atype, dtype, D; kwarg...) = IU1(atype, dtype, D; kwarg...)
 
 function Iinitial(A::AbstractArray{T, N}, D; kwarg...) where {T, N}
-    atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
+    atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor)
     Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D; kwarg...)
 end
 
@@ -50,7 +50,7 @@ zerosinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = zerosZ2(atype, dtype, a
 zerosinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = zerosU1(atype, dtype, a...; kwarg...)
 
 function zerosinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
-    atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor[1])
+    atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor)
     zerosinitial(Val(getsymmetry(A)), atype, T, a...; kwarg...)
 end
 

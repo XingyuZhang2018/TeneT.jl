@@ -29,7 +29,7 @@ end
 @testset "leftorth and rightorth with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
     Random.seed!(100)
     χ, D = 4, 4
-    # A = [randinitial(Val(symmetry), atype, dtype, D, d, D; dir = [-1,1,1]) for i in 1:Ni, j in 1:Nj]
+    # A = [randinitial(Val(symmetry), atype, dtype, χ, D, χ; dir = [-1,1,1]) for i in 1:Ni, j in 1:Nj]
     A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]
     AL, L, λ = leftorth(A)
     R, AR, λ = rightorth(A)
@@ -56,7 +56,7 @@ end
     Random.seed!(100)
     χ, D = 4, 4
     A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]
-    T = [randinitial(Val(symmetry), atype, dtype, Int(sqrt(D)),Int(sqrt(D)),4,Int(sqrt(D)),Int(sqrt(D)); dir = [-1,-1,1,1,1], q=[0,1,2]) for i in 1:Ni, j in 1:Nj]
+    T = [randinitial(Val(symmetry), atype, dtype, Int(sqrt(D)),Int(sqrt(D)),4,Int(sqrt(D)),Int(sqrt(D)); dir = [-1,-1,1,1,1], q=[0]) for i in 1:Ni, j in 1:Nj]
     # M = [randinitial(Val(symmetry), atype, dtype, d, d, d, d; dir = [-1,1,1,-1]) for i in 1:Ni, j in 1:Nj]
     TT = [ein"abcde, fgchi -> gbhdiefa"(T[i,j], conj(T[i,j])) for i in 1:Ni, j in 1:Nj]
     M = [symmetryreshape(TT[i,j], D,D,D,D)[1] for i in 1:Ni, j in 1:Nj]

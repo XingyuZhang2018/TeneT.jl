@@ -49,7 +49,7 @@ function ρmatrix(M, T, env, remρ)
     D = Int(sqrt(size(M[1], 1)))
     if getsymmetry(T) == :U1
         indqn = getqrange(χ,D,D,χ)
-        indims = u1bulkdims(χ,D,D,χ)
+        indims = getblockdims(χ,D,D,χ)
         FLinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [1,-1,1,-1], indqn, indims)
         ACinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [-1,-1,1,1], indqn, indims)
         FRinfo = U1reshapeinfo((χ,D^2,χ),(χ,D,D,χ), [-1,1,-1,1], indqn, indims)

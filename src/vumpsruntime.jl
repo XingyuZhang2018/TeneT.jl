@@ -94,7 +94,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
         AL, AR, FL, FR = map(Array{atype{ComplexF64, 3}, 2}, [env.AL, env.AR, env.FL, env.FR])
         C = Array{atype{ComplexF64, 2}, 2}(env.C)
         if !(atype <: Union{CuArray, Array})
-            intype = _arraytype(M[1,1].tensor[1])
+            intype = _arraytype(M[1,1].tensor)
             AL, C, AR, FL, FR = map(x->map(intype, x), [AL, C, AR, FL, FR])
         end
     end
@@ -208,7 +208,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Zygote.@ignore begin
             FL, FR = Array{atype{ComplexF64, 3}, 2}(FL), Array{atype{ComplexF64, 3}, 2}(FR)
             if !(atype <: Union{CuArray, Array})
-                intype = _arraytype(M[1,1].tensor[1])
+                intype = _arraytype(M[1,1].tensor)
                 FL, FR = map(x->map(intype, x), [FL, FR])
             end
         end

@@ -88,23 +88,23 @@ end
 
 @testset "last tr with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
-    A = randinitial(Val(symmetry), atype, dtype, 4,4; dir = [-1,1])
-	Atensor = asArray(A)
-    foo1(x) = norm(tr(x))
-    @test asArray(Zygote.gradient(foo1, A)[1]) ≈ asArray(num_grad(foo1, A)) ≈ Zygote.gradient(foo1, Atensor)[1] ≈ num_grad(foo1, Atensor)
+    # A = randinitial(Val(symmetry), atype, dtype, 4,4; dir = [-1,1])
+	# Atensor = asArray(A)
+    # foo1(x) = norm(tr(x))
+    # @test asArray(Zygote.gradient(foo1, A)[1]) ≈ asArray(num_grad(foo1, A)) ≈ Zygote.gradient(foo1, Atensor)[1] ≈ num_grad(foo1, Atensor)
 
     A = randinitial(Val(symmetry), atype, dtype, 4,4,4,4; dir = [-1,-1,1,1])
     Atensor = asArray(A)
     foo2(x) = norm(ein"abcd,abcd -> "(x,conj(x))[])
     @test asArray(Zygote.gradient(foo2, A)[1]) ≈ asArray(num_grad(foo2, A)) ≈ Zygote.gradient(foo2, Atensor)[1] ≈ num_grad(foo2, Atensor)
 
-    A = randinitial(Val(symmetry), atype, dtype, 4,4,4,4; dir = [-1,-1,1,1])
-    Atensor = asArray(A)
-    foo3(x) = norm(ein"abab -> "(x)[])
-    foo4(x) = norm(dtr(x))
-    @test foo3(A) ≈ foo4(A)
-    @test Zygote.gradient(foo3, A)[1] ≈ asArray(num_grad(foo3, A)) ≈ Zygote.gradient(foo3, Atensor)[1] ≈ num_grad(foo3, Atensor)
-    @test Zygote.gradient(foo4, A)[1] ≈ num_grad(foo3, A) ≈ num_grad(foo4, A)
+    # A = randinitial(Val(symmetry), atype, dtype, 4,4,4,4; dir = [-1,-1,1,1])
+    # Atensor = asArray(A)
+    # foo3(x) = norm(ein"abab -> "(x)[])
+    # foo4(x) = norm(dtr(x))
+    # @test foo3(A) ≈ foo4(A)
+    # @test Zygote.gradient(foo3, A)[1] ≈ asArray(num_grad(foo3, A)) ≈ Zygote.gradient(foo3, Atensor)[1] ≈ num_grad(foo3, Atensor)
+    # @test Zygote.gradient(foo4, A)[1] ≈ num_grad(foo3, A) ≈ num_grad(foo4, A)
 end
 
 @testset "QR factorization with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
@@ -115,7 +115,6 @@ end
         Q, R = qrpos(M)
         return norm(Q) + norm(R)
     end
-
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M)  atol = 1e-8
 end
 

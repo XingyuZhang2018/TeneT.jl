@@ -69,37 +69,47 @@ function ρmap(ρ,Ai,J)
     return ρ
 end
 
-function initialA(M, D; U1info)
+function initialA(M, χ; U1info = nothing)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     # dir = nothing
     # typeof(M[1]) <: U1Array && (getdir(M[1])[4] == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
     # typeof(M[1]) <: U1Array && (direction == "up" ? (dir = [-1, -1, 1, 1]) : (dir = [1, 1, -1, -1]))
-    indD, indχ, dimsD, dimsχ = U1info
-    for k = 1:Ni*Nj
+    D = size(M[1], 4)
+    if U1info === nothing
+        indD, indχ = getqrange(Int(sqrt(D)), χ)
+        dimsD, dimsχ = getblockdims(Int(sqrt(D)), χ)
+    else
+        indD, indχ, dimsD, dimsχ = U1info
+    end
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
-        d = size(M[i,j], 4)
-        # A[i,j] = randinitial(M[1,1], D,d,D; dir = [-1, 1, 1]) # ordinary random initial
+        D = size(M[i,j], 4)
+        # A[i,j] = randinitial(M[1,1], D,D,D; dir = [-1, 1, 1]) # ordinary random initial
         indqn = [indχ, indD, indD, indχ]
         indims = [dimsχ, dimsD, dimsD, dimsχ]
-        A[i,j] = symmetryreshape(randinitial(M[1,1], D, Int(sqrt(d)), Int(sqrt(d)), D; 
+        A[i,j] = symmetryreshape(randinitial(M[1,1], χ, Int(sqrt(D)), Int(sqrt(D)), χ; 
         dir = [-1, -1, 1, 1], indqn = indqn, indims = indims
         ), 
-        D, d, D; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] # for double-layer ipeps
+        χ, D, χ; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] # for double-layer ipeps
     end
     return A
 end
 
-function cellones(A; U1info)
-    _, indχ, _, dimsχ = U1info
+function cellones(A; U1info = nothing)
     Ni, Nj = size(A)
     χ = size(A[1,1],1)
+    if U1info === nothing
+        indχ, dimsχ = getqrange(χ)[1], getblockdims(χ)[1]
+    else
+        _, indχ, _, dimsχ = U1info
+    end
     atype = _arraytype(A[1,1])
     Cell = Array{atype, 2}(undef, Ni, Nj)
     dir = nothing
     atype <: U1Array && (dir = getdir(A[1,1])[[1,3]])
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         Cell[i,j] = Iinitial(A[1,1], χ; dir = dir, indqn = [indχ, indχ], indims = [dimsχ, dimsχ])
     end
@@ -126,7 +136,7 @@ If ρ is not exactly positive definite, cholesky will fail
 """
 function getL!(A,L; kwargs...) 
     Ni,Nj = size(A)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
         @debug "getL eigsolve" λ info sort(abs.(λ))
@@ -152,7 +162,7 @@ function getAL(A,L)
     AL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
     Le = Array{atype{ComplexF64, 2}, 2}(undef, Ni, Nj)
     λ = zeros(Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         D, d, = size(A[i,j])
         Q, R = qrpos!(reshape(ein"ab,bcd -> acd"(L[i,j], A[i,j]), D*d, D))
@@ -166,7 +176,7 @@ end
 function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
     L = Array{_arraytype(A[1,1]){ComplexF64, 2}, 2}(undef, Ni, Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λ info sort(abs.(λ))
@@ -275,34 +285,44 @@ function FRmap(ARi, ARip, Mi, FR, J)
     return FRm
 end
 
-function FLint(AL, M; U1info)
-    indD, indχ, dimsD, dimsχ = U1info
+function FLint(AL, M; U1info = nothing)
     Ni,Nj = size(AL)
-    D, d = size(AL[1],1), size(M[1],1)
+    χ, D = size(AL[1],1), size(M[1],1)
+    if U1info === nothing
+        indD, indχ = getqrange(Int(sqrt(D)), χ)
+        dimsD, dimsχ = getblockdims(Int(sqrt(D)), χ)
+    else
+        indD, indχ, dimsD, dimsχ = U1info
+    end
     # typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
     dir = nothing
     typeof(AL[1]) <: U1Array && (dir = [1, getdir(M[1])[1], -getdir(M[1])[1], -1])
-    # [randinitial(AL[i,j], D,d,D; dir = [1,1,-1]) for i=1:Ni, j=1:Nj]
+    # [randinitial(AL[i,j], χ,D,χ; dir = [1,1,-1]) for i=1:Ni, j=1:Nj]
     indqn = [indχ, indD, indD, indχ]
     indims = [dimsχ, dimsD, dimsD, dimsχ]
-    [symmetryreshape(randinitial(AL[i,j], D, Int(sqrt(d)), Int(sqrt(d)), D; 
+    [symmetryreshape(randinitial(AL[i,j], χ, Int(sqrt(D)), Int(sqrt(D)), χ; 
         dir = dir, indqn = indqn, indims = indims
-        ), D, d, D; 
+        ), χ, D, χ; 
         reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] for i=1:Ni, j=1:Nj]
 end
 
-function FRint(AR, M; U1info)
-    indD, indχ, dimsD, dimsχ = U1info
+function FRint(AR, M; U1info = nothing)
     Ni,Nj = size(AR)
-    D, d = size(AR[1],3), size(M[1],3)
+    χ, D = size(AR[1],3), size(M[1],3)
+    if U1info === nothing
+        indD, indχ = getqrange(Int(sqrt(D)), χ)
+        dimsD, dimsχ = getblockdims(Int(sqrt(D)), χ)
+    else
+        indD, indχ, dimsD, dimsχ = U1info
+    end
     dir = nothing
     typeof(AR[1]) <: U1Array && (dir = [-1, getdir(M[1])[3], -getdir(M[1])[3], 1])
-    # [randinitial(AR[i,j], D,d,D; dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
+    # [randinitial(AR[i,j], χ,D,χ; dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
     indqn = [indχ, indD, indD, indχ]
     indims = [dimsχ, dimsD, dimsD, dimsχ]
-    [symmetryreshape(randinitial(AR[i,j], D, Int(sqrt(d)), Int(sqrt(d)), D; 
+    [symmetryreshape(randinitial(AR[i,j], χ, Int(sqrt(D)), Int(sqrt(D)), χ; 
     dir = dir, indqn = indqn, indims = indims),
-     D, d, D; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] for i=1:Ni, j=1:Nj]
+     χ, D, χ; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] for i=1:Ni, j=1:Nj]
 end
 
 """
@@ -322,10 +342,10 @@ leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = leftenv!(ALu, ALd, M, copy(
 function leftenv!(ALu, ALd, M, FL; kwargs...) 
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = i + 1 - Ni * (i==Ni)
-        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=100 , ishermitian = false, kwargs...)
+        λLs, FL1s, info = eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=100 , ishermitian = false, kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
@@ -363,10 +383,10 @@ rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = rightenv!(ARu, ARd, M, cop
 function rightenv!(ARu, ARd, M, FR; kwargs...) 
     Ni,Nj = size(ARu)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = i + 1 - Ni * (i==Ni)
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=100 , ishermitian = false, kwargs...)
+        λRs, FR1s, info = eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=100 , ishermitian = false, kwargs...)
         @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
         if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
@@ -458,7 +478,7 @@ ACenv(AC, FL, M, FR; kwargs...) = ACenv!(copy(AC), FL, M, FR; kwargs...)
 function ACenv!(AC, FL, M, FR; kwargs...)
     Ni,Nj = size(AC)
     λAC = zeros(eltype(AC[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
@@ -502,7 +522,7 @@ Cenv(C, FL, FR; kwargs...) = Cenv!(copy(C), FL, FR; kwargs...)
 function Cenv!(C, FL, FR; kwargs...)
     Ni,Nj = size(C)
     λC = zeros(eltype(C[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         jr = j + 1 - (j==Nj) * Nj
         λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=100 ,ishermitian = false, kwargs...)
@@ -609,7 +629,7 @@ function error(AL,C,AR,FL,M,FR)
     Ni,Nj = size(AL)
     AC = ALCtoAC(AL, C)
     err = [0.0 for _ = 1:nthreads()]
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         MAC = ACmap(AC[i,j], FL[:,j], FR[:,j], M[:,j], i)
         MAC -= ein"(apc,dpc),dsb -> asb"(MAC,conj(AR[i,j]),AR[i,j])
@@ -635,7 +655,7 @@ obs_FL(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = obs_FL!(ALu, ALd, M, copy(FL
 function obs_FL!(ALu, ALd, M, FL; kwargs...) 
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = Ni + 1 - i
         λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
@@ -676,7 +696,7 @@ obs_FR(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = obs_FR!(ARu, ARd, M, copy(FR
 function obs_FR!(ARu, ARd, M, FR; kwargs...) 
     Ni,Nj = size(ARu)
     λR = zeros(eltype(FR[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         ir = Ni + 1 - i
         λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
@@ -704,7 +724,7 @@ function norm_FLint(AL)
     Ni,Nj = size(AL)
     arraytype = _arraytype(AL[1,1])
     norm_FL = Array{arraytype,2}(undef, Ni, Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         D = size(AL[i,j],1)
         norm_FL[i,j] = randinitial(AL[1,1], D, D; dir = [1,1])
@@ -735,7 +755,7 @@ norm_FL(ALu, ALd, FL_norm = norm_FLint(ALu); kwargs...) = norm_FL!(ALu, ALd, FL_
 function norm_FL!(ALu, ALd, FL_norm; kwargs...)
     Ni,Nj = size(ALu)
     λL = zeros(eltype(FL_norm[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λLs, FL_norms, info= eigsolve(X->norm_FLmap(ALu[i,:], ALd[i,:], X, j), FL_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "norm_FL eigsolve" λLs info sort(abs.(λLs))
@@ -760,7 +780,7 @@ function norm_FRint(AR)
     Ni,Nj = size(AR)
     arraytype = _arraytype(AR[1,1])
     norm_FR = Array{arraytype,2}(undef, Ni, Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         D = size(AR[i,j],1)
         norm_FR[i,j] = randinitial(AR[1,1], D, D; dir = [-1,-1])
@@ -791,7 +811,7 @@ norm_FR(ARu, ARd, FR_norm = norm_FRint(ARu); kwargs...) = norm_FR!(ARu, ARd, FR_
 function norm_FR!(ARu, ARd, FR_norm; kwargs...)
     Ni,Nj = size(ARu)
     λL = zeros(eltype(FR_norm[1,1]),Ni,Nj)
-    for k = 1:Ni*Nj
+    @threads for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
         λLs, FR_norms, info= eigsolve(X->norm_FRmap(ARu[i,:], ARd[i,:], X, j), FR_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "norm_FR! eigsolve" λLs info sort(abs.(λLs))

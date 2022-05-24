@@ -14,13 +14,13 @@ CUDA.allowscalar(false)
 	Random.seed!(100)
 	@test U1Array <: AbstractSymmetricArray <: AbstractArray
 
-    # getbulkdims division
-    @test getbulkdims(2,4) == [[1,1], [1,2,1]]
-    @test getbulkdims(5,8) == [[1,3,1], [1,3,3,1]]
-    @test getbulkdims(3,3,4) == [[1,2], [1,2], [1,2,1]]
+    # getblockdims division
+    @test getblockdims(2,4) == [[1,1], [1,2,1]]
+    @test getblockdims(5,8) == [[1,3,1], [1,3,3,1]]
+    @test getblockdims(3,3,4) == [[1,2], [1,2], [1,2,1]]
     for a = 5:8, b = 5:8
-        @test sum(getbulkdims(a,b)[1]) == a
-        @test sum(getbulkdims(a,b)[2]) == b
+        @test sum(getblockdims(a,b)[1]) == a
+        @test sum(getblockdims(a,b)[2]) == b
     end
 
     # # initial 
@@ -49,7 +49,6 @@ CUDA.allowscalar(false)
 	# reshape
 	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
-
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
@@ -177,46 +176,51 @@ end
 @testset "U1 qr with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     χ, D = 10, 4
-    A = randU1(atype, dtype, [-1, 1, 1], [[-1, 0, 1] for _ in 1:3], [[2, 5, 3], [1, 2, 1], [2, 5, 3]])
-	Atensor = asArray(A, [[-1, 0, 1] for _ in 1:3], [[2, 5, 3], [1, 2, 1], [2, 5, 3]])
+    A = randU1(atype, dtype, χ, D, χ; dir = [-1, 1, 1])
+	Atensor = asArray(A)
 	A = reshape(A, χ * D, χ) 
 	Atensor = reshape(Atensor, χ * D, χ)
 	Q, R = qrpos(A)
+    @test Q.qn == sort(Q.qn) 
+    @test R.qn == sort(R.qn)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor * Rtensor ≈ Atensor
 	@test Q * R ≈ A
 
     @test Qtensor' * Qtensor ≈ I(χ)
     M = ein"cda,cdb -> ab"(reshape(Q, χ, D, χ), conj(reshape(Q, χ, D, χ)))
-    @test asArray(M, [[-1, 0, 1] for _ in 1:2], [[2, 5, 3] for _ in 1:2]) ≈ I(χ)
+    @test asArray(M) ≈ I(χ)
 
-	@test asArray(reshape(Q, χ,D,χ), [[-1, 0, 1] for _ in 1:3], [[2, 5, 3], [1, 2, 1], [2, 5, 3]]) ≈ reshape(Qtensor, χ,D,χ)
-	@test asArray(R, [[-1, 0, 1] for _ in 1:2], [[2, 5, 3], [2, 5, 3]]) ≈ Rtensor
+	@test asArray(reshape(Q, χ,D,χ)) ≈ reshape(Qtensor, χ,D,χ)
+	@test asArray(R) ≈ Rtensor
 end
 
 @testset "U1 lq with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     χ, D = 10, 4
-    A = randU1(atype, dtype, [-1, 1, 1], [[-1, 0, 1] for _ in 1:3], [[2, 5, 3], [1, 2, 1], [2, 5, 3]])
-	Atensor = asArray(A, [[-1, 0, 1] for _ in 1:3], [[2, 5, 3], [1, 2, 1], [2, 5, 3]])
+    A = randU1(atype, dtype, χ, D, χ; dir = [-1, 1, 1])
+	Atensor = asArray(A)
 	A = reshape(A, χ, χ*D)
 	Atensor = reshape(Atensor, χ, χ*D)
 	L, Q = lqpos(A)
+    @test Q.qn == sort(Q.qn) 
+    @test L.qn == sort(L.qn)
     Ltensor, Qtensor = lqpos(Atensor)
     @test Ltensor*Qtensor ≈ Atensor
 	@test L*Q ≈ A
 
     @test Qtensor*Qtensor' ≈ I(χ)
     M = ein"acd,bcd -> ab"(reshape(Q, χ,D,χ),conj(reshape(Q, χ,D,χ)))
-    @test asArray(M, [[-1, 0, 1] for _ in 1:2], [[2, 5, 3] for _ in 1:2]) ≈ I(χ)
+    @test asArray(M) ≈ I(χ)
 
-	@test asArray(L, [[-1, 0, 1] for _ in 1:2], [[2, 5, 3], [2, 5, 3]]) ≈ Ltensor
-	@test asArray(reshape(Q,  χ,D,χ), [[-1, 0, 1] for _ in 1:3], [[2, 5, 3], [1, 2, 1], [2, 5, 3]]) ≈ reshape(Qtensor,  χ,D,χ)
+	@test asArray(L) ≈ Ltensor
+	@test asArray(reshape(Q,  χ,D,χ)) ≈ reshape(Qtensor,  χ,D,χ)
 end
 
 @testset "U1 svd with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, [-1, 1], [[-1, 0, 1], [-1, 0, 1]], [[2, 5, 3], [2, 5, 3]])
+    χ = 10
+    A = randU1(atype, dtype, χ, χ; dir = [-1, 1])
 	Atensor = asArray(A)
 	U, S, V = sysvd!(copy(A))
     Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
@@ -225,6 +229,7 @@ end
 end
 
 @testset "general flatten reshape" begin
+    using VUMPS: blockdiv
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
     D, χ = 4, 2
     # a = randinitial(Val(:U1), Array, ComplexF64, D,D,D,D,D,D,D,D; dir = [1,-1,-1,1,-1,1,1,-1])
@@ -238,7 +243,7 @@ end
     indims = [[1, 2, 1] for _ in 1:8]
     rea, reinfo = U1reshape(a, D^2,D^2,D^2,D^2; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))
     rerea = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo)[1]
-    # @test rerea ≈ a
+    @test rerea ≈ a
 
     # # (χ,D,D,χ) -> (χ,D^2,χ)
     D, χ = 2, 5
@@ -247,5 +252,5 @@ end
     a = randU1(Array, ComplexF64, χ,D,D,χ; dir = [-1,1,-1,1], indqn = indqn, indims = indims)
     rea, reinfo  = U1reshape(a, χ,D^2,χ; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))
     rerea = U1reshape(rea, χ,D,D,χ; reinfo = reinfo)[1]
-    # @test rerea ≈ a
+    @test rerea ≈ a
 end

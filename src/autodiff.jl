@@ -79,18 +79,18 @@ end
 
 function num_grad(f, a::U1Array; δ::Real=1e-5)
     b = Array(copy(a))
-    intype = _arraytype(a.tensor[1])
+    intype = _arraytype(a.tensor)
     df = copy(a)
     bits = map(x -> ceil(Int, log2(x)), size(a))
     Adir = getdir(a)
     for i in CartesianIndices(b)
-        qn = collect(sum.(minuseven.(bitarray.(i.I .- 1, bits)))) 
+        qn = collect(sum.(bitarray.(i.I .- 1, bits))) 
         if sum(qn.*Adir) == 0
             foo = x -> (ac = copy(b); ac[i] = x; f(intype(ac)))
             df[i] = num_grad(foo, b[i], δ=δ)
         end
     end
-    return intype(deletezerobulk(df))
+    return intype(deletezeroblock(df))
 end
 
 # patch since it's currently broken otherwise
@@ -143,10 +143,10 @@ end
 
 @adjoint function reshape(A::U1Array, a::Int...)
     function back(dAr)
-        exchangeind = indexin(A.qn, dAr.qn)
-        s = map(size, A.tensor) 
-        dAtensor = map((x, y) -> reshape(x, y), dAr.tensor[exchangeind], s)
-        return U1Array(A.qn, A.dir, dAtensor, A.size, A.dims, A.division), a...
+        @assert A.qn == dAr.qn
+        # s = map(size, A.tensor) 
+        # dAtensor = map((x, y) -> reshape(x, y), dAr.tensor, s)
+        return U1Array(A.qn, A.dir, dAr.tensor, A.size, A.dims, A.division), a...
     end
     return reshape(A, a...), back
 end
@@ -161,10 +161,10 @@ ChainRulesCore.rrule(::typeof(asArray), A::AbstractSymmetricArray) = asArray(A),
 
 ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; kwarg...) = asSymmetryArray(A, symmetry; kwarg...), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
 
-function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
+function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::AbstractArray{T}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
     function back(dA)
-        exchangeind = indexin(qn, dA.qn)
-        return NoTangent(), NoTangent(), NoTangent(), dA.tensor[exchangeind], NoTangent(), NoTangent(), NoTangent()...
+        @assert qn == dA.qn
+        return NoTangent(), NoTangent(), NoTangent(), dA.tensor, NoTangent(), NoTangent(), NoTangent()...
     end
     U1Array(qn, dir, tensor, size, dims, division), back
 end
@@ -221,14 +221,14 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::Z2Array)
     function back((dQ, dR))
         dA = copy(A)
         @assert Q.parity == dQ.parity
-        bulkbackQR!(A, dA, Q, R, dQ, dR, 0)
-        bulkbackQR!(A, dA, Q, R, dQ, dR, 1)
+        blockbackQR!(A, dA, Q, R, dQ, dR, 0)
+        blockbackQR!(A, dA, Q, R, dQ, dR, 1)
         return NoTangent(), dA
     end
     return (Q, R), back
 end
 
-function bulkbackQR!(A::Z2Array, dA, Q, R, dQ, dR, p)
+function blockbackQR!(A::Z2Array, dA, Q, R, dQ, dR, p)
     div = dQ.division
     ind_A = findall(x->sum(x[div+1:end]) % 2 == p, dQ.parity)
     m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
@@ -237,8 +237,8 @@ function bulkbackQR!(A::Z2Array, dA, Q, R, dQ, dR, p)
     ind = [findfirst(x->x in [[i; m_j[1]]], dQ.parity) for i in m_i]
     dQm = vcat(dQ.tensor[ind]...)
     Qm = vcat(Q.tensor[ind]...)
-    bulkidims = [size(dQ.tensor[i],1) for i in ind]
-    bulkjdims = [size(dQm, 2)]
+    blockidims = [size(dQ.tensor[i],1) for i in ind]
+    blockjdims = [size(dQm, 2)]
     ind = findfirst(x->x in [[m_j[1]; m_j[1]]], R.parity)
     dRm = dR == ZeroTangent() ? ZeroTangent() : dR.tensor[ind]
     Rm = R.tensor[ind]
@@ -248,7 +248,7 @@ function bulkbackQR!(A::Z2Array, dA, Q, R, dQ, dR, p)
 
     for i in 1:length(m_i), j in 1:length(m_j)
         ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
-        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
+        idim, jdim = sum(blockidims[1:i-1])+1:sum(blockidims[1:i]), sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end
 end
@@ -258,14 +258,14 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::Z2Array)
     function back((dL, dQ))
         dA = copy(A)
         @assert Q.parity == dQ.parity
-        bulkbackLQ!(A, dA, L, Q, dL, dQ, 0)
-        bulkbackLQ!(A, dA, L, Q, dL, dQ, 1)
+        blockbackLQ!(A, dA, L, Q, dL, dQ, 0)
+        blockbackLQ!(A, dA, L, Q, dL, dQ, 1)
         return NoTangent(), dA
     end
     return (L, Q), back
 end
 
-function bulkbackLQ!(A::Z2Array, dA, L, Q, dL, dQ, p)
+function blockbackLQ!(A::Z2Array, dA, L, Q, dL, dQ, p)
     div = dQ.division
     ind_A = findall(x->sum(x[div+1:end]) % 2 == p, dQ.parity)
     m_j = unique(map(x->x[div+1:end], dQ.parity[ind_A]))
@@ -274,8 +274,8 @@ function bulkbackLQ!(A::Z2Array, dA, L, Q, dL, dQ, p)
     ind = [findfirst(x->x in [[m_i[1]; j]], dQ.parity) for j in m_j]
     dQm = hcat(dQ.tensor[ind]...)
     Qm = hcat(Q.tensor[ind]...)
-    bulkidims = [size(dQm, 1)]
-    bulkjdims = [size(dQ.tensor[i],2) for i in ind]
+    blockidims = [size(dQm, 1)]
+    blockjdims = [size(dQ.tensor[i],2) for i in ind]
     ind = findfirst(x->x in [[m_i[1]; m_i[1]]], L.parity)
     dLm = dL == ZeroTangent() ? ZeroTangent() : dL.tensor[ind]
     Lm = L.tensor[ind]
@@ -285,7 +285,7 @@ function bulkbackLQ!(A::Z2Array, dA, L, Q, dL, dQ, p)
 
     for i in 1:length(m_i), j in 1:length(m_j)
         ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.parity)
-        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
+        idim, jdim = sum(blockidims[1:i-1])+1:sum(blockidims[1:i]), sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end
 end
@@ -296,36 +296,49 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::U1Array)
     function back((dQ, dR))
         dA = copy(A)
         @assert Q.qn == dQ.qn
+        # @assert R.qn == dR.qn
+        Qqn, Qdir, Qdims, Qdiv = Q.qn, Q.dir, Q.dims, Q.division
+        Rqn, Rdims = R.qn, R.dims
+        Abdiv = blockdiv(A.dims)
+        Qbdiv = blockdiv(Qdims)
+        Qtensor = [reshape(@view(Q.tensor[Qbdiv[i]]), prod(Qdims[i][1:Qdiv]), prod(Qdims[i][Qdiv+1:end])) for i in 1:length(Qbdiv)]
+        dQtensor = [reshape(@view(dQ.tensor[Qbdiv[i]]), prod(Qdims[i][1:Qdiv]), prod(Qdims[i][Qdiv+1:end])) for i in 1:length(Qbdiv)]
+
+        Rbdiv = blockdiv(Rdims)
+        Rtensor = [reshape(@view(R.tensor[Rbdiv[i]]), Rdims[i]...) for i in 1:length(Rbdiv)]
+        if dR == ZeroTangent()
+            dRtensor = ZeroTangent()
+        else
+            dRtensor = [reshape(@view(dR.tensor[Rbdiv[i]]), Rdims[i]...) for i in 1:length(Rbdiv)]
+        end
         for q in unique(map(x->sum(x[A.division+1:end] .* A.dir[A.division+1:end]), A.qn))
-            bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
+            blockbackQR!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Rqn, Rtensor, dQtensor, dRtensor, q)
         end
         return NoTangent(), dA
     end
     return (Q, R), back
 end
 
-function bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
-    div = dQ.division
-    ind_A = findall(x->sum(x[div+1:end].* dQ.dir[dQ.division+1:end]) == q, dQ.qn)
-    m_j = unique(map(x->x[div+1:end], dQ.qn[ind_A]))
-    m_i = unique(map(x->x[1:div], dQ.qn[ind_A]))
+function blockbackQR!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Rqn, Rtensor, dQtensor, dRtensor, q)
+    ind_A = findall(x->sum(x[Qdiv+1:end] .* Qdir[Qdiv+1:end]) == q, Qqn)
+    m_j = unique(map(x->x[Qdiv+1:end], Qqn[ind_A]))
+    m_i = unique(map(x->x[1:Qdiv], Qqn[ind_A]))
 
-    ind = [findfirst(x->x in [[i; m_j[1]]], dQ.qn) for i in m_i]
-    dQm = vcat(dQ.tensor[ind]...)
-    Qm = vcat(Q.tensor[ind]...)
-    bulkidims = [size(dQ.tensor[i],1) for i in ind]
-    bulkjdims = [size(dQm, 2)]
-    ind = findfirst(x->x in [[m_j[1]; m_j[1]]], R.qn)
-    dRm = dR == ZeroTangent() ? ZeroTangent() : dR.tensor[ind]
-    Rm = R.tensor[ind]
-    
+    ind = indexin([[i; m_j[1]] for i in m_i], Qqn)
+    dQm = vcat(dQtensor[ind]...)
+    Qm = vcat(Qtensor[ind]...)
+    blockidims = [size(dQtensor[i],1) for i in ind]
+    ind = indexin([[m_j[1]; m_j[1]]], Rqn)[1]
+    dRm = dRtensor == ZeroTangent() ? ZeroTangent() : dRtensor[ind]
+    Rm = Rtensor[ind]
+
     M = Array(Rm * dRm' - dQm' * Qm)
     dAm = (UpperTriangular(Rm + I * 1e-12) \ (dQm + Qm * _arraytype(Qm)(Hermitian(M, :L)))' )'
 
-    for i in 1:length(m_i), j in 1:length(m_j)
-        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.qn)
-        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
-        CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
+    for i in 1:length(m_i)
+        ind = findfirst(x->x in [[m_i[i]; m_j[1]]], dA.qn)
+        idim = sum(blockidims[1:i-1])+1:sum(blockidims[1:i])
+        CUDA.@allowscalar dA.tensor[Abdiv[ind]] = vec(@view(dAm[idim, :]))
     end
 end
 
@@ -334,36 +347,49 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::U1Array)
     function back((dL, dQ))
         dA = copy(A)
         @assert Q.qn == dQ.qn
+        # @assert L.qn == dL.qn
+        Qqn, Qdir, Qdims, Qdiv = Q.qn, Q.dir, Q.dims, Q.division
+        Lqn, Ldims = L.qn, L.dims
+        Abdiv = blockdiv(A.dims)
+        Qbdiv = blockdiv(Qdims)
+        Qtensor = [reshape(@view(Q.tensor[Qbdiv[i]]), prod(Qdims[i][1:Qdiv]), prod(Qdims[i][Qdiv+1:end])) for i in 1:length(Qbdiv)]
+        dQtensor = [reshape(@view(dQ.tensor[Qbdiv[i]]), prod(Qdims[i][1:Qdiv]), prod(Qdims[i][Qdiv+1:end])) for i in 1:length(Qbdiv)]
+
+        Lbdiv = blockdiv(Ldims)
+        Ltensor = [reshape(@view(L.tensor[Lbdiv[i]]), Ldims[i]...) for i in 1:length(Lbdiv)]
+        if dL == ZeroTangent()
+            dLtensor = ZeroTangent()
+        else
+            dLtensor = [reshape(@view(dL.tensor[Lbdiv[i]]), Ldims[i]...) for i in 1:length(Lbdiv)]
+        end
         for q in unique(map(x->x[1] * A.dir[1], A.qn))
-            bulkbackLQ!(A, dA, L, Q, dL, dQ, q)
+            blockbackLQ!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Lqn, Ltensor, dQtensor, dLtensor, q)
         end
         return NoTangent(), dA
     end
     return (L, Q), back
 end
 
-function bulkbackLQ!(A::U1Array, dA, L, Q, dL, dQ, q)
-    div = dQ.division
-    ind_A = findall(x->x[1] * dQ.dir[1] == q, dQ.qn)
-    m_j = unique(map(x->x[div+1:end], dQ.qn[ind_A]))
-    m_i = unique(map(x->x[1], dQ.qn[ind_A]))
+function blockbackLQ!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Lqn, Ltensor, dQtensor, dLtensor, q)
+    ind_A = findall(x->x[1] * Qdir[1] == q, Qqn)
+    m_j = unique(map(x->x[Qdiv+1:end], Qqn[ind_A]))
+    m_i = unique(map(x->x[1], Qqn[ind_A]))
 
-    ind = [findfirst(x->x in [[m_i[1]; j]], dQ.qn) for j in m_j]
-    dQm = hcat(dQ.tensor[ind]...)
-    Qm = hcat(Q.tensor[ind]...)
-    bulkidims = [size(dQm, 1)]
-    bulkjdims = [size(dQ.tensor[i],2) for i in ind]
-    ind = findfirst(x->x in [[m_i[1]; m_i[1]]], L.qn)
-    dLm = dL == ZeroTangent() ? ZeroTangent() : dL.tensor[ind]
-    Lm = L.tensor[ind]
+    ind = indexin([[m_i[1]; j] for j in m_j], Qqn)
+    dQm = hcat(dQtensor[ind]...)
+    Qm = hcat(Qtensor[ind]...)
+    blockjdims = [size(dQtensor[i],2) for i in ind]
+    ind = indexin([[m_i[1]; m_i[1]]], Lqn)[1]
+    dLm = dLtensor == ZeroTangent() ? ZeroTangent() : dLtensor[ind]
+    Lm = Ltensor[ind]
     
     M = Array(Lm' * dLm - dQm * Qm')
     dAm = LowerTriangular(Lm + I * 1e-12)' \ (dQm + _arraytype(Qm)(Hermitian(M, :L)) * Qm)
 
-    for i in 1:length(m_i), j in 1:length(m_j)
-        ind = findfirst(x->x in [[m_i[i]; m_j[j]]], A.qn)
-        idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
-        CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
+    for j in 1:length(m_j)
+        ind = findfirst(x->x in [[m_i[1]; m_j[j]]], dA.qn)
+        jdim = sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])
+        CUDA.@allowscalar dA.tensor[Abdiv[ind]] = vec(@view(dAm[:, jdim]))
     end
 end
 
@@ -419,7 +445,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -448,7 +474,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -563,7 +589,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dAC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -668,7 +694,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     function back((dλ, dC))
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -700,7 +726,7 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
@@ -729,7 +755,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
@@ -765,10 +791,11 @@ end
 
 @adjoint function tr(A::AbstractSymmetricArray)
     function back(dtrA)
-        dA = similar(A)
-        atype = _arraytype(A.tensor[1])
-        for i in 1:length(A.tensor)
-            dA.tensor[i] = atype(Matrix(I,dA.dims[i]...) * dtrA)
+        dA = zero(A)
+        atype = _arraytype(A.tensor)
+        Abdiv = blockdiv(A.dims)
+        for i in 1:length(Abdiv)
+            dA.tensor[Abdiv[i]] = vec(atype(Matrix(I,dA.dims[i]...) * dtrA))
         end
         return (dA, )
     end
@@ -777,18 +804,22 @@ end
 
 function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) where {T,N}
     function back(dtrA)
-        atype = _arraytype(A.tensor[1])
-        dA = Array(zero(A))
-        for i in 1:length(A.tensor)
-            if A.qn[i][1] == A.qn[i][3] && A.qn[i][2] == A.qn[i][4]
-                d1 = dA.dims[i][1]
-                d2 = dA.dims[i][2]
-                for j = 1:d1, k = 1:d2
-                    dA.tensor[i][j,k,j,k] = dtrA
-                end
+        atype = _arraytype(A.tensor)
+        Aqn = A.qn
+        Adims = A.dims
+        dA = zero(A)
+        Abdiv = blockdiv(Adims)
+        for i in 1:length(Abdiv)
+            if Aqn[i][1] == Aqn[i][3] && Aqn[i][2] == Aqn[i][4]
+                d1 = Adims[i][1]
+                d2 = Adims[i][2]
+                dA.tensor[Abdiv[i]] = vec(atype(dtrA * ein"ab, cd -> acbd"(Matrix(I,d1,d1), Matrix(I,d2,d2))))
+                # for j = 1:d1, k = 1:d2
+                #     dA.tensor[i][j,k,j,k] = dtrA
+                # end
             end
         end
-        return NoTangent(), atype(deletezerobulk(dA))
+        return NoTangent(), atype(deletezeroblock(dA))
     end
     dtr(A), back
 end
