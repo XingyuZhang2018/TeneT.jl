@@ -445,7 +445,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -474,7 +474,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -589,7 +589,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dAC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -694,7 +694,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     function back((dλ, dC))
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -726,7 +726,7 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
@@ -755,7 +755,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        @threads for k = 1:Ni*Nj
+        for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)

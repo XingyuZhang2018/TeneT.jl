@@ -7,7 +7,7 @@ using Test
 
 @testset "threads" begin
     acc = Ref(0)
-    @threads for i in 1:1000
+    for i in 1:1000
         acc[] += 1
     end
     @show acc[]
@@ -18,7 +18,7 @@ end
     for i in 1:nthreads()
         push!(solution_data, Float64[])
     end
-    @threads for i in 1:10000
+    for i in 1:10000
         push!(solution_data[threadid()], 1)
     end
     @show sum(vcat(solution_data...))
@@ -30,7 +30,7 @@ end
         push!(qn_para, Vector{Vector{Int}}())
     end
     f!(x) = push!(x, [1,1]) 
-    @threads for i in 1:10
+    for i in 1:10
         f!(qn_para[threadid()])
     end
     @show vcat(qn_para...)
@@ -56,7 +56,7 @@ end
         for _ in 1:nthreads()
             push!(A_para, CuArray{ComplexF64}[])
         end
-        @threads for i in 1:nthreads()
+        for i in 1:nthreads()
             A_para[threadid()] = CUDA.@sync A[i] * A[i]
         end
         reduce(+, A_para)

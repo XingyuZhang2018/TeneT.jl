@@ -497,7 +497,7 @@ end
 # # for OMEinsum contract to get number
 # # vec(A::U1Array) = A
 
-transpose(A::U1Array) = U1Array(A.qn, A.dir, transpose(A.tensor), A.size, A.dims, 0)
+transpose(A::U1Array) = U1Array(A.qn, A.dir, A.tensor, A.size, A.dims, 0)
 
 function tr(A::U1Array{T,2}) where {T}
     qn = A.qn
