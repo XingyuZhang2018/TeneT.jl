@@ -144,7 +144,7 @@ function getL!(A,L; kwargs...)
         ρ = ρs[1] + ρs[1]'
         ρ /= tr(ρ)
         _, S, Vt = sysvd!(ρ)
-        Lo = lmul!(Diagonal(sqrt.(S)), Vt)
+        Lo = Diagonal(sqrt.(S)) * Vt
         _, L[i,j] = qrpos!(Lo)
     end
     return L

@@ -575,9 +575,10 @@ end
 
 # # for leftorth and rightorth compatibility
 function Diagonal(A::U1Array)
+    atype = _arraytype(A.tensor)
     blocklen = map(x->x[1], A.dims)
     bdiv = [sum(blocklen[1 : i - 1]) + 1 : sum(blocklen[1 : i]) for i in 1:length(blocklen)]
-    tensor = vcat([vec(Diagonal(@view(A.tensor[bdiv[i]]))) for i in 1:length(bdiv)]...)
+    tensor = CUDA.@allowscalar atype(vcat([vec(diagm(A.tensor[bdiv[i]])) for i in 1:length(bdiv)]...))
     U1Array(A.qn, A.dir, tensor, A.size, A.dims, A.division)
 end
 
@@ -589,15 +590,13 @@ function sqrt(A::U1Array)
 end
 broadcasted(sqrt, A::U1Array) = sqrt(A)
 
-function lmul!(A::U1Array, B::U1Array)
-    C = A*B
-    B.tensor[:] = C.tensor
-    for i = 1:length(B.qn)
-        B.qn[i] = C.qn[i]
-        B.dims[i] = C.dims[i]
-    end
-    B
-end
+# function lmul!(A::U1Array, B::U1Array)
+#     dims = A.dims
+#     bdiv = blockdiv(Adims)
+#     Atensor = [Diagonal[reshape(@view(A.tensor[Abdiv[i]]), Adims[i]...)] for i in 1:length(Abdiv)]
+#     lmul!(Atensor[i], B.tensor[])
+#     B
+# end
 
 # only for order-three tensor's qr and lq
 function qrpos!(A::U1Array{T,N}) where {T,N}
