@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
+using VUMPS:qrpos,lqpos,cellones,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -246,8 +246,10 @@ end
     S2 = [randinitial(Val(symmetry), atype, ComplexF64, D,D,D,D; dir = [1,-1,-1,1]) for i in 1:Ni, j in 1:Nj]
     M = [randinitial(Val(symmetry), atype, ComplexF64, d,d,d,d; dir = [-1,1,1,-1]) for i in 1:Ni, j in 1:Nj]
 
-    AL, L, _ = leftorth(A) 
-    R, AR, _ = rightorth(A)
+    U1info = ([], getqrange(D)..., [], u1bulkdims(D)...)
+    L = cellones(A; U1info = U1info)
+    AL, L, _ = leftorth(A, L)
+    R, AR, _ = rightorth(AL, L)
     # _, FL = leftenv(AL, AL, M)
     # _, FR = rightenv(AR, AR, M)
     FL = [randinitial(Val(symmetry), atype, dtype, D,d,D; dir = [1,1,-1]) for i in 1:Ni, j in 1:Nj]
@@ -274,8 +276,9 @@ end
         end
         return s
     end
-    @test Zygote.gradient(foo1, 1)[1] !== nothing
-    # @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2 # num_grad isn't stable for U1 symmetry
+    # @show foo1(1) foo1(1.1) num_grad(foo1, 1) Zygote.gradient(foo1, 1)[1]
+    # @test Zygote.gradient(foo1, 1)[1] !== nothing # num_grad isn't stable for U1 symmetry
+    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-8 
 end
 
 @testset "observable leftenv and rightenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [2], Nj = [2]

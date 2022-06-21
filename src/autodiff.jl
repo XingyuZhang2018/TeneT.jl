@@ -296,7 +296,7 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::U1Array)
     function back((dQ, dR))
         dA = copy(A)
         @assert Q.qn == dQ.qn
-        for q in unique(map(x->sum(x[A.division+1:end] .* A.dir[A.division+1:end]), A.qn))
+        for q in unique!(map(x->sum(x[A.division+1:end] .* A.dir[A.division+1:end]), A.qn))
             bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
         end
         return NoTangent(), dA
@@ -307,10 +307,10 @@ end
 function bulkbackQR!(A::U1Array, dA, Q, R, dQ, dR, q)
     div = dQ.division
     ind_A = findall(x->sum(x[div+1:end].* dQ.dir[dQ.division+1:end]) == q, dQ.qn)
-    m_j = unique(map(x->x[div+1:end], dQ.qn[ind_A]))
-    m_i = unique(map(x->x[1:div], dQ.qn[ind_A]))
-
-    ind = [findfirst(x->x in [[i; m_j[1]]], dQ.qn) for i in m_i]
+    m_j = unique!(map(x->x[div+1:end], dQ.qn[ind_A]))
+    m_i = unique!(map(x->x[1:div], dQ.qn[ind_A]))
+    
+    ind = indexin([[i; m_j[1]] for i in m_i], dQ.qn)
     dQm = vcat(dQ.tensor[ind]...)
     Qm = vcat(Q.tensor[ind]...)
     bulkidims = [size(dQ.tensor[i],1) for i in ind]
@@ -334,7 +334,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::U1Array)
     function back((dL, dQ))
         dA = copy(A)
         @assert Q.qn == dQ.qn
-        for q in unique(map(x->x[1] * A.dir[1], A.qn))
+        for q in unique!(map(x->x[1] * A.dir[1], A.qn))
             bulkbackLQ!(A, dA, L, Q, dL, dQ, q)
         end
         return NoTangent(), dA
@@ -345,10 +345,10 @@ end
 function bulkbackLQ!(A::U1Array, dA, L, Q, dL, dQ, q)
     div = dQ.division
     ind_A = findall(x->x[1] * dQ.dir[1] == q, dQ.qn)
-    m_j = unique(map(x->x[div+1:end], dQ.qn[ind_A]))
-    m_i = unique(map(x->x[1], dQ.qn[ind_A]))
-
-    ind = [findfirst(x->x in [[m_i[1]; j]], dQ.qn) for j in m_j]
+    m_j = unique!(map(x->x[div+1:end], dQ.qn[ind_A]))
+    m_i = unique!(map(x->x[1], dQ.qn[ind_A]))
+    
+    ind = indexin([[m_i[1]; j] for j in m_j], dQ.qn)
     dQm = hcat(dQ.tensor[ind]...)
     Qm = hcat(Q.tensor[ind]...)
     bulkidims = [size(dQm, 1)]
@@ -419,7 +419,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -448,7 +448,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = i + 1 - Ni * (i == Ni)
             jr = j - 1 + Nj * (j == 1)
@@ -563,7 +563,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dAC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -668,7 +668,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     function back((dλ, dC))
         dFL = [[zero(x) for x in FL] for _ in 1:nthreads()]
         dFR = [[zero(x) for x in FR] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             if dC[i,j] !== nothing
                 ir = i - 1 + Ni * (i == 1)
@@ -700,7 +700,7 @@ function ChainRulesCore.rrule(::typeof(obs_FL), ALu, ALd, M, FL; kwargs...)
         dALu = [[zero(x) for x in ALu] for _ in 1:nthreads()]
         dALd = [[zero(x) for x in ALd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)
@@ -729,7 +729,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
         dARu = [[zero(x) for x in ARu] for _ in 1:nthreads()]
         dARd = [[zero(x) for x in ARd] for _ in 1:nthreads()]
         dM = [[zero(x) for x in M] for _ in 1:nthreads()]
-        for k = 1:Ni*Nj
+        @threads for k = 1:Ni*Nj
             i,j = ktoij(k, Ni, Nj)
             ir = Ni + 1 - i
             jr = j - 1 + Nj * (j == 1)

@@ -73,8 +73,8 @@ end
 function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, U1info)
     A = initialA(M, χ; U1info = U1info)
     L = cellones(A; U1info = U1info)
-    AL, L = leftorth(A, L)
-    R, AR = rightorth(AL, L)
+    AL, L, _ = leftorth(A, L)
+    R, AR, _ = rightorth(AL, L)
     FL = FLint(AL, M; U1info = U1info)
     _, FL = leftenv(AL, AL, M, FL)
     _, FR = rightenv(AR, AR, M, conj(FL))
@@ -91,13 +91,16 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     print("vumps $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry environment load from $(chkp_file) -> ")   
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
     Zygote.@ignore begin
-        AL, AR, FL, FR = map(Array{atype{ComplexF64, 3}, 2}, [env.AL, env.AR, env.FL, env.FR])
+        AL, AR = map(Array{atype{ComplexF64, 3}, 2}, [env.AL, env.AR])
         C = Array{atype{ComplexF64, 2}, 2}(env.C)
         if !(atype <: Union{CuArray, Array})
             intype = _arraytype(M[1,1].tensor[1])
-            AL, C, AR, FL, FR = map(x->map(intype, x), [AL, C, AR, FL, FR])
+            AL, C, AR = map(x->map(intype, x), [AL, C, AR])
         end
     end
+    FL = FLint(AL, M; U1info = U1info)
+    _, FL = leftenv(AL, AL, M, FL)
+    _, FR = rightenv(AR, AR, M, conj(FL))
     AL, C, AR, FL, FR
 end
 
@@ -109,13 +112,53 @@ function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=
     stopfun = StopFunction(olderror, -1, tol, maxiter, miniter)
     rt, err = fixedpoint(res -> vumpstep(res...;show_counting=vumps_counting), (rt, olderror), stopfun)
     verbose && println("vumps done@step: $(stopfun.counter), error=$(err)")
-    return rt
+    return rt, err
 end
 
 function show_every_count(n::Number)
     i = 0
     counting() = (i += 1; mod(i,n)==0 ? i : 0)
     return counting
+end
+
+function blocktruc(M, ALu, ARu, Cu, ALd, ARd, Cd; U1info = U1info)
+    Ni,Nj = size(ALu)
+    χ, D, _ = size(ALu[1]) 
+    indD, indχ, dimsD, dimsχ = U1info
+    U1info = (indD, indχ, dimsD, dimsχ)
+    BgFL = BgFLint(ALu, M; U1info = U1info)
+    _, BgFL = bigleftenv(ALu, ALd, M, BgFL)
+    _, BgFR = bigrightenv(ARu, ARd, M, conj(BgFL))
+
+    indqn = [indχ, [-2, -1, 0, 1, 2], indχ, [-2, -1, 0, 1, 2]]
+    indims = [dimsχ, [1, 2, 3, 2, 1], dimsχ, [1, 2, 3, 2, 1]]
+    # @threads for k = 1:Ni*Nj
+    #     i, j = ktoij(k, Ni, Nj)
+    for j in 1:Nj, i in 1:Ni
+        ir = i + 1 - Ni * (i==Ni)
+        irr = i + 2 - Ni * (i + 2 > Ni) - (Ni==1)
+        jr = j + 1 - Nj * (j==Nj)
+        l = BgFLmap(ALu[i,:], conj(ALd[irr,:]), M[i,:], M[ir,:], BgFL[i,jr], jr)
+        ρ = ein"(adfg, gh), (bc, cefh) -> adbe"(l, conj(Cd[irr,j]), Cu[i,j], BgFR[i, j])
+        ρ = U1reshape(ρ, χ*D, χ*D; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1]
+        @show norm(ρ-ρ')
+        U, S, Vt = svd(ρ; trunc = χ)
+        rρ = U'*ρ*Vt'
+        p = sortperm(rρ.qn)
+        indχ = map(x->x[1], rρ.qn[p])
+        dimsχ = map(x->x[1], rρ.dims[p])
+        @show i,j indχ dimsχ
+        jr = j - 1 + (j - 1 == 0) * Nj
+        r = BgFRmap(ARu[i,:], conj(ARd[irr,:]), M[i,:], M[ir,:], BgFR[i,jr], jr)
+        ρ = ein"(adfg,gh), (bc, cefh) -> adbe"(BgFL[i,j], conj(Cd[irr,j]), Cu[i,j], r)
+        ρ = U1reshape(ρ, χ*D, χ*D; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1]
+        U, S, Vt = svd(ρ; trunc = χ)
+        rρ = U'*ρ*Vt'
+        p = sortperm(rρ.qn)
+        indχ = map(x->x[1], rρ.qn[p])
+        dimsχ = map(x->x[1], rρ.dims[p])
+        @show i,j indχ dimsχ
+    end
 end
 
 function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
@@ -169,13 +212,14 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     in_chkp_file = infolder*"/$(direction)_D$(D)_χ$(χ).jld2"
 
     if isfile(in_chkp_file)                               
-        rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
+        rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose, U1info = U1info)   
     else
         rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose, U1info = U1info)
     end
-    env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
+    env, err = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
-    Zygote.@ignore savefile && begin
+    # blocktruc(M, env.AL, env.AR, env.C, env.AL, env.AR, env.C; U1info = U1info)
+    Zygote.@ignore savefile && err < 1e-8 && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
@@ -228,13 +272,14 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         ALd, ARd, Cd = ALu, ARu, Cu
     end
 
+    # blocktruc(M, ALu, ARu, Cu, ALd, ARd, Cd; U1info = U1info)
     _, FL = obs_FL(ALu, conj(ALd), M, FL)
     _, FR = obs_FR(ARu, conj(ARd), M, FR)
-    Zygote.@ignore savefile && begin
-        out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
-        FLs, FRs = map(x->map(Array, x), [FL, FR])
-        save(out_chkp_file_obs, "env", (FLs, FRs))
-    end
+    # Zygote.@ignore savefile && begin
+    #     out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
+    #     FLs, FRs = map(x->map(Array, x), [FL, FR])
+    #     save(out_chkp_file_obs, "env", (FLs, FRs))
+    # end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
 end
 

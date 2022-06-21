@@ -9,7 +9,6 @@ using OMEinsum
 using ProfileView
 using Random
 using LinearAlgebra
-using CUDA:i32
 LinearAlgebra.BLAS.set_num_threads(8)
 CUDA.allowscalar(false)
 
@@ -28,14 +27,14 @@ CUDA.allowscalar(false)
         FL = symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ, D, D, χ; dir = [1, -1, 1, -1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
 
         # @time CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        FLm = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
-        @show FLm.qn sort(FLm.qn)
+        # FLm = ein"((adf,abc),dgeb),fgh -> ceh"(FL,AL,M,conj(AL))
+        # @show FLm.qn sort(FLm.qn)
 #         FLm2 = ein"((adf,abc),dgeb),fgh -> ceh"(FLm,AL,M,conj(AL))
 #         @show indexin(FLm.qn, FL.qn) indexin(FLm2.qn, FL.qn) indexin(FLm2.qn, FLm.qn)
 # # 
     #     # t = minimum(@benchmark(CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL)))).time / 1e9
-    #     # # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
-        # @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
+        # @time CUDA.@sync ein"adf,abc -> fdbc"(FL,AL)
+        @btime CUDA.@sync ein"((adf,abc),dgeb),fgh -> ceh"($FL,$AL,$M,conj($AL))
     #     # message = "$D    $χ    $(round(t,digits=5))\n"
     #     # logfile = open("./timing/wang_contraction_$(atype)_$(symmetry)symmetry_d$(D)_.log", "a")
     #     # write(logfile, message)
@@ -53,83 +52,7 @@ CUDA.allowscalar(false)
     # @btime $a * $b
 end
 
-@testset "dot with $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64]
-    Random.seed!(100)
-
-    N = 100
-    A = [atype(rand(dtype, N, N)) for _ in 1:20]
-    B = [atype(rand(dtype, N, N)) for _ in 1:20]
-
-    @btime CUDA.@sync dot(vcat(vec.($A)...), vcat(vec.($B)...))
-    @btime CUDA.@sync dot(vcat(vec.($A)...), vcat(vec.($B)...))
-
-end
-
-
- @testset "dot with $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64]
-    Random.seed!(100)
-
-    N = 100
-    A = [atype(rand(dtype, N, N)) for _ in 1:10]
-    B = [atype(rand(dtype, N, N)) for _ in 1:10]
-    
-    mydot1(A, B) = dot(vcat(map(x->@view(x[:]), A)...), vcat(map(x->@view(x[:]), B)...))
-    function mydot2(A, B)
-        sA = length.(A)
-        sB = length.(B)
-        At = CUDA.zeros(dtype, sum(sA))
-        Bt = CUDA.zeros(dtype, sum(sB))
-        for i in 1:length(sA)
-            At[sum(sA[1:i-1])+1:sum(sA[1:i])] = @view(A[i][:])
-            Bt[sum(sB[1:i-1])+1:sum(sB[1:i])] = @view(B[i][:])
-        end
-        dot(At, Bt)
-    end
-    mydot3(A, B) = dot(map(Array, A), map(Array, B))
-    # @btime CUDA.@sync dot($A, $B)
-    # @btime CUDA.@sync $mydot1($A, $B)
-    # @test dot(A, B) ≈ mydot2(A, B)
-    @btime CUDA.@sync $mydot3($A, $B)
-end
-
-@testset "dot with $atype{$dtype} " for atype in [CuArray], dtype in [ComplexF64]
-    Random.seed!(100)
-    indD = [0, 1, 2]
-    indχ = [-2, -1, 0, 1, 2]
-    dimsD = [1, 3, 4]
-    dimsχ = [10, 20, 40, 20, 10]
-    D = sum(dimsD)
-    χ = sum(dimsχ)
-    # for χ in [χ]
-    println("D = $(D) χ = $(χ)")
-    AL = symmetryreshape(randinitial(Val(:U1), atype, dtype, χ, D, D, χ; dir = [-1, -1, 1, 1], indqn = [indχ, indD, indD, indχ], indims = [dimsχ, dimsD, dimsD, dimsχ]), χ, D^2, χ; reinfo = (nothing, nothing, nothing, [indχ, indD, indD, indχ], [dimsχ, dimsD, dimsD, dimsχ], nothing, nothing))[1]
-
-    @show AL.qn
-    @show sort(AL.qn)
-    # A = vcat(map(vec, AL.tensor)...)
-    # @btime norm($A)
-    # @btime norm(vcat(map(vec, $AL.tensor)...))
-    # @btime dot($A, $A)
-    # foo(A) = (A .= A[[1:100; 101:200; 201:end]]; dot(A, A))
-    # @btime $foo($A)
-
-    # function foo1(A)
-    #     atensor = vcat(map(vec, A.tensor)...)
-    #     dot(atensor, atensor)
-    # end
-    # function foo2(A)
-    #     map(dot, A.tensor, A.tensor)
-    # end
-    # @test foo(AL) ≈ dot(AL, AL)
-
-    # @btime CUDA.@sync dot($AL, $AL)
-    # @btime CUDA.@sync $foo1($AL)
-    # @btime CUDA.@sync $foo2($AL)
-end
-
-
-
-@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [CuArray], dtype in [ComplexF64], symmetry in [:U1]
+@testset "KrylovKit with $symmetry $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
     Random.seed!(100)
     indD = [0, 1, 2]
     indχ = [-2, -1, 0, 1, 2]

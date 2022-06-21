@@ -50,7 +50,6 @@ CUDA.allowscalar(false)
 	# @test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5), indqn, indims),(16,5))
 end
 
-
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     A = randU1(atype, dtype, 3,3,4; dir = [1,1,-1])
@@ -216,11 +215,11 @@ end
 
 @testset "U1 svd with $atype{$dtype}" for atype in [Array], dtype in [Float64]
     Random.seed!(100)
-    A = randU1(atype, dtype, [-1, 1], [[-1, 0, 1], [-1, 0, 1]], [[2, 5, 3], [2, 5, 3]])
+    A = randU1(atype, dtype, 10, 10; dir = [-1, 1])
 	Atensor = asArray(A)
-	U, S, V = sysvd!(copy(A))
-    Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
-    @test Utensor * Diagonal(Stensor) * Vtensor ≈ Atensor
+	U, S, V = svd(A)
+    Utensor, Stensor, Vtensor = svd(Atensor)
+    @test Utensor * Diagonal(Stensor) * Vtensor' ≈ Atensor
 	@test U * Diagonal(S) * V ≈ A
 end
 

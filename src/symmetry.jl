@@ -5,6 +5,7 @@ export randinitial, zerosinitial
 #helper functions to handle array types
 _mattype(::Array{T}) where {T} = Matrix
 _mattype(::CuArray{T}) where {T} = CuMatrix
+_mattype(::Adjoint{T, Matrix{T}}) where {T} = Matrix
 _mattype(::Adjoint{T, CuArray{T, 2 ,B}}) where {T,B} = CuMatrix
 _mattype(::Symmetric{T, CuArray{T, 2, B}}) where {T,B} = CuMatrix
 
