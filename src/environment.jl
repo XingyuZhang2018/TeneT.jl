@@ -134,8 +134,8 @@ function getL!(A,L; kwargs...)
         info.converged == 0 && @warn "getL not converged"
         ρ = ρs[1] + ρs[1]'
         ρ /= tr(ρ)
-        _, S, Vt = svd!(ρ)
-        Lo = lmul!(Diagonal(sqrt.(S)), Vt)
+        _, S, V = svd!(ρ)
+        Lo = Diagonal(sqrt.(S)) * V'
         _, L[i,j] = qrpos!(Lo)
     end
     return L

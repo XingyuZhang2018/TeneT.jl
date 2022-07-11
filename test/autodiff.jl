@@ -1,6 +1,7 @@
 using VUMPS
 using VUMPS:qrpos,lqpos,cellones,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
 using ChainRulesCore
+using ChainRulesTestUtils
 using CUDA
 using LinearAlgebra
 using OMEinsum
@@ -128,6 +129,22 @@ end
         return  norm(Q) + norm(L)
     end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
+end
+
+@testset "svd factorization with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1]
+    Random.seed!(100)
+    D, d = 4, 2
+    M = randinitial(Val(symmetry), atype, dtype, D,d,D; dir = [-1,1,1])
+    indqn = getqrange(D, d, D)
+    indims = u1bulkdims(D, d, D)
+    reinfo = nothing, nothing, nothing, indqn, indims, nothing, nothing
+    function foo(M)
+        M = symmetryreshape(M, D*d, D; reinfo = reinfo)[1]
+        U, S, V = svd(M)
+        norm(U) + norm(V) + norm(S)
+    end
+    # @show Zygote.gradient(foo, M)[1]
+    @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M)  atol = 1e-8
 end
 
 @testset "loop_einsum mistake with  $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [Float64], symmetry in [:none, :Z2, :U1]

@@ -104,7 +104,7 @@ end
     end
 end
 
-@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:U1], Ni = [1], Nj = [1]
+@testset "ACenv and Cenv with $(symmetry) $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], symmetry in [:none], Ni = [1], Nj = [1]
     Random.seed!(100)
     χ, D = 4, 4
     A = [symmetryreshape(randinitial(Val(symmetry), atype, dtype, χ,Int(sqrt(D)),Int(sqrt(D)),χ; dir = [-1, -1, 1, 1]), χ,D,χ)[1] for i in 1:Ni, j in 1:Nj]

@@ -233,31 +233,37 @@ function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}} = get
     U1Array(qn, dir, tensor, (D, D), dims, 1)
 end
 
-# getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
-# function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
-#     bits = map(x -> ceil(Int, log2(x)), size(A))
-#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
-#     # sum(qn.*Adir) != 0 && return 0.0
-#     ind = findfirst(x->x in [qn], A.qn)
-#     ind === nothing && return 0.0
-#     qlist = [U1selection(size(A, i)) for i = 1:N]
-#     qrange = getqrange(size(A)...)
-#     shift = getshift(qrange)
-#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-#     CUDA.@allowscalar A.tensor[ind][position...]
-# end
+getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
+function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
+    bits = map(x -> ceil(Int, log2(x)), size(A))
+    qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
+    # sum(qn.*Adir) != 0 && return 0.0
+    ind = findfirst(x->x in [qn], A.qn)
+    ind === nothing && return 0.0
+    qlist = [U1selection(size(A, i)) for i = 1:N]
+    qrange = getqrange(size(A)...)
+    shift = getshift(qrange)
+    position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
+    CUDA.@allowscalar A.tensor[ind][position...]
+end
 
-# setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-# function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
-#     bits = map(x -> ceil(Int, log2(x)), size(A))
-#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
-#     ind = findfirst(x->x in [qn], A.qn)
-#     qlist = [U1selection(size(A, i)) for i = 1:N]
-#     qrange = getqrange(size(A)...)
-#     shift = getshift(qrange)
-#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-#     CUDA.@allowscalar A.tensor[ind][position...] = x
-# end
+setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
+function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
+    bits = map(x -> ceil(Int, log2(x)), size(A))
+    qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
+    ind = findfirst(x->x in [qn], A.qn)
+    qlist = [U1selection(size(A, i)) for i = 1:N]
+    qrange = getqrange(size(A)...)
+    shift = getshift(qrange)
+    position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
+    CUDA.@allowscalar A.tensor[ind][position...] = x
+end
+
+function U1selection(maxs::Int)
+    mq = maxq(maxs)
+    q = [sum(minuseven((bitarray(i - 1, mq + 1)))) for i = 1:maxs]
+    [q .== i for i in sort(unique(q))]
+end
 
 function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
@@ -265,12 +271,6 @@ function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     q = [sum(minuseven(bitarray(i - 1, mq + 1))) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
-
-# function U1selection(maxs::Int)
-#     mq = maxq(maxs)
-#     q = [sum(bitarray(i - 1, mq + 1)) for i = 1:maxs]
-#     [q .== i for i in sort(unique(q))]
-# end
 
 function asArray(A::U1Array{T,N}; indqn::Vector{Vector{Int}} = getqrange(size(A)), indims::Vector{Vector{Int}} = u1bulkdims(size(A))) where {T,N}
     atype = _arraytype(A.tensor[1])
@@ -798,7 +798,7 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
         F = svd!(t)
         push!(Utensor, F.U)
         push!(Stensor, F.S)
-        push!(Vtensor, F.Vt)
+        push!(Vtensor, F.V)
     end
     if trunc != -1
         Sort = sort(abs.(vcat(Stensor...)); rev=true)
@@ -808,7 +808,7 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
         for i in 1:length(qn)
             Utensor[i] = Utensor[i][:, ind[i]]
             Stensor[i] = Stensor[i][ind[i]]
-            Vtensor[i] = Vtensor[i][ind[i], :]
+            Vtensor[i] = Vtensor[i][:, ind[i]]
         end
         deleind = sum.(ind) .== 0
         deleteat!(qn, deleind)
@@ -820,8 +820,9 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     Udims = map(x -> collect(size(x)), Utensor)
     Sdims = map(x -> [length(x), length(x)], Stensor)
     Vdims = map(x -> collect(size(x)), Vtensor)
-    Usize, Ssize, Vsize = map(x->Tuple(sum(x)), [Udims, Sdims, Vdims])
-    U1Array(qn, A.dir, Utensor, Usize, Udims, div), U1Array(qn, A.dir, Stensor, Ssize, Sdims, div), U1Array(qn, A.dir, Vtensor, Vsize, Vdims, div)
+    Asize = A.size
+    sm = min(Asize...)
+    U1Array(qn, A.dir, Utensor, (Asize[1], sm), Udims, div), U1Array(qn, A.dir, Stensor, (sm, sm), Sdims, div), U1Array(qn, A.dir, Vtensor, (Asize[2], sm),  Vdims, div)
 end
 
 """
@@ -873,7 +874,11 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo) where {T, N}
             push!(retensors, tensor)
         end
         dims = map(x -> collect(size(x)), retensors)
-        dir = [A.dir[d][end] for d in div]     # last dir of reshape
+        if length(div) !== 2
+            dir = [A.dir[d][end] for d in div]     # last dir of reshape
+        else
+            dir = [-1, 1]
+        end
         deletezerobulk(U1Array(map(qn->qn .* dir, ureqn), dir, map(atype, retensors), s, dims, 1)), (choosesilces, chooseinds, A.dir, indqn, indims, Aqn, Adims)
     else
         choosesilces, chooseinds, redir, indqn, indims, reqn, redims = reinfo

@@ -6,7 +6,7 @@ using Zygote
 using Zygote: @adjoint
 
 import Base: reshape
-import LinearAlgebra: norm
+import LinearAlgebra: norm, svd
 export num_grad
 
 Zygote.@nograd StopFunction
@@ -157,9 +157,11 @@ end
 
 @adjoint conjM(A::AbstractArray) = conjM(A), dA -> (conjM(dA), )
 
-ChainRulesCore.rrule(::typeof(asArray), A::AbstractSymmetricArray) = asArray(A), dAt -> (NoTangent(), asSymmetryArray(dAt, Val(getsymmetry(A)); dir = getdir(A)))
+ChainRulesCore.rrule(::typeof(asArray), A::AbstractSymmetricArray; kwargs...) = asArray(A; kwargs...), dAt -> (NoTangent(), asSymmetryArray(dAt, Val(getsymmetry(A)); kwargs...))
 
-ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; kwarg...) = asSymmetryArray(A, symmetry; kwarg...), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
+# ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; kwarg...) = asSymmetryArray(A, symmetry; kwarg...), dAt -> (NoTangent(), asArray(dAt; indqn=indqn, indims=indims), NoTangent()...)
+
+ChainRulesCore.rrule(::typeof(asU1Array), A::AbstractArray; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}) = asU1Array(A; dir=dir, indqn=indqn, indims=indims, q=q), dAt -> (NoTangent(), asArray(dAt; indqn=indqn, indims=indims), NoTangent()...)
 
 function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
     function back(dA)
@@ -213,6 +215,56 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
         return NoTangent(), _arraytype(Q)(dA)
     end
     return (L, Q), back
+end
+
+"""
+    svd_back(U, S, V, dU, dS, dV)
+adjoint for SVD decomposition.
+References:
+    https://j-towns.github.io/papers/svd-derivative.pdf
+    https://giggleliu.github.io/2019/04/02/einsumbp.html
+"""
+function ChainRulesCore.rrule(::typeof(svd), A::AbstractArray{T,2}) where {T}
+    U, S, V = svd(A)
+    function back((dU, dS, dV))
+        res = svd_back(U, S, V, dU, dS, dV)
+        return NoTangent(), res
+    end
+    return (U, S, V), back
+end
+
+function svd_back(U::AbstractArray, S::AbstractArray{T}, V, dU, dS, dV; η::Real=1e-12) where T
+    η = T(η)
+    S2 = S .^ 2
+    Sinv = @. S/(S2+η)
+    F = S2' .- S2
+    F ./= (F .^ 2 .+ η)
+
+    res = zero(Diagonal(S))
+    if !(dU == ZeroTangent())
+        UdU = U'*dU
+        J = F.*(UdU)
+        res += (J+J')*Diagonal(S) + Diagonal(1im*imag(diag(UdU)) .* Sinv)
+    end
+    if !(dV == ZeroTangent())
+        VdV = V'*dV
+        K = F.*(VdV)
+        res += Diagonal(S) * (K+K')
+    end
+    if !(dS == ZeroTangent())
+        res += Diagonal(dS)
+    end
+
+    res = U*res*V'
+
+    if !(dU == ZeroTangent()) && size(U, 1) != size(U, 2)
+        res += (dU - U* (U'*dU)) * Diagonal(Sinv) * V'
+    end
+
+    if !(dV == ZeroTangent()) && size(V, 1) != size(V, 2)
+        res = res + U * Diagonal(Sinv) * (dV' - (dV'*V)*V')
+    end
+    res
 end
 
 # Z2
@@ -365,6 +417,18 @@ function bulkbackLQ!(A::U1Array, dA, L, Q, dL, dQ, q)
         idim, jdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkjdims[1:j-1])+1:sum(bulkjdims[1:j])
         CUDA.@allowscalar dA.tensor[ind] = dAm[idim, jdim]
     end
+end
+
+function ChainRulesCore.rrule(::typeof(svd), A::U1Array{T, 2}) where {T}
+    U, S, V = svd(A)
+    function back((dU, dS, dV))
+        dA = copy(A)
+        for i in 1:length(dU.tensor)
+            dA.tensor[i] = svd_back(U.tensor[i], S.tensor[i], V.tensor[i], dU.tensor[i], ZeroTangent(), dV.tensor[i])
+        end
+        return NoTangent(), dA
+    end
+    return (U, S, V), back
 end
 
 """

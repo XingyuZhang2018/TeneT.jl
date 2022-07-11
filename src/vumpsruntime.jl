@@ -91,16 +91,16 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     print("vumps $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry environment load from $(chkp_file) -> ")   
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
     Zygote.@ignore begin
-        AL, AR = map(Array{atype{ComplexF64, 3}, 2}, [env.AL, env.AR])
+        AL, AR, FL, FR = map(Array{atype{ComplexF64, 3}, 2}, [env.AL, env.AR, env.FL, env.FR])
         C = Array{atype{ComplexF64, 2}, 2}(env.C)
         if !(atype <: Union{CuArray, Array})
             intype = _arraytype(M[1,1].tensor[1])
-            AL, C, AR = map(x->map(intype, x), [AL, C, AR])
+            AL, C, AR, FL, FR = map(x->map(intype, x), [AL, C, AR, FL, FR])
         end
     end
-    FL = FLint(AL, M; U1info = U1info)
-    _, FL = leftenv(AL, AL, M, FL)
-    _, FR = rightenv(AR, AR, M, conj(FL))
+    # FL = FLint(AL, M; U1info = U1info)
+    # _, FL = leftenv(AL, AL, M, FL)
+    # _, FR = rightenv(AR, AR, M, conj(FL))
     AL, C, AR, FL, FR
 end
 
@@ -124,14 +124,15 @@ end
 function blocktruc(M, ALu, ARu, Cu, ALd, ARd, Cd; U1info = U1info)
     Ni,Nj = size(ALu)
     χ, D, _ = size(ALu[1]) 
+    @show χ
     indD, indχ, dimsD, dimsχ = U1info
     U1info = (indD, indχ, dimsD, dimsχ)
     BgFL = BgFLint(ALu, M; U1info = U1info)
     _, BgFL = bigleftenv(ALu, ALd, M, BgFL)
     _, BgFR = bigrightenv(ARu, ARd, M, conj(BgFL))
 
-    indqn = [indχ, [-2, -1, 0, 1, 2], indχ, [-2, -1, 0, 1, 2]]
-    indims = [dimsχ, [1, 2, 3, 2, 1], dimsχ, [1, 2, 3, 2, 1]]
+    indqn = [indχ, [-1, 0, 1], indχ, [-1, 0, 1]]
+    indims = [dimsχ, [1, 2, 1], dimsχ, [1, 2, 1]]
     # @threads for k = 1:Ni*Nj
     #     i, j = ktoij(k, Ni, Nj)
     for j in 1:Nj, i in 1:Ni
@@ -219,7 +220,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     env, err = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
     # blocktruc(M, env.AL, env.AR, env.C, env.AL, env.AR, env.C; U1info = U1info)
-    Zygote.@ignore savefile && err < 1e-8 && begin
+    Zygote.@ignore savefile && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
@@ -275,11 +276,11 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     # blocktruc(M, ALu, ARu, Cu, ALd, ARd, Cd; U1info = U1info)
     _, FL = obs_FL(ALu, conj(ALd), M, FL)
     _, FR = obs_FR(ARu, conj(ARd), M, FR)
-    # Zygote.@ignore savefile && begin
-    #     out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
-    #     FLs, FRs = map(x->map(Array, x), [FL, FR])
-    #     save(out_chkp_file_obs, "env", (FLs, FRs))
-    # end
+    Zygote.@ignore savefile && begin
+        out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
+        FLs, FRs = map(x->map(Array, x), [FL, FR])
+        save(out_chkp_file_obs, "env", (FLs, FRs))
+    end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
 end
 
