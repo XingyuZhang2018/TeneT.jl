@@ -142,7 +142,7 @@ return the negative of the array with even indices
 """
 minuseven(A) = (A = Array{Int}(A); A[[i % 2 == 0 for i in 1:length(A)]] .*= -1; A)
 
-getq(s::Int...) = map(s -> [sum(bitarray(i - 1, maxq(s) + 1)) for i = 1:s], s)
+getq(s::Int...) = map(s -> [sum(minuseven(bitarray(i - 1, maxq(s) + 1))) for i = 1:s], s)
 getqrange(s::Tuple{Vararg{Int}}) = getqrange(s...)
 getqrange(s::Int...) = (q = getq(s...); [map(q -> sort(unique(q)), q)...])
 getshift(qrange) = map(q -> abs(q[1]), qrange) .+ 1
@@ -220,46 +220,46 @@ function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}} = get
     U1Array(qn[p], dir, tensor, (D, D), dims[p], 1)
 end
 
-getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
-function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
-    bits = map(x -> ceil(Int, log2(x)), size(A))
-    qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
-    # sum(qn.*Adir) != 0 && return 0.0
-    ind = findfirst(x->x in [qn], A.qn)
-    ind === nothing && return 0.0
-    qlist = [U1selection(size(A, i)) for i = 1:N]
-    qrange = getqrange(size(A)...)
-    shift = getshift(qrange)
-    position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-    Liner = LinearIndices(Tuple(A.dims[ind]))
-    Abdiv = blockdiv(A.dims)
-    CUDA.@allowscalar A.tensor[Abdiv[ind]][Liner[position...]]
-end
+# getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
+# function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
+#     bits = map(x -> ceil(Int, log2(x)), size(A))
+#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
+#     # sum(qn.*Adir) != 0 && return 0.0
+#     ind = findfirst(x->x in [qn], A.qn)
+#     ind === nothing && return 0.0
+#     qlist = [U1selection(size(A, i)) for i = 1:N]
+#     qrange = getqrange(size(A)...)
+#     shift = getshift(qrange)
+#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
+#     Liner = LinearIndices(Tuple(A.dims[ind]))
+#     Abdiv = blockdiv(A.dims)
+#     CUDA.@allowscalar A.tensor[Abdiv[ind]][Liner[position...]]
+# end
 
-setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
-    bits = map(x -> ceil(Int, log2(x)), size(A))
-    qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
-    ind = findfirst(x->x in [qn], A.qn)
-    qlist = [U1selection(size(A, i)) for i = 1:N]
-    qrange = getqrange(size(A)...)
-    shift = getshift(qrange)
-    position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-    Liner = LinearIndices(Tuple(A.dims[ind]))
-    Abdiv = blockdiv(A.dims)
-    CUDA.@allowscalar @view(A.tensor[Abdiv[ind]])[Liner[position...]] = x
-end
+# setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
+# function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
+#     bits = map(x -> ceil(Int, log2(x)), size(A))
+#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
+#     ind = findfirst(x->x in [qn], A.qn)
+#     qlist = [U1selection(size(A, i)) for i = 1:N]
+#     qrange = getqrange(size(A)...)
+#     shift = getshift(qrange)
+#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
+#     Liner = LinearIndices(Tuple(A.dims[ind]))
+#     Abdiv = blockdiv(A.dims)
+#     CUDA.@allowscalar @view(A.tensor[Abdiv[ind]])[Liner[position...]] = x
+# end
 
 function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
     mq = maxq(maxs)
-    q = [sum(bitarray(i - 1, mq + 1)) for i = 1:maxs]
+    q = [sum(minuseven(bitarray(i - 1, mq + 1))) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
 function U1selection(maxs::Int)
     mq = maxq(maxs)
-    q = [sum(bitarray(i - 1, mq + 1)) for i = 1:maxs]
+    q = [sum(minuseven(bitarray(i - 1, mq + 1))) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
@@ -437,14 +437,15 @@ fill into different quantum number,  then dispatch to result tensor after produc
 """
 function timesinfo!(qn, dims, Aindexs, Bindexs, blockidims, blockjdims, blockkdims,
                     Aqn, Adiv, Adir, Atensorsize, Adims, Bqn, Bdiv, Btensorsize, Bdims, q)
-
-    ind_A = [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
-    matrix_j = intersect!(map(x->x[Adiv+1:end], Aqn[ind_A]), map(x->x[1:Bdiv], Bqn))
-    ind_A = [Aqn[Adiv+1:end] in matrix_j for Aqn in Aqn]
-    matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
-    ind_B = [Bqn[1:Bdiv] in matrix_j for Bqn in Bqn]
-    sum(ind_B) == 0 && return
-    matrix_k = unique!(map(x->x[Bdiv+1:end], Bqn[ind_B]))
+    @inbounds @views begin
+        ind_A = [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
+        matrix_j = intersect!(map(x->x[Adiv+1:end], Aqn[ind_A]), map(x->x[1:Bdiv], Bqn))
+        ind_A = [Aqn[Adiv+1:end] in matrix_j for Aqn in Aqn]
+        matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
+        ind_B = [Bqn[1:Bdiv] in matrix_j for Bqn in Bqn]
+        sum(ind_B) == 0 && return
+        matrix_k = unique!(map(x->x[Bdiv+1:end], Bqn[ind_B]))
+    end
 
     Aindex = indexin([[i; j] for i in matrix_i, j in matrix_j], Aqn)
     Bindex = indexin([[j; k] for j in matrix_j, k in matrix_k], Bqn)
