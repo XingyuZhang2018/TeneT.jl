@@ -5,26 +5,27 @@ using VUMPS
 using VUMPS: vumps, vumps_env
 
 @testset "$(Ni)x$(Nj) VUMPSRuntime with $atype{$dtype}" for Ni = [1,2,3], Nj = [1,2,3], atype = [Array, CuArray], dtype = [Float64, ComplexF64]
+    Random.seed!(100)
     @test SquareLattice <: AbstractLattice
 
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        M[i,j] = atype(rand(dtype,2,2,2,2))
-    end
-    rt = SquareVUMPSRuntime(M, Val(:random), 2)
+    M = atype(rand(dtype,2,2,2,2,Ni,Nj))
+    rt = SquareVUMPSRuntime(M, Val(:random), 4)
 end
 
-@testset "$(Ni)x$(Nj) vumps with $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array, CuArray], dtype = [Float64, ComplexF64]
-    M = Array{atype{dtype,4},2}(undef, Ni, Nj)
+@testset "$(Ni)x$(Nj) vumps with $atype{$dtype}" for Ni = [3], Nj = [1], atype = [Array], dtype = [ComplexF64]
+    Random.seed!(100)
+    M = atype(rand(dtype,2,2,2,2,Ni,Nj))
+    m = atype(rand(dtype,2,2,2,2))
     for j = 1:Nj, i = 1:Ni
-        M[i,j] = atype(rand(dtype,2,2,2,2))
+        M[:,:,:,:,i,j] = m
     end
-    rt = SquareVUMPSRuntime(M, Val(:random), 2)
-    env = vumps(rt)
+    rt = SquareVUMPSRuntime(M, Val(:random), 10)
+    env = vumps(rt; maxiter=10)
     @test env !== nothing
 end
 
 @testset "$(Ni)x$(Nj) vumps_env with $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array, CuArray], dtype = [Float64, ComplexF64]
+    Random.seed!(100)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         M[i,j] = atype(rand(dtype,2,2,2,2))
@@ -34,6 +35,7 @@ end
 end
 
 @testset "$(Ni)x$(Nj) obs_env" for Ni = [2], Nj = [2], atype = [Array, CuArray], dtype = [Float64, ComplexF64]
+    Random.seed!(100)
     M = Array{atype{dtype,4},2}(undef, Ni, Nj)
     for j = 1:Nj, i = 1:Ni
         M[i,j] = atype(rand(dtype,2,2,2,2))

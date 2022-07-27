@@ -1,6 +1,6 @@
 module VUMPS
 
-include("cuda_patch.jl")
+include("patch.jl")
 include("environment.jl")
 include("fixedpoint.jl")
 include("vumpsruntime.jl")

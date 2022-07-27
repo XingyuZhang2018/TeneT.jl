@@ -63,35 +63,72 @@ function lqpos!(A)
     return L, Q
 end
 
+function env_norm(F::AbstractArray{T,4}) where T
+    N = size(F, 4)
+    @inbounds @views for i in 1:N
+        F[:,:,:,i] /= norm(F[:,:,:,i]) 
+    end
+    return F
+end
+
+function env_norm(F::AbstractArray{T,3}) where T
+    N = size(F, 3)
+    @inbounds @views for i in 1:N
+        F[:,:,i] /= norm(F[:,:,i]) 
+    end
+    return F
+end
+
+function env_norm(F::AbstractArray{T,2}) where T
+    return F
+end
+
+"""
+    λs[1], Fs[1] = selectpos(λs, Fs)
+
+Select the first positive one of λs and corresponding Fs.
+"""
+function selectpos(λs, Fs)
+    if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
+        # @show "selectpos: λs are degeneracy"
+        # @show λs
+        if real(λs[1]) > 0
+            return λs[1], Fs[1]
+        else
+            return λs[2], Fs[2]
+        end
+    else
+        return λs[1], Fs[1]
+    end
+end
+
 function cellones(A)
-    Ni, Nj = size(A)
-    D = size(A[1,1],1)
-    Cell = Array{_arraytype(A[1,1]){ComplexF64,2},2}(undef, Ni, Nj)
+    χ, Ni, Nj = size(A)[[1,4,5]]
+    atype = _arraytype(A)
+    Cell = atype == Array ? zeros(ComplexF64, χ,χ,Ni,Nj) : CUDA.zeros(ComplexF64, χ,χ,Ni,Nj)
     for j = 1:Nj, i = 1:Ni
-        Cell[i,j] = _mattype(A){ComplexF64}(I, D, D)
+        Cell[:,:,i,j] = atype{ComplexF64}(I, χ, χ)
     end
     return Cell
 end
 
-function ρmap(ρ,Ai,J)
-    Nj = size(Ai,1)
-    for j = 1:Nj
-        jr = J+j-1 - (J+j-1 > Nj)*Nj
-        ρ = ein"(dc,csb),dsa -> ab"(ρ,Ai[jr],conj(Ai[jr]))
+function ρmap(ρ,A)
+    Ni, Nj = size(A)[[4,5]]
+    ρ = copy(ρ)
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        jr = j + 1 - Nj * (j==Nj)
+        ρ[:,:,i,jr] .= ein"(dc,csb),dsa -> ab"(ρ[:,:,i,j], A[:,:,:,i,j], conj(A[:,:,:,i,j]))
     end
     return ρ
 end
 
-function initialA(M, D)
-    Ni, Nj = size(M)
-    arraytype = _arraytype(M[1,1])
-    A = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        d = size(M[i,j], 4)
-        A[i,j] = arraytype(rand(ComplexF64, D, d, D))
-    end
+function initialA(M, χ)
+    D, Ni, Nj = size(M)[[1,5,6]]
+    atype = _arraytype(M)
+    A = atype == Array ? rand(ComplexF64, χ,D,χ,Ni,Nj) : CUDA.rand(ComplexF64, χ,D,χ,Ni,Nj)
     return A
 end
+
 """
     getL!(A,L; kwargs...)
 
@@ -106,16 +143,18 @@ L = cholesky!(ρ).U
 If ρ is not exactly positive definite, cholesky will fail
 """
 function getL!(A,L; kwargs...)
-    Ni,Nj = size(A)
-    for j = 1:Nj, i = 1:Ni
-        λ,ρs,info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
-        @debug "getL eigsolv" λ info sort(abs.(λ))
-        info.converged == 0 && @warn "getL not converged"
-        ρ = ρs[1] + ρs[1]'
+    Ni,Nj = size(A)[[4,5]]
+    λs, ρs, info = eigsolve(ρ->ρmap(ρ,A), L, 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
+    @debug "getL eigsolve" λs info sort(abs.(λs))
+    info.converged == 0 && @warn "getL not converged"
+    _, ρs1 = selectpos(λs, ρs)
+    @inbounds @views for j = 1:Nj, i = 1:Ni
+        ρ = ρs1[:,:,i,j] + ρs1[:,:,i,j]'
         ρ ./= tr(ρ)
         F = svd!(ρ)
         Lo = lmul!(Diagonal(sqrt.(F.S)), F.Vt)
-        _, L[i,j] = qrpos!(Lo)
+        _, R = qrpos!(Lo)
+        L[:,:,i,j] = R
     end
     return L
 end
@@ -127,29 +166,29 @@ Given an MPS tensor `A` and `L` ，return a left-canonical MPS tensor `AL`, a ga
 a scalar factor `λ` such that ``λ AR R = L A``
 """
 function getAL(A,L)
-    Ni,Nj = size(A)
-    arraytype = _arraytype(A[1,1])
-    AL = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    Le = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
+    χ, D, Ni,Nj = size(A)[[1,2,4,5]]
+    AL = similar(A)
+    Le = similar(L)
     λ = zeros(Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        D, d, = size(A[i,j])
-        Q, R = qrpos!(reshape(L[i,j]*reshape(A[i,j], D, d*D), D*d, D))
-        AL[i,j] = reshape(Q, D, d, D)
+    @inbounds @views for j = 1:Nj, i = 1:Ni
+        Q, R = qrpos!(reshape(L[:,:,i,j]*reshape(A[:,:,:,i,j], χ, D*χ), D*χ, χ))
+        AL[:,:,:,i,j] = reshape(Q, χ, D, χ)
         λ[i,j] = norm(R)
-        Le[i,j] = rmul!(R, 1/λ[i,j])
+        Le[:,:,i,j] = rmul!(R, 1/λ[i,j])
     end
     return AL, Le, λ
 end
 
 function getLsped(Le, A, AL; kwargs...)
-    Ni,Nj = size(A)
-    L = Array{_arraytype(A[1,1]){ComplexF64,2},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        λ , Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "getLsped eigsolve" λ info sort(abs.(λ))
+    Ni,Nj = size(A)[[4,5]]
+    L = similar(Le)
+    @inbounds @views for j = 1:Nj, i = 1:Ni
+        λs, Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[:,:,:,i,j],conj(AL[:,:,:,i,j])), Le[:,:,i,j], 1, :LM; ishermitian = false, kwargs...)
+        @debug "getLsped eigsolve" λs info sort(abs.(λs))
         info.converged == 0 && @warn "getLsped not converged"
-        _, L[i,j] = qrpos!(Ls[1])
+        _, Ls1 = selectpos(λs, Ls)
+        _, R = qrpos!(Ls1)
+        L[:,:,i,j] = R
     end
     return L
 end
@@ -183,20 +222,19 @@ a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for
 provided.
 """
 function rightorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
-    Ni,Nj = size(A)
-    arraytype = _arraytype(A[1,1])
-    Ar = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    Lr = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        Ar[i,j] = permutedims(A[i,j],(3,2,1))
-        Lr[i,j] = permutedims(L[i,j],(2,1))
+    Ni,Nj = size(A)[[4,5]]
+    Ar = similar(A)
+    Lr = similar(L)
+    @inbounds @views for j = 1:Nj, i = 1:Ni
+        Ar[:,:,:,i,j] = permutedims(A[:,:,:,i,j],(3,2,1))
+        Lr[:,:,  i,j] = permutedims(L[:,:,  i,j],(2,1))
     end
     AL, L, λ = leftorth(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
-    R = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    AR = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        R[i,j] = permutedims(L[i,j],(2,1))
-        AR[i,j] = permutedims(AL[i,j],(3,2,1))
+    R  = similar(L)
+    AR = similar(AL)
+    @inbounds @views for j = 1:Nj, i = 1:Ni
+         R[:,:,  i,j] = permutedims( L[:,:,  i,j],(2,1))
+        AR[:,:,:,i,j] = permutedims(AL[:,:,:,i,j],(3,2,1))
     end
     return R, AR, λ
 end
@@ -209,34 +247,34 @@ end
 ```
 """
 function LRtoC(L, R)
-    Ni, Nj = size(L)
-    arraytype = _arraytype(L[1,1])
-    C = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    for j in 1:Nj,i in 1:Ni
+    Ni, Nj = size(L)[[3,4]]
+    C = similar(L)
+    @inbounds @views for j in 1:Nj,i in 1:Ni
         jr = j + 1 - (j + 1 > Nj) * Nj
-        C[i,j] = L[i,j] * R[i,jr]
+        C[:,:,i,j] .= L[:,:,i,j] * R[:,:,i,jr]
     end
     return C
 end
 
 """
-    FLm = FLmap(ALi, ALip, Mi, FL, J)
+    FLm = FLmap(ALu, ALd, M, FL)
 
-ALip means ALᵢ₊₁
 ```
-  ┌──        ┌──  ALᵢⱼ  ── ALᵢⱼ₊₁   ──   ...          a ────┬──── c 
-  │          │     │        │                         │     b     │ 
- FLm   =   FLᵢⱼ ─ Mᵢⱼ   ── Mᵢⱼ₊₁    ──   ...          ├─ d ─┼─ e ─┤ 
-  │          │     │        │                         │     g     │ 
-  ┕──        ┕──  ALᵢ₊₁ⱼ ─ ALᵢ₊₁ⱼ₊₁ ──   ...          f ────┴──── h 
+  ┌──       ┌──  ALuᵢⱼ  ──                     a ────┬──── c 
+  │         │     │                            │     b     │ 
+FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d ─┼─ e ─┤ 
+  │         │     │                            │     g     │ 
+  └──       └──  ALdᵢᵣⱼ  ─                     f ────┴──── h 
 ```
 """
-function FLmap(ALi, ALip, Mi, FL, J)
-    Nj = size(ALi,1)
+
+function FLmap(ALu, ALd, M, FL, i)
+    Ni, Nj = size(M)[[5,6]]
     FLm = copy(FL)
-    for j=1:Nj
-        jr = J+j-1 - (J+j-1 > Nj)*Nj
-        FLm = ein"((adf,abc),dgeb),fgh -> ceh"(FLm,ALi[jr],Mi[jr],ALip[jr])
+    ir = i + 1 - Ni * (i==Ni)
+    @inbounds @views for j in 1:Nj
+        jr = j + 1 - Nj * (j==Nj)
+        FLm[:,:,:,jr] .= ein"((adf,abc),dgeb),fgh -> ceh"(FL[:,:,:,j],ALu[:,:,:,i,j],M[:,:,:,:,i,j],ALd[:,:,:,ir,j])
     end
     return FLm
 end
@@ -246,44 +284,35 @@ end
 
 ARip means ARᵢ₊₁
 ```
- ──┐       ... ─── ARᵢⱼ₋₁  ── ARᵢⱼ  ──┐            a ────┬──── c 
-   │                │          │      │            │     b     │ 
-──FRm  =   ... ──── Mᵢⱼ₋₁  ── Mᵢⱼ  ──FRᵢⱼ          ├─ d ─┼─ e ─┤ 
-   │                │          │      │            │     g     │ 
- ──┘       ... ─ ARᵢ₊₁ⱼ₋₁ ─ ARᵢ₊₁ⱼ  ──┘            f ────┴──── h 
+    ── ARuᵢⱼ  ──┐          ──┐          a ────┬──── c 
+        │       │            │          │     b     │ 
+    ── Mᵢⱼ   ──FRᵢⱼ  =    ──FRᵢⱼ₋₁      ├─ d ─┼─ e ─┤ 
+        │       │            │          │     g     │ 
+    ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h 
 ```
 """
-function FRmap(ARi, ARip, Mi, FR, J)
-    Nj = size(ARi,1)
+function FRmap(ARu, ARd, M, FR, i)
+    Ni, Nj = size(M)[[5,6]]
     FRm = copy(FR)
-    for j=1:Nj
-        jr = J-(j-1) + (J-(j-1) < 1)*Nj
-        FRm = ein"((ceh,abc),dgeb),fgh -> adf"(FRm,ARi[jr],Mi[jr],ARip[jr])
+    ir = i + 1 - Ni * (i==Ni)
+    @inbounds @views for j in 1:Nj
+        jr = j - 1 + Nj * (j==1)
+        FRm[:,:,:,jr] .= ein"((ceh,abc),dgeb),fgh -> adf"(FR[:,:,:,j],ARu[:,:,:,i,j],M[:,:,:,:,i,j],ARd[:,:,:,ir,j])
     end
     return FRm
 end
 
 function FLint(AL, M)
-    Ni,Nj = size(AL)
-    arraytype = _arraytype(AL[1,1])
-    FL = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        D = size(AL[i,j],1)
-        dL = size(M[i,j],1)
-        FL[i,j] = arraytype(rand(ComplexF64, D, dL, D))
-    end
+    χ, D, Ni, Nj = size(AL)[[1,2,4,5]]
+    atype = _arraytype(AL)
+    FL = atype == Array ? rand(ComplexF64, χ, D, χ, Ni, Nj) : CUDA.rand(ComplexF64, χ, D, χ, Ni, Nj)
     return FL
 end
 
 function FRint(AR, M)
-    Ni,Nj = size(AR)
-    arraytype = _arraytype(AR[1,1])
-    FR = Array{arraytype{ComplexF64,3},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        D = size(AR[i,j],1)
-        dR = size(M[i,j],3)
-        FR[i,j] = arraytype(rand(ComplexF64, D, dR, D))
-    end
+    χ, D, Ni, Nj = size(AR)[[1,2,4,5]]
+    atype = _arraytype(AR)
+    FR = atype == Array ? rand(ComplexF64, χ, D, χ, Ni, Nj) : CUDA.rand(ComplexF64, χ, D, χ, Ni, Nj)
     return FR
 end
 
@@ -293,35 +322,22 @@ end
 Compute the left environment tensor for MPS A and MPO M, by finding the left fixed point
 of ALu - M - ALd contracted along the physical dimension.
 ```
- ┌──  ALuᵢⱼ  ── ALuᵢⱼ₊₁   ──   ...         ┌── 
- │     │        │                          │   
-FLᵢⱼ ─ Mᵢⱼ   ── Mᵢⱼ₊₁     ──   ...  = λLᵢⱼ FLᵢⱼ 
- │     │        │                          │   
- ┕──  ALdᵢᵣⱼ  ─ ALdᵢᵣⱼ₊₁  ──   ...         ┕── 
+ ┌──  ALuᵢⱼ  ──          ┌── 
+ │     │                 │   
+FLᵢⱼ ─ Mᵢⱼ   ──   = λLᵢⱼ FLᵢⱼ₊₁   
+ │     │                 │   
+ └──  ALdᵢᵣⱼ  ─          └── 
 ```
 """
 leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = leftenv!(ALu, ALd, M, copy(FL); kwargs...) 
 function leftenv!(ALu, ALd, M, FL; kwargs...) 
-    Ni,Nj = size(ALu)
-    λL = zeros(eltype(FL[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], X, j), FL[i,j], 1, :LM; maxiter=1000 , ishermitian = false, kwargs...)
-        @debug "leftenv! eigsolv" λLs info sort(abs.(λLs))
+    Ni = size(M, 5)
+    λL = zeros(eltype(FL),Ni)
+    for i in 1:Ni
+        λLs, FL1s, info = eigsolve(X->FLmap(ALu, ALd, M, X, i), FL[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
-        if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
-            if real(λLs[1]) > 0
-                FL[i,j] = FL1s[1]
-                λL[i,j] = λLs[1]
-            else
-                FL[i,j] = FL1s[2]
-                λL[i,j] = λLs[2]
-            end
-        else
-            FL[i,j] = FL1s[1]
-            λL[i,j] = λLs[1]
-        end
+        λL[i], FL[:,:,:,i,:] = selectpos(λLs, FL1s)
     end
     return λL, FL
 end
@@ -332,35 +348,22 @@ end
 Compute the right environment tensor for MPS A and MPO M, by finding the left fixed point
 of AR - M - conj(AR) contracted along the physical dimension.
 ```
-   ... ─── ARuᵢⱼ₋₁ ── ARuᵢⱼ  ──┐          ──┐   
-            │          │       │            │  
-   ... ──── Mᵢⱼ₋₁  ── Mᵢⱼ   ──FRᵢⱼ  = λRᵢⱼ──FRᵢⱼ
-            │          │       │            │  
-   ... ─   ARdᵢᵣⱼ₋₁ ─ ARdᵢᵣⱼ ──┘          ──┘  
+    ── ARuᵢⱼ  ──┐          ──┐   
+        │       │            │  
+    ── Mᵢⱼ   ──FRᵢⱼ  = λRᵢⱼ──FRᵢⱼ₋₁
+        │       │            │  
+    ── ARdᵢᵣⱼ ──┘          ──┘  
 ```
 """
 rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = rightenv!(ARu, ARd, M, copy(FR); kwargs...) 
 function rightenv!(ARu, ARd, M, FR; kwargs...) 
-    Ni,Nj = size(ARu)
-    λR = zeros(eltype(FR[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], X, j), FR[i,j], 1, :LM;maxiter=1000 , ishermitian = false, kwargs...)
-        @debug "rightenv! eigsolv" λRs info sort(abs.(λRs))
+    Ni = size(M, 5)
+    λR = zeros(eltype(FR),Ni)
+    for i in 1:Ni
+        λRs, FR1s, info= eigsolve(X->FRmap(ARu, ARd, M, X, i), FR[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
-        if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
-            @show λRs
-            if real(λRs[1]) > 0
-                FR[i,j] = FR1s[1]
-                λR[i,j] = λRs[1]
-            else
-                FR[i,j] = FR1s[2]
-                λR[i,j] = λRs[2]
-            end
-        else
-            FR[i,j] = FR1s[1]
-            λR[i,j] = λRs[1]
-        end
+        λR[i], FR[:,:,:,i,:] = selectpos(λRs, FR1s)
     end
     return λR, FR
 end
@@ -369,23 +372,20 @@ end
     ACm = ACmap(ACij, FLj, FRj, Mj, II)
 
 ```
-                                ┌─────── ACᵢⱼ ─────┐
-                                │        │         │             a ────┬──── c   
-┌─────── ACm  ─────┐      =     FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ          │     b     │ 
-│        │         │            │        │         │             ├─ d ─┼─ e ─┤ 
-                                FLᵢ₊₁ⱼ ─ Mᵢ₊₁ⱼ ──  FRᵢ₊₁ⱼ        │     g     │ 
-                                │        │         │             f ────┴──── h 
-                                .        .         .
-                                .        .         .
-                                .        .         .
+                                ┌─────── ACᵢⱼ ─────┐              a ────┬──── c  
+┌───── ACᵢ₊₁ⱼ ─────┐            │        │         │              │     b     │ 
+│        │         │      =     FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ           ├─ d ─┼─ e ─┤ 
+                                │        │         │              │     g     │ 
+                                                                  f ────┴──── h 
+                                                               
 ```
 """
-function ACmap(ACij, FLj, FRj, Mj, II)
-    Ni = size(FLj,1)
-    ACm = copy(ACij)
-    for i=1:Ni
-        ir = II+i-1 - (II+i-1 > Ni)*Ni
-        ACm = ein"((adf,abc),dgeb),ceh -> fgh"(FLj[ir],ACm,Mj[ir],FRj[ir])
+function ACmap(AC, FL, FR, M, j)
+    Ni = size(M, 5)
+    ACm = copy(AC)
+    @inbounds @views for i in 1:Ni
+        ir = i + 1 - Ni * (i==Ni)
+        ACm[:,:,:,ir] .= ein"((adf,abc),dgeb),ceh -> fgh"(FL[:,:,:,i,j],AC[:,:,:,i],M[:,:,:,:,i,j],FR[:,:,:,i,j])
     end
     return ACm
 end
@@ -394,23 +394,20 @@ end
     Cmap(Cij, FLjp, FRj, II)
 
 ```
-                    ┌────Cᵢⱼ ───┐         
-                    │           │            a ─── b 
-┌──── Cm ───┐   =   FLᵢⱼ₊₁ ──── FRᵢⱼ         │     │
-│           │       │           │            ├─ c ─┤
-                    FLᵢ₊₁ⱼ₊₁ ── FRᵢ₊₁ⱼ       │     │
-                    │           │            d ─── e
-                    .           .     
-                    .           .     
-                    .           .     
+                    ┌────Cᵢⱼ ───┐            a ─── b
+┌── Cᵢ₊₁ⱼ ──┐       │           │            │     │
+│           │  =   FLᵢⱼ₊₁ ──── FRᵢⱼ          ├─ c ─┤
+                    │           │            │     │
+                                             d ─── e                                    
 ```
 """
-function Cmap(Cij, FLjp, FRj, II)
-    Ni = size(FLjp,1)
-    Cm = copy(Cij)
-    for i=1:Ni
-        ir = II+i-1 - (II+i-1 > Ni)*Ni
-        Cm = ein"(acd,ab),bce -> de"(FLjp[ir],Cm,FRj[ir])
+function Cmap(C, FL, FR, j)
+    Ni,Nj = size(FL)[[4,5]]
+    Cm = copy(C)
+    jr = j + 1 - Nj * (j==Nj)
+    @inbounds @views for i in 1:Ni
+        ir = i + 1 - Ni * (i==Ni)
+        Cm[:,:,ir] .= ein"(acd,ab),bce -> de"(FL[:,:,:,i,jr],C[:,:,i],FR[:,:,:,i,j])
     end
     return Cm
 end
@@ -421,38 +418,21 @@ end
 Compute the up environment tensor for MPS `FL`,`FR` and MPO `M`, by finding the up fixed point
         of `FL - M - FR` contracted along the physical dimension.
 ```
-┌─────── ACᵢⱼ ─────┐
-│        │         │          
-FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ
+┌─────── ACᵢⱼ ─────┐         
+│        │         │         =  λACᵢⱼ ┌─── ACᵢ₊₁ⱼ ──┐
+FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ               │      │      │   
 │        │         │   
-FLᵢ₊₁ⱼ ─ Mᵢ₊₁ⱼ ──  FRᵢ₊₁ⱼ  =  λACᵢⱼ ┌──── ACᵢⱼ ───┐
-│        │         │                │      │      │  
-.        .         .
-.        .         .
-.        .         .
 ```
 """
 ACenv(AC, FL, M, FR; kwargs...) = ACenv!(copy(AC), FL, M, FR; kwargs...)
 function ACenv!(AC, FL, M, FR; kwargs...)
-    Ni,Nj = size(AC)
-    λAC = zeros(eltype(AC[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j], i), AC[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
+    Nj = size(M, 6)
+    λAC = zeros(eltype(AC),Nj)
+    for j in 1:Nj
+        λACs, ACs, info = eigsolve(X->ACmap(X, FL, FR, M, j), AC[:,:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
         info.converged == 0 && @warn "ACenv Not converged"
-        if length(λACs) > 1 && norm(abs(λACs[1]) - abs(λACs[2])) < 1e-12
-            @show λACs
-            if real(λACs[1]) > 0
-                AC[i,j] = ACs[1]
-                λAC[i,j] = λACs[1]
-            else
-                AC[i,j] = ACs[2]
-                λAC[i,j] = λACs[2]
-            end
-        else
-            AC[i,j] = ACs[1]
-            λAC[i,j] = λACs[1]
-        end
+        λAC[j], AC[:,:,:,:,j] = selectpos(λACs, ACs)
     end
     return λAC, AC
 end
@@ -464,58 +444,49 @@ Compute the up environment tensor for MPS `FL` and `FR`, by finding the up fixed
     of `FL - FR` contracted along the physical dimension.
 ```
 ┌────Cᵢⱼ ───┐
-│           │          
-FLᵢⱼ₊₁ ──── FRᵢⱼ
+│           │       =  λCᵢⱼ ┌──Cᵢⱼ ─┐
+FLᵢⱼ₊₁ ──── FRᵢⱼ            │       │
 │           │   
-FLᵢ₊₁ⱼ₊₁ ── FRᵢ₊₁ⱼ   =  λCᵢⱼ ┌──Cᵢⱼ ─┐
-│           │                │       │  
-.           .     
-.           .     
-.           .     
 ```
 """
 Cenv(C, FL, FR; kwargs...) = Cenv!(copy(C), FL, FR; kwargs...)
 function Cenv!(C, FL, FR; kwargs...)
-    Ni,Nj = size(C)
-    λC = zeros(eltype(C[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        jr = j + 1 - (j==Nj) * Nj
-        λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j], i), C[i,j], 1, :LM; maxiter=1000 ,ishermitian = false, kwargs...)
+    Nj = size(C, 4)
+    λC = zeros(eltype(C),Nj)
+    for j in 1:Nj
+        λCs, Cs, info = eigsolve(X->Cmap(X, FL, FR, j), C[:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
         info.converged == 0 && @warn "Cenv Not converged"
-        if length(λCs) > 1 && norm(abs(λCs[1]) - abs(λCs[2])) < 1e-12
-            @show λCs
-            if real(λCs[1]) > 0
-                C[i,j] = Cs[1]
-                λC[i,j] = λCs[1]
-            else
-                C[i,j] = Cs[2]
-                λC[i,j] = λCs[2]
-            end
-        else
-            C[i,j] = Cs[1]
-            λC[i,j] = λCs[1]
-        end
+        λC[j], C[:,:,:,j] = selectpos(λCs, Cs)
     end
     return λC, C
 end
 
-function ACCtoAL(ACij,Cij)
-    D,d, = size(ACij)
-    QAC, RAC = qrpos(reshape(ACij,(D*d, D)))
-    QC, RC = qrpos(Cij)
-    errL = norm(RAC-RC)
-    # @show errL
-    reshape(QAC*QC', (D, d, D)), errL
+function ACCtoAL(AC, C)
+    χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
+    errL = 0.0
+    AL = similar(AC)
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        QAC, RAC = qrpos(reshape(AC[:,:,:,i,j],(χ*D, χ)))
+         QC, RC  = qrpos(C[:,:,i,j])
+        errL += norm(RAC-RC)
+        AL[:,:,:,i,j] .= reshape(QAC*QC', (χ, D, χ))
+    end
+    return AL, errL
 end
 
-function ACCtoAR(ACij,Cijr)
-    D,d, = size(ACij)
-    LAC, QAC = lqpos(reshape(ACij,(D, d*D)))
-    LC, QC = lqpos(Cijr)
-    errR = norm(LAC-LC)
-    # @show errR
-    reshape(QC'*QAC, (D, d, D)), errR
+function ACCtoAR(AC, C)
+    χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
+    errR = 0.0
+    AR = similar(AC)
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        jr = j - 1 + (j==1)*Nj
+        LAC, QAC = lqpos(reshape(AC[:,:,:,i,j],(χ, D*χ)))
+         LC, QC  = lqpos(C[:,:,i,jr])
+        errR += norm(LAC-LC)
+        AR[:,:,:,i,j] .= reshape(QC'*QAC, (χ, D, χ))
+    end
+    return AR, errR
 end
 
 """
@@ -535,9 +506,12 @@ function itoir(i,Ni,Nj)
 end
 
 function ALCtoAC(AL,C)
-    Ni,Nj = size(AL)
-    ACij = [ein"asc,cb -> asb"(AL[i],C[i]) for i=1:Ni*Nj]
-    reshape(ACij,Ni,Nj)
+    AC = similar(AL)
+    Ni,Nj = size(AL)[[4,5]]
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        AC[:,:,:,i,j] .= ein"asc,cb -> asb"(AL[:,:,:,i,j], C[:,:,i,j]) 
+    end
+    return AC
 end
 
 """
@@ -551,13 +525,8 @@ QR factorization to get `AL` and `AR` from `AC` and `C`
 ````
 """
 function ACCtoALAR(AC, C)
-    Ni,Nj = size(AC)
-    ALijerrL = [ACCtoAL(AC[i],C[i]) for i=1:Ni*Nj]
-    AL = reshape([ALijerrL[i][1] for i=1:Ni*Nj],Ni,Nj)
-    errL = Zygote.@ignore sum([ALijerrL[i][2] for i=1:Ni*Nj])
-    ARijerrR = [ACCtoAR(AC[i],C[itoir(i,Ni,Nj)]) for i=1:Ni*Nj]
-    AR = reshape([ARijerrR[i][1] for i=1:Ni*Nj],Ni,Nj)
-    errR = Zygote.@ignore sum([ARijerrR[i][2] for i=1:Ni*Nj])
+    AL, errL = ACCtoAL(AC, C)
+    AR, errR = ACCtoAR(AC, C)
     return AL, AR, errL, errR
 end
 
@@ -581,362 +550,18 @@ MAC2 =  FL─ M ──FR  =  λAC  │     │
 ````
 """
 function error(AL,C,AR,FL,M,FR)
-    Ni,Nj = size(AL)
+    Ni,Nj = size(AL)[[4,5]]
     AC = ALCtoAC(AL, C)
     err = 0
-    for j = 1:Nj, i = 1:Ni
-        MAC = ACmap(AC[i,j], FL[:,j], FR[:,j], M[:,j], i)
-        MAC -= ein"(apc,dpc),dsb -> asb"(MAC,conj(AR[i,j]),AR[i,j])
-        err += norm(MAC)
+    for _ in 1:Ni
+        for j in 1:Nj
+            AC[:,:,:,:,j] = ACmap(AC[:,:,:,:,j], FL, FR, M, j)
+        end
+    end
+    MAC = AC
+    @inbounds @views for j = 1:Nj, i = 1:Ni
+        MAC[:,:,:,i,j] -= ein"(apc,dpc),dsb -> asb"(MAC[:,:,:,i,j],conj(AR[:,:,:,i,j]),AR[:,:,:,i,j])
+        err += norm(MAC[:,:,:,i,j])
     end
     return err
-end
-
-"""
-    λL, FL = obs_FL(ALu, ALd, M, FL = FLint(AL,M); kwargs...)
-
-Compute the observable left environment tensor for MPS A and MPO M, by finding the left fixed point
-of AL - M - conj(AL) contracted along the physical dimension.
-```
- ┌──  ALuᵢⱼ  ── ALuᵢⱼ₊₁   ──   ...         ┌── 
- │     │        │                          │   
-FLᵢⱼ ─ Mᵢⱼ   ── Mᵢⱼ₊₁     ──   ...  = λLᵢⱼ FLᵢⱼ 
- │     │        │                          │   
- ┕──  ALdᵢᵣⱼ  ─ ALdᵢᵣⱼ₊₁  ──   ...         ┕── 
-```
-"""
-obs_FL(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = obs_FL!(ALu, ALd, M, copy(FL); kwargs...) 
-function obs_FL!(ALu, ALd, M, FL; kwargs...) 
-    Ni,Nj = size(ALu)
-    λL = zeros(eltype(FL[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = Ni + 1 - i
-        λLs, FL1s, info= eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X, j), FL[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "obs_FL eigsolve" λLs info sort(abs.(λLs))
-        info.converged == 0 && @warn "obs_FL Not converged"
-        if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
-            if real(λLs[1]) > 0
-                FL[i,j] = FL1s[1]
-                λL[i,j] = λLs[1]
-            else
-                FL[i,j] = FL1s[2]
-                λL[i,j] = λLs[2]
-            end
-        else
-            FL[i,j] = FL1s[1]
-            λL[i,j] = λLs[1]
-        end
-    end
-    return λL, FL
-end
-
-"""
-    λR, FR = obs_FR(ARu, ARd, M, FR = FRint(ARu,M); kwargs...)
-
-Compute the observable right environment tensor for MPS A and MPO M, by finding the left fixed point
-of AR - M - conj(AR) contracted along the physical dimension.
-```
-   ... ─── ARuᵢⱼ₋₁ ── ARuᵢⱼ  ──┐          ──┐   
-            │          │       │            │  
-   ... ──── Mᵢⱼ₋₁  ── Mᵢⱼ   ──FRᵢⱼ  = λRᵢⱼ──FRᵢⱼ
-            │          │       │            │  
-   ... ─   ARdᵢᵣⱼ₋₁ ─ ARdᵢᵣⱼ ──┘          ──┘  
-```
-"""
-obs_FR(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = obs_FR!(ARu, ARd, M, copy(FR); kwargs...) 
-function obs_FR!(ARu, ARd, M, FR; kwargs...) 
-    Ni,Nj = size(ARu)
-    λR = zeros(eltype(FR[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = Ni + 1 - i
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X, j), FR[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "obs_FR! eigsolve" λRs info sort(abs.(λRs))
-        info.converged == 0 && @warn "obs_FR! Not converged"
-        if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
-            @show λRs
-            if real(λRs[1]) > 0
-                FR[i,j] = FR1s[1]
-                λR[i,j] = λRs[1]
-            else
-                FR[i,j] = FR1s[2]
-                λR[i,j] = λRs[2]
-            end
-        else
-            FR[i,j] = FR1s[1]
-            λR[i,j] = λRs[1]
-        end
-    end
-    return λR, FR
-end
-
-function BgFLint(AL, M)
-    Ni,Nj = size(AL)
-    arraytype = _arraytype(AL[1,1])
-    BgFL = Array{arraytype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        D1 = size(AL[i,j],1)
-        D2 = size(AL[irr,j],1)
-        dL1 = size(M[i,j],1)
-        dL2 = size(M[ir,j],1)
-        BgFL[i,j] = arraytype(rand(ComplexF64, D1, dL1, dL2, D2))
-    end
-    return BgFL
-end
-
-"""
-    BgFLm = BgFLmap(ALi, ALip, Mi, Mip, BgFLij, J)
-
-ALip means ALᵢ₊₂
-Mip means Mᵢ₊₁
-```
-  ┌──        ┌──  ALᵢⱼ  ── ALᵢⱼ₊₁    ──   ...       a ────┬──── c
-  │          │     │        │                       │     b     │
-  │          │  ─ Mᵢⱼ   ── Mᵢⱼ₊₁     ──   ...       ├─ d ─┼─ e ─┤
-BgFLm   =  BgFLᵢⱼ  │        │                       │     f     │
-  │          │  ─ Mᵢ₊₁ⱼ ── Mᵢ₊₁ⱼ₊₁   ──   ...       ├─ g ─┼─ h ─┤
-  │          │     │        │                       │     j     │
-  ┕──        ┕──  ALᵢ₊₂ⱼ ─ ALᵢ₊₂ⱼ₊₁  ──   ...       i ────┴──── k 
-```
-"""
-function BgFLmap(ALi, ALip, Mi, Mip, BgFLij, J)
-    Nj = size(ALi,1)
-    BgFLm = copy(BgFLij)
-    for j=1:Nj
-        jr = J+j-1 - (J+j-1 > Nj)*Nj
-        BgFLm = ein"(((adgi,abc),dfeb),gjhf),ijk -> cehk"(BgFLm,ALi[jr],Mi[jr],Mip[jr],ALip[jr])
-    end
-    return BgFLm
-end
-
-"""
-    λL, BgFL = bigleftenv(ALu, ALd, M, BgFL = BgFLint(AL,M); kwargs...)
-
-Compute the up and down left environment tensor for MPS A and MPO M, by finding the left fixed point
-of AL - M - M - conj(AL) contracted along the physical dimension.
-```
-   ┌──  ALuᵢⱼ ── ALuᵢⱼ₊₁   ──   ...           ┌── 
-   │     │        │                           │   
-   │  ─ Mᵢⱼ   ── Mᵢⱼ₊₁     ──   ...           │   
- BgFLᵢⱼ  │        │                   = λLᵢⱼ BgFLᵢⱼ
-   │  ─ Mᵢ₊₁ⱼ ── Mᵢ₊₁ⱼ₊₁   ──   ...           │   
-   │     │        │                           │   
-   ┕── ALdᵢ₊₂ⱼ ─ ALdᵢ₊₂ⱼ₊₁ ──   ...           ┕── 
-```
-"""
-bigleftenv(ALu, ALd, M, BgFL = BgFLint(ALu,M); kwargs...) = bigleftenv!(ALu, ALd, M, copy(BgFL); kwargs...)
-function bigleftenv!(ALu, ALd, M, BgFL; kwargs...)
-    Ni,Nj = size(ALu)
-    λL = zeros(eltype(BgFL[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        λLs, BgFL1s, info= eigsolve(X->BgFLmap(ALu[i,:], ALd[irr,:], M[i,:], M[ir,:], X, j), BgFL[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "bigleftenv! eigsolve" λLs info sort(abs.(λLs))
-        if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
-            if real(λLs[1]) > 0
-                BgFL[i,j] = BgFL1s[1]
-                λL[i,j] = λLs[1]
-            else
-                BgFL[i,j] = BgFL1s[2]
-                λL[i,j] = λLs[2]
-            end
-        else
-            BgFL[i,j] = BgFL1s[1]
-            λL[i,j] = λLs[1]
-        end
-    end
-    return λL, BgFL
-end
-
-function BgFRint(AR, M)
-    Ni,Nj = size(AR)
-    arraytype = _arraytype(AR[1,1])
-    BgFR = Array{arraytype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        D1 = size(AR[i,j],3)
-        D2 = size(AR[irr,j],3)
-        dR1 = size(M[i,j],3)
-        dR2 = size(M[ir,j],3)
-        BgFR[i,j] = arraytype(rand(ComplexF64, D1, dR1, dR2, D2))
-    end
-    return BgFR
-end
-
-"""
-    FRm = FRmap(ARi, ARip, Mi, FR, J)
-
-ARip means ARᵢ₊₁
-```
- ──┐          ...  ─── ARᵢⱼ₋₁  ── ARᵢⱼ  ──┐        a ────┬──── c
-   │                    │          │      │        │     b     │
- ──│          ... ──── Mᵢⱼ₋₁  ──  Mᵢⱼ   ──│        ├─ d ─┼─ e ─┤
-  BgFRm   =             │          │     BgFRm     │     f     │
- ──│          ... ──── Mᵢ₊₁ⱼ₋₁ ── Mᵢ₊₁ⱼ ──│        ├─ g ─┼─ h ─┤
-   │                    │          │      │        │     j     │
- ──┘          ...  ─ ARᵢ₊₂ⱼ₋₁ ─── ARᵢ₊₂ⱼ──┘        i ────┴──── k 
-```
-"""
-function BgFRmap(ARi, ARip, Mi, Mip, BgFR, J)
-    Nj = size(ARi,1)
-    BgFRm = copy(BgFR)
-    for j=1:Nj
-        jr = J-(j-1) + (J-(j-1) < 1)*Nj
-        BgFRm = ein"(((cehk,abc),dfeb),gjhf),ijk -> adgi"(BgFRm,ARi[jr],Mi[jr],Mip[jr],ARip[jr])
-    end
-    return BgFRm
-end
-
-"""
-    λR, BgFR = bigrightenv(ARu, ARd, M, BgFR = BgFRint(ARu,M); kwargs...)
-
-Compute the up and down right environment tensor for MPS A and MPO M, by finding the left fixed point
-of AR - M - M - conj(AR) contracted along the physical dimension.
-```
-     ──┐          ...  ─── ARᵢⱼ₋₁  ── ARᵢⱼ  ──┐ 
-       │                    │          │      │ 
-     ──│          ... ──── Mᵢⱼ₋₁  ──  Mᵢⱼ   ──│
-λRᵢⱼ BgFRᵢⱼ   =             │          │     BgFRᵢⱼ
-     ──│          ... ──── Mᵢ₊₁ⱼ₋₁ ── Mᵢ₊₁ⱼ ──│
-       │                    │          │      │     
-     ──┘          ...  ─ ARᵢ₊₂ⱼ₋₁ ─── ARᵢ₊₂ⱼ──┘ 
-```
-"""
-bigrightenv(ARu, ARd, M, BgFR = BgFRint(ARu,M); kwargs...) = bigrightenv!(ARu, ARd, M, copy(BgFR); kwargs...)
-function bigrightenv!(ARu, ARd, M, BgFR; kwargs...)
-    Ni,Nj = size(ARu)
-    λR = zeros(eltype(BgFR[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        irr = i + 2 - Ni * (i + 2 > Ni)
-        λRs, BgFR1s, info= eigsolve(X->BgFRmap(ARu[i,:], ARd[irr,:], M[i,:], M[ir,:], X, j), BgFR[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "bigrightenv eigsolve" λRs info sort(abs.(λRs))
-        if length(λRs) > 1 && norm(abs(λRs[1]) - abs(λRs[2])) < 1e-12
-            @show λRs
-            if real(λRs[1]) > 0
-                BgFR[i,j] = BgFR1s[1]
-                λR[i,j] = λRs[1]
-            else
-                BgFR[i,j] = BgFR1s[2]
-                λR[i,j] = λRs[2]
-            end
-        else
-            BgFR[i,j] = BgFR1s[1]
-            λR[i,j] = λRs[1]
-        end
-    end
-    return λR, BgFR
-end
-
-function norm_FLint(AL)
-    Ni,Nj = size(AL)
-    arraytype = _arraytype(AL[1,1])
-    norm_FL = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        D = size(AL[i,j],1)
-        norm_FL[i,j] = arraytype(rand(ComplexF64, D, D))
-    end
-    return norm_FL
-end
-
-"""
-    FL_normm = norm_FLmap(ALui, ALdi, FL_norm, J)
-
-```
-   ┌──        ┌──  ALuᵢⱼ ── ALuᵢⱼ₊₁ ──  ...     a───┬───c   
-  FLm   =    FLm     │        │                 │   b   │ 
-   ┕──        ┕──  ALdᵢⱼ ── ALdᵢⱼ₊₁ ──  ...     d───┴───e  
-```
-"""
-function norm_FLmap(ALui, ALdi, FL_norm, J)
-    Nj = size(ALui,1)
-    FL_normm = copy(FL_norm)
-    for j=1:Nj
-        jr = J+j-1 - (J+j-1 > Nj)*Nj
-        FL_normm = ein"(ad,abc),dbe -> ce"(FL_normm,ALui[jr],ALdi[jr])
-    end
-    return FL_normm
-end
-
-norm_FL(ALu, ALd, FL_norm = norm_FLint(ALu); kwargs...) = norm_FL!(ALu, ALd, FL_norm; kwargs...)
-function norm_FL!(ALu, ALd, FL_norm; kwargs...)
-    Ni,Nj = size(ALu)
-    λL = zeros(eltype(FL_norm[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        λLs, FL_norms, info= eigsolve(X->norm_FLmap(ALu[i,:], ALd[i,:], X, j), FL_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "norm_FL eigsolve" λLs info sort(abs.(λLs))
-        if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
-            if real(λLs[1]) > 0
-                FL_norm[i,j] = FL_norms[1]
-                λL[i,j] = λLs[1]
-            else
-                FL_norm[i,j] = FL_norms[2]
-                λL[i,j] = λLs[2]
-            end
-        else
-            FL_norm[i,j] = FL_norms[1]
-            λL[i,j] = λLs[1]
-        end
-    end
-    return λL, FL_norm
-end
-
-function norm_FRint(AR)
-    Ni,Nj = size(AR)
-    arraytype = _arraytype(AR[1,1])
-    norm_FR = Array{arraytype{ComplexF64,2},2}(undef, Ni, Nj)
-    for j = 1:Nj, i = 1:Ni
-        D = size(AR[i,j],1)
-        norm_FR[i,j] = arraytype(rand(ComplexF64, D, D))
-    end
-    return norm_FR
-end
-
-"""
-    FR_normm = norm_FRmap(ARui, ARdi, FR_norm, J)
-
-```
-──┐       ... ─── ARᵢⱼ₋₁  ── ARᵢⱼ  ──┐      a───┬───c   
- FRm  =            │          │     FRm     │   b   │ 
-──┘       ... ─── ARᵢⱼ₋₁ ─── ARᵢⱼ  ──┘      d───┴───e  
-```
-"""
-function norm_FRmap(ARui, ARdi, FR_norm, J)
-    Nj = size(ARui,1)
-    FR_normm = copy(FR_norm)
-    for j=1:Nj
-        jr = J-(j-1) + (J-(j-1) < 1)*Nj
-        FR_normm = ein"(ce,abc),dbe -> ad"(FR_normm,ARui[jr],ARdi[jr])
-    end
-    return FR_normm
-end
-
-norm_FR(ARu, ARd, FR_norm = norm_FRint(ARu); kwargs...) = norm_FR!(ARu, ARd, FR_norm; kwargs...)
-function norm_FR!(ARu, ARd, FR_norm; kwargs...)
-    Ni,Nj = size(ARu)
-    λL = zeros(eltype(FR_norm[1,1]),Ni,Nj)
-    for j = 1:Nj, i = 1:Ni
-        λLs, FR_norms, info= eigsolve(X->norm_FRmap(ARu[i,:], ARd[i,:], X, j), FR_norm[i,j], 1, :LM; ishermitian = false, kwargs...)
-        @debug "norm_FR! eigsolve" λLs info sort(abs.(λLs))
-        if length(λLs) > 1 && norm(abs(λLs[1]) - abs(λLs[2])) < 1e-12
-            @show λLs
-            if real(λLs[1]) > 0
-                FR_norm[i,j] = FR_norms[1]
-                λL[i,j] = λLs[1]
-            else
-                FR_norm[i,j] = FR_norms[2]
-                λL[i,j] = λLs[2]
-            end
-        else
-            FR_norm[i,j] = FR_norms[1]
-            λL[i,j] = λLs[1]
-        end
-    end
-    return λL, FR_norm
 end

@@ -1,5 +1,6 @@
 using CUDA
 using LinearAlgebra
+import LinearAlgebra: mul!
 
 CUDA.allowscalar(false)
 
@@ -21,3 +22,8 @@ _mattype(x::Symmetric{T, CuArray{T, 2, B}}) where {T,B} = CuMatrix
 
 _arraytype(x::Array{T}) where {T} = Array
 _arraytype(x::CuArray{T}) where {T} = CuArray
+
+# function mul!(C::AbstractArray{<:AbstractArray}, A::AbstractArray{<:AbstractArray}, α::Number)
+#     C .= α .* A
+#     return C
+# end

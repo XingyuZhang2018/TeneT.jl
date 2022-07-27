@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,bigleftenv,bigrightenv
+using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -18,19 +18,6 @@ CUDA.allowscalar(false)
         norm(atype(dtype[x 2x; 3x x]))
     end
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1)
-
-    # example to solve differential of array of array
-    # use `[]` list then reshape
-    A = Array{atype,2}(undef, 2, 2)
-    for j = 1:2,i = 1:2
-        A[i,j] = atype(rand(dtype,2,2))
-    end
-    function foo2(x)
-        # B[i,j] = A[i,j].*x   # mistake
-        B = reshape([A[i]*x for i=1:4],2,2)
-        return norm(sum(B))
-    end
-    @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1)
 end
 
 @testset "QR factorization with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
@@ -40,7 +27,7 @@ end
         Q, R = qrpos(M)
         return norm(Q) + norm(R)
     end
-    @test norm(Zygote.gradient(foo, M)[1] - num_grad(foo, M)) ≈ 0 atol = 1e-8
+    @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
 @testset "LQ factorization with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
@@ -50,7 +37,7 @@ end
         L, Q = lqpos(M)
         return  norm(Q) + norm(L)
     end
-    @test norm(Zygote.gradient(foo, M)[1] - num_grad(foo, M)) ≈ 0 atol = 1e-8
+    @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
 @testset "loop_einsum mistake with  $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
