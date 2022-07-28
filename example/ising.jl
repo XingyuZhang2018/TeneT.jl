@@ -7,11 +7,11 @@ using CUDA
 using LinearAlgebra: norm
 using Zygote
 
-@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [2], Nj = [2], atype = [Array]
+@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [2], Nj = [2], atype = [Array, CuArray]
     Random.seed!(100)
     β = 0.5
     model = Ising(Ni, Nj, β)
-    M = model_tensor(model, Val(:bulk))
+    M = atype(model_tensor(model, Val(:bulk)))
     env = obs_env(M; χ = 10, maxiter = 10, miniter = 1, 
          infolder = "./example/data/$model/", 
         outfolder = "./example/data/$model/", 
@@ -22,11 +22,11 @@ using Zygote
     @test observable(env, model, Val(:energy)) ≈ -1.745564581767667
 end
 
-@testset "$(Ni)x$(Nj) ising backward with $atype" for Ni = [2], Nj = [2], atype = [Array]
+@testset "$(Ni)x$(Nj) ising backward with $atype" for Ni = [2], Nj = [2], atype = [Array, CuArray]
     Random.seed!(100)
     function logZ(β)
         model = Ising(Ni, Nj, β)
-        M = model_tensor(model, Val(:bulk))
+        M = atype(model_tensor(model, Val(:bulk)))
         env = obs_env(M; χ = 10, maxiter = 10, miniter = 1, 
              infolder = "./example/data/$model/", 
             outfolder = "./example/data/$model/", 

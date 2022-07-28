@@ -65,7 +65,7 @@ end
 
 function env_norm(F::AbstractArray{T,5}) where T
     χ,D,Ni,Nj = size(F)[[1,2,4,5]]
-    Fij = Zygote.@ignore Array{ComplexF64}([])
+    Fij = Zygote.@ignore _arraytype(F){ComplexF64}([])
     @inbounds @views for j in 1:Nj, i in 1:Ni
         Fij = [Fij; F[:,:,:,i,j]/norm(F[:,:,:,i,j])]
     end
@@ -75,16 +75,12 @@ end
 
 function env_norm(F::AbstractArray{T,4}) where T
     χ,Ni,Nj = size(F)[[1,3,4]]
-    Fij = Zygote.@ignore Array{ComplexF64}([])
+    Fij = Zygote.@ignore _arraytype(F){ComplexF64}([])
     @inbounds @views for j in 1:Nj, i in 1:Ni
         Fij = cat(Fij, F[:,:,i,j]/norm(F[:,:,i,j]); dims=1)
     end
     Fij = permutedims(reshape(Fij, (χ, Ni, Nj, χ)),(1,4,2,3))
     return Fij
-end
-
-function env_norm(F::AbstractArray{T,2}) where T
-    return F
 end
 
 """
@@ -468,7 +464,7 @@ end
 function ACCtoAL(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errL = 0.0
-    ALij = Array{ComplexF64}([])
+    ALij = _arraytype(AC){ComplexF64}([])
     @inbounds for j in 1:Nj, i in 1:Ni
         QAC, RAC = qrpos(reshape(AC[:,:,:,i,j],(χ*D, χ)))
          QC, RC  = qrpos(C[:,:,i,j])
@@ -482,7 +478,7 @@ end
 function ACCtoAR(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errR = 0.0
-    ARij = Array{ComplexF64}([])
+    ARij = _arraytype(C){ComplexF64}([])
     @inbounds for  j in 1:Nj, i in 1:Ni
         jr = j - 1 + (j==1)*Nj
         LAC, QAC = lqpos(reshape(AC[:,:,:,i,j],(χ, D*χ)))
