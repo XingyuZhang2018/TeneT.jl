@@ -9,13 +9,14 @@ function observable(env, model::MT, ::Val{:Z}) where {MT <: HamiltonianModel}
     _, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, FLu, FRu = env
     atype = _arraytype(ALu)
     M   = atype(model_tensor(model, Val(:bulk)))
-    Ni,Nj = size(M)[[5,6]]
+    χ,D,Ni,Nj = size(ALu)[[1,2,4,5]]
     
     z_tol = 1
-    ACu = similar(ALu)
+    ACu = atype{ComplexF64}([])
     @inbounds @views for j = 1:Nj,i = 1:Ni
-        ACu[:,:,:,i,j] = ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])
+        ACu = [ACu; ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])]
     end
+    ACu = permutedims(reshape(ACu, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
 
     for j = 1:Nj,i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
@@ -43,6 +44,9 @@ function observable(env, model::MT, type) where {MT <: HamiltonianModel}
         obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M_obs[:,:,:,:,i,j],ACu[:,:,:,ir,j],FR[:,:,:,i,j])
         λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M[:,:,:,:,i,j],ACu[:,:,:,ir,j],FR[:,:,:,i,j])
         obs_tol += Array(obs)[]/Array(λ)[]
+    end
+    if type == Val(:mag)
+        obs_tol = abs(obs_tol)
     end
     return obs_tol/Ni/Nj
 end

@@ -63,20 +63,24 @@ function lqpos!(A)
     return L, Q
 end
 
-function env_norm(F::AbstractArray{T,4}) where T
-    N = size(F, 4)
-    @inbounds @views for i in 1:N
-        F[:,:,:,i] /= norm(F[:,:,:,i]) 
+function env_norm(F::AbstractArray{T,5}) where T
+    χ,D,Ni,Nj = size(F)[[1,2,4,5]]
+    Fij = Zygote.@ignore Array{ComplexF64}([])
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        Fij = [Fij; F[:,:,:,i,j]/norm(F[:,:,:,i,j])]
     end
-    return F
+    Fij = permutedims(reshape(Fij, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
+    return Fij
 end
 
-function env_norm(F::AbstractArray{T,3}) where T
-    N = size(F, 3)
-    @inbounds @views for i in 1:N
-        F[:,:,i] /= norm(F[:,:,i]) 
+function env_norm(F::AbstractArray{T,4}) where T
+    χ,Ni,Nj = size(F)[[1,3,4]]
+    Fij = Zygote.@ignore Array{ComplexF64}([])
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        Fij = cat(Fij, F[:,:,i,j]/norm(F[:,:,i,j]); dims=1)
     end
-    return F
+    Fij = permutedims(reshape(Fij, (χ, Ni, Nj, χ)),(1,4,2,3))
+    return Fij
 end
 
 function env_norm(F::AbstractArray{T,2}) where T
@@ -280,9 +284,8 @@ function FLmap(ALu, ALd, M, FL, i)
 end
 
 """
-    FRm = FRmap(ARi, ARip, Mi, FR, J)
+    FRm = FRmap(ARu, ARd, M, FR, i)
 
-ARip means ARᵢ₊₁
 ```
     ── ARuᵢⱼ  ──┐          ──┐          a ────┬──── c 
         │       │            │          │     b     │ 
@@ -465,27 +468,29 @@ end
 function ACCtoAL(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errL = 0.0
-    AL = similar(AC)
-    @inbounds @views for j in 1:Nj, i in 1:Ni
+    ALij = Array{ComplexF64}([])
+    @inbounds for j in 1:Nj, i in 1:Ni
         QAC, RAC = qrpos(reshape(AC[:,:,:,i,j],(χ*D, χ)))
          QC, RC  = qrpos(C[:,:,i,j])
         errL += norm(RAC-RC)
-        AL[:,:,:,i,j] .= reshape(QAC*QC', (χ, D, χ))
+        ALij = [ALij; reshape(QAC*QC', (χ, D, χ))]
     end
+    AL = permutedims(reshape(ALij, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
     return AL, errL
 end
 
 function ACCtoAR(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errR = 0.0
-    AR = similar(AC)
-    @inbounds @views for j in 1:Nj, i in 1:Ni
+    ARij = Array{ComplexF64}([])
+    @inbounds for  j in 1:Nj, i in 1:Ni
         jr = j - 1 + (j==1)*Nj
         LAC, QAC = lqpos(reshape(AC[:,:,:,i,j],(χ, D*χ)))
          LC, QC  = lqpos(C[:,:,i,jr])
         errR += norm(LAC-LC)
-        AR[:,:,:,i,j] .= reshape(QC'*QAC, (χ, D, χ))
+        ARij = [ARij; reshape(QC'*QAC, (χ, D, χ))]
     end
+    AR = permutedims(reshape(ARij, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
     return AR, errR
 end
 
@@ -525,6 +530,8 @@ QR factorization to get `AL` and `AR` from `AC` and `C`
 ````
 """
 function ACCtoALAR(AC, C)
+    AC = env_norm(AC)
+     C = env_norm( C)
     AL, errL = ACCtoAL(AC, C)
     AR, errR = ACCtoAR(AC, C)
     return AL, AR, errL, errR

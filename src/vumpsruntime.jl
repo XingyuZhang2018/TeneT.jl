@@ -199,10 +199,13 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     end
 
     if updown 
-        Ni, Nj = size(ALu)
-        Md = [permutedims(M[:,:,:,:,uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
-        Md = reshape(Md, Ni, Nj)
-
+        Ni, Nj = size(ALu)[[4,5]]
+        Md = similar(M)
+        for j in 1:Nj, i in 1:Ni
+            ir = Ni + 1 - i
+            Md[:,:,:,:,i,j] = permutedims(M[:,:,:,:,ir,j], (1,4,3,2))
+        end
+        
         envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else

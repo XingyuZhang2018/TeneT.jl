@@ -113,70 +113,73 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
 end
 
 """
-    dAMmap(Ai, Aip, Mi, L, R, j, J)
+    dAMmap(Au, Ad, M, L, R, i)
 
-Aip means Aᵢ₊₁
 ```
-               ┌──  Aᵢⱼ  ── ... ── AᵢJ   ──   ...  ──┐ 
-               │     │              │                │ 
-dMᵢJ    =     Lᵢⱼ ─ Mᵢⱼ  ── ... ──     ────── ...  ──Rᵢⱼ
-               │     │              │                │ 
-               └──  Aᵢ₊₁ⱼ  ─... ── Aᵢ₊₁J  ──  ...  ──┘ 
+               ┌──  Auᵢⱼ ──┐ 
+               │     │     │ 
+dMᵢⱼ    =  -   L ── Mᵢⱼ ── R
+               │     │     │ 
+               └── Adᵢ₊₁ⱼ──┘ 
 
-               ┌──  Aᵢⱼ  ── ... ──     ────── ...  ──┐ 
-               │     │              │                │ 
-dAᵢJ    =     Lᵢⱼ ─ Mᵢⱼ  ── ... ── dMᵢJ  ──── ...  ──Rᵢⱼ
-               │     │              │                │ 
-               └──  Aᵢ₊₁ⱼ  ─... ── Aᵢ₊₁J  ─── ...  ──┘ 
+               ┌──  Auᵢⱼ ──┐ 
+               │     │     │ 
+dAuᵢⱼ   =  -   L ── Mᵢⱼ  ──R
+               │     │     │ 
+               └── Adᵢ₊₁ⱼ──┘ 
 
-               ┌──  Aᵢⱼ  ── ... ── AᵢJ  ────  ...  ──┐        a ────┬──── c     
-               │     │              │                │        │     b     │    
-dAᵢ₊₁J   =     Lᵢⱼ ─ Mᵢⱼ  ── ... ── dMᵢJ ────  ...  ──Rᵢⱼ     ├─ d ─┼─ e ─┤     
-               │     │              │                │        │     g     │  
-               └──  Aᵢ₊₁ⱼ  ─... ──     ─────  ...  ──┘        f ────┴──── h  
+               ┌──  Auᵢⱼ ──┐       a ────┬──── c     
+               │     │     │       │     b     │    
+dAdᵢ₊₁ⱼ =  -   L ─── Mᵢⱼ ──R       ├─ d ─┼─ e ─┤     
+               │     │     │       │     g     │  
+               └── Adᵢ₊₁ⱼ──┘       f ────┴──── h  
 
 ```
 """
-function dAMmap(Ai, Aip, Mi, L, R, j, J; ifconj = false)
-    Nj = size(Ai, 1)
-        NL = (J - j + (J - j < 0) * Nj)
-    NR = Nj - NL - 1
-    L = copy(L)
-    R = copy(R)
-    for jj = 1:NL
-        jr = j + jj - 1 - (j + jj - 1 > Nj) * Nj
-        L = ein"((adf,abc),dgeb),fgh -> ceh"(L, Ai[jr], Mi[jr], Aip[jr])
+function dAMmap!(dAu, dAd, dM, Au, Ad, M, L, R, i, j)
+    Ni = size(Au, 4)
+    ir = i + 1 - Ni * (i==Ni)
+    dAu[:,:,:,  i, j] = -conj(ein"((adf,fgh),dgeb),ceh -> abc"(L, Ad[:,:,:,ir,j], M[:,:,:,:,i,j], R))
+    dAd[:,:,:,  ir,j] = -conj(ein"((adf,abc),dgeb),ceh -> fgh"(L, Au[:,:,:,i ,j], M[:,:,:,:,i,j], R))
+     dM[:,:,:,:,i, j] = -conj(ein"(adf,abc),(fgh,ceh) -> dgeb"(L, Au[:,:,:,i ,j], Ad[:,:,:,ir,j], R))
+end
+
+"""
+    ξLm = ξLmap(ARu, ARd, M, FR, i)
+
+```
+    ── ALuᵢⱼ  ──┐          ──┐          a ────┬──── c 
+        │       │            │          │     b     │ 
+    ── Mᵢⱼ   ──ξLᵢⱼ₊₁  =   ──ξLᵢⱼ       ├─ d ─┼─ e ─┤ 
+        │       │            │          │     g     │ 
+    ── ALdᵢ₊₁ⱼ ─┘          ──┘          f ────┴──── h 
+```
+"""
+function ξLmap(ALu, ALd, M, ξL, i)
+    Ni, Nj = size(M)[[5,6]]
+    ξLm = copy(ξL)
+    ir = i + 1 - Ni * (i==Ni)
+    @inbounds @views for j in 1:Nj
+        jr = j + 1 - Nj * (j==Nj)
+        ξLm[:,:,:,j] .= ein"((ceh,abc),dgeb),fgh -> adf"(ξL[:,:,:,jr],ALu[:,:,:,i,j],M[:,:,:,:,i,j],ALd[:,:,:,ir,j])
     end
-    for jj = 1:NR
-        jr = j - jj + (j - jj < 1) * Nj
-        R = ein"((ceh,abc),dgeb),fgh -> adf"(R, Ai[jr], Mi[jr], Aip[jr])
-    end
-    dAiJ = -ein"((adf,fgh),dgeb),ceh -> abc"(L, Aip[J], Mi[J], R)
-    dAipJ = -ein"((adf,abc),dgeb),ceh -> fgh"(L, Ai[J], Mi[J], R)
-    dMiJ = -ein"(adf,abc),(fgh,ceh) -> dgeb"(L, Ai[J], Aip[J], R)
-    return conj(dAiJ), ifconj ? dAipJ : conj(dAipJ), conj(dMiJ)
+    return ξLm
 end
 
 function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
     λL, FL = leftenv(ALu, ALd, M, FL)
-    Ni, Nj = size(ALu)
-    T = eltype(ALu[1,1])
-    atype = _arraytype(M[1,1])
+    Ni,Nj = size(M)[[5,6]]
     function back((dλL, dFL))
-        dALu = fill!(similar(ALu, atype), atype(zeros(T,size(ALu[1,1]))))
-        dALd = fill!(similar(ALd, atype), atype(zeros(T,size(ALd[1,1]))))
-        dM = fill!(similar(M, atype), atype(zeros(T,size(M[1,1]))))
-        for j = 1:Nj, i = 1:Ni
-            ir = i + 1 - Ni * (i == Ni)
-            jr = j - 1 + Nj * (j == 1)
-            dFL[i,j] -= Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] * FL[i,j]
-            ξl, info = linsolve(FR -> FRmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], FR, jr), conj(dFL[i,j]), -λL[i,j], 1; maxiter = 1)
+        dALu = similar(ALu)
+        dALd = similar(ALd)
+        dM   = similar(M)
+        @inbounds for i = 1:Ni
+            dFL[:,:,:,i,:] -= Array(ein"abcd,abcd ->"(conj(FL[:,:,:,i,:]), dFL[:,:,:,i,:]))[] * FL[:,:,:,i,:]
+            ξL, info = linsolve(X -> ξLmap(ALu, ALd, M, X, i), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 1)
             info.converged == 0 && @warn "ad's linsolve not converge"
-            for J = 1:Nj
-                dAiJ, dAipJ, dMiJ = dAMmap(ALu[i,:], conj(ALd[ir,:]), M[i,:], FL[i,j], ξl, j, J; ifconj = true)
-                dALu[i,J] += dAiJ
-                dALd[ir,J] += dAipJ
-                dM[i,J] += dMiJ
+            @views for j in 1:Nj
+                jr = j + 1 - Nj * (j==Nj)
+                dAMmap!(dALu, dALd, dM, ALu, ALd, M, FL[:,:,:,i,j], ξL[:,:,:,jr], i, j)
             end
         end
         return NoTangent(), dALu, dALd, dM, NoTangent()
@@ -184,26 +187,43 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
     return (λL, FL), back
 end
 
+"""
+    ξRm = ξRmap(ARu, ARd, M, FL)
+
+```
+  ┌──       ┌──  ARuᵢⱼ  ──                     a ────┬──── c 
+  │         │     │                            │     b     │ 
+ξRᵢⱼ   =  ξRᵢⱼ₋₁─ Mᵢⱼ   ──                     ├─ d ─┼─ e ─┤ 
+  │         │     │                            │     g     │ 
+  └──       └──  ARdᵢ₊₁ⱼ ─                     f ────┴──── h 
+```
+"""
+
+function ξRmap(ARu, ARd, M, ξR, i)
+    Ni, Nj = size(M)[[5,6]]
+    ξRm = copy(ξR)
+    ir = i + 1 - Ni * (i==Ni)
+    @inbounds @views for j in 1:Nj
+        jr = j - 1 + Nj * (j==1)
+        ξRm[:,:,:,j] .= ein"((adf,abc),dgeb),fgh -> ceh"(ξR[:,:,:,jr],ARu[:,:,:,i,j],M[:,:,:,:,i,j],ARd[:,:,:,ir,j])
+    end
+    return ξRm
+end
+
 function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
     λR, FR = rightenv(ARu, ARd, M, FR)
-    Ni, Nj = size(ARu)
-    T = eltype(ARu[1,1])
-    atype = _arraytype(M[1,1])
+    Ni,Nj = size(M)[[5,6]]
     function back((dλ, dFR))
-        dARu = fill!(similar(ARu, atype), atype(zeros(T,size(ARu[1,1]))))
-        dARd = fill!(similar(ARd, atype), atype(zeros(T,size(ARd[1,1]))))
-        dM = fill!(similar(M, atype), atype(zeros(T,size(M[1,1]))))
-        for j = 1:Nj, i = 1:Ni
-            ir = i + 1 - Ni * (i == Ni)
-            jr = j - 1 + Nj * (j == 1)
-            dFR[i,jr] -= Array(ein"abc,abc ->"(conj(FR[i,jr]), dFR[i,jr]))[] * FR[i,jr]
-            ξr, info = linsolve(FL -> FLmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], FL, j), conj(dFR[i,jr]), -λR[i,jr], 1; maxiter = 1)
+        dARu = similar(ARu)
+        dARd = similar(ARd)
+        dM   = similar(M)
+        for i = 1:Ni
+            dFR[:,:,:,i,:] -= Array(ein"abcd,abcd ->"(conj(FR[:,:,:,i,:]), dFR[:,:,:,i,:]))[] * FR[:,:,:,i,:]
+            ξR, info = linsolve(X -> ξRmap(ARu, ARd, M, X, i), conj(dFR[:,:,:,i,:]), -λR[i], 1; maxiter = 1)
             info.converged == 0 && @warn "ad's linsolve not converge"
-            for J = 1:Nj
-                dAiJ, dAipJ, dMiJ = dAMmap(ARu[i,:], conj(ARd[ir,:]), M[i,:], ξr, FR[i,jr], j, J; ifconj = true)
-                dARu[i,J] += dAiJ
-                dARd[ir,J] += dAipJ
-                dM[i,J] += dMiJ
+            for j = 1:Nj
+                jr = j - 1 + Nj * (j==1)
+                dAMmap!(dARu, dARd, dM, ARu, ARd, M,  ξR[:,:,:,jr], FR[:,:,:,i,j], i, j)
             end
         end
         return NoTangent(), dARu, dARd, dM, NoTangent()
@@ -212,115 +232,72 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
 end
 
 """
-    ACdmap(ACij, FLj, FRj, Mj, II)
+    ξACmap(ξAC, FL, FR, M, j)
 
 ```
-.        .         .
-.        .         .
-.        .         .
-│        │         │          a ────┬──── c 
-FLᵢ₋₁ⱼ ─ Mᵢ₋₁ⱼ ──  FRᵢ₋₁ⱼ     │     b     │
-│        │         │          ├─ d ─┼─ e ─┤ 
-FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ       │     g     │ 
-│        │         │          f ────┴──── h     
-└─────── ACᵢⱼ ─────┘
+                                                            a ────┬──── c 
+                                                            │     b     │
+│        │         │          │        │         │          ├─ d ─┼─ e ─┤ 
+└───────ξACᵢⱼ ─────┘    =     FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ       │     g     │ 
+                              │        │         │          f ────┴──── h     
+                              └──────ξACᵢ₊₁ⱼ ────┘                                    
+                         
 ```
 """
-function ACdmap(ACij, FLj, FRj, Mj, II)
-    Ni = size(FLj,1)
-    ACdm = copy(ACij)
-    for i=1:Ni
-        ir = II-(i-1) + (II-(i-1) < 1)*Ni
-        ACdm = ein"((adf,fgh),dgeb),ceh -> abc"(FLj[ir],ACdm,Mj[ir],FRj[ir])
+function ξACmap(ξAC, FL, FR, M, j)
+    Ni = size(M, 5)
+    ξACm = copy(ξAC)
+    @inbounds @views for i in 1:Ni
+        ir = i + 1 - Ni * (i==Ni)
+        ξACm[:,:,:,i] .= ein"((adf,fgh),dgeb),ceh -> abc"(FL[:,:,:,i,j],ξAC[:,:,:,ir],M[:,:,:,:,i,j],FR[:,:,:,i,j])
     end
-    return ACdm
+    return ξACm
 end
 
 """
     ACdFMmap(FLj, Mi, FRj, AC, ACd, i, II)
 
 ```
-               ┌─────  ACᵢⱼ ─────┐ 
-               │        │        │ 
-              FLᵢⱼ ─── Mᵢⱼ ──── FRᵢⱼ
-               │        │        │ 
-               ⋮         ⋮        ⋮
-               │        │        │
-dMIⱼ    =     FLIⱼ ───     ──── FRIⱼ 
-               │        │        │
-               ⋮         ⋮        ⋮
-               │        │        │             
-               └─────  ACdᵢ₋₁ⱼ ──┘ 
 
-               ┌─────  ACᵢⱼ ─────┐ 
-               │        │        │ 
-              FLᵢⱼ ─── Mᵢⱼ  ─── FRᵢⱼ
-               │        │        │ 
-               ⋮         ⋮        ⋮
-               │        │        │
-dFLIⱼ   =        ───── MIⱼ ───  FRIⱼ 
-               │        │        │
-               ⋮         ⋮        ⋮
-               │        │        │             
-               └─────  ACdᵢ₋₁ⱼ ──┘
+               ┌──── ACu  ───┐ 
+               │      │      │ 
+dFLᵢⱼ    =          ──Mᵢⱼ ── FRᵢⱼ
+               │      │      │
+               └───  ACd ────┘ 
 
-               ┌─────  ACᵢⱼ ─────┐ 
-               │        │        │ 
-              FLᵢⱼ ─── Mᵢⱼ  ─── FRᵢⱼ
-               │        │        │ 
-               ⋮         ⋮        ⋮
-               │        │        │    
-dFRIⱼ   =     FLIⱼ ─── MIⱼ ─────       a ────┬──── c   
-               │        │        │     │     b     │ 
-               ⋮         ⋮        ⋮     ├─ d ─┼─ e ─┤       
-               │        │        │     │     g     │          
-               └─────  ACdᵢ₋₁ⱼ ──┘     f ────┴──── h  
+               ┌──── ACu  ───┐ 
+               │      │      │ 
+dMᵢⱼ    =      FLᵢⱼ ─   ─── FRᵢⱼ
+               │      │      │
+               └───  ACd ────┘ 
+
+               ┌──── ACu  ───┐          a ────┬──── c    
+               │      │      │          │     b     │  
+dFRᵢⱼ    =     FLᵢⱼ ──Mᵢⱼ ──            ├─ d ─┼─ e ─┤ 
+               │      │      │          │     g     │  
+               └───  ACd ────┘          f ────┴──── h   
 ```
 """
-function ACdFMmap(FLj, Mj, FRj, AC, ACd, i, II)
-    Ni = size(FLj, 1)
-    Nu = (II - i + (II - i < 0) * Ni)
-    Nd = Ni - Nu - 1
-    AC = copy(AC)
-    ACd = copy(ACd)
-    for ii = 1:Nu
-        ir = i + ii - 1 - (i + ii - 1 > Ni) * Ni
-        AC = ein"((adf,abc),dgeb),ceh -> fgh"(FLj[ir], AC, Mj[ir], FRj[ir])
-    end
-    for ii = 1:Nd
-        ir = i - ii + (i - ii < 1) * Ni
-        ACd = ein"((adf,fgh),dgeb),ceh -> abc"(FLj[ir], ACd, Mj[ir], FRj[ir])
-    end
-    dFLIj = -ein"((abc,ceh),dgeb),fgh -> adf"(AC, FRj[II], Mj[II], ACd)
-    dMIj = -ein"(adf,abc),(fgh,ceh) -> dgeb"(FLj[II], AC, ACd, FRj[II])
-    dFRIj = -ein"((abc,adf),dgeb),fgh -> ceh"(AC, FLj[II], Mj[II], ACd)
-    return conj(dFLIj), conj(dMIj), conj(dFRIj)
+function dFMmap!(dFL, dM, dFR, FL, M, FR, ACu, ACd, i, j)
+    dFL[:,:,:,  i,j] = -conj(ein"((abc,ceh),dgeb),fgh -> adf"(ACu, FR[:,:,:,i,j], M[:,:,:,:,i,j], ACd))
+     dM[:,:,:,:,i,j] = -conj(ein"(abc,adf),(ceh,fgh) -> dgeb"(ACu, FL[:,:,:,i,j],FR[:,:,:,  i,j], ACd))
+    dFR[:,:,:,  i,j] = -conj(ein"((abc,adf),dgeb),fgh -> ceh"(ACu, FL[:,:,:,i,j], M[:,:,:,:,i,j], ACd))
 end
 
 function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
     λAC, AC = ACenv(AC, FL, M, FR)
-    Ni, Nj = size(AC)
-    T = eltype(AC[1,1])
-    atype = _arraytype(M[1,1])
+    Ni, Nj = size(M)[[5,6]]
     function back((dλ, dAC))
-        dFL = fill!(similar(FL, atype), atype(zeros(T,size(FL[1,1]))))
-        dM = fill!(similar(M, atype), atype(zeros(T,size(M[1,1]))))
-        dFR = fill!(similar(FR, atype), atype(zeros(T,size(FR[1,1]))))
-        for j = 1:Nj, i = 1:Ni
-            if dAC[i,j] !== nothing
-                ir = i - 1 + Ni * (i == 1)
-                dAC[i,j] -= Array(ein"abc,abc ->"(conj(AC[i,j]), dAC[i,j]))[] * AC[i,j]
-                ξAC, info = linsolve(ACd -> ACdmap(ACd, FL[:,j], FR[:,j], M[:,j], ir), conj(dAC[i,j]), -λAC[i,j], 1; maxiter = 1)
-                info.converged == 0 && @warn "ad's linsolve not converge"
-                # errAC = ein"abc,abc ->"(AC[i,j], ξAC)[]
-                # abs(errAC) > 1e-1 && throw("AC and ξ aren't orthometric. $(errAC) $(info)")
-                # @show info ein"abc,abc ->"(AC[i,j], ξAC)[] ein"abc,abc -> "(AC[i,j], dAC[i,j])[]
-                for II = 1:Ni
-                    dFLIj, dMIj, dFRIj = ACdFMmap(FL[:,j], M[:,j], FR[:,j], AC[i,j], ξAC, i, II)
-                    dFL[II,j] += dFLIj
-                    dM[II,j] += dMIj
-                    dFR[II,j] += dFRIj
-                end
+        dFL = similar(FL)
+        dM  = similar(M)
+        dFR = similar(FR)
+        @inbounds for j = 1:Nj
+            dAC[:,:,:,:,j] -= Array(ein"abcd,abcd ->"(conj(AC[:,:,:,:,j]), dAC[:,:,:,:,j]))[] * AC[:,:,:,:,j]
+            ξAC, info = linsolve(X -> ξACmap(X, FL, FR, M, j), conj(dAC[:,:,:,:,j]), -λAC[j], 1; maxiter = 1)
+            info.converged == 0 && @warn "ad's linsolve not converge"
+            @views for i = 1:Ni
+                ir = i + 1 - Ni * (i==Ni)
+                dFMmap!(dFL, dM, dFR, FL, M, FR, AC[:,:,:,i,j], ξAC[:,:,:,ir], i, j)
             end
         end
         return NoTangent(), NoTangent(), dFL, dM, dFR
@@ -329,101 +306,64 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
 end
 
 """
-    Cdmap(Cij, FLj, FRj, II)
+    ξCmap(ξC, FL, FR, j)
 
-```
-.                .
-.                .
-.                .
-│                │          
-FLᵢ₋₁ⱼ₊₁ ─────  FRᵢ₋₁ⱼ      a ─── b
-│                │          │     │       
-FLᵢⱼ₊₁ ───────  FRᵢⱼ        ├─ c ─┤   
-│                │          │     │     
-└────── Cᵢⱼ ─────┘          d ─── e  
+```               
+                                                    a ─── b
+                        │                │          │     │       
+│                │      FLᵢⱼ₊₁ ───────  FRᵢⱼ        ├─ c ─┤   
+└────── Cᵢⱼ ─────┘  =   │                │          │     │     
+                        └───── Cᵢ₊₁ⱼ ────┘          d ─── e  
 ```
 """
-function Cdmap(Cij, FLjp, FRj, II)
-    Ni = size(FLjp,1)
-    Cdm = copy(Cij)
-    for i=1:Ni
-        ir = II-(i-1) + (II-(i-1) < 1)*Ni
-        Cdm = ein"(acd,de),bce -> ab"(FLjp[ir],Cdm,FRj[ir])
+function ξCmap(ξC, FL, FR, j)
+    Ni,Nj = size(FL)[[4,5]]
+    ξCm = copy(ξC)
+    jr = j + 1 - Nj * (j==Nj)
+    @inbounds @views for i in 1:Ni
+        ir = i + 1 - Ni * (i==Ni)
+        ξCm[:,:,i] .= ein"(acd,de),bce -> ab"(FL[:,:,:,i,jr],ξC[:,:,ir],FR[:,:,:,i,j])
     end
-    return Cdm
+    return ξCm
 end
 
 """
     CdFMmap(FLj, FRj, C, Cd, i, II)
 
 ```
-               ┌────  Cᵢⱼ ────┐ 
-               │              │ 
-              FLᵢⱼ₊₁───────  FRᵢⱼ
-               │              │ 
-               ⋮               ⋮
-               │              │
-dFLIⱼ₊₁ =        ──────────  FRIⱼ
-               │              │
-               ⋮               ⋮
-               │              │             
-               └──── Cdᵢⱼ ────┘ 
+               ┌──── Cu ────┐ 
+               │            │ 
+dFLᵢⱼ₊₁ =           ────── FRᵢⱼ
+               │            │
+               └──── Cd ────┘ 
+               ┌──── Cu ────┐          a ─── b   
+               │            │          │     │  
+dFRᵢⱼ =        FLᵢⱼ₊₁──────            ├─ c ─┤ 
+               │            │          │     │  
+               └──── Cd ────┘          d ─── e  
 
-               ┌────  Cᵢⱼ ────┐ 
-               │              │ 
-              FLᵢⱼ₊₁ ──────  FRᵢⱼ
-               │              │ 
-               ⋮               ⋮
-               │              │
-dFRIⱼ   =     FLᵢ₊Iⱼ₊₁ ──────           a ─── b     
-               │              │         │     │   
-               ⋮               ⋮         ├─ c ─┤    
-               │              │         │     │                
-               └──── Cdᵢⱼ ────┘         d ─── e  
 ```
 """
-function CdFMmap(FLjp, FRj, C, Cd, i, II)
-    Ni = size(FLjp, 1)
-    Nu = (II - i + (II - i < 0) * Ni)
-    Nd = Ni - Nu - 1
-    C = copy(C)
-    Cd = copy(Cd)
-    for ii = 1:Nu
-        ir = i + ii - 1 - (i + ii - 1 > Ni) * Ni
-        C = ein"(acd,ab),bce -> de"(FLjp[ir], C, FRj[ir])
-    end
-    for ii = 1:Nd
-        ir = i - ii + (i - ii < 1) * Ni
-        Cd = ein"(acd,de),bce -> ab"(FLjp[ir], Cd, FRj[ir])
-    end
-    dFLIjp = -ein"(ab,bce),de -> acd"(C, FRj[II], Cd)
-    dFRIj = -ein"(ab,acd),de -> bce"(C, FLjp[II], Cd)
-    return conj(dFLIjp), conj(dFRIj)
+function dFMmap!(dFL, dFR, FL, FR, Cu, Cd, i, j)
+    Nj = size(FL, 5)
+    jr = j + 1 -  Nj * (j==Nj)
+    dFL[:,:,:,i,jr] = -conj(ein"(ab,bce),de -> acd"(Cu, FR[:,:,:,i,j ], Cd))
+    dFR[:,:,:,i,j ] = -conj(ein"(ab,acd),de -> bce"(Cu, FL[:,:,:,i,jr], Cd))
 end
 
 function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     λC, C = Cenv(C, FL, FR)
-    Ni, Nj = size(C)
-    T = eltype(C[1,1])
-    atype = _arraytype(FL[1,1])
+    Ni, Nj = size(C)[[3,4]]
     function back((dλ, dC))
-        dFL = fill!(similar(FL, atype), atype(zeros(T,size(FL[1,1]))))
-        dFR = fill!(similar(FR, atype), atype(zeros(T,size(FR[1,1]))))
-        for j = 1:Nj, i = 1:Ni
-            if dC[i,j] !== nothing
-                ir = i - 1 + Ni * (i == 1)
-                jr = j + 1 - (j==Nj) * Nj
-                dC[i,j] -= Array(ein"ab,ab ->"(conj(C[i,j]), dC[i,j]))[] * C[i,j]
-                ξC, info = linsolve(Cd -> Cdmap(Cd, FL[:,jr], FR[:,j], ir), conj(dC[i,j]), -λC[i,j], 1; maxiter = 1)
-                info.converged == 0 && @warn "ad's linsolve not converge"
-                # errC = ein"ab,ab ->"(C[i,j], ξC)[]
-                # abs(errC) > 1e-1 && throw("C and ξ aren't orthometric. $(errC) $(info)")
-                # @show info ein"ab,ab ->"(C[i,j], ξC)[] ein"ab,ab -> "(C[i,j], dC[i,j])[]
-                for II = 1:Ni
-                    dFLIjp, dFRIj = CdFMmap(FL[:,jr], FR[:,j], C[i,j], ξC, i, II)
-                    dFL[II,jr] += dFLIjp
-                    dFR[II,j] += dFRIj
-                end
+        dFL = similar(FL)
+        dFR = similar(FR)
+        for j = 1:Nj
+            dC[:,:,:,j] -= Array(ein"abc,abc ->"(conj(C[:,:,:,j]), dC[:,:,:,j]))[] * C[:,:,:,j]
+            ξC, info = linsolve(X -> ξCmap(X, FL, FR, j), conj(dC[:,:,:,j]), -λC[j], 1; maxiter = 1)
+            info.converged == 0 && @warn "ad's linsolve not converge"
+            @views for i = 1:Ni
+                ir = i + 1 - Ni * (i==Ni)
+                dFMmap!(dFL, dFR, FL, FR, C[:,:,i,j], ξC[:,:,ir], i, j)
             end
         end
         return NoTangent(), NoTangent(), dFL, dFR

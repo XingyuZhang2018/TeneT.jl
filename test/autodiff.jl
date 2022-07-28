@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR
+using VUMPS:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,env_norm
 using ChainRulesCore
 using CUDA
 using LinearAlgebra
@@ -9,7 +9,7 @@ using Test
 using Zygote
 CUDA.allowscalar(false)
 
-@testset "matrix autodiff with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "matrix autodiff with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     a = atype(randn(dtype, 10, 10))
     @test Zygote.gradient(norm, a)[1] ≈ num_grad(norm, a)
@@ -18,6 +18,15 @@ CUDA.allowscalar(false)
         norm(atype(dtype[x 2x; 3x x]))
     end
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1)
+
+    F = rand(3,2,3,2,2)
+    function foo2(F) 
+        F = env_norm(F)
+        norm(F)
+    end
+    x = rand(2,2)
+    @show foo2(F) 
+    @test Zygote.gradient(foo2, F)[1] ≈ num_grad(foo2, F)
 end
 
 @testset "QR factorization with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
@@ -58,218 +67,117 @@ end
     @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 
-@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    S = Array{atype{ComplexF64,6},2}(undef, Ni, Nj)
-    M = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S[i,j] = atype(rand(ComplexF64, D, d, D, D, d, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
+    A = atype(rand(dtype,      D, d, D, Ni, Nj))
+    S = atype(rand(ComplexF64, D, d, D, D, d, D, Ni, Nj))
+    M = atype(rand(ComplexF64, d, d, d, d, Ni, Nj))
 
-    ALu, = leftorth(A) 
-    ALd, = leftorth(A)
+       ALu, =  leftorth(A) 
+       ALd, =  leftorth(A)
     _, ARu, = rightorth(A)
     _, ARd, = rightorth(A)
 
-    function foo1(x)
-        _,FL = leftenv(ALu, ALd, M*x)
+    function foo1(M)
+        _,FL = leftenv(ALu, conj(ALd), M)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(FL[i,j], S[i,j], FL[i,j])
-            B = ein"abc,abc -> "(FL[i,j], FL[i,j])
+            A  = ein"(abc,abcdef),def -> "(FL[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FL[:,:,:,i,j])
+            B  = ein"abc,abc -> "(FL[:,:,:,i,j], FL[:,:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
         end
         return s
     end 
-    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-7
+    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M)
 
-    function foo2(x)
-        _,FR = rightenv(ARu, ARd, M*x)
+    function foo2(M)
+        _,FR = rightenv(ARu, conj(ARd), M)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(FR[i,j], S[i,j], FR[i,j])
-            B = ein"abc,abc -> "(FR[i,j], FR[i,j])
+            A  = ein"(abc,abcdef),def -> "(FR[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FR[:,:,:,i,j])
+            B  = ein"abc,abc -> "(FR[:,:,:,i,j], FR[:,:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
         end
         return s
     end 
-    @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
+    @test Zygote.gradient(foo2, M)[1] ≈ num_grad(foo2, M)
 end
 
-@testset "$(Ni)x$(Nj) ACenv and Cenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) ACenv and Cenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    S1 = Array{atype{ComplexF64,6},2}(undef, Ni, Nj)
-    S2 = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    M = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S1[i,j] = atype(rand(ComplexF64, D, d, D, D, d, D))
-        S2[i,j] = atype(rand(ComplexF64, D, D, D, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
+     A = atype(rand(dtype,      D, d, D, Ni, Nj))
+    S1 = atype(rand(ComplexF64, D, d, D, D, d, D, Ni, Nj))
+    S2 = atype(rand(ComplexF64, D, D, D, D, Ni, Nj))
+     M = atype(rand(ComplexF64, d, d, d, d, Ni, Nj))
 
-    AL, L, _ = leftorth(A) 
+    AL, L, _ =  leftorth(A) 
     R, AR, _ = rightorth(A)
-    _, FL = leftenv(AL, AL, M)
-    _, FR = rightenv(AR, AR, M)
+    _, FL    =  leftenv(AL, conj(AL), M)
+    _, FR    = rightenv(AR, conj(AR), M)
 
-    C = LRtoC(L, R)
+     C =   LRtoC( L, R)
     AC = ALCtoAC(AL, C)
-    function foo1(x)
-        _, AC = ACenv(AC, FL, M*x, FR)
+    function foo1(M)
+        _, AC = ACenv(AC, FL, M, FR)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(AC[i,j], S1[i,j], AC[i,j])
-            B = ein"abc,abc -> "(AC[i,j], AC[i,j])
+            A = ein"(abc,abcdef),def -> "(AC[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AC[:,:,:,i,j])
+            B = ein"abc,abc -> "(AC[:,:,:,i,j], AC[:,:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
         end
         return s
     end
-    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-8
+    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M)
 
-    function foo2(x)
-        _, FL = leftenv(AL, AL, M*x)
-        _, FR = rightenv(AR, AR, M*x)
+    function foo2(M)
+        _, FL = leftenv(AL, conj(AL), M)
+        _, FR = rightenv(AR, conj(AR), M)
         _, C = Cenv(C, FL, FR)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(ab,abcd),cd -> "(C[i,j], S2[i,j], C[i,j])
-            B = ein"ab,ab -> "(C[i,j], C[i,j])
+            A = ein"(ab,abcd),cd -> "(C[:,:,i,j], S2[:,:,:,:,i,j], C[:,:,i,j])
+            B = ein"ab,ab -> "(C[:,:,i,j], C[:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
         end
         return s
     end
-    @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-8
+    @test Zygote.gradient(foo2, M)[1] ≈ num_grad(foo2, M)
 end
 
-@testset "$(Ni)x$(Nj) ACCtoALAR with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) ACCtoALAR with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [1], Nj = [1]
     Random.seed!(100)
     D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    S1 = Array{atype{ComplexF64,6},2}(undef, Ni, Nj)
-    S2 = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    M = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S1[i,j] = atype(rand(ComplexF64, D, d, D, D, d, D))
-        S2[i,j] = atype(rand(ComplexF64, D, D, D, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
+     A = atype(rand(dtype,      D, d, D, Ni, Nj))
+    S1 = atype(rand(ComplexF64, D, d, D, D, d, D, Ni, Nj))
+    S2 = atype(rand(ComplexF64, D, D, D, D, Ni, Nj))
+     M = atype(rand(ComplexF64, d, d, d, d, Ni, Nj))
 
-    AL, L, _ = leftorth(A) 
+    AL, L, _ =  leftorth(A) 
     R, AR, _ = rightorth(A)
-    _, FL = leftenv(AL, AL, M)
-    _, FR = rightenv(AR, AR, M)
+    _, FL    =  leftenv(AL, conj(AL), M)
+    _, FR    = rightenv(AR, conj(AR), M)
 
-    Co = LRtoC(L, R)
+     Co =   LRtoC( L, R)
     ACo = ALCtoAC(AL, Co)
     _, Co = Cenv(Co, FL, FR)
-    function foo1(x)
-        M *= x
+    function foo1(M)
         _, AC = ACenv(ACo, FL, M, FR)
         AL, AR = ACCtoALAR(AC, Co) 
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(AL[i,j], S1[i,j], AL[i,j])
-            B = ein"abc,abc -> "(AL[i,j], AL[i,j])
+            A  = ein"(abc,abcdef),def -> "(AL[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AL[:,:,:,i,j])
+            B  = ein"abc,abc -> "(AL[:,:,:,i,j], AL[:,:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
-            A = ein"(abc,abcdef),def -> "(AR[i,j], S1[i,j], AR[i,j])
-            B = ein"abc,abc -> "(AR[i,j], AR[i,j])
+            A  = ein"(abc,abcdef),def -> "(AR[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AR[:,:,:,i,j])
+            B  = ein"abc,abc -> "(AR[:,:,:,i,j], AR[:,:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
-            A = ein"(abc,abcdef),def -> "(AC[i,j], S1[i,j], AC[i,j])
-            B = ein"abc,abc -> "(AC[i,j], AC[i,j])
+            A  = ein"(abc,abcdef),def -> "(AC[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AC[:,:,:,i,j])
+            B  = ein"abc,abc -> "(AC[:,:,:,i,j], AC[:,:,:,i,j])
             s += norm(Array(A)[]/Array(B)[])
         end
         return s
     end
-    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-2
-end
-
-@testset "observable leftenv and rightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
-    Random.seed!(100)
-    D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    S = Array{atype{ComplexF64,6},2}(undef, Ni, Nj)
-    M = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S[i,j] = atype(rand(ComplexF64, D, d, D, D, d, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
-
-    ALu, = leftorth(A) 
-    ALd, = leftorth(A)
-    _, ARu, = rightorth(A)
-    _, ARd, = rightorth(A)
-
-    function foo1(x)
-        _,FL = obs_FL(ALu, ALd, M*x)
-        s = 0
-        for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(FL[i,j], S[i,j], FL[i,j])
-            B = ein"abc,abc -> "(FL[i,j], FL[i,j])
-            s += norm(Array(A)[]/Array(B)[])
-        end
-        return s
-    end 
-    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-7
-
-    function foo2(x)
-        _,FR = obs_FR(ARu, ARd, M*x)
-        s = 0
-        for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(FR[i,j], S[i,j], FR[i,j])
-            B = ein"abc,abc -> "(FR[i,j], FR[i,j])
-            s += norm(Array(A)[]/Array(B)[])
-        end
-        return s
-    end 
-    @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
-end
-
-@testset "bigleftenv and bigrightenv with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64], Ni = [2], Nj = [2]
-    Random.seed!(100)
-    D, d = 3, 2
-    A = Array{atype{dtype,3},2}(undef, Ni, Nj)
-    S = Array{atype{ComplexF64,8},2}(undef, Ni, Nj)
-    M = Array{atype{ComplexF64,4},2}(undef, Ni, Nj)
-    for j in 1:Nj, i in 1:Ni
-        A[i,j] = atype(rand(dtype, D, d, D))
-        S[i,j] = atype(rand(ComplexF64, D, d, d, D, D, d, d, D))
-        M[i,j] = atype(rand(ComplexF64, d, d, d, d))
-    end
-
-    ALu, = leftorth(A) 
-    ALd, = leftorth(A) 
-    _, ARu, = rightorth(A)
-    _, ARd, = rightorth(A)
-    function foo1(x)
-        _, FL4 = bigleftenv(ALu, ALd, M*x)
-        s = 0
-        for j in 1:Nj, i in 1:Ni
-            A = ein"(abcd,abcdefgh),efgh -> "(FL4[i,j], S[i,j], FL4[i,j])
-            B = ein"abcd,abcd -> "(FL4[i,j], FL4[i,j])
-            s += norm(Array(A)[]/Array(B)[])
-        end
-        return s
-    end 
-    @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1) atol = 1e-7
-
-    function foo2(x)
-        _, FR4 = bigrightenv(ARu, ARd, M*x)
-        s = 0
-        for j in 1:Nj, i in 1:Ni
-            A = ein"(abcd,abcdefgh),efgh -> "(FR4[i,j], S[i,j], FR4[i,j])
-            B = ein"abcd,abcd -> "(FR4[i,j], FR4[i,j])
-            s += norm(Array(A)[]/Array(B)[])
-        end
-        return s
-    end 
-    @test Zygote.gradient(foo2, 1)[1] ≈ num_grad(foo2, 1) atol = 1e-7
+    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M) atol = 1e-5
 end

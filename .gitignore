@@ -3,4 +3,4 @@
 *.jl.mem
 /Manifest.toml
 .vscode/settings.json
-/example/data/
+*.jld2
