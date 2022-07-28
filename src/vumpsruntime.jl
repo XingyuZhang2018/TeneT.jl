@@ -200,11 +200,12 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     if updown 
         Ni, Nj = size(ALu)[[4,5]]
-        Md = similar(M)
+        Md = atype{Complex64}([])
         for j in 1:Nj, i in 1:Ni
             ir = Ni + 1 - i
-            Md[:,:,:,:,i,j] = permutedims(M[:,:,:,:,ir,j], (1,4,3,2))
+            Md = [Md; permutedims(M[:,:,:,:,ir,j], (1,4,3,2))]
         end
+        Md = permutedims(reshape(Md, (D, Ni, Nj, D, D, D)),(1,4,5,6,2,3))
         
         envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
