@@ -4,7 +4,6 @@ include("./exampleobs.jl")
 using Random
 using Test
 using CUDA
-using LinearAlgebra: norm
 using Zygote
 
 @testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [2], Nj = [2], atype = [Array, CuArray]

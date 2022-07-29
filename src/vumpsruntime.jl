@@ -77,7 +77,7 @@ function _initializect_square(M::AbstractArray, env::Val{:random}, χ::Int; verb
     _, FL = leftenv(AL, conj(AL), M)
     _, FR = rightenv(AR, conj(AR), M)
     C = LRtoC(L,R)
-    Ni, Nj = size(M)
+    Ni, Nj = size(M)[[5,6]]
     verbose && print("random initial $(Ni)×$(Nj) vumps_χ$(χ) environment-> ")
     AL, C, AR, FL, FR
 end

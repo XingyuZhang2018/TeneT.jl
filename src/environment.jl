@@ -64,23 +64,21 @@ function lqpos!(A)
 end
 
 function env_norm(F::AbstractArray{T,5}) where T
-    χ,D,Ni,Nj = size(F)[[1,2,4,5]]
-    Fij = Zygote.@ignore _arraytype(F){ComplexF64}([])
+    Ni,Nj = size(F)[[4,5]]
+    buf = Zygote.Buffer(F)
     @inbounds @views for j in 1:Nj, i in 1:Ni
-        Fij = [Fij; F[:,:,:,i,j]/norm(F[:,:,:,i,j])]
+        buf[:,:,:,i,j] = F[:,:,:,i,j]/norm(F[:,:,:,i,j])
     end
-    Fij = permutedims(reshape(Fij, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
-    return Fij
+    return copy(buf)
 end
 
 function env_norm(F::AbstractArray{T,4}) where T
-    χ,Ni,Nj = size(F)[[1,3,4]]
-    Fij = Zygote.@ignore _arraytype(F){ComplexF64}([])
+    Ni,Nj = size(F)[[3,4]]
+    buf = Zygote.Buffer(F)
     @inbounds @views for j in 1:Nj, i in 1:Ni
-        Fij = cat(Fij, F[:,:,i,j]/norm(F[:,:,i,j]); dims=1)
+        buf[:,:,i,j] = F[:,:,i,j]/norm(F[:,:,i,j])
     end
-    Fij = permutedims(reshape(Fij, (χ, Ni, Nj, χ)),(1,4,2,3))
-    return Fij
+    return copy(buf)
 end
 
 """
@@ -89,17 +87,17 @@ end
 Select the first positive one of λs and corresponding Fs.
 """
 function selectpos(λs, Fs)
-    if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
-        # @show "selectpos: λs are degeneracy"
-        # @show λs
-        if real(λs[1]) > 0
-            return λs[1], Fs[1]
-        else
-            return λs[2], Fs[2]
-        end
-    else
+    # if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
+    #     # @show "selectpos: λs are degeneracy"
+    #     # @show λs
+    #     if real(λs[1]) > 0
+    #         return λs[1], Fs[1]
+    #     else
+    #         return λs[2], Fs[2]
+    #     end
+    # else
         return λs[1], Fs[1]
-    end
+    # end
 end
 
 function cellones(A)
@@ -464,46 +462,28 @@ end
 function ACCtoAL(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errL = 0.0
-    ALij = _arraytype(AC){ComplexF64}([])
-    @inbounds for j in 1:Nj, i in 1:Ni
+    AL = Zygote.Buffer(AC)
+    @inbounds @views for j in 1:Nj, i in 1:Ni
         QAC, RAC = qrpos(reshape(AC[:,:,:,i,j],(χ*D, χ)))
          QC, RC  = qrpos(C[:,:,i,j])
         errL += norm(RAC-RC)
-        ALij = [ALij; reshape(QAC*QC', (χ, D, χ))]
+        AL[:,:,:,i,j] = reshape(QAC*QC', (χ, D, χ))
     end
-    AL = permutedims(reshape(ALij, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
-    return AL, errL
+    return copy(AL), errL
 end
 
 function ACCtoAR(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errR = 0.0
-    ARij = _arraytype(C){ComplexF64}([])
-    @inbounds for  j in 1:Nj, i in 1:Ni
+    AR = Zygote.Buffer(AC)
+    @inbounds @views for j in 1:Nj, i in 1:Ni
         jr = j - 1 + (j==1)*Nj
         LAC, QAC = lqpos(reshape(AC[:,:,:,i,j],(χ, D*χ)))
          LC, QC  = lqpos(C[:,:,i,jr])
         errR += norm(LAC-LC)
-        ARij = [ARij; reshape(QC'*QAC, (χ, D, χ))]
+        AR[:,:,:,i,j] = reshape(QC'*QAC, (χ, D, χ))
     end
-    AR = permutedims(reshape(ARij, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
-    return AR, errR
-end
-
-"""
-    itoir(i,Ni,Nj)
-
-````
-i -> (i,j) -> (i,jr) -> ir
-````
-"""
-function itoir(i,Ni,Nj)
-    Liner = LinearIndices((1:Ni,1:Nj))
-    Cart = CartesianIndices((1:Ni,1:Nj))
-    Index = Cart[i]
-    i,j = Index[1],Index[2]
-    jr = j - 1 + (j==1)*Nj
-    Liner[i,jr]
+    return copy(AR), errR
 end
 
 function ALCtoAC(AL,C)
@@ -556,10 +536,8 @@ function error(AL,C,AR,FL,M,FR)
     Ni,Nj = size(AL)[[4,5]]
     AC = ALCtoAC(AL, C)
     err = 0
-    for _ in 1:Ni
-        for j in 1:Nj
-            AC[:,:,:,:,j] = ACmap(AC[:,:,:,:,j], FL, FR, M, j)
-        end
+    for _ in 1:Ni, j in 1:Nj
+        AC[:,:,:,:,j] = ACmap(AC[:,:,:,:,j], FL, FR, M, j)
     end
     MAC = AC
     @inbounds @views for j = 1:Nj, i = 1:Ni

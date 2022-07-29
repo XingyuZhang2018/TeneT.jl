@@ -18,15 +18,37 @@ CUDA.allowscalar(false)
         norm(atype(dtype[x 2x; 3x x]))
     end
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1)
+end
 
-    F = rand(3,2,3,2,2)
-    function foo2(F) 
-        F = env_norm(F)
-        norm(F)
+@testset "zygote mutable arrays with $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64]
+    Random.seed!(100)
+    function foo(F) 
+        buf = Zygote.Buffer(F) # https://fluxml.ai/Zygote.jl/latest/utils/#Zygote.Buffer
+        @inbounds @views for j in 1:2, i in 1:2 
+            buf[:,:,:,i,j] = F[:,:,:,i,j]./norm(F[:,:,:,i,j]) 
+        end
+        return norm(copy(buf))
     end
-    x = rand(2,2)
-    @show foo2(F) 
-    @test Zygote.gradient(foo2, F)[1] ≈ num_grad(foo2, F)
+    F = atype(rand(dtype, 3,2,3,2,2))
+    @test Zygote.gradient(foo, F)[1] ≈ num_grad(foo, F) atol = 1e-8
+end
+
+@testset "loop_einsum mistake with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+    Random.seed!(100)
+    D = 5
+    A = atype(rand(dtype, D,D,D))
+    B = atype(rand(dtype, D,D))
+    function foo(x)
+        C = A * x
+        D = B * x
+        E = ein"abc,abc -> "(C,C)
+        F = ein"ab,ab -> "(D,D)
+        return norm(Array(E)[]/Array(F)[])
+        # E = ein"abc,abc -> "(C,C)[]
+        # F = ein"ab,ab -> "(D,D)[]
+        # return norm(E/F) mistake for GPU
+    end 
+    @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 
 @testset "QR factorization with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
@@ -47,24 +69,6 @@ end
         return  norm(Q) + norm(L)
     end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
-end
-
-@testset "loop_einsum mistake with  $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
-    Random.seed!(100)
-    D = 5
-    A = atype(rand(dtype, D,D,D))
-    B = atype(rand(dtype, D,D))
-    function foo(x)
-        C = A * x
-        D = B * x
-        E = ein"abc,abc -> "(C,C)
-        F = ein"ab,ab -> "(D,D)
-        return norm(Array(E)[]/Array(F)[])
-        # E = ein"abc,abc -> "(C,C)[]
-        # F = ein"ab,ab -> "(D,D)[]
-        # return norm(E/F) mistake for GPU
-    end 
-    @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 
 @testset "$(Ni)x$(Nj) leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
