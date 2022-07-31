@@ -2,9 +2,9 @@ using VUMPS
 using Test
 
 @testset "VUMPS.jl" begin
-    @testset "cuda_patch" begin
-        println("cuda_patch tests running...")
-        include("cuda_patch.jl")
+    @testset "patch" begin
+        println("patch tests running...")
+        include("patch.jl")
     end
 
     @testset "environment" begin

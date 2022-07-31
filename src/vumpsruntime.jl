@@ -102,7 +102,7 @@ function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=
     stopfun = StopFunction(olderror, -1, tol, maxiter, miniter)
     rt, err = fixedpoint(res -> vumpstep(res...;show_counting=vumps_counting), (rt, olderror), stopfun)
     verbose && println("vumps done@step: $(stopfun.counter), error=$(err)")
-    return rt
+    return rt, err
 end
 
 function show_every_count(n::Number)
@@ -164,15 +164,15 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     else
         rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose)
     end
-    env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
+    env, err = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
-    Zygote.@ignore savefile && begin
+    Zygote.@ignore savefile && err < 1e-7 && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = Array(env.AL), Array(env.C), Array(env.AR), Array(env.FL), Array(env.FR)
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
         save(out_chkp_file, "env", envsave)
     end
-    env
+    env, err
 end
 
 """
@@ -182,7 +182,7 @@ If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment ar
 """
 function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf)
     M /= norm(M)
-    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every)
+    envup, errup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
     D = size(M,1)
@@ -207,15 +207,16 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         end
         Md = permutedims(reshape(Md, (D, Ni, Nj, D, D, D)),(1,4,5,6,2,3))
         
-        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every)
+        envdown, errdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu
+        errdown = errup
     end
 
     _, FL = leftenv(ALu, ALd, M)
     _, FR = rightenv(ARu, ARd, M)
-    Zygote.@ignore savefile && begin
+    Zygote.@ignore savefile &&  (errup + errdown < 1e-7) && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         envsave = (Array(FL), Array(FR))
         save(out_chkp_file_obs, "env", envsave)
