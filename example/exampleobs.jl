@@ -12,11 +12,11 @@ function observable(env, model::MT, ::Val{:Z}) where {MT <: HamiltonianModel}
     χ,D,Ni,Nj = size(ALu)[[1,2,4,5]]
     
     z_tol = 1
-    ACu = atype{ComplexF64}([])
+    ACu = Zygote.Buffer(ALu)
     @inbounds @views for j = 1:Nj,i = 1:Ni
-        ACu = [ACu; ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])]
+        ACu[:,:,:,i,j] = ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])
     end
-    ACu = permutedims(reshape(ACu, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
+    ACu = copy(ACu)
 
     for j = 1:Nj,i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
@@ -35,11 +35,11 @@ function observable(env, model::MT, type) where {MT <: HamiltonianModel}
     M   = atype(model_tensor(model, Val(:bulk)))
     M_obs = atype(model_tensor(model, type))
     obs_tol = 0
-    ACu = atype{ComplexF64}([])
+    ACu = Zygote.Buffer(ALu)
     @inbounds @views for j = 1:Nj,i = 1:Ni
-        ACu = [ACu; ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])]
+        ACu[:,:,:,i,j] = ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])
     end
-    ACu = permutedims(reshape(ACu, (χ, Ni, Nj, D, χ)),(1,4,5,2,3))
+    ACu = copy(ACu)
 
     for j = 1:Nj,i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)

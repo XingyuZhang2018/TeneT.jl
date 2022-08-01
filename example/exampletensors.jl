@@ -25,12 +25,12 @@ function model_tensor(model::Ising, ::Val{:bulk})
     w = exp.(- β * ham)
     wsq = sqrt(w)
     m = ein"ia,ib,ic,id -> abcd"(wsq, wsq, wsq, wsq)
-    M = Array{ComplexF64}([])
-    for j = 1:Nj, i = 1:Ni
-        M = [M; m]
+
+    M = Zygote.Buffer(m, 2,2,2,2,Ni,Nj)
+    @inbounds @views for j = 1:Nj,i = 1:Ni
+        M[:,:,:,:,i,j] = m
     end
-    M = permutedims(reshape(M, (2, Ni, Nj, 2, 2, 2)),(1,4,5,6,2,3))
-    return M
+    return copy(M)
 end
 
 function model_tensor(model::Ising, ::Val{:mag})
@@ -39,12 +39,11 @@ function model_tensor(model::Ising, ::Val{:mag})
     cβ, sβ = sqrt(cosh(β)), sqrt(sinh(β))
     q = 1/sqrt(2) * [cβ+sβ cβ-sβ; cβ-sβ cβ+sβ]
     m = ein"abcd,ai,bj,ck,dl -> ijkl"(a,q,q,q,q)
-    M = Array{ComplexF64}([])
-    for j = 1:Nj, i = 1:Ni
-        M = [M; m]
+    M = Zygote.Buffer(m, 2,2,2,2,Ni,Nj)
+    @inbounds @views for j = 1:Nj,i = 1:Ni
+        M[:,:,:,:,i,j] = m
     end
-    M = permutedims(reshape(M, (2, Ni, Nj, 2, 2, 2)),(1,4,5,6,2,3))
-    return M
+    return copy(M)
 end
 
 function model_tensor(model::Ising, ::Val{:energy})
@@ -56,12 +55,11 @@ function model_tensor(model::Ising, ::Val{:energy})
     wsqi = wsq^(-1)
     e = (ein"ai,im,bm,cm,dm -> abcd"(wsqi,we,wsq,wsq,wsq) + ein"am,bi,im,cm,dm -> abcd"(wsq,wsqi,we,wsq,wsq) + 
         ein"am,bm,ci,im,dm -> abcd"(wsq,wsq,wsqi,we,wsq) + ein"am,bm,cm,di,im -> abcd"(wsq,wsq,wsq,wsqi,we)) / 2
-    M = Array{ComplexF64}([])
-    for j = 1:Nj, i = 1:Ni
-        M = [M; e]
+    M = Zygote.Buffer(e, 2,2,2,2,Ni,Nj)
+    @inbounds @views for j = 1:Nj,i = 1:Ni
+        M[:,:,:,:,i,j] = e
     end
-    M = permutedims(reshape(M, (2, Ni, Nj, 2, 2, 2)),(1,4,5,6,2,3))
-    return M
+    return copy(M)
 end
 
 
