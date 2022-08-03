@@ -12,7 +12,6 @@ Zygote.@nograd FLint
 Zygote.@nograd FRint
 Zygote.@nograd leftorth
 Zygote.@nograd rightorth
-Zygote.@nograd ALCtoAC
 Zygote.@nograd LRtoC
 Zygote.@nograd initialA
 Zygote.@nograd save
@@ -156,7 +155,7 @@ end
 ```
 """
 function ξLmap(ALu, ALd, M, ξL, i)
-    Ni, Nj = size(M)[[5,6]]
+    Ni, Nj = size(M)[end-1:end]
     ξLm = copy(ξL)
     ir = i + 1 - Ni * (i==Ni)
     @inbounds @views for j in 1:Nj
@@ -168,11 +167,11 @@ end
 
 function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
     λL, FL = leftenv(ALu, ALd, M, FL)
-    Ni,Nj = size(M)[[5,6]]
+    Ni,Nj = size(M)[end-1:end]
     function back((dλL, dFL))
-        dALu = similar(ALu)
-        dALd = similar(ALd)
-        dM   = similar(M)
+        dALu = zero(ALu)
+        dALd = zero(ALd)
+        dM   = zero(M)
         @inbounds for i = 1:Ni
             dFL[:,:,:,i,:] -= Array(ein"abcd,abcd ->"(conj(FL[:,:,:,i,:]), dFL[:,:,:,i,:]))[] * FL[:,:,:,i,:]
             ξL, info = linsolve(X -> ξLmap(ALu, ALd, M, X, i), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 1)
@@ -200,7 +199,7 @@ end
 """
 
 function ξRmap(ARu, ARd, M, ξR, i)
-    Ni, Nj = size(M)[[5,6]]
+    Ni, Nj = size(M)[end-1:end]
     ξRm = copy(ξR)
     ir = i + 1 - Ni * (i==Ni)
     @inbounds @views for j in 1:Nj
@@ -212,11 +211,11 @@ end
 
 function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
     λR, FR = rightenv(ARu, ARd, M, FR)
-    Ni,Nj = size(M)[[5,6]]
+    Ni,Nj = size(M)[end-1:end]
     function back((dλ, dFR))
-        dARu = similar(ARu)
-        dARd = similar(ARd)
-        dM   = similar(M)
+        dARu = zero(ARu)
+        dARd = zero(ARd)
+        dM   = zero(M)
         for i = 1:Ni
             dFR[:,:,:,i,:] -= Array(ein"abcd,abcd ->"(conj(FR[:,:,:,i,:]), dFR[:,:,:,i,:]))[] * FR[:,:,:,i,:]
             ξR, info = linsolve(X -> ξRmap(ARu, ARd, M, X, i), conj(dFR[:,:,:,i,:]), -λR[i], 1; maxiter = 1)
@@ -286,11 +285,11 @@ end
 
 function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
     λAC, AC = ACenv(AC, FL, M, FR)
-    Ni, Nj = size(M)[[5,6]]
+    Ni, Nj = size(M)[end-1:end]
     function back((dλ, dAC))
-        dFL = similar(FL)
-        dM  = similar(M)
-        dFR = similar(FR)
+        dFL = zero(FL)
+        dM  = zero(M)
+        dFR = zero(FR)
         @inbounds for j = 1:Nj
             dAC[:,:,:,:,j] -= Array(ein"abcd,abcd ->"(conj(AC[:,:,:,:,j]), dAC[:,:,:,:,j]))[] * AC[:,:,:,:,j]
             ξAC, info = linsolve(X -> ξACmap(X, FL, FR, M, j), conj(dAC[:,:,:,:,j]), -λAC[j], 1; maxiter = 1)
@@ -355,8 +354,8 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     λC, C = Cenv(C, FL, FR)
     Ni, Nj = size(C)[[3,4]]
     function back((dλ, dC))
-        dFL = similar(FL)
-        dFR = similar(FR)
+        dFL = zero(FL)
+        dFR = zero(FR)
         for j = 1:Nj
             dC[:,:,:,j] -= Array(ein"abc,abc ->"(conj(C[:,:,:,j]), dC[:,:,:,j]))[] * C[:,:,:,j]
             ξC, info = linsolve(X -> ξCmap(X, FL, FR, j), conj(dC[:,:,:,j]), -λC[j], 1; maxiter = 1)

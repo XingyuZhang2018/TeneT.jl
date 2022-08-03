@@ -64,7 +64,7 @@ function lqpos!(A)
 end
 
 function env_norm(F::AbstractArray{T,5}) where T
-    Ni,Nj = size(F)[[4,5]]
+    Ni,Nj = size(F)[end-1:end]
     buf = Zygote.Buffer(F)
     @inbounds @views for j in 1:Nj, i in 1:Ni
         buf[:,:,:,i,j] = F[:,:,:,i,j]/norm(F[:,:,:,i,j])
@@ -111,7 +111,7 @@ function cellones(A)
 end
 
 function ρmap(ρ,A)
-    Ni, Nj = size(A)[[4,5]]
+    Ni, Nj = size(A)[end-1:end]
     ρ = copy(ρ)
     @inbounds @views for j in 1:Nj, i in 1:Ni
         jr = j + 1 - Nj * (j==Nj)
@@ -141,7 +141,7 @@ L = cholesky!(ρ).U
 If ρ is not exactly positive definite, cholesky will fail
 """
 function getL!(A,L; kwargs...)
-    Ni,Nj = size(A)[[4,5]]
+    Ni,Nj = size(A)[end-1:end]
     λs, ρs, info = eigsolve(ρ->ρmap(ρ,A), L, 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
     @debug "getL eigsolve" λs info sort(abs.(λs))
     info.converged == 0 && @warn "getL not converged"
@@ -178,7 +178,7 @@ function getAL(A,L)
 end
 
 function getLsped(Le, A, AL; kwargs...)
-    Ni,Nj = size(A)[[4,5]]
+    Ni,Nj = size(A)[end-1:end]
     L = similar(Le)
     @inbounds @views for j = 1:Nj, i = 1:Ni
         λs, Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[:,:,:,i,j],conj(AL[:,:,:,i,j])), Le[:,:,i,j], 1, :LM; ishermitian = false, kwargs...)
@@ -220,7 +220,7 @@ a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for
 provided.
 """
 function rightorth(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
-    Ni,Nj = size(A)[[4,5]]
+    Ni,Nj = size(A)[end-1:end]
     Ar = similar(A)
     Lr = similar(L)
     @inbounds @views for j = 1:Nj, i = 1:Ni
@@ -399,7 +399,7 @@ end
 ```
 """
 function Cmap(C, FL, FR, j)
-    Ni,Nj = size(FL)[[4,5]]
+    Ni,Nj = size(FL)[end-1:end]
     Cm = copy(C)
     jr = j + 1 - Nj * (j==Nj)
     @inbounds @views for i in 1:Ni
@@ -487,12 +487,12 @@ function ACCtoAR(AC, C)
 end
 
 function ALCtoAC(AL,C)
-    AC = similar(AL)
-    Ni,Nj = size(AL)[[4,5]]
+    AC = Zygote.Buffer(AL)
+    Ni,Nj = size(AL)[end-1:end]
     @inbounds @views for j in 1:Nj, i in 1:Ni
-        AC[:,:,:,i,j] .= ein"asc,cb -> asb"(AL[:,:,:,i,j], C[:,:,i,j]) 
+        AC[:,:,:,i,j] = ein"asc,cb -> asb"(AL[:,:,:,i,j], C[:,:,i,j]) 
     end
-    return AC
+    return copy(AC)
 end
 
 """
@@ -533,7 +533,7 @@ MAC2 =  FL─ M ──FR  =  λAC  │     │
 ````
 """
 function error(AL,C,AR,FL,M,FR)
-    Ni,Nj = size(AL)[[4,5]]
+    Ni,Nj = size(AL)[end-1:end]
     AC = ALCtoAC(AL, C)
     err = 0
     for _ in 1:Ni, j in 1:Nj
