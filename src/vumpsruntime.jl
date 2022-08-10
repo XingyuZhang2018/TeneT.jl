@@ -202,7 +202,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Ni, Nj = size(ALu)[[4,5]]
         Md = atype{ComplexF64}([])
         for j in 1:Nj, i in 1:Ni
-            ir = Ni + 1 - i
+            ir = Ni - i + (i==Ni)
             Md = [Md; permutedims(M[:,:,:,:,ir,j], (1,4,3,2))]
         end
         Md = permutedims(reshape(Md, (D, Ni, Nj, D, D, D)),(1,4,5,6,2,3))
