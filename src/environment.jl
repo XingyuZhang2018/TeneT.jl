@@ -84,20 +84,17 @@ end
 """
     λs[1], Fs[1] = selectpos(λs, Fs)
 
-Select the first positive one of λs and corresponding Fs.
+Select the max positive one of λs and corresponding Fs.
 """
-function selectpos(λs, Fs)
-    # if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
-    #     # @show "selectpos: λs are degeneracy"
-    #     # @show λs
-    #     if real(λs[1]) > 0
-    #         return λs[1], Fs[1]
-    #     else
-    #         return λs[2], Fs[2]
-    #     end
-    # else
+function selectpos(λs, Fs, N)
+    if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
+        # @show "selectpos: λs are degeneracy"
+        p = argmax(real(λs[1:N]))  
+        # @show λs p abs.(λs)
+        return λs[1:N][p], Fs[1:N][p]
+    else
         return λs[1], Fs[1]
-    # end
+    end
 end
 
 function cellones(A)
@@ -145,7 +142,7 @@ function getL!(A,L; kwargs...)
     λs, ρs, info = eigsolve(ρ->ρmap(ρ,A), L, 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
     @debug "getL eigsolve" λs info sort(abs.(λs))
     info.converged == 0 && @warn "getL not converged"
-    _, ρs1 = selectpos(λs, ρs)
+    _, ρs1 = selectpos(λs, ρs, Nj)
     @inbounds @views for j = 1:Nj, i = 1:Ni
         ρ = ρs1[:,:,i,j] + ρs1[:,:,i,j]'
         ρ ./= tr(ρ)
@@ -184,7 +181,7 @@ function getLsped(Le, A, AL; kwargs...)
         λs, Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[:,:,:,i,j],conj(AL[:,:,:,i,j])), Le[:,:,i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λs info sort(abs.(λs))
         info.converged == 0 && @warn "getLsped not converged"
-        _, Ls1 = selectpos(λs, Ls)
+        _, Ls1 = selectpos(λs, Ls, Nj)
         _, R = qrpos!(Ls1)
         L[:,:,i,j] = R
     end
@@ -326,14 +323,14 @@ FLᵢⱼ ─ Mᵢⱼ   ──   = λLᵢⱼ FLᵢⱼ₊₁
 """
 leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = leftenv!(ALu, ALd, M, copy(FL); kwargs...) 
 function leftenv!(ALu, ALd, M, FL; ifobs=false, kwargs...) 
-    Ni = size(M, 5)
+    Ni,Nj = size(M)[[5,6]]
     λL = zeros(eltype(FL),Ni)
     for i in 1:Ni
         ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
         λLs, FL1s, info = eigsolve(X->FLmap(ALu, ALd, M, X, i, ir), FL[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
-        λL[i], FL[:,:,:,i,:] = selectpos(λLs, FL1s)
+        λL[i], FL[:,:,:,i,:] = selectpos(λLs, FL1s, Nj)
     end
     return λL, FL
 end
@@ -353,14 +350,14 @@ of AR - M - conj(AR) contracted along the physical dimension.
 """
 rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = rightenv!(ARu, ARd, M, copy(FR); kwargs...) 
 function rightenv!(ARu, ARd, M, FR; ifobs=false, kwargs...) 
-    Ni = size(M, 5)
+    Ni,Nj = size(M)[[5,6]]
     λR = zeros(eltype(FR),Ni)
     for i in 1:Ni
         ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
         λRs, FR1s, info= eigsolve(X->FRmap(ARu, ARd, M, X, i, ir), FR[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
-        λR[i], FR[:,:,:,i,:] = selectpos(λRs, FR1s)
+        λR[i], FR[:,:,:,i,:] = selectpos(λRs, FR1s, Nj)
     end
     return λR, FR
 end
@@ -423,13 +420,13 @@ FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ               │      │  
 """
 ACenv(AC, FL, M, FR; kwargs...) = ACenv!(copy(AC), FL, M, FR; kwargs...)
 function ACenv!(AC, FL, M, FR; kwargs...)
-    Nj = size(M, 6)
+    Ni,Nj = size(M)[[5,6]]
     λAC = zeros(eltype(AC),Nj)
     for j in 1:Nj
         λACs, ACs, info = eigsolve(X->ACmap(X, FL, FR, M, j), AC[:,:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
         info.converged == 0 && @warn "ACenv Not converged"
-        λAC[j], AC[:,:,:,:,j] = selectpos(λACs, ACs)
+        λAC[j], AC[:,:,:,:,j] = selectpos(λACs, ACs, Ni)
     end
     return λAC, AC
 end
@@ -448,13 +445,13 @@ FLᵢⱼ₊₁ ──── FRᵢⱼ            │       │
 """
 Cenv(C, FL, FR; kwargs...) = Cenv!(copy(C), FL, FR; kwargs...)
 function Cenv!(C, FL, FR; kwargs...)
-    Nj = size(C, 4)
+    Ni,Nj = size(C)[[3,4]]
     λC = zeros(eltype(C),Nj)
     for j in 1:Nj
         λCs, Cs, info = eigsolve(X->Cmap(X, FL, FR, j), C[:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
         info.converged == 0 && @warn "Cenv Not converged"
-        λC[j], C[:,:,:,j] = selectpos(λCs, Cs)
+        λC[j], C[:,:,:,j] = selectpos(λCs, Cs, Ni)
     end
     return λC, C
 end
