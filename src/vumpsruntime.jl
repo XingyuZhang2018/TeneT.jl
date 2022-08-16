@@ -203,7 +203,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Md = Zygote.Buffer(M)
         @inbounds @views for j in 1:Nj, i in 1:Ni
             ir = Ni + 1 - i 
-            Md[:,:,:,:,ir,j] = permutedims(M[:,:,:,:,ir,j], (1,4,3,2))
+            Md[:,:,:,:,i,j] = permutedims(M[:,:,:,:,ir,j], (1,4,3,2))
         end
         Md = copy(Md)
         
