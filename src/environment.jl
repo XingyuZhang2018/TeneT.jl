@@ -266,10 +266,9 @@ FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d �
 ```
 """
 
-function FLmap(ALu, ALd, M, FL, i)
-    Ni, Nj = size(M)[[5,6]]
+function FLmap(ALu, ALd, M, FL, i, ir)
+    Nj = size(M, 6)
     FLm = copy(FL)
-    ir = i + 1 - Ni * (i==Ni)
     @inbounds @views for j in 1:Nj
         jr = j + 1 - Nj * (j==Nj)
         FLm[:,:,:,jr] .= ein"((adf,abc),dgeb),fgh -> ceh"(FL[:,:,:,j],ALu[:,:,:,i,j],M[:,:,:,:,i,j],ALd[:,:,:,ir,j])
@@ -288,10 +287,9 @@ end
     ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h 
 ```
 """
-function FRmap(ARu, ARd, M, FR, i)
-    Ni, Nj = size(M)[[5,6]]
+function FRmap(ARu, ARd, M, FR, i, ir)
+    Nj = size(M, 6)
     FRm = copy(FR)
-    ir = i + 1 - Ni * (i==Ni)
     @inbounds @views for j in 1:Nj
         jr = j - 1 + Nj * (j==1)
         FRm[:,:,:,jr] .= ein"((ceh,abc),dgeb),fgh -> adf"(FR[:,:,:,j],ARu[:,:,:,i,j],M[:,:,:,:,i,j],ARd[:,:,:,ir,j])
@@ -327,11 +325,12 @@ FLᵢⱼ ─ Mᵢⱼ   ──   = λLᵢⱼ FLᵢⱼ₊₁
 ```
 """
 leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...) = leftenv!(ALu, ALd, M, copy(FL); kwargs...) 
-function leftenv!(ALu, ALd, M, FL; kwargs...) 
+function leftenv!(ALu, ALd, M, FL; ifobs=false, kwargs...) 
     Ni = size(M, 5)
     λL = zeros(eltype(FL),Ni)
     for i in 1:Ni
-        λLs, FL1s, info = eigsolve(X->FLmap(ALu, ALd, M, X, i), FL[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
+        λLs, FL1s, info = eigsolve(X->FLmap(ALu, ALd, M, X, i, ir), FL[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         λL[i], FL[:,:,:,i,:] = selectpos(λLs, FL1s)
@@ -353,11 +352,12 @@ of AR - M - conj(AR) contracted along the physical dimension.
 ```
 """
 rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...) = rightenv!(ARu, ARd, M, copy(FR); kwargs...) 
-function rightenv!(ARu, ARd, M, FR; kwargs...) 
+function rightenv!(ARu, ARd, M, FR; ifobs=false, kwargs...) 
     Ni = size(M, 5)
     λR = zeros(eltype(FR),Ni)
     for i in 1:Ni
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu, ARd, M, X, i), FR[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
+        λRs, FR1s, info= eigsolve(X->FRmap(ARu, ARd, M, X, i, ir), FR[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
         λR[i], FR[:,:,:,i,:] = selectpos(λRs, FR1s)

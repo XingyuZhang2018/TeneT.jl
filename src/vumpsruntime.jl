@@ -200,12 +200,12 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     if updown 
         Ni, Nj = size(ALu)[[4,5]]
-        Md = atype{ComplexF64}([])
-        for j in 1:Nj, i in 1:Ni
-            ir = Ni - i + (i==Ni)
-            Md = [Md; permutedims(M[:,:,:,:,ir,j], (1,4,3,2))]
+        Md = Zygote.Buffer(M)
+        @inbounds @views for j in 1:Nj, i in 1:Ni
+            ir = Ni + 1 - i 
+            Md[:,:,:,:,ir,j] = permutedims(M[:,:,:,:,ir,j], (1,4,3,2))
         end
-        Md = permutedims(reshape(Md, (D, Ni, Nj, D, D, D)),(1,4,5,6,2,3))
+        Md = copy(Md)
         
         envdown, errdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every, savetol = savetol)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
@@ -214,8 +214,8 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         errdown = errup
     end
 
-    _, FL = leftenv(ALu, ALd, M)
-    _, FR = rightenv(ARu, ARd, M)
+    _, FL = leftenv(ALu, ALd, M; ifobs = true)
+    _, FR = rightenv(ARu, ARd, M; ifobs = true)
     Zygote.@ignore savefile &&  (errup + errdown < savetol) && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         envsave = (Array(FL), Array(FR))

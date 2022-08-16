@@ -1,5 +1,5 @@
 using VUMPS
-using VUMPS:qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error,FLmap2,FRmap2, env_norm
+using VUMPS:qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, env_norm
 using CUDA
 using LinearAlgebra
 using Random
@@ -49,20 +49,21 @@ end
     end
 end
 
-@testset "leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+@testset "leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], ifobs in [false, true], Ni = [3], Nj = [3]
     Random.seed!(100)
     χ, D = 3, 2
     A = atype(rand(dtype, χ, D, χ, Ni, Nj))
     M = atype(rand(dtype, D, D, D, D, Ni, Nj))
 
     AL,    =  leftorth(A)
-    λL,FL  =  leftenv(AL, conj(AL), M)
+    λL,FL  =  leftenv(AL, conj(AL), M; ifobs = ifobs)
     _, AR, = rightorth(A)
-    λR,FR  = rightenv(AR, conj(AR), M)
+    λR,FR  = rightenv(AR, conj(AR), M; ifobs = ifobs)
 
     for i in 1:Ni
-        @test λL[i] * FL[:,:,:,i,:] ≈ FLmap(AL, conj(AL), M, FL[:,:,:,i,:], i)
-        @test λR[i] * FR[:,:,:,i,:] ≈ FRmap(AR, conj(AR), M, FR[:,:,:,i,:], i)
+        ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
+        @test λL[i] * FL[:,:,:,i,:] ≈ FLmap(AL, conj(AL), M, FL[:,:,:,i,:], i, ir)
+        @test λR[i] * FR[:,:,:,i,:] ≈ FRmap(AR, conj(AR), M, FR[:,:,:,i,:], i, ir)
     end
 end
 

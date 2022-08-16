@@ -135,9 +135,7 @@ dAdᵢ₊₁ⱼ =  -   L ─── Mᵢⱼ ──R       ├─ d ─┼─ e �
 
 ```
 """
-function dAMmap!(dAu, dAd, dM, Au, Ad, M, L, R, i, j)
-    Ni = size(Au, 4)
-    ir = i + 1 - Ni * (i==Ni)
+function dAMmap!(dAu, dAd, dM, Au, Ad, M, L, R, i, ir, j)
     dAu[:,:,:,  i, j] = -conj(ein"((adf,fgh),dgeb),ceh -> abc"(L, Ad[:,:,:,ir,j], M[:,:,:,:,i,j], R))
     dAd[:,:,:,  ir,j] = -conj(ein"((adf,abc),dgeb),ceh -> fgh"(L, Au[:,:,:,i ,j], M[:,:,:,:,i,j], R))
      dM[:,:,:,:,i, j] = -conj(ein"(adf,abc),(fgh,ceh) -> dgeb"(L, Au[:,:,:,i ,j], Ad[:,:,:,ir,j], R))
@@ -154,10 +152,9 @@ end
     ── ALdᵢ₊₁ⱼ ─┘          ──┘          f ────┴──── h 
 ```
 """
-function ξLmap(ALu, ALd, M, ξL, i)
-    Ni, Nj = size(M)[end-1:end]
+function ξLmap(ALu, ALd, M, ξL, i, ir)
+    Nj = size(M, 6)
     ξLm = copy(ξL)
-    ir = i + 1 - Ni * (i==Ni)
     @inbounds @views for j in 1:Nj
         jr = j + 1 - Nj * (j==Nj)
         ξLm[:,:,:,j] .= ein"((ceh,abc),dgeb),fgh -> adf"(ξL[:,:,:,jr],ALu[:,:,:,i,j],M[:,:,:,:,i,j],ALd[:,:,:,ir,j])
@@ -165,20 +162,21 @@ function ξLmap(ALu, ALd, M, ξL, i)
     return ξLm
 end
 
-function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; kwargs...)
-    λL, FL = leftenv(ALu, ALd, M, FL)
+function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; ifobs = false, kwargs...)
+    λL, FL = leftenv(ALu, ALd, M, FL; ifobs = ifobs, kwargs...)
     Ni,Nj = size(M)[end-1:end]
     function back((dλL, dFL))
         dALu = zero(ALu)
         dALd = zero(ALd)
         dM   = zero(M)
         @inbounds for i = 1:Ni
+            ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
             dFL[:,:,:,i,:] -= Array(ein"abcd,abcd ->"(conj(FL[:,:,:,i,:]), dFL[:,:,:,i,:]))[] * FL[:,:,:,i,:]
-            ξL, info = linsolve(X -> ξLmap(ALu, ALd, M, X, i), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 1)
+            ξL, info = linsolve(X -> ξLmap(ALu, ALd, M, X, i, ir), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 1)
             info.converged == 0 && @warn "ad's linsolve not converge"
             @views for j in 1:Nj
                 jr = j + 1 - Nj * (j==Nj)
-                dAMmap!(dALu, dALd, dM, ALu, ALd, M, FL[:,:,:,i,j], ξL[:,:,:,jr], i, j)
+                dAMmap!(dALu, dALd, dM, ALu, ALd, M, FL[:,:,:,i,j], ξL[:,:,:,jr], i, ir, j)
             end
         end
         return NoTangent(), dALu, dALd, dM, NoTangent()
@@ -198,10 +196,9 @@ end
 ```
 """
 
-function ξRmap(ARu, ARd, M, ξR, i)
-    Ni, Nj = size(M)[end-1:end]
+function ξRmap(ARu, ARd, M, ξR, i, ir)
+    Nj = size(M, 6)
     ξRm = copy(ξR)
-    ir = i + 1 - Ni * (i==Ni)
     @inbounds @views for j in 1:Nj
         jr = j - 1 + Nj * (j==1)
         ξRm[:,:,:,j] .= ein"((adf,abc),dgeb),fgh -> ceh"(ξR[:,:,:,jr],ARu[:,:,:,i,j],M[:,:,:,:,i,j],ARd[:,:,:,ir,j])
@@ -209,20 +206,21 @@ function ξRmap(ARu, ARd, M, ξR, i)
     return ξRm
 end
 
-function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; kwargs...)
-    λR, FR = rightenv(ARu, ARd, M, FR)
+function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; ifobs = false, kwargs...)
+    λR, FR = rightenv(ARu, ARd, M, FR; ifobs = ifobs, kwargs...)
     Ni,Nj = size(M)[end-1:end]
     function back((dλ, dFR))
         dARu = zero(ARu)
         dARd = zero(ARd)
         dM   = zero(M)
         for i = 1:Ni
+            ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
             dFR[:,:,:,i,:] -= Array(ein"abcd,abcd ->"(conj(FR[:,:,:,i,:]), dFR[:,:,:,i,:]))[] * FR[:,:,:,i,:]
-            ξR, info = linsolve(X -> ξRmap(ARu, ARd, M, X, i), conj(dFR[:,:,:,i,:]), -λR[i], 1; maxiter = 1)
+            ξR, info = linsolve(X -> ξRmap(ARu, ARd, M, X, i, ir), conj(dFR[:,:,:,i,:]), -λR[i], 1; maxiter = 1)
             info.converged == 0 && @warn "ad's linsolve not converge"
             for j = 1:Nj
                 jr = j - 1 + Nj * (j==1)
-                dAMmap!(dARu, dARd, dM, ARu, ARd, M,  ξR[:,:,:,jr], FR[:,:,:,i,j], i, j)
+                dAMmap!(dARu, dARd, dM, ARu, ARd, M,  ξR[:,:,:,jr], FR[:,:,:,i,j], i, ir, j)
             end
         end
         return NoTangent(), dARu, dARd, dM, NoTangent()

@@ -71,7 +71,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], ifobs in [false, true], Ni = [3], Nj = [3]
     Random.seed!(100)
     D, d = 3, 2
     A = atype(rand(dtype,      D, d, D, Ni, Nj))
@@ -84,7 +84,7 @@ end
     _, ARd, = rightorth(A)
 
     function foo1(M)
-        _,FL = leftenv(ALu, conj(ALd), M)
+        _,FL = leftenv(ALu, conj(ALd), M; ifobs = ifobs)
         s = 0
         for j in 1:Nj, i in 1:Ni
             A  = ein"(abc,abcdef),def -> "(FL[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FL[:,:,:,i,j])
@@ -96,7 +96,7 @@ end
     @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M)
 
     function foo2(M)
-        _,FR = rightenv(ARu, conj(ARd), M)
+        _,FR = rightenv(ARu, conj(ARd), M; ifobs = ifobs)
         s = 0
         for j in 1:Nj, i in 1:Ni
             A  = ein"(abc,abcdef),def -> "(FR[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FR[:,:,:,i,j])
