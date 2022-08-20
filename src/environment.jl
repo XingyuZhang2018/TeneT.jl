@@ -89,6 +89,7 @@ Select the max positive one of λs and corresponding Fs.
 function selectpos(λs, Fs, N)
     if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
         # @show "selectpos: λs are degeneracy"
+        N = max(N, length(λs))
         p = argmax(real(λs[1:N]))  
         # @show λs p abs.(λs)
         return λs[1:N][p], Fs[1:N][p]
