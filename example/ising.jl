@@ -6,7 +6,7 @@ using Test
 using CUDA
 using Zygote
 
-@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [1], Nj = [2], atype = [Array]
+@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [2], Nj = [2], atype = [Array]
     Random.seed!(100)
     β = 0.5
     model = Ising(Ni, Nj, β)

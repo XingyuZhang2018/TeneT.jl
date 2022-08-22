@@ -157,7 +157,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     
     D = size(M,1)
     savefile && mkpath(outfolder)
-    in_chkp_file = infolder*"/$(direction)_D$(D)_χ$(χ).jld2"
+    in_chkp_file = joinpath(infolder, "$(direction)_D$(D)_χ$(χ).jld2")
 
     if isfile(in_chkp_file)                               
         rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
@@ -167,7 +167,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     env, err = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
     Zygote.@ignore savefile && err < savetol && begin
-        out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
+        out_chkp_file = joinpath(outfolder, "$(direction)_D$(D)_χ$(χ).jld2")
         ALs, Cs, ARs, FLs, FRs = Array(env.AL), Array(env.C), Array(env.AR), Array(env.FL), Array(env.FR)
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
         save(out_chkp_file, "env", envsave)
@@ -187,7 +187,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     D = size(M,1)
     atype = _arraytype(M)
-    in_chkp_file_obs = infolder*"/obs_D$(D)_χ$(χ).jld2"
+    in_chkp_file_obs = joinpath(infolder, "obs_D$(D)_χ$(χ).jld2")
     if isfile(in_chkp_file_obs)   
         verbose && println("←→ observable environment load from $(in_chkp_file_obs)")
         FL, FR = load(in_chkp_file_obs)["env"]
@@ -217,7 +217,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     _, FL = leftenv(ALu, ALd, M; ifobs = true)
     _, FR = rightenv(ARu, ARd, M; ifobs = true)
     Zygote.@ignore savefile &&  (errup + errdown < savetol) && begin
-        out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
+        out_chkp_file_obs = joinpath(outfolder, "obs_D$(D)_χ$(χ).jld2")
         envsave = (Array(FL), Array(FR))
         save(out_chkp_file_obs, "env", envsave)
     end
