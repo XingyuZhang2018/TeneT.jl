@@ -264,7 +264,7 @@ end
 
 function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
     λAC, AC = ACenv(AC, FL, M, FR)
-    Nj = size(M, 5)
+    Nj = size(M, 6)
     function back((dλ, dAC))
         dFL = zero(FL)
         dM  = zero(M)
