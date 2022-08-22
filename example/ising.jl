@@ -31,7 +31,7 @@ end
             outfolder = "./example/data/$model/", 
             updown = false, verbose = true, savefile = false
             )
-        -log(real(observable(env, model, Val(:Z))))
+        log(real(observable(env, model, Val(:Z))))
     end
-    @test Zygote.gradient(β->logZ(β), 0.5)[1] ≈ -1.745564581767667
+    @test Zygote.gradient(β->-logZ(β), 0.5)[1] ≈ -1.745564581767667
 end

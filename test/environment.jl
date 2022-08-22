@@ -62,8 +62,8 @@ end
 
     for i in 1:Ni
         ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
-        @test λL[i] * FL[:,:,:,i,:] ≈ FLmap(AL, conj(AL), M, FL[:,:,:,i,:], i, ir)
-        @test λR[i] * FR[:,:,:,i,:] ≈ FRmap(AR, conj(AR), M, FR[:,:,:,i,:], i, ir)
+        @test λL[i] * FL[:,:,:,i,:] ≈ FLmap(AL[:,:,:,i,:], conj(AL[:,:,:,ir,:]), M[:,:,:,:,i,:], FL[:,:,:,i,:])
+        @test λR[i] * FR[:,:,:,i,:] ≈ FRmap(AR[:,:,:,i,:], conj(AR[:,:,:,ir,:]), M[:,:,:,:,i,:], FR[:,:,:,i,:])
     end
 end
 
@@ -85,8 +85,9 @@ end
      λC,  C =  Cenv( C, FL,    FR)
 
     for j in 1:Ni
-        @test λAC[j] * AC[:,:,:,:,j] ≈ ACmap(AC[:,:,:,:,j], FL, FR, M, j)
-        @test  λC[j] *  C[:,:,  :,j] ≈  Cmap( C[:,:,  :,j], FL, FR,    j)
+        jr = j + 1 - Ni*(j==Ni)
+        @test λAC[j] * AC[:,:,:,:,j] ≈ ACmap(AC[:,:,:,:,j], FL[:,:,:,:,j],  FR[:,:,:,:,j], M[:,:,:,:,:,j])
+        @test  λC[j] *  C[:,:,  :,j] ≈  Cmap( C[:,:,  :,j], FL[:,:,:,:,jr], FR[:,:,:,:,j])
     end
 end
 

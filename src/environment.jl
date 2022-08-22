@@ -15,16 +15,6 @@ f ────┴──── h    d──────┴──────e    
 ```
 """
 
-"""
-    i, j = ktoij(k,Ni,Nj)
-    LinearIndices -> CartesianIndices
-"""
-function ktoij(k,Ni,Nj)
-    Cart = CartesianIndices((1:Ni,1:Nj))
-    Index = Cart[k]
-    Index[1],Index[2]
-end
-
 safesign(x::Number) = iszero(x) ? one(x) : sign(x)
 
 """
@@ -243,13 +233,8 @@ end
 ```
 """
 function LRtoC(L, R)
-    Ni, Nj = size(L)[[3,4]]
-    C = similar(L)
-    @inbounds @views for j in 1:Nj,i in 1:Ni
-        jr = j + 1 - (j + 1 > Nj) * Nj
-        C[:,:,i,j] .= L[:,:,i,j] * R[:,:,i,jr]
-    end
-    return C
+    Rijr = circshift(R, (0,0,0,-1))
+    ein"abij,bcij -> acij"(L, Rijr)
 end
 
 """
@@ -264,14 +249,9 @@ FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d �
 ```
 """
 
-function FLmap(ALu, ALd, M, FL, i, ir)
-    Nj = size(M, 6)
-    FLm = copy(FL)
-    @inbounds @views for j in 1:Nj
-        jr = j + 1 - Nj * (j==Nj)
-        FLm[:,:,:,jr] .= ein"((adf,abc),dgeb),fgh -> ceh"(FL[:,:,:,j],ALu[:,:,:,i,j],M[:,:,:,:,i,j],ALd[:,:,:,ir,j])
-    end
-    return FLm
+function FLmap(ALui, ALdir, Mi, FLi)
+    FLij = ein"((adfi,abci),dgebi),fghi -> cehi"(FLi,ALui,Mi,ALdir)
+    circshift(FLij, (0,0,0,1))
 end
 
 """
@@ -285,14 +265,9 @@ end
     ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h 
 ```
 """
-function FRmap(ARu, ARd, M, FR, i, ir)
-    Nj = size(M, 6)
-    FRm = copy(FR)
-    @inbounds @views for j in 1:Nj
-        jr = j - 1 + Nj * (j==1)
-        FRm[:,:,:,jr] .= ein"((ceh,abc),dgeb),fgh -> adf"(FR[:,:,:,j],ARu[:,:,:,i,j],M[:,:,:,:,i,j],ARd[:,:,:,ir,j])
-    end
-    return FRm
+function FRmap(ARui, ARdir, Mi, FRi)
+    FRij = ein"((cehi,abci),dgebi),fghi -> adfi"(FRi,ARui,Mi,ARdir)
+    circshift(FRij, (0,0,0,-1))
 end
 
 function FLint(AL, M)
@@ -328,7 +303,7 @@ function leftenv!(ALu, ALd, M, FL; ifobs=false, kwargs...)
     λL = zeros(eltype(FL),Ni)
     for i in 1:Ni
         ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
-        λLs, FL1s, info = eigsolve(X->FLmap(ALu, ALd, M, X, i, ir), FL[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        λLs, FL1s, info = eigsolve(X->FLmap(ALu[:,:,:,i,:], ALd[:,:,:,ir,:], M[:,:,:,:,i,:], X), FL[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "leftenv! eigsolve" λLs info sort(abs.(λLs))
         info.converged == 0 && @warn "leftenv not converged"
         λL[i], FL[:,:,:,i,:] = selectpos(λLs, FL1s, Nj)
@@ -355,7 +330,7 @@ function rightenv!(ARu, ARd, M, FR; ifobs=false, kwargs...)
     λR = zeros(eltype(FR),Ni)
     for i in 1:Ni
         ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu, ARd, M, X, i, ir), FR[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        λRs, FR1s, info= eigsolve(X->FRmap(ARu[:,:,:,i,:], ARd[:,:,:,ir,:], M[:,:,:,:,i,:], X), FR[:,:,:,i,:], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "rightenv! eigsolve" λRs info sort(abs.(λRs))
         info.converged == 0 && @warn "rightenv not converged"
         λR[i], FR[:,:,:,i,:] = selectpos(λRs, FR1s, Nj)
@@ -375,14 +350,9 @@ end
                                                                
 ```
 """
-function ACmap(AC, FL, FR, M, j)
-    Ni = size(M, 5)
-    ACm = copy(AC)
-    @inbounds @views for i in 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        ACm[:,:,:,ir] .= ein"((adf,abc),dgeb),ceh -> fgh"(FL[:,:,:,i,j],AC[:,:,:,i],M[:,:,:,:,i,j],FR[:,:,:,i,j])
-    end
-    return ACm
+function ACmap(ACj, FLj, FRj, Mj)
+    ACij = ein"((adfj,abcj),dgebj),cehj -> fghj"(FLj,ACj,Mj,FRj)
+    circshift(ACij, (0,0,0,1))
 end
 
 """
@@ -396,15 +366,9 @@ end
                                              d ─── e                                    
 ```
 """
-function Cmap(C, FL, FR, j)
-    Ni,Nj = size(FL)[end-1:end]
-    Cm = copy(C)
-    jr = j + 1 - Nj * (j==Nj)
-    @inbounds @views for i in 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        Cm[:,:,ir] .= ein"(acd,ab),bce -> de"(FL[:,:,:,i,jr],C[:,:,i],FR[:,:,:,i,j])
-    end
-    return Cm
+function Cmap(Cj, FLjr, FRj)
+    Cij = ein"(acdj,abj),bcej -> dej"(FLjr,Cj,FRj)
+    circshift(Cij, (0,0,1))
 end
 
 """
@@ -424,7 +388,7 @@ function ACenv!(AC, FL, M, FR; kwargs...)
     Ni,Nj = size(M)[[5,6]]
     λAC = zeros(eltype(AC),Nj)
     for j in 1:Nj
-        λACs, ACs, info = eigsolve(X->ACmap(X, FL, FR, M, j), AC[:,:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,:,:,:,j], FR[:,:,:,:,j], M[:,:,:,:,:,j]), AC[:,:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
         info.converged == 0 && @warn "ACenv Not converged"
         λAC[j], AC[:,:,:,:,j] = selectpos(λACs, ACs, Ni)
@@ -449,7 +413,8 @@ function Cenv!(C, FL, FR; kwargs...)
     Ni,Nj = size(C)[[3,4]]
     λC = zeros(eltype(C),Nj)
     for j in 1:Nj
-        λCs, Cs, info = eigsolve(X->Cmap(X, FL, FR, j), C[:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        jr = j + 1 - Nj * (j==Nj)
+        λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,:,:,:,jr], FR[:,:,:,:,j]), C[:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         @debug "Cenv! eigsolve" λCs info sort(abs.(λCs))
         info.converged == 0 && @warn "Cenv Not converged"
         λC[j], C[:,:,:,j] = selectpos(λCs, Cs, Ni)
@@ -485,12 +450,7 @@ function ACCtoAR(AC, C)
 end
 
 function ALCtoAC(AL,C)
-    AC = Zygote.Buffer(AL)
-    Ni,Nj = size(AL)[end-1:end]
-    @inbounds @views for j in 1:Nj, i in 1:Ni
-        AC[:,:,:,i,j] = ein"asc,cb -> asb"(AL[:,:,:,i,j], C[:,:,i,j]) 
-    end
-    return copy(AC)
+    ein"ascij,cbij -> asbij"(AL, C)
 end
 
 """
@@ -535,7 +495,7 @@ function error(AL,C,AR,FL,M,FR)
     AC = ALCtoAC(AL, C)
     err = 0
     for _ in 1:Ni, j in 1:Nj
-        AC[:,:,:,:,j] = ACmap(AC[:,:,:,:,j], FL, FR, M, j)
+        AC[:,:,:,:,j] = ACmap(AC[:,:,:,:,j], FL[:,:,:,:,j], FR[:,:,:,:,j], M[:,:,:,:,:,j])
     end
     MAC = AC
     @inbounds @views for j = 1:Nj, i = 1:Ni
