@@ -7,7 +7,7 @@ using Test
 using OMEinsum
 CUDA.allowscalar(false)
 
-@testset "qr with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "qr with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
     Random.seed!(100)
     A = atype(rand(dtype, 4,4))
     Q, R = qrpos(A)
@@ -16,7 +16,7 @@ CUDA.allowscalar(false)
     @test all(imag.(diag(R)) .≈ 0)
 end
 
-@testset "lq with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "lq with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
     Random.seed!(100)
     A = atype(rand(dtype, 4,4))
     L, Q = lqpos(A)
@@ -91,7 +91,7 @@ end
     end
 end
 
-@testset "bcvumps unit test with $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64], Ni = [2], Nj = [2]
+@testset "bcvumps unit test with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)
     χ, D = 3, 2
     A = atype(rand(dtype, χ, D, χ, Ni, Nj))

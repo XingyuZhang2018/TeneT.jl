@@ -21,7 +21,7 @@ using Zygote
     @test observable(env, model, Val(:energy)) ≈ -1.745564581767667
 end
 
-@testset "$(Ni)x$(Nj) ising backward with $atype" for Ni = [1], Nj = [2], atype = [CuArray]
+@testset "$(Ni)x$(Nj) ising backward with $atype" for Ni = [1], Nj = [2], atype = [Array]
     Random.seed!(100)
     function logZ(β)
         model = Ising(Ni, Nj, β)

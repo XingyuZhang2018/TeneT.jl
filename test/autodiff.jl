@@ -20,7 +20,7 @@ CUDA.allowscalar(false)
     @test Zygote.gradient(foo1, 1)[1] ≈ num_grad(foo1, 1)
 end
 
-@testset "zygote mutable arrays with $atype{$dtype}" for atype in [Array, CuArray], dtype in [ComplexF64]
+@testset "zygote mutable arrays with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     Random.seed!(100)
     function foo(F) 
         buf = Zygote.Buffer(F) # https://fluxml.ai/Zygote.jl/latest/utils/#Zygote.Buffer
@@ -33,7 +33,7 @@ end
     @test Zygote.gradient(foo, F)[1] ≈ num_grad(foo, F) atol = 1e-8
 end
 
-@testset "loop_einsum mistake with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "loop_einsum mistake with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
     Random.seed!(100)
     D = 5
     A = atype(rand(dtype, D,D,D))
@@ -51,7 +51,7 @@ end
     @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 
-@testset "QR factorization with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "QR factorization with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
     Random.seed!(100)
     M = atype(rand(dtype, 3, 3))
     function foo(M)
@@ -61,7 +61,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "LQ factorization with $atype{$dtype}" for atype in [Array, CuArray], dtype in [Float64, ComplexF64]
+@testset "LQ factorization with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
     Random.seed!(100)
     M = atype(rand(dtype, 3, 3))
     function foo(M)
