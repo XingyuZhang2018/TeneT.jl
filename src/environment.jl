@@ -496,11 +496,11 @@ function error(AL,C,AR,FL,M,FR)
     err = 0
     for _ in 1:Ni, j in 1:Nj
         AC[:,:,:,:,j] = ACmap(AC[:,:,:,:,j], FL[:,:,:,:,j], FR[:,:,:,:,j], M[:,:,:,:,:,j])
-    end
-    MAC = AC
+    end   
+    # MAC = AC
+    AC .-= ein"(apcij,dpcij),dsbij -> asbij"(AC,conj(AR),AR)
     @inbounds @views for j = 1:Nj, i = 1:Ni
-        MAC[:,:,:,i,j] -= ein"(apc,dpc),dsb -> asb"(MAC[:,:,:,i,j],conj(AR[:,:,:,i,j]),AR[:,:,:,i,j])
-        err += norm(MAC[:,:,:,i,j])
+        err += norm(AC[:,:,:,i,j])
     end
     return err
 end

@@ -74,9 +74,9 @@ end
 @testset "$(Ni)x$(Nj) leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], ifobs in [false, true], Ni = [3], Nj = [3]
     Random.seed!(100)
     D, d = 3, 2
-    A = atype(rand(dtype,      D, d, D, Ni, Nj))
+    A = atype(rand(dtype,      D, d, D,          Ni, Nj))
     S = atype(rand(ComplexF64, D, d, D, D, d, D, Ni, Nj))
-    M = atype(rand(ComplexF64, d, d, d, d, Ni, Nj))
+    M = atype(rand(ComplexF64, d, d, d, d,       Ni, Nj))
 
        ALu, =  leftorth(A) 
        ALd, =  leftorth(A)
@@ -111,10 +111,10 @@ end
 @testset "$(Ni)x$(Nj) ACenv and Cenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
-     A = atype(rand(dtype,      D, d, D, Ni, Nj))
+     A = atype(rand(dtype,      D, d, D,          Ni, Nj))
     S1 = atype(rand(ComplexF64, D, d, D, D, d, D, Ni, Nj))
-    S2 = atype(rand(ComplexF64, D, D, D, D, Ni, Nj))
-     M = atype(rand(ComplexF64, d, d, d, d, Ni, Nj))
+    S2 = atype(rand(ComplexF64, D, D, D, D,       Ni, Nj))
+     M = atype(rand(ComplexF64, d, d, d, d,       Ni, Nj))
 
     AL, L, _ =  leftorth(A) 
     R, AR, _ = rightorth(A)
@@ -153,10 +153,10 @@ end
 @testset "$(Ni)x$(Nj) ACCtoALAR with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [1], Nj = [1]
     Random.seed!(100)
     D, d = 3, 2
-     A = atype(rand(dtype,      D, d, D, Ni, Nj))
+     A = atype(rand(dtype,      D, d, D,          Ni, Nj))
     S1 = atype(rand(ComplexF64, D, d, D, D, d, D, Ni, Nj))
-    S2 = atype(rand(ComplexF64, D, D, D, D, Ni, Nj))
-     M = atype(rand(ComplexF64, d, d, d, d, Ni, Nj))
+    S2 = atype(rand(ComplexF64, D, D, D, D,       Ni, Nj))
+     M = atype(rand(ComplexF64, d, d, d, d,       Ni, Nj))
 
     AL, L, _ =  leftorth(A) 
     R, AR, _ = rightorth(A)

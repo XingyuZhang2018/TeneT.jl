@@ -40,11 +40,11 @@ end
     Ni = 2
     Nj = 2
      M = atype(rand(dtype, D^2, D^2, D^2, D^2, Ni, Nj))
-    AL = atype(rand(dtype, χ, D^2, χ, Ni, Nj))
-     C = atype(rand(dtype, χ, χ, Ni, Nj))
-    AC = atype(rand(dtype, χ, D^2, χ, Ni, Nj))
-    FL = atype(rand(dtype, χ, D^2, χ, Ni, Nj))
-    FR = atype(rand(dtype, χ, D^2, χ, Ni, Nj))
+    AL = atype(rand(dtype, χ,   D^2, χ,        Ni, Nj))
+     C = atype(rand(dtype, χ,        χ,        Ni, Nj))
+    AC = atype(rand(dtype, χ,   D^2, χ,        Ni, Nj))
+    FL = atype(rand(dtype, χ,   D^2, χ,        Ni, Nj))
+    FR = atype(rand(dtype, χ,   D^2, χ,        Ni, Nj))
 
     function ACmap1(AC, FL, FR, M, j)
             Ni = size(M, 5)
