@@ -131,22 +131,6 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
 end
 
 """
-    uptodown(i,Ni,Nj)
-
-````
-i -> (i,j) -> (Nj +1 - i,j) -> ir
-````
-"""
-function uptodown(i,Ni,Nj)
-    Liner = LinearIndices((1:Ni,1:Nj))
-    Cart = CartesianIndices((1:Ni,1:Nj))
-    Index = Cart[i]
-    i,j = Index[1],Index[2]
-    ir = Ni + 1 - i
-    Liner[ir,j]
-end
-
-"""
     env = vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf)
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
@@ -214,7 +198,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         errdown = errup
     end
 
-    _, FL = leftenv(ALu, ALd, M; ifobs = true)
+    _, FL =  leftenv(ALu, ALd, M; ifobs = true)
     _, FR = rightenv(ARu, ARd, M; ifobs = true)
     Zygote.@ignore savefile &&  (errup + errdown < savetol) && begin
         out_chkp_file_obs = joinpath(outfolder, "obs_D$(D)_χ$(χ).jld2")

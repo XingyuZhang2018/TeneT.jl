@@ -1,5 +1,5 @@
 using OMEinsum
-
+using VUMPS: ALCtoAC
 """
     observable(env, model::MT, type)
 
@@ -12,11 +12,7 @@ function observable(env, model::MT, ::Val{:Z}) where {MT <: HamiltonianModel}
     χ,D,Ni,Nj = size(ALu)[[1,2,4,5]]
     
     z_tol = 1
-    ACu = Zygote.Buffer(ALu)
-    @inbounds @views for j = 1:Nj,i = 1:Ni
-        ACu[:,:,:,i,j] = ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])
-    end
-    ACu = copy(ACu)
+    ACu = ALCtoAC(ALu, Cu)
 
     for j = 1:Nj,i = 1:Ni
         ir = i + 1 - Ni * (i==Ni)
@@ -32,19 +28,16 @@ function observable(env, model::MT, type) where {MT <: HamiltonianModel}
     _, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, FLu, FRu = env
     χ,D,Ni,Nj = size(ALu)[[1,2,4,5]]
     atype = _arraytype(ALu)
-    M   = atype(model_tensor(model, Val(:bulk)))
-    M_obs = atype(model_tensor(model, type))
+    M     = atype(model_tensor(model, Val(:bulk)))
+    M_obs = atype(model_tensor(model, type      ))
     obs_tol = 0
-    ACu = Zygote.Buffer(ALu)
-    @inbounds @views for j = 1:Nj,i = 1:Ni
-        ACu[:,:,:,i,j] = ein"asc,cb -> asb"(ALu[:,:,:,i,j],Cu[:,:,i,j])
-    end
-    ACu = copy(ACu)
+    ACu = ALCtoAC(ALu, Cu)
+    ACd = ALCtoAC(ALd, Cd)
 
     for j = 1:Nj,i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M_obs[:,:,:,:,i,j],ACu[:,:,:,ir,j],FR[:,:,:,i,j])
-        λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M[:,:,:,:,i,j],ACu[:,:,:,ir,j],FR[:,:,:,i,j])
+        ir = Ni + 1 - i
+        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M_obs[:,:,:,:,i,j],ACd[:,:,:,ir,j],FR[:,:,:,i,j])
+        λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M[:,:,:,:,i,j],ACd[:,:,:,ir,j],FR[:,:,:,i,j])
         obs_tol += Array(obs)[]/Array(λ)[]
     end
     if type == Val(:mag)
