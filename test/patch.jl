@@ -1,4 +1,4 @@
-using VUMPS
+using Vumps
 using KrylovKit
 using CUDA
 using Test

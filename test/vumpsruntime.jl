@@ -1,8 +1,8 @@
 using CUDA
 using Random
 using Test
-using VUMPS
-using VUMPS: vumps, vumps_env, env_norm
+using Vumps
+using Vumps: vumps, vumps_env, env_norm
 
 @testset "$(Ni)x$(Nj) VUMPSRuntime with $atype{$dtype}" for Ni = [1,2,3], Nj = [1,2,3], atype = [Array], dtype = [Float64, ComplexF64]
     Random.seed!(100)

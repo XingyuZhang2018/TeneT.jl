@@ -1,4 +1,4 @@
-module VUMPS
+module Vumps
 
 include("patch.jl")
 include("environment.jl")

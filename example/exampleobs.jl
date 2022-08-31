@@ -1,5 +1,5 @@
 using OMEinsum
-using VUMPS: ALCtoAC
+using Vumps: ALCtoAC
 """
     observable(env, model::MT, type)
 

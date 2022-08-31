@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: fixedpoint
+using Vumps
+using Vumps: fixedpoint
 using Test
 
 struct StopFunction{T,S}

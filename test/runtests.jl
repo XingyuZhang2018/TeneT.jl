@@ -1,7 +1,7 @@
-using VUMPS
+using Vumps
 using Test
 
-@testset "VUMPS.jl" begin
+@testset "Vumps.jl" begin
     @testset "patch" begin
         println("patch tests running...")
         include("patch.jl")

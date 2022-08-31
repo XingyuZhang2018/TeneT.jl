@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: _arraytype
+using Vumps
+using Vumps: _arraytype
 using OMEinsum
 using Zygote
 

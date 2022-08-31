@@ -1,11 +1,11 @@
-# VUMPS.jl
+# Vumps.jl
 
-[![CI](https://github.com/XingyuZhang2018/VUMPS.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/XingyuZhang2018/VUMPS.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/XingyuZhang2018/VUMPS.jl/branch/master/graph/badge.svg?token=i34pxx5k2N)](https://codecov.io/gh/XingyuZhang2018/VUMPS.jl)
+[![CI](https://github.com/XingyuZhang2018/Vumps.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/XingyuZhang2018/Vumps.jl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/XingyuZhang2018/Vumps.jl/branch/master/graph/badge.svg?token=i34pxx5k2N)](https://codecov.io/gh/XingyuZhang2018/Vumps.jl)
 
-This is a Julia package for the Variational Uniform Matrix product states(VUMPS) to contract infinite two-dimension square lattice tensor network.
+This is a Julia package for the Variational Uniform Matrix product states(Vumps) to contract infinite two-dimension square lattice tensor network.
 
-In this package we implemented the VUMPS algorithms including the following:
+In this package we implemented the Vumps algorithms including the following:
 - Complex number forward and backward propagation
 - NixNj Big Unit Cell
 - U1-symmmetry and Z2-symmmetry
@@ -15,19 +15,19 @@ This package a updated version of the original [ADVUMPS.jl](https://github.com/X
 
 ## install
 ```shell
-> git clone https://github.com/XingyuZhang2018/VUMPS.jl
+> git clone https://github.com/XingyuZhang2018/Vumps.jl
 ```
 move to the file and run `julia REPL`, press `]` into `Pkg REPL`
 ```julia
 (@v1.7) pkg> activate .
-Activating environment at `..\VUMPS\Project.toml`
+Activating environment at `..\Vumps\Project.toml`
 
-(VUMPS) pkg> instantiate
+(Vumps) pkg> instantiate
 ```
-To get back to the Julia REPL, press `backspace` or `ctrl+C`. Then Precompile `VUMPS`
+To get back to the Julia REPL, press `backspace` or `ctrl+C`. Then Precompile `Vumps`
 ```julia
-julia> using VUMPS
-[ Info: Precompiling VUMPS [260a78e0-cbf2-49ba-8157-48058c700f32]
+julia> using Vumps
+[ Info: Precompiling Vumps [260a78e0-cbf2-49ba-8157-48058c700f32]
 ```
 ## Examples
 ### 2D Classical Ising Model
@@ -39,5 +39,5 @@ You can modify Ni and Nj to change the Unit cell size and atype `Array` or `CuAr
 
 ### More Project including this package
 
-- [AD-Kitaev](https://github.com/XingyuZhang2018/AD-Kitaev) - Optimize iPEPS of Kitaev-like model with 1x2 unit cell VUMPS.
-- [ADFPEPS.jl](https://github.com/XingyuZhang2018/ADFPEPS.jl) - Optimize fermionic iPEPS of Hubbard model with 2x2 unit cell VUMPS.
+- [AD-Kitaev](https://github.com/XingyuZhang2018/AD-Kitaev) - Optimize iPEPS of Kitaev-like model with 1x2 unit cell Vumps.
+- [ADFPEPS.jl](https://github.com/XingyuZhang2018/ADFPEPS.jl) - Optimize fermionic iPEPS of Hubbard model with 2x2 unit cell Vumps.
