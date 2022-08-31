@@ -3,7 +3,7 @@
 [![CI](https://github.com/XingyuZhang2018/Vumps.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/XingyuZhang2018/Vumps.jl/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/XingyuZhang2018/Vumps.jl/branch/master/graph/badge.svg?token=i34pxx5k2N)](https://codecov.io/gh/XingyuZhang2018/Vumps.jl)
 
-This is a Julia package for the Variational Uniform Matrix product states(Vumps) to contract infinite two-dimension square lattice tensor network.
+This is a Julia package for the Variational Uniform Matrix product states(VUMPS) to contract infinite two-dimension square lattice tensor network.
 
 In this package we implemented the Vumps algorithms including the following:
 - Complex number forward and backward propagation
