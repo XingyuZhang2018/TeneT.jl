@@ -27,7 +27,7 @@ end
     @test env !== nothing
 end
 
-@testset "$(Ni)x$(Nj) obs_env" for Ni = [2], Nj = [2], atype = [CuArray], dtype = [Float64, ComplexF64]
+@testset "$(Ni)x$(Nj) obs_env" for Ni = [2], Nj = [2], atype = [Array], dtype = [Float64, ComplexF64]
     Random.seed!(100)
     M = atype(rand(dtype,2,2,2,2,Ni,Nj))
     env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./test/data1/", outfolder = "./test/data2/", show_every = 3)

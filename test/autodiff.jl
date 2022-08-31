@@ -41,9 +41,9 @@ end
     function foo(x)
         C = A * x
         D = B * x
-        E = ein"abc,abc -> "(C,C)
-        F = ein"ab,ab -> "(D,D)
-        return norm(Array(E)[]/Array(F)[])
+        E = Array(ein"abc,abc -> "(C,C))[]
+        F = Array(ein"ab,ab -> "(D,D))[]
+        return norm(E/F)
         # E = ein"abc,abc -> "(C,C)[]
         # F = ein"ab,ab -> "(D,D)[]
         # return norm(E/F) mistake for GPU
@@ -85,11 +85,11 @@ end
 
     function foo1(M)
         _,FL = leftenv(ALu, conj(ALd), M; ifobs = ifobs)
-        s = 0
+        s = 0.0
         for j in 1:Nj, i in 1:Ni
-            A  = ein"(abc,abcdef),def -> "(FL[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FL[:,:,:,i,j])
-            B  = ein"abc,abc -> "(FL[:,:,:,i,j], FL[:,:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
+            A  = Array(ein"(abc,abcdef),def -> "(FL[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FL[:,:,:,i,j]))[]
+            B  = Array(ein"abc,abc -> "(FL[:,:,:,i,j], FL[:,:,:,i,j]))[]
+            s += norm(A/B)
         end
         return s
     end 
@@ -99,9 +99,9 @@ end
         _,FR = rightenv(ARu, conj(ARd), M; ifobs = ifobs)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A  = ein"(abc,abcdef),def -> "(FR[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FR[:,:,:,i,j])
-            B  = ein"abc,abc -> "(FR[:,:,:,i,j], FR[:,:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
+            A  = Array(ein"(abc,abcdef),def -> "(FR[:,:,:,i,j], S[:,:,:,:,:,:,i,j], FR[:,:,:,i,j]))[]
+            B  = Array(ein"abc,abc -> "(FR[:,:,:,i,j], FR[:,:,:,i,j]))[]
+            s += norm(A/B)
         end
         return s
     end 
@@ -127,9 +127,9 @@ end
         _, AC = ACenv(AC, FL, M, FR)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(abc,abcdef),def -> "(AC[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AC[:,:,:,i,j])
-            B = ein"abc,abc -> "(AC[:,:,:,i,j], AC[:,:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
+            A = Array(ein"(abc,abcdef),def -> "(AC[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AC[:,:,:,i,j]))[]
+            B = Array(ein"abc,abc -> "(AC[:,:,:,i,j], AC[:,:,:,i,j]))[]
+            s += norm(A/B)
         end
         return s
     end
@@ -141,9 +141,9 @@ end
         _, C = Cenv(C, FL, FR)
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A = ein"(ab,abcd),cd -> "(C[:,:,i,j], S2[:,:,:,:,i,j], C[:,:,i,j])
-            B = ein"ab,ab -> "(C[:,:,i,j], C[:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
+            A = Array(ein"(ab,abcd),cd -> "(C[:,:,i,j], S2[:,:,:,:,i,j], C[:,:,i,j]))[]
+            B = Array(ein"ab,ab -> "(C[:,:,i,j], C[:,:,i,j]))[]
+            s += norm(A/B)
         end
         return s
     end
@@ -171,15 +171,15 @@ end
         AL, AR = ACCtoALAR(AC, Co) 
         s = 0
         for j in 1:Nj, i in 1:Ni
-            A  = ein"(abc,abcdef),def -> "(AL[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AL[:,:,:,i,j])
-            B  = ein"abc,abc -> "(AL[:,:,:,i,j], AL[:,:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
-            A  = ein"(abc,abcdef),def -> "(AR[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AR[:,:,:,i,j])
-            B  = ein"abc,abc -> "(AR[:,:,:,i,j], AR[:,:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
-            A  = ein"(abc,abcdef),def -> "(AC[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AC[:,:,:,i,j])
-            B  = ein"abc,abc -> "(AC[:,:,:,i,j], AC[:,:,:,i,j])
-            s += norm(Array(A)[]/Array(B)[])
+            A  = Array(ein"(abc,abcdef),def -> "(AL[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AL[:,:,:,i,j]))[]
+            B  = Array(ein"abc,abc -> "(AL[:,:,:,i,j], AL[:,:,:,i,j]))[]
+            s += norm(A/B)
+            A  = Array(ein"(abc,abcdef),def -> "(AR[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AR[:,:,:,i,j]))[]
+            B  = Array(ein"abc,abc -> "(AR[:,:,:,i,j], AR[:,:,:,i,j]))[]
+            s += norm(A/B)
+            A  = Array(ein"(abc,abcdef),def -> "(AC[:,:,:,i,j], S1[:,:,:,:,:,:,i,j], AC[:,:,:,i,j]))[]
+            B  = Array(ein"abc,abc -> "(AC[:,:,:,i,j], AC[:,:,:,i,j]))[]
+            s += norm(A/B)
         end
         return s
     end
