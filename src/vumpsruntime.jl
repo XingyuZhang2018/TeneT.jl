@@ -67,6 +67,7 @@ true
 ```
 "
 function SquareVUMPSRuntime(M::AbstractArray, env, χ::Int; verbose=false)
+    M = _arraytype(M){ComplexF64}(M)
     return SquareVUMPSRuntime(M, _initializect_square(M, env, χ; verbose=verbose)...)
 end
 
@@ -165,6 +166,7 @@ end
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
 function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, savetol = 1e-5)
+    M = _arraytype(M){ComplexF64}(M)
     M /= norm(M)
     envup, errup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, savetol = savetol)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C

@@ -93,7 +93,7 @@ end
         end
         return s
     end 
-    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M)
+    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M) atol = 1e-7
 
     function foo2(M)
         _,FR = rightenv(ARu, conj(ARd), M; ifobs = ifobs)
@@ -105,7 +105,7 @@ end
         end
         return s
     end 
-    @test Zygote.gradient(foo2, M)[1] ≈ num_grad(foo2, M)
+    @test Zygote.gradient(foo2, M)[1] ≈ num_grad(foo2, M) atol = 1e-7
 end
 
 @testset "$(Ni)x$(Nj) ACenv and Cenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
@@ -133,7 +133,7 @@ end
         end
         return s
     end
-    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M)
+    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M) atol = 1e-7
 
     function foo2(M)
         _, FL = leftenv(AL, conj(AL), M)
@@ -147,7 +147,7 @@ end
         end
         return s
     end
-    @test Zygote.gradient(foo2, M)[1] ≈ num_grad(foo2, M)
+    @test Zygote.gradient(foo2, M)[1] ≈ num_grad(foo2, M) atol = 1e-7
 end
 
 @testset "$(Ni)x$(Nj) ACCtoALAR with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [1], Nj = [1]
@@ -183,5 +183,5 @@ end
         end
         return s
     end
-    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M) atol = 1e-5
+    @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M) atol = 1e-4
 end
