@@ -1,5 +1,5 @@
-using Vumps
-using Vumps:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,env_norm
+using TeneT
+using TeneT:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,env_norm
 using ChainRulesCore
 using CUDA
 using LinearAlgebra

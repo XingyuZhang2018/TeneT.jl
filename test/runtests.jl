@@ -1,7 +1,7 @@
-using Vumps
+using TeneT
 using Test
 
-@testset "Vumps.jl" begin
+@testset "TeneT.jl" begin
     @testset "patch" begin
         println("patch tests running...")
         include("patch.jl")

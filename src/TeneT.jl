@@ -1,4 +1,4 @@
-module Vumps
+module TeneT
 
 include("patch.jl")
 include("environment.jl")

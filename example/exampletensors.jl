@@ -1,5 +1,5 @@
-using Vumps
-using Vumps: _arraytype
+using TeneT
+using TeneT: _arraytype
 using OMEinsum
 using Zygote
 

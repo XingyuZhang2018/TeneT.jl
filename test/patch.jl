@@ -1,4 +1,4 @@
-using Vumps
+using TeneT
 using KrylovKit
 using CUDA
 using Test
