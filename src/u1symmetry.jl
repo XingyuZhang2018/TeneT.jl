@@ -161,7 +161,7 @@ return the negative of the array with even indices
 """
 minuseven(A) = (A = Array{Int}(A); A[[i % 2 == 0 for i in 1:length(A)]] .*= -1; A)
 
-getq(s::Int...) = map(s -> [sum(minuseven(bitarray(i - 1, maxq(s) + 1))) for i = 1:s], s)
+getq(s::Int...) = map(s -> [sum((bitarray(i - 1, maxq(s) + 1))) for i = 1:s], s)
 getqrange(s::Tuple{Vararg{Int}}) = getqrange(s...)
 getqrange(s::Int...) = (q = getq(s...); [map(q -> sort(unique(q)), q)...])
 getshift(qrange) = map(q -> abs(q[1]), qrange) .+ 1
@@ -236,7 +236,7 @@ end
 getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
 function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
     bits = map(x -> ceil(Int, log2(x)), size(A))
-    qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
+    qn = collect(map((index, bits) -> sum((bitarray(index - 1, bits))), index, bits))
     # sum(qn.*Adir) != 0 && return 0.0
     ind = findfirst(x->x in [qn], A.qn)
     ind === nothing && return 0.0
@@ -250,7 +250,7 @@ end
 setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
 function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
     bits = map(x -> ceil(Int, log2(x)), size(A))
-    qn = collect(map((index, bits) -> sum(minuseven(bitarray(index - 1, bits))), index, bits))
+    qn = collect(map((index, bits) -> sum((bitarray(index - 1, bits))), index, bits))
     ind = findfirst(x->x in [qn], A.qn)
     qlist = [U1selection(size(A, i)) for i = 1:N]
     qrange = getqrange(size(A)...)
@@ -261,14 +261,14 @@ end
 
 function U1selection(maxs::Int)
     mq = maxq(maxs)
-    q = [sum(minuseven((bitarray(i - 1, mq + 1)))) for i = 1:maxs]
+    q = [sum(((bitarray(i - 1, mq + 1)))) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
 function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
     mq = maxq(maxs)
-    q = [sum(minuseven(bitarray(i - 1, mq + 1))) for i = 1:maxs]
+    q = [sum((bitarray(i - 1, mq + 1))) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
