@@ -238,3 +238,23 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
 end
 
+
+function obs_env(M::AbstractArray, ::Val{:none}; kwargs...)
+    U1info = ([],[],[],[])
+    envir = obs_env(M; U1info=U1info, kwargs...)
+    return envir
+end
+
+function obs_env(M::AbstractArray, ::Val{:Z2}; kwargs...)
+    U1info = ([],[],[],[])
+    M = map(x->asSymmetryArray(x, Val(:Z2)), M)
+    envir = obs_env(M; U1info=U1info, kwargs...)
+    envir = map(asArray, envir)
+    return envir
+end
+
+function obs_env(M::AbstractArray, ::Val{:U1}; kwargs...)
+    envir = obs_env(M; U1info=U1info, kwargs...)
+    envir = map(asArray, envir)
+    return envir
+end
