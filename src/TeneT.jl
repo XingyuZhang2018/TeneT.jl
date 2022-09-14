@@ -1,4 +1,4 @@
-module VUMPS
+module TeneT
 
 include("cuda_patch.jl")
 include("environment.jl")
