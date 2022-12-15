@@ -109,7 +109,7 @@ function ρmap(ρ,A)
 end
 
 function initialA(M, χ)
-    D, Ni, Nj = size(M)[[1,5,6]]
+    D, Ni, Nj = size(M)[[4,5,6]]
     atype = _arraytype(M)
     A = atype == Array ? rand(ComplexF64, χ,D,χ,Ni,Nj) : CUDA.rand(ComplexF64, χ,D,χ,Ni,Nj)
     return A
