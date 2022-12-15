@@ -271,14 +271,16 @@ function FRmap(ARui, ARdir, Mi, FRi)
 end
 
 function FLint(AL, M)
-    χ, D, Ni, Nj = size(AL)[[1,2,4,5]]
+    χ, Ni, Nj = size(AL)[[1,4,5]]
+    D = size(M, 1)
     atype = _arraytype(AL)
     FL = atype == Array ? rand(ComplexF64, χ, D, χ, Ni, Nj) : CUDA.rand(ComplexF64, χ, D, χ, Ni, Nj)
     return FL
 end
 
 function FRint(AR, M)
-    χ, D, Ni, Nj = size(AR)[[1,2,4,5]]
+    χ, Ni, Nj = size(AR)[[1,4,5]]
+    D = size(M, 3)
     atype = _arraytype(AR)
     FR = atype == Array ? rand(ComplexF64, χ, D, χ, Ni, Nj) : CUDA.rand(ComplexF64, χ, D, χ, Ni, Nj)
     return FR
