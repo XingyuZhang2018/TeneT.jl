@@ -89,6 +89,7 @@ function _initializect_square(M::AbstractArray, chkp_file::String, χ::Int; verb
     atype = _arraytype(M)
     verbose && print("vumps $(Ni)×$(Nj) environment load from $(chkp_file) -> ")   
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
+    size(AL, 1) != χ && throw(DimensionMismatch("environment dimension χ mismatch, should be $(χ), got $(size(AL,1))."))
     Zygote.@ignore begin
         AL, C, AR, FL, FR = atype(env.AL), atype(env.C), atype(env.AR), atype(env.FL), atype(env.FR)
     end
