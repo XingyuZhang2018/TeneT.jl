@@ -167,7 +167,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; ifobs = false,
         @inbounds for i = 1:Ni
             ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
             dFL[:,:,:,i,:] .-= Array(ein"abcd,abcd ->"(conj(FL[:,:,:,i,:]), dFL[:,:,:,i,:]))[] * FL[:,:,:,i,:]
-            ξL, info = linsolve(X -> ξLmap(ALu[:,:,:,i,:], ALd[:,:,:,ir,:], M[:,:,:,:,i,:], X), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 1)
+            ξL, info = linsolve(X -> ξLmap(ALu[:,:,:,i,:], ALd[:,:,:,ir,:], M[:,:,:,:,i,:], X), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξL .= circshift(ξL, (0,0,0,-1))
             dAMmap!(view(dALu,:,:,:,i,:), view(dALd,:,:,:,ir,:), view(dM,:,:,:,:,i,:), ALu[:,:,:,i,:], ALd[:,:,:,ir,:], M[:,:,:,:,i,:], FL[:,:,:,i,:], ξL)
@@ -204,7 +204,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; ifobs = false
         @inbounds for i = 1:Ni
             ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
             dFR[:,:,:,i,:] .-= Array(ein"abcd,abcd ->"(conj(FR[:,:,:,i,:]), dFR[:,:,:,i,:]))[] * FR[:,:,:,i,:]
-            ξR, info = linsolve(X -> ξRmap(ARu[:,:,:,i,:], ARd[:,:,:,ir,:], M[:,:,:,:,i,:], X), conj(dFR[:,:,:,i,:]), -λR[i], 1; maxiter = 1)
+            ξR, info = linsolve(X -> ξRmap(ARu[:,:,:,i,:], ARd[:,:,:,ir,:], M[:,:,:,:,i,:], X), conj(dFR[:,:,:,i,:]), -λR[i], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξR = circshift(ξR, (0,0,0,1))
             dAMmap!(view(dARu,:,:,:,i,:), view(dARd,:,:,:,ir,:), view(dM,:,:,:,:,i,:), ARu[:,:,:,i,:], ARd[:,:,:,ir,:], M[:,:,:,:,i,:], ξR, FR[:,:,:,i,:])
@@ -271,7 +271,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
         dFR = zero(FR)
         @inbounds for j = 1:Nj
             dAC[:,:,:,:,j] .-= Array(ein"abcd,abcd ->"(conj(AC[:,:,:,:,j]), dAC[:,:,:,:,j]))[] * AC[:,:,:,:,j]
-            ξAC, info = linsolve(X -> ξACmap(X, FL[:,:,:,:,j], FR[:,:,:,:,j], M[:,:,:,:,:,j]), conj(dAC[:,:,:,:,j]), -λAC[j], 1; maxiter = 1)
+            ξAC, info = linsolve(X -> ξACmap(X, FL[:,:,:,:,j], FR[:,:,:,:,j], M[:,:,:,:,:,j]), conj(dAC[:,:,:,:,j]), -λAC[j], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξAC = circshift(ξAC, (0,0,0,-1))
             dFMmap!(view(dFL,:,:,:,:,j), view(dM,:,:,:,:,:,j), view(dFR,:,:,:,:,j), FL[:,:,:,:,j], M[:,:,:,:,:,j], FR[:,:,:,:,j], AC[:,:,:,:,j], ξAC)
@@ -328,7 +328,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
         for j = 1:Nj
             jr = j + 1 -  Nj * (j==Nj)
             dC[:,:,:,j] .-= Array(ein"abc,abc ->"(conj(C[:,:,:,j]), dC[:,:,:,j]))[] * C[:,:,:,j]
-            ξC, info = linsolve(X -> ξCmap(X, FL[:,:,:,:,jr], FR[:,:,:,:,j]), conj(dC[:,:,:,j]), -λC[j], 1; maxiter = 1)
+            ξC, info = linsolve(X -> ξCmap(X, FL[:,:,:,:,jr], FR[:,:,:,:,j]), conj(dC[:,:,:,j]), -λC[j], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξC = circshift(ξC, (0,0,-1))
             dFMmap!(view(dFL,:,:,:,:,jr), view(dFR,:,:,:,:,j), FL[:,:,:,:,jr], FR[:,:,:,:,j], C[:,:,:,j], ξC)
