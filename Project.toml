@@ -1,7 +1,7 @@
 name = "TeneT"
 uuid = "260a78e0-cbf2-49ba-8157-48058c700f32"
 authors = ["XingyuZhang2018 <zhangxingyu@iphy.ac.cn> and contributors"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
