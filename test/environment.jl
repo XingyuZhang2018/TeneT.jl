@@ -1,5 +1,5 @@
 using TeneT
-using TeneT:qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, env_norm
+using TeneT:qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,AC2env,ACmap,AC2map,Cenv,Cmap,LRtoC,ALCtoAC,ALCARtoAC,ACCtoALAR, AC2toALCAR, error, env_norm
 using CUDA
 using LinearAlgebra
 using Random
@@ -84,10 +84,32 @@ end
     λAC, AC = ACenv(AC, FL, M, FR)
      λC,  C =  Cenv( C, FL,    FR)
 
-    for j in 1:Ni
+    for j in 1:Nj
         jr = j + 1 - Ni*(j==Ni)
         @test λAC[j] * AC[:,:,:,:,j] ≈ ACmap(AC[:,:,:,:,j], FL[:,:,:,:,j],  FR[:,:,:,:,j], M[:,:,:,:,:,j])
         @test  λC[j] *  C[:,:,  :,j] ≈  Cmap( C[:,:,  :,j], FL[:,:,:,:,jr], FR[:,:,:,:,j])
+    end
+end
+
+@testset "AC2env with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+    Random.seed!(100)
+    χ, D = 3, 2
+    A = atype(rand(dtype, χ, D, χ, Ni, Nj))
+    M = atype(rand(dtype, D, D, D, D, Ni, Nj))
+
+    AL,  L, _ =  leftorth(A)
+     R, AR, _ = rightorth(A)
+    λL, FL    =  leftenv(AL, conj(AL), M)
+    λR, FR    = rightenv(AR, conj(AR), M)
+
+      C = LRtoC(L, R)
+    AC2 = ALCARtoAC(AL, C, AR)
+
+    λAC2, AC2 = AC2env(AC2, FL, M, FR)
+
+    for j in 1:Nj
+        jr = mod1(j+1, Nj)
+        @test λAC2[j] * AC2[:,:,:,:,:,j] ≈ AC2map(AC2[:,:,:,:,:,j], FL[:,:,:,:,j],  FR[:,:,:,:,j], M[:,:,:,:,:,j], M[:,:,:,:,:,jr])
     end
 end
 
@@ -110,4 +132,25 @@ end
     AL, AR = ACCtoALAR(AC, C)
     err = error(AL,C,AR,FL,M,FR)
     @test err !== nothing
+end
+
+@testset "bcvumps unit test with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+    Random.seed!(100)
+    χ, D = 3, 2
+    A = atype(rand(dtype, χ, D, χ, Ni, Nj))
+    M = atype(rand(dtype, D, D, D, D, Ni, Nj))
+
+    AL,  L, _ =  leftorth(A)
+     R, AR, _ = rightorth(A)
+    λL, FL    =  leftenv(AL, conj(AL), M)
+    λR, FR    = rightenv(AR, conj(AR), M)
+
+    C = LRtoC(L,R)
+    AC2 = ALCARtoAC(AL, C, AR)
+    
+    λAC2, AC2 = AC2env(AC2, FL, M, FR)
+
+    AL, C, AR, err1 = AC2toALCAR(AC2)
+    err2 = error(AL,C,AR,FL,M,FR)
+    @show err1 err2
 end

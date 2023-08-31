@@ -424,6 +424,49 @@ function Cenv!(C, FL, FR; kwargs...)
     return λC, C
 end
 
+"""
+    ACm = AC2map(ACij, FLj, FRj, Mj, II)
+
+```
+                               ┌──────   ACᵢⱼ   ───────┐          a ────┬─────┬──── d  
+┌───── ACᵢ₊₁ⱼ ─────┐           │       │       │       │          │     b     c     │
+│      │     │     │      =    FLᵢⱼ ── Mᵢⱼ ─── Mᵢⱼ₊₁── FRᵢⱼ₊₁     ├─ e ─┼─ f ─┼─ g ─┤ 
+                               │       │       │       │          │     k     l     │ 
+                                                                  h ────┴─────┴──── m 
+                                                               
+```
+"""
+function AC2map(ACj, FLj, FRj, Mj, Mjr)
+    ACij = ein"(((aehj,abcdj),ekfbj),flgcj),dgmj -> hklmj"(FLj,ACj,Mj,Mjr,FRj)
+    circshift(ACij, (0,0,0,0,1))
+end
+
+"""
+    AC2env(AC, FL, M, FR;kwargs...)
+
+Compute the up environment tensor for MPS `FL`,`FR` and MPO `M`, by finding the up fixed point
+        of `FL - M - FR` contracted along the physical dimension.
+```
+┌──────   ACᵢⱼ   ───────┐         
+│       │       │       │         =      λACᵢⱼ ┌─── ACᵢ₊₁ⱼ ──┐
+FLᵢⱼ ── Mᵢⱼ ─── Mᵢⱼ₊₁── FRᵢⱼ₊₁                 │    │    │   │   
+│       │       │       │   
+```
+"""
+AC2env(AC, FL, M, FR; kwargs...) = AC2env!(copy(AC), FL, M, FR; kwargs...)
+function AC2env!(AC, FL, M, FR; kwargs...)
+    Ni,Nj = size(M)[[5,6]]
+    λAC = zeros(eltype(AC),Nj)
+    for j in 1:Nj
+        jr = mod1(j+1, Nj) 
+        λACs, ACs, info = eigsolve(X->AC2map(X, FL[:,:,:,:,j], FR[:,:,:,:,j], M[:,:,:,:,:,j], M[:,:,:,:,:,jr]), AC[:,:,:,:,:,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+        @debug "ACenv! eigsolve" λACs info sort(abs.(λACs))
+        info.converged == 0 && @warn "ACenv Not converged"
+        λAC[j], AC[:,:,:,:,:,j] = selectpos(λACs, ACs, Ni)
+    end
+    return λAC, AC
+end
+
 function ACCtoAL(AC, C)
     χ, D, Ni, Nj = size(AC)[[1,2,4,5]]
     errL = 0.0
@@ -451,9 +494,32 @@ function ACCtoAR(AC, C)
     return copy(AR), errR
 end
 
-function ALCtoAC(AL,C)
-    ein"ascij,cbij -> asbij"(AL, C)
+function AC2toALCAR(AC2; ifL = true)
+    χ, D, Ni, Nj = size(AC2)[[1,2,5,6]]
+
+    F = svd(reshape(AC2[:,:,:,:,1,1], χ*D, χ*D))
+    χL = ifL ? min(max(sum(abs.(F.S) .> 1e-12),χ), ceil(Int,1.1*χ)) : χ
+    χL > χ && println("enlarge χ = $χ to $χL")
+    AL = zeros(ComplexF64, χ, D, χL, Ni, Nj)
+    AR = zeros(ComplexF64, χL, D, χ, Ni, Nj)
+     C = zeros(ComplexF64, χL,    χL,Ni, Nj)
+    # @inbounds @views for j in 1:Nj, i in 1:Ni
+        # jr = mod1(j+1, Nj)
+        AL[:,:,:,1,1]  = reshape(F.U[:,1:χL],    χ, D, χL)
+        AR[:,:,:,1,1] = reshape(F.Vt[1:χL,:],   χL, D, χ)
+         C[:,:,  1,1]  = reshape(diagm(F.S[1:χL]), χL, χL)
+    # end
+    
+    # normalize!(C)
+    # @show ein"abij,abij->"(C,conj(C))[]
+    # C /= ein"ab,ab->"(C,C)[]
+
+    err = norm(ALCARtoAC2(AL,C,AR) - AC2)
+    return AL, C, AR, err
 end
+
+ALCtoAC(AL,C) = ein"ascij,cbij -> asbij"(AL, C)
+ALCARtoAC2(AL,C,AR) = ein"asbij,bcij,cqdij -> asqdij"(AL, C, circshift(AR, (0,0,0,0,-1)))
 
 """
     AL, AR = ACCtoALAR(AC, C)

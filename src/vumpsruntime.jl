@@ -117,18 +117,20 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     temp = show_counting()
     temp != 0 && println("vumps@step: $(temp), error=$(err)")
     M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
-    AC = Zygote.@ignore ALCtoAC(AL,C)
-    _, ACp = ACenv(AC, FL, M, FR)
-    _, Cp = Cenv(C, FL, FR)
-    ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
-    _, FL = leftenv(AL, conj(ALp), M, FL)
-    _, FR = rightenv(AR, conj(ARp), M, FR)
-    _, ACp = ACenv(ACp, FL, M, FR)
-    _, Cp = Cenv(Cp, FL, FR)
-    ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
+    AC2 = Zygote.@ignore ALCARtoAC2(AL, C, AR)
+    _, AC2p = AC2env(AC2, FL, M, FR)
+    ALp, Cp, ARp, _  = AC2toALCAR(AC2p)
+    χ, D, χL = size(ALp)
+    FL = normalize!(FLmap(ALp[:,:,:,1,:], conj(ALp[:,:,:,1,:]), M[:,:,:,:,1,:], FL[:,:,:,1,:]))
+    FR = normalize!(FRmap(ARp[:,:,:,1,:], conj(ARp[:,:,:,1,:]), M[:,:,:,:,1,:], FR[:,:,:,1,:]))
+    FL = reshape(FL, χL, size(M,1), χL, 1, 1)
+    FR = reshape(FR, χL, size(M,3), χL, 1, 1)
+    AC2 = zeros(ComplexF64, χL, D, D, χL, 1, 1)
+    AC2[1:χ, :, :, 1:χ, :, :] = AC2p
+    _, AC2p = AC2env(AC2, FL, M, FR)
+    ALp, Cp, ARp, err_truc  = AC2toALCAR(AC2p; ifL = false)
     erroverlap = error(ALp, Cp, ARp, FL, M, FR)
-    err = erroverlap + errL + errR
-    err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR, erroverlap=$erroverlap")
+    err =  erroverlap + err_truc
     return SquareVUMPSRuntime(M, ALp, Cp, ARp, FL, FR), err
 end
 

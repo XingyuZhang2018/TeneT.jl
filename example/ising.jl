@@ -6,15 +6,17 @@ using Test
 using CUDA
 using Zygote
 
-@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [3], Nj = [3], atype = [Array]
+@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = [1], Nj = [1], atype = [Array]
     Random.seed!(100)
     β = 0.5
     model = Ising(Ni, Nj, β)
     M = atype(model_tensor(model, Val(:bulk)))
-    env = obs_env(M; χ = 10, maxiter = 10, miniter = 1, 
+    env = obs_env(M; χ = 1, maxiter = 1000, miniter = 1, 
          infolder = "./example/data/$model/", 
         outfolder = "./example/data/$model/", 
-        updown = false, verbose = true, savefile = false
+        updown = false, verbose = true, savefile = false,
+        show_every = 1,
+        tol = 1e-10
         )
     @test observable(env, model, Val(:Z)     ) ≈ 2.789305993957602
     @test observable(env, model, Val(:mag)   ) ≈ magofβ(model) 
