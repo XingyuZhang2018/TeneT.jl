@@ -128,21 +128,26 @@ function show(::IOBuffer, A::U1Array)
 end
 
 """
-    maxq(D::Int)
+    q = index_to_q(n::Int)
 
-give the maximum `q` value for a given dimensions `D`
+transfer index to quantum number
 """
-maxq(D::Int) = floor(Int, log2(D))
+function index_to_q(n::Int)
+    n -= 1
+    n == 0 && return 0
 
+    ternary = []
+    while n > 0
+        remainder = n % 3
+        remainder == 2 && (remainder = -1)
+        pushfirst!(ternary, remainder)
+        n = div(n, 3)
+    end
 
-"""
-    minuseven!(A)
+    return sum(ternary)
+end
 
-return the negative of the array with even indices
-"""
-minuseven(A) = (A = Array{Int}(A); A[[i % 2 == 0 for i in 1:length(A)]] .*= -1; A)
-
-getq(s::Int...) = map(s -> [sum(minuseven(bitarray(i - 1, maxq(s) + 1))) for i = 1:s], s)
+getq(s::Int...) = map(s -> [index_to_q(i) for i = 1:s], s)
 getqrange(s::Tuple{Vararg{Int}}) = getqrange(s...)
 getqrange(s::Int...) = (q = getq(s...); [map(q -> sort(unique(q)), q)...])
 getshift(qrange) = map(q -> abs(q[1]), qrange) .+ 1
@@ -252,14 +257,12 @@ end
 
 function U1selection(indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
-    mq = maxq(maxs)
-    q = [sum(minuseven(bitarray(i - 1, mq + 1))) for i = 1:maxs]
+    q = [index_to_q(i) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
 function U1selection(maxs::Int)
-    mq = maxq(maxs)
-    q = [sum(minuseven(bitarray(i - 1, mq + 1))) for i = 1:maxs]
+    q = [index_to_q(i) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
