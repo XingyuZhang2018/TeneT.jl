@@ -1,6 +1,6 @@
 using BenchmarkTools
-using VUMPS
-using VUMPS: qrpos,lqpos,leftorth,rightorth,leftenv,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR
+using TeneT
+using TeneT: qrpos,lqpos,leftorth,rightorth,leftenv,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR
 using KrylovKit
 using CUDA
 using LinearAlgebra: dot

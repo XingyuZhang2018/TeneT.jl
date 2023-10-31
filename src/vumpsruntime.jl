@@ -48,7 +48,7 @@ canonical form. `FL,FR` is the left and right environment.
 
 # example
 
-```jldoctest; setup = :(using VUMPS)
+```jldoctest; setup = :(using TeneT)
 julia> Ni, Nj = 2, 2;
 
 julia> M = Array{Array,2}(undef, Ni, Nj);

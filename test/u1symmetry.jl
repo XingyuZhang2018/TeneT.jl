@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA
+using TeneT
+using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -91,7 +91,7 @@ end
     Btensor = asArray(B)
     @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)  
 
-    # VUMPS unit
+    # TeneT unit
     d = 4
     D = 10
     AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])

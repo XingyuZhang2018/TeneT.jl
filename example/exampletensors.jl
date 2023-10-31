@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: _arraytype
+using TeneT
+using TeneT: _arraytype
 using OMEinsum
 
 const isingβc = log(1+sqrt(2))/2

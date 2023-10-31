@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS:qrpos,lqpos,cellones,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
+using TeneT
+using TeneT:qrpos,lqpos,cellones,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
 using ChainRulesCore
 using ChainRulesTestUtils
 using CUDA

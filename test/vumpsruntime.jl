@@ -1,8 +1,8 @@
 using CUDA
 using Random
 using Test
-using VUMPS
-using VUMPS: vumps, vumps_env
+using TeneT
+using TeneT: vumps, vumps_env
 
 @testset "$(Ni)x$(Nj) VUMPSRuntime with $(symmetry) $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array], dtype = [ComplexF64], symmetry in [:none, :Z2, :U1]
     @test SquareLattice <: AbstractLattice

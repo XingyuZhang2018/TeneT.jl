@@ -1,5 +1,5 @@
 using BenchmarkTools
-using VUMPS
+using TeneT
 using CUDA
 using Test
 using OMEinsum

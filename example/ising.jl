@@ -3,7 +3,7 @@ include("./exampleobs.jl")
 
 using Random
 using Test
-using VUMPS: asZ2Array, parity_conserving
+using TeneT: asZ2Array, parity_conserving
 using CUDA
 using LinearAlgebra: norm
 using Zygote
