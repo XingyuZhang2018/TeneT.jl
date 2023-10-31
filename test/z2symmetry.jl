@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: qrpos,lqpos,sysvd!,_arraytype,zerosZ2, AbstractArray
+using TeneT
+using TeneT: qrpos,lqpos,sysvd!,_arraytype,zerosZ2, AbstractArray
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -142,7 +142,7 @@ end
 	@test Array(ein"abab -> "(Btensor))[] ≈ tr(reshape(B,4,4))
 	@test Array(ein"aabb -> "(Btensor))[] ≈ Array(ein"aabb-> "(B))[]
 
-	## VUMPS unit
+	## TeneT unit
 	d = 2
     D = 5
     AL = randZ2(atype, dtype, D, d, D)

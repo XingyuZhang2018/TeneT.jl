@@ -5,7 +5,7 @@ using CUDA
 using LinearAlgebra: norm
 using Random
 using Test
-using VUMPS: parity_conserving
+using TeneT: parity_conserving
 using Zygote
 
 

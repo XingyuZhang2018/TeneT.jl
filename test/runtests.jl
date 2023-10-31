@@ -1,7 +1,7 @@
-using VUMPS
+using TeneT
 using Test
 
-@testset "VUMPS.jl" begin
+@testset "TeneT.jl" begin
     @testset "z2symmetry.jl" begin
         println("z2symmetry tests running...")
         include("z2symmetry.jl")

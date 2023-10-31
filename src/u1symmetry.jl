@@ -730,7 +730,7 @@ function u1blockLQ!(Ltensor, Qtensor, Atensor, index, blockidims, Qbdiv, Ldiv)
     end
 end
 
-# # for ' in ACCtoALAR of VUMPS
+# # for ' in ACCtoALAR of TeneT
 function adjoint(A::U1Array{T,N}) where {T,N}
     div = A.division 
     qn = map(x->x[[div+1:end;1:div]], A.qn)

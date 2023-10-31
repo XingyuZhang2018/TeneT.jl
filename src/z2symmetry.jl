@@ -480,7 +480,7 @@ function Z2bulkLQ!(Lparity, Ltensor, Qparity, Qtensor, A, p)
     end
 end
 
-# for ' in ACCtoALAR of VUMPS
+# for ' in ACCtoALAR of TeneT
 function adjoint(A::Z2Array{T,N}) where {T,N}
     div = A.division 
     parity = map(x->x[[div+1:end;1:div]], A.parity)

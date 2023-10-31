@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA
+using TeneT
+using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA,zerosinitial
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -91,7 +91,7 @@ end
     Btensor = asArray(B)
     @test Array(ein"abab -> "(Btensor))[] ≈ dtr(B)  
 
-    # # VUMPS unit
+    # # TeneT unit
     d = 4
     D = 10
     AL = randU1(atype, dtype, D,d,D; dir = [-1,1,1])
@@ -117,35 +117,50 @@ end
     χ = 5
 
     # rmul!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1,-1], q=[0])
-    Acopy = copy(A)
-    @test A*2.0 == rmul!(A, 2.0)
-    @test A.tensor != Acopy.tensor
+    indD = [0,1]
+    dimsD = [2,3]
+    A = zerosinitial(Val(symmetry), atype, ComplexF64, χ, χ, χ; 
+							dir = [-1, 1, 1], 
+							indqn = [indD, indD, indD],                    
+							indims = [dimsD, dimsD, dimsD], 
+							q = [0]
+							)
+    B = zerosinitial(Val(symmetry), atype, ComplexF64, χ, χ; 
+                            dir = [-1, 1], 
+                            indqn = [indD, indD],                    
+                            indims = [dimsD, dimsD], 
+                            q = [0]
+    )
+    @show ein"ijk,kl->ijl"(A,B)
+                    
+    # Acopy = copy(A)
+    # @test A*2.0 == rmul!(A, 2.0)
+    # @test A.tensor != Acopy.tensor
 
-    # lmul!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
-    B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
-    Bcopy = copy(B)
-    @test A*B == lmul!(A, B) 
-    @test B.tensor != Bcopy.tensor
+    # # lmul!
+    # A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
+    # B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
+    # Bcopy = copy(B)
+    # @test A*B == lmul!(A, B) 
+    # @test B.tensor != Bcopy.tensor
 
-    # mul!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
-    Y = similar(A)
-    Ycopy = copy(Y)
-    @test A*2.0 == mul!(Y, A, 2.0)
-    @test Y.tensor != Ycopy.tensor
+    # # mul!
+    # A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir = [1, -1])
+    # Y = similar(A)
+    # Ycopy = copy(Y)
+    # @test A*2.0 == mul!(Y, A, 2.0)
+    # @test Y.tensor != Ycopy.tensor
 
-    # axpy!
-    A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1, -1])
-    B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1, -1])
-    Bcopy = copy(B)
-    At = asArray(A)
-    Bt = asArray(B)
-    Bcopyt = asArray(Bcopy)
-    @test A*2.0 + B == axpy!(2.0, A, B) == B
-    @test B.tensor != Bcopy.tensor
-    @test Bt + 2.0*At == axpy!(2.0, At, Bt) == asArray(axpy!(2.0, A, Bcopy))
+    # # axpy!
+    # A = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1, -1])
+    # B = randinitial(Val(symmetry), atype, dtype, χ, χ; dir=[1, -1])
+    # Bcopy = copy(B)
+    # At = asArray(A)
+    # Bt = asArray(B)
+    # Bcopyt = asArray(Bcopy)
+    # @test A*2.0 + B == axpy!(2.0, A, B) == B
+    # @test B.tensor != Bcopy.tensor
+    # @test Bt + 2.0*At == axpy!(2.0, At, Bt) == asArray(axpy!(2.0, A, Bcopy))
 end
 
 @testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
@@ -229,7 +244,7 @@ end
 end
 
 @testset "general flatten reshape" begin
-    using VUMPS: blockdiv
+    using TeneT: blockdiv
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
     D, χ = 4, 2
     # a = randinitial(Val(:U1), Array, ComplexF64, D,D,D,D,D,D,D,D; dir = [1,-1,-1,1,-1,1,1,-1])

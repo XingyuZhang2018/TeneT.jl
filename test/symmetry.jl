@@ -1,5 +1,5 @@
-using VUMPS
-using VUMPS: getsymmetry, _arraytype, Iinitial, zerosZ2, bulkdims
+using TeneT
+using TeneT: getsymmetry, _arraytype, Iinitial, zerosZ2, bulkdims
 using CUDA
 using Random
 using Test

@@ -1,6 +1,6 @@
-using VUMPS
-using VUMPS: qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, obs_FL, obs_FR, norm_FL, norm_FR, norm_FLmap, norm_FRmap
-using VUMPS: _arraytype, asArray
+using TeneT
+using TeneT: qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, obs_FL, obs_FR, norm_FL, norm_FR, norm_FLmap, norm_FRmap
+using TeneT: _arraytype, asArray
 using CUDA
 using LinearAlgebra
 using Random
