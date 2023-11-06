@@ -777,7 +777,7 @@ function ChainRulesCore.rrule(::typeof(obs_FR), ARu, ARd, M, FR; kwargs...)
     return (λR, FR), back
 end
 
-ChainRulesCore.rrule(::typeof(parity_conserving),T::Union{Array,CuArray}) = parity_conserving(T), dT -> (NoTangent(), parity_conserving(dT))
+ChainRulesCore.rrule(::typeof(parityconserving),T::Union{Array,CuArray},siteinds) = parityconserving(T,siteinds), dT -> (NoTangent(), parityconserving(dT,siteinds), NoTangent())
 
 ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, s::Int...) = Z2reshape(A, s), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), s...)
 

@@ -1,39 +1,14 @@
-import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum, zero
-using BitBasis
+import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, show, similar, adjoint, copy, sqrt,  Array, broadcasted, vec, map, ndims, indexin, sum, zero
 using CUDA
 import CUDA: CuArray
 import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export Z2Array, AbstractSymmetricArray
-export parity_conserving, randZ2, asZ2Array, asArray, Z2reshape
+export randZ2, Z2reshape
+export parityconserving
+export asZ2Array, asArray
 
-"""
-    parity_conserving(T::Array)
-Transform an arbitray tensor which has arbitray legs and each leg have index 1 or 2 into parity conserving form
-----
-The following is faster but rely on updates of CUDA.jl(available in master branch)
-function parity_conserving!(T::Union{Array,CuArray})
-	bits = map(x -> Int(ceil(log2(x))), size(T))
-    T[map(x->sum(sum.(bitarray.((Tuple(x).-1) ,bits))) % 2 !== 0 ,CartesianIndices(T))].=0
-    return T
-end
-parity_conserving(T) = parity_conserving!(copy(T))
-"""
-function parity_conserving(T::Union{Array,CuArray})
-	s = size(T)
-	p = zeros(s)
-	bits = map(x -> Int(ceil(log2(x))), s)
-	@inbounds for index in CartesianIndices(T)
-		i = Tuple(index) .- 1
-		sum(sum.(bitarray.(i,bits))) % 2 == 0 && (p[index] = 1)
-	end
-	p = _arraytype(T)(p)
-
-	return reshape(p.*T,s...)
-end
-
-abstract type AbstractSymmetricArray{T,N} <: AbstractArray{T,N} end
 """
     Z2Array{T, N}
 
@@ -106,27 +81,48 @@ function ≈(A::Z2Array{TA,NA}, B::Z2Array{TB,NB}) where {TA,NA,TB,NB}
     A.tensor ≈ B.tensor[exchangeind]
 end
 
+function ==(A::Z2Array{TA,NA}, B::Z2Array{TB,NB}) where {TA,NA,TB,NB}
+    NA != NB && throw(Base.error("$A and $B have different dimensions"))
+    exchangeind = indexin(A.parity, B.parity)
+    A.tensor == B.tensor[exchangeind]
+end
+
 function show(::IOBuffer, A::Z2Array)
     println("parity: \n", A.parity)
     println("dims: \n", A.dims)
     println("tensor: \n", A.tensor)
 end
 
-getindex(A::Z2Array, index::CartesianIndex) = getindex(A, index.I...)
-function getindex(A::Z2Array, index::Int...)
-    bits = map(x -> ceil(Int, log2(x)), size(A))
-    parity = collect(map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits))
-    sum(parity) % 2 != 0 && return 0.0
-    ip = findfirst(x->x in [parity], A.parity)
-    CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...]
+zero(A::Z2Array) = Z2Array(A.parity, map(zero, A.tensor), A.size, A.dims, A.division)
+
+"""
+    parityconserving(T::Array, ::Val{:electron})
+
+Transform an arbitray tensor which has arbitray legs and each leg have index 1 or 2 into parity conserving form
+"""
+function parityconserving(T::Union{Array,CuArray}, siteinds)
+	s = size(T)
+	p = zeros(s)
+	@inbounds for index in CartesianIndices(T)
+		i = Tuple(index)
+		sum(index_to_parity.(i, siteinds)) % 2 == 0 && (p[index] = 1)
+	end
+	p = _arraytype(T)(p)
+
+	return reshape(p.*T,s...)
 end
 
-setindex!(A::Z2Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-function setindex!(A::Z2Array, x::Number, index::Int...)
-    bits = map(x -> ceil(Int, log2(x)), size(A))
-    parity = collect(map((index, bits) -> sum(bitarray(index - 1, bits)) % 2, index, bits))
-    ip = findfirst(x->x in [parity], A.parity)
-    CUDA.@allowscalar A.tensor[ip][(Int.(floor.((index .-1 ) ./ 2)) .+ 1)...] = x
+"""
+    p = getparity(N::Int)
+
+give the available parity of length N
+"""
+function getparity(N::Int)
+    p = Vector{Vector{Int}}()
+    for i in CartesianIndices(Tuple(0:1 for i=1:N))
+        sum(i.I) % 2 == 0 && push!(p, collect(i.I))
+    end
+    p
 end
 
 """
@@ -134,18 +130,43 @@ end
 
 find even and odd part dims of Z2 tensor bulk
 """
-function bulkdims(N::Int...)
-    bits = map(x -> ceil(Int, log2(x)), N)
-    dodd = map((bits, N) -> sum([sum(bitarray(i - 1, bits)) % 2 for i = 1:N]), bits, N)
+function z2bulkdims(siteinds, N::Int...)
+    dodd = map(N -> sum([index_to_parity(i, siteinds) for i = 1:N]), N)
     deven = N .- dodd
-    # deven = ceil.(Int, N ./ 2)
-    # dodd = N .- deven
     deven, dodd
 end
 
-function randZ2(atype, dtype, a...)
+function z2selection(maxN::Int, siteinds)
+    q = [index_to_parity(i, siteinds) for i = 1:maxN]
+    return [(q .== 0),(q .== 1)]
+end
+
+function asArray(A::Z2Array{T,N}, siteinds) where {T,N}
+    atype = _arraytype(A.tensor[1])
+    tensor = zeros(T, size(A))
+    parity = A.parity
+    qlist = [z2selection(size(A)[i], siteinds) for i = 1:N]
+    for i in 1:length(parity)
+        tensor[[qlist[j][parity[i][j]+1] for j = 1:N]...] = Array(A.tensor[i])
+    end
+    atype(tensor)
+end
+
+# have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
+# which is fixed in new vervion, but its allocation is abnormal
+function asZ2Array(A::AbstractArray{T,N}, siteinds) where {T,N}
+    atype = _arraytype(A)
+    Aarray = Array(A)
+    qlist = [z2selection(size(A)[i], siteinds) for i = 1:N]
+    parity = getparity(N)
+    tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
+    dims = map(x -> [size(x)...], tensor)
+    Z2Array(parity, tensor, size(A), dims, 1)
+end
+
+function randZ2(atype, dtype, siteinds, a...)
     L = length(a)
-    deven, dodd = bulkdims(a...)
+    deven, dodd = z2bulkdims(siteinds, a...)
     parity = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
@@ -159,9 +180,9 @@ function randZ2(atype, dtype, a...)
     Z2Array(parity, tensor, a, dims, 1)
 end
 
-function zerosZ2(atype, dtype, a...)
+function zerosZ2(atype, dtype, siteinds, a...)
     L = length(a)
-    deven, dodd = bulkdims(a...)
+    deven, dodd = z2bulkdims(siteinds, a...)
     parity = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
@@ -175,12 +196,10 @@ function zerosZ2(atype, dtype, a...)
     Z2Array(parity, tensor, a, dims, 1)
 end
 
-function IZ2(atype, dtype, D)
-    deven, dodd = bulkdims(D, D)
+function IZ2(atype, dtype, siteinds, D)
+    deven, dodd = z2bulkdims(siteinds, D, D)
     Z2Array([[0, 0], [1, 1]], [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), [[deven...], [dodd...]], 1)
 end
-
-zero(A::Z2Array) = Z2Array(A.parity, map(zero, A.tensor), A.size, A.dims, A.division)
 
 # only for OMEinsum binary permutedims before reshape
 permutedims(A::Z2Array, perm) = tensorpermute(A, perm)
@@ -278,34 +297,6 @@ function bulktimes!(parity, tensor, dims, A, B, p)
         idim, kdim = sum(bulkidims[1:i-1])+1:sum(bulkidims[1:i]), sum(bulkkdims[1:k-1])+1:sum(bulkkdims[1:k])
         push!(tensor, C[idim, kdim])
     end
-end
-
-function Z2bitselection(maxN::Int)
-    q = [sum(bitarray(i-1,ceil(Int,log2(maxN)))) % 2 for i = 1:maxN]
-    return [(q .== 0),(q .== 1)]
-end
-
-function asArray(A::Z2Array{T,N}) where {T,N}
-    atype = _arraytype(A.tensor[1])
-    tensor = zeros(T, size(A))
-    parity = A.parity
-    qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
-    for i in 1:length(parity)
-        tensor[[qlist[j][parity[i][j]+1] for j = 1:N]...] = Array(A.tensor[i])
-    end
-    atype(tensor)
-end
-
-# have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
-# which is fixed in new vervion, but its allocation is abnormal
-function asZ2Array(A::AbstractArray{T,N}) where {T,N}
-    atype = _arraytype(A)
-    Aarray = Array(A)
-    qlist = [Z2bitselection(size(A)[i]) for i = 1:N]
-    parity = getparity(N)
-    tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
-    dims = map(x -> [size(x)...], tensor)
-    Z2Array(parity, tensor, size(A), dims, 1)
 end
 
 # for OMEinsum contract to get number
@@ -514,19 +505,6 @@ function sysvd!(A::Z2Array{T,N}) where {T,N}
 end
 
 """
-p = getparity(L::Int)
-
-give the parity of length L
-"""
-function getparity(L::Int)
-    p = Vector{Vector{Int}}()
-    for i in CartesianIndices(Tuple(0:1 for i=1:L))
-        sum(i.I) % 2 == 0 && push!(p, collect(i.I))
-    end
-    p
-end
-
-"""
     div = division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
 
 give the reshape division of b by a, where b is the original shape and a is the new shape.
@@ -593,16 +571,16 @@ function Z2reshape(A::Z2Array{T, N}, a::Int...) where {T, N}
         div = division(size(A), a)
         reparity = getparity(length(a))
         parity = [[sum(p[d]) % 2 for d in div] for p in reparity]
-        rebulkdims = bulkdims(a...)
+        rebulkdims = z2bulkdims(a...)
         redims = [[rebulkdims[p[i] + 1][i] for i in 1:length(a)] for p in reparity]
         dims = [[prod(dims[d]) for d in div] for dims in redims]
         retensors = Array{Array,1}(undef, length(reparity))
         for i in 1:length(orderedparity)
             p = orderedparity[i]
             bulkind = findall(x->x in [p], parity)
-            bulkdims = Int.(.+(dims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
+            z2bulkdims = Int.(.+(dims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
             bulkdims1 = dims[bulkind[1]]
-            silce = [[1:bulkdims1[i], (bulkdims1[i] == bulkdims[i] ? 1 : 1+bulkdims1[i]):bulkdims[i]] for i in 1:length(bulkdims)]
+            silce = [[1:bulkdims1[i], (bulkdims1[i] == z2bulkdims[i] ? 1 : 1+bulkdims1[i]):z2bulkdims[i]] for i in 1:length(z2bulkdims)]
             bits = Int(log2(length(bulkind)))
             for j in 1:length(bulkind)
                 choose = bitarray(j - 1, bits) .+ 1
