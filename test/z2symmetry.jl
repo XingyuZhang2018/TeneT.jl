@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: qrpos,lqpos,sysvd!,_arraytype,zerosZ2, AbstractArray
+using TeneT: qrpos,lqpos,sysvd!,_arraytype,zerosZ2, AbstractArray,index_to_parity
 using CUDA
 using KrylovKit
 using LinearAlgebra
