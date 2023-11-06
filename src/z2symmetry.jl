@@ -319,7 +319,7 @@ function tr(A::Z2Array{T,N}) where {T,N}
 end
 
 function _compactify!(y, x::Z2Array, indexer)
-    x = asArray(Array(x))
+    x = asArray(Array(x), Val(siteinds))
     @inbounds for ci in CartesianIndices(y)
         y[ci] = x[subindex(indexer, ci.I)]
     end
@@ -360,7 +360,15 @@ similar(A::Z2Array, atype) = Z2Array(A.parity, map(x -> atype(similar(x)), A.ten
 diag(A::Z2Array{T,N}) where {T,N} = CUDA.@allowscalar collect(Iterators.flatten(diag.(A.tensor)))
 copy(A::Z2Array{T,N}) where {T,N} = Z2Array(A.parity, map(copy, A.tensor), A.size, A.dims, A.division)
 
-mul!(Y::Z2Array, A::Z2Array, B::Number) = (map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor); Y)
+function mul!(Y::Z2Array, A::Z2Array, B::Number) 
+    if Y.parity == A.parity
+        map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor)
+    else
+        exchangeind = indexin(Y.parity, A.parity)
+        map((Y, A) -> mul!(Y, A, B), Y.tensor, A.tensor[exchangeind])
+    end
+    Y
+end
 
 function axpy!(α::Number, A::Z2Array, B::Z2Array)
     if B.parity == A.parity
@@ -370,6 +378,12 @@ function axpy!(α::Number, A::Z2Array, B::Z2Array)
         map((x,y) -> axpy!(α, x, y), A.tensor[exchangeind], B.tensor)
     end
     return B
+end
+
+function axpby!(α::Number, x::Z2Array, β::Number, y::Z2Array)
+    @assert x.parity == y.parity
+    axpby!(α, x.tensor, β, y.tensor)
+    y
 end
 
 # for leftorth and rightorth compatibility
@@ -530,8 +544,8 @@ end
 
 Z2reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`
 """
-Z2reshape(A::Z2Array, a::Tuple{Vararg{Int}}) = Z2reshape(A, a...)
-function Z2reshape(A::Z2Array{T, N}, a::Int...) where {T, N}
+Z2reshape(A::Z2Array, siteinds, a::Tuple{Vararg{Int}}) = Z2reshape(A, siteinds, a...)
+function Z2reshape(A::Z2Array{T, N}, siteinds, a::Int...) where {T, N}
     atype = _arraytype(A.tensor[1])
     orderedparity = getparity(N)
     if orderedparity == A.parity
@@ -571,7 +585,7 @@ function Z2reshape(A::Z2Array{T, N}, a::Int...) where {T, N}
         div = division(size(A), a)
         reparity = getparity(length(a))
         parity = [[sum(p[d]) % 2 for d in div] for p in reparity]
-        rebulkdims = z2bulkdims(a...)
+        rebulkdims = z2bulkdims(siteinds, a...)
         redims = [[rebulkdims[p[i] + 1][i] for i in 1:length(a)] for p in reparity]
         dims = [[prod(dims[d]) for d in div] for dims in redims]
         retensors = Array{Array,1}(undef, length(reparity))
