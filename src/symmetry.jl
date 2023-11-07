@@ -28,8 +28,8 @@ getdir(::AbstractArray) = nothing
 getdir(::Z2Array) = nothing
 
 randinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(rand(dtype, a...))
-randinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = randZ2(atype, dtype, a...)
-randinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = randU1(atype, dtype, a...; kwarg...)
+randinitial(::Val{:Z2}, atype, dtype, siteinds, a...; kwarg...) = randZ2(atype, dtype, siteinds, a...)
+randinitial(::Val{:U1}, atype, dtype, siteinds, a...; kwarg...) = randU1(atype, dtype, siteinds, a...; kwarg...)
 
 function randinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor)

@@ -29,10 +29,10 @@ end
     @test A isa Z2Array
 	Atensor = asArray(A, Val(siteinds))
 
-	# permutedims
+	## permutedims
 	@test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]), Val(siteinds))
 
-	# ## reshape
+	## reshape
 	@test reshape(Atensor,(9,4)) == reshape(asArray(reshape(reshape(A,9,4),3,3,4),Val(siteinds)),(9,4))
 end
 
@@ -43,25 +43,41 @@ end
     b = asZ2Array(a, Val(siteinds))
     c = asArray(b, Val(siteinds))
     d = asZ2Array(c, Val(siteinds))
+    # @show a c
     @test a == c && b == d
 end
 
-# @testset "general flatten reshape" for atype in [Array], dtype in [ComplexF64], siteinds in [:electron, :tJ]
-#     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
-#     a = randinitial(Val(:Z2), atype, dtype, Val(siteinds), 3,3,3,3,3,3,3,3)
-#     atensor = asArray(a, Val(siteinds))
-#     rea = Z2reshape(a, 9,9,9,9)
-#     rea2 = asZ2Array(reshape(atensor, 9,9,9,9))
-#     @test rea !== rea2
-#     rerea = Z2reshape(rea, 3,3,3,3,3,3,3,3)
-#     @test rerea ≈ a
 
-#     # (χ,D,D,χ) -> (χ,D^2,χ)
-#     # a = randinitial(Val(:Z2), CuArray, Float64, 5, 3, 3, 5)
-#     # rea = Z2reshape(a, 5, 9, 5)
-#     # rerea = Z2reshape(rea, 5, 3, 3, 5)
-#     # @test rerea ≈ a
-# end
+@testset "general flatten reshape" for atype in [Array], dtype in [ComplexF64], siteinds in [:electron, :tJ]
+    # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
+    D = 6
+    indims = [[4, 2],[4, 2],[2, 2],[4, 2],[4, 2]]
+    a = randZ2(atype, ComplexF64, Val(siteinds), D, D, 4, D, D; indims = indims)
+    a = ein"abcde, fgchi -> gbhdiefa"(a, conj(a))
+    @test collect.(size.(a.tensor))[[1,2,3]] == a.dims[[1,2,3]]
+    
+    indims = [[4, 2] for _ in 1:8]
+    rea, reinfo1 = Z2reshape(a, Val(siteinds), D^2,D^2,D^2,D^2; reinfo = (nothing, nothing, indims, nothing, nothing))
+
+    rerea1 = Z2reshape(rea, Val(siteinds), D,D,D,D,D,D,D,D; reinfo = reinfo1)[1]
+    @test rerea1 ≈ a
+
+    reinfo2 = Z2reshapeinfo((D^2,D^2,D^2,D^2), (D,D,D,D,D,D,D,D), Val(siteinds), indims)
+    rerea2 = Z2reshape(rea, Val(siteinds), D,D,D,D,D,D,D,D; reinfo = reinfo2)[1]
+    @test rerea2 ≈ a
+
+    # (χ,D,D,χ) -> (χ,D^2,χ)
+    D, χ = 2, 6
+    indims = [[4, 2], [1, 1], [1, 1], [4, 2]]
+    a = randZ2(atype, ComplexF64, Val(siteinds), χ,D,D,χ; indims = indims)
+    rea, reinfo1 = Z2reshape(a, Val(siteinds), χ,D^2,χ; reinfo = (nothing, nothing, indims, nothing, nothing))
+    rerea = Z2reshape(rea, Val(siteinds), χ,D,D,χ; reinfo = reinfo1)[1]
+    @test rerea ≈ a
+
+    reinfo2 = Z2reshapeinfo((χ,D^2,χ), (χ,D,D,χ), Val(siteinds), indims)
+    rerea2 = Z2reshape(rea, Val(siteinds), χ,D,D,χ; reinfo = reinfo2)[1]
+    @test rerea2 ≈ a
+end
 
 @testset "OMEinsum Z2 with $atype{$dtype} and $siteinds siteinds" for atype in [Array], dtype in [Float64], siteinds in [:electron, :tJ]
 	Random.seed!(100)

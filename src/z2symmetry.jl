@@ -5,7 +5,7 @@ import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export Z2Array, AbstractSymmetricArray
-export randZ2, Z2reshape
+export randZ2, Z2reshape, Z2reshapeinfo
 export parityconserving
 export asZ2Array, asArray
 
@@ -112,28 +112,71 @@ function parityconserving(T::Union{Array,CuArray}, siteinds)
 	return reshape(p.*T,s...)
 end
 
-"""
-    p = getparity(N::Int)
+getp(siteinds, s::Int...) = map(s -> [index_to_parity(i, siteinds) for i = 1:s], s)
 
-give the available parity of length N
-"""
-function getparity(N::Int)
-    p = Vector{Vector{Int}}()
-    for i in CartesianIndices(Tuple(0:1 for i=1:N))
-        sum(i.I) % 2 == 0 && push!(p, collect(i.I))
-    end
-    p
+getZ2blockdims(siteinds, s::Tuple{Vararg{Int}}) = getZ2blockdims(siteinds, s...)
+function getZ2blockdims(siteinds, s::Int...)
+    parity = getp(siteinds, s...)
+    [map(p -> [sum(p .== i) for i in [0,1]], parity)...]
 end
 
 """
-    deven, dodd = bulkdims(N::Int...)
+    parity = getqn(dir::Vector{Int}, indqn; q::Vector{Int}=[0])
 
-find even and odd part dims of Z2 tensor bulk
+give the parity of length L
 """
-function z2bulkdims(siteinds, N::Int...)
-    dodd = map(N -> sum([index_to_parity(i, siteinds) for i = 1:N]), N)
-    deven = N .- dodd
-    deven, dodd
+function getparity(N; f::Vector{Int}=[0])
+    parity = Vector{Vector{Int}}()
+    @inbounds for i in CartesianIndices(Tuple(2 for i=1:N))
+        parityi = [[0,1][i.I[j]] for j in 1:N]
+        if sum(parityi) % 2 in f
+            push!(parity, parityi)
+        end
+    end
+    sort!(parity)
+end
+
+function randZ2(atype, dtype, siteinds, s...; indims::Vector{Vector{Int}} = getZ2blockdims(siteinds, s...), f::Vector{Int}=[0])
+    s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
+    L = length(s)
+    parity = Vector{Vector{Int}}()
+    tensor = Vector{atype{dtype}}()
+    dims = Vector{Vector{Int}}()
+    @inbounds for i in CartesianIndices(Tuple(2 for i=1:L))
+        parityi = [[0,1][i.I[j]] for j in 1:L]
+        if sum(parityi) % 2 in f
+            blockdims = [indims[j][i.I[j]] for j in 1:L]
+            push!(parity, parityi)
+            push!(dims, blockdims)
+            push!(tensor, atype(rand(dtype, blockdims...)))
+        end
+    end
+    p = sortperm(parity)
+    Z2Array(parity[p], tensor[p], s, dims[p], 1)
+end
+
+function zerosZ2(atype, dtype, siteinds, s...; indims::Vector{Vector{Int}} = getZ2blockdims(siteinds, s...), f::Vector{Int}=[0])
+    s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
+    L = length(s)
+    parity = Vector{Vector{Int}}()
+    tensor = Vector{atype{dtype}}()
+    dims = Vector{Vector{Int}}()
+    @inbounds for i in CartesianIndices(Tuple(2 for i=1:L))
+        parityi = [[0,1][i.I[j]] for j in 1:L]
+        if sum(parityi) % 2 in f
+            blockdims = [indims[j][i.I[j]] for j in 1:L]
+            push!(parity, parityi)
+            push!(dims, blockdims)
+            push!(tensor, atype(zeros(dtype, blockdims...)))
+        end
+    end
+    p = sortperm(parity)
+    Z2Array(parity[p], tensor[p], s, dims[p], 1)
+end
+
+function IZ2(atype, dtype, siteinds, D)
+    deven, dodd = getZ2blockdims(siteinds, D, D)
+    Z2Array([[0, 0], [1, 1]], [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), [[deven...], [dodd...]], 1)
 end
 
 function z2selection(maxN::Int, siteinds)
@@ -161,44 +204,8 @@ function asZ2Array(A::AbstractArray{T,N}, siteinds) where {T,N}
     parity = getparity(N)
     tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
     dims = map(x -> [size(x)...], tensor)
-    Z2Array(parity, tensor, size(A), dims, 1)
-end
-
-function randZ2(atype, dtype, siteinds, a...)
-    L = length(a)
-    deven, dodd = z2bulkdims(siteinds, a...)
-    parity = Vector{Vector{Int}}()
-    tensor = Vector{atype{dtype}}()
-    @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
-        if sum(i.I) % 2 == 0
-            push!(parity, collect(i.I))
-            dims = Tuple(i.I[j] == 0 ? deven[j] : dodd[j] for j in 1:L)
-            push!(tensor, atype(rand(dtype, dims)))
-        end
-    end
-    dims = map(x -> [size(x)...], tensor)
-    Z2Array(parity, tensor, a, dims, 1)
-end
-
-function zerosZ2(atype, dtype, siteinds, a...)
-    L = length(a)
-    deven, dodd = z2bulkdims(siteinds, a...)
-    parity = Vector{Vector{Int}}()
-    tensor = Vector{atype{dtype}}()
-    @inbounds for i in CartesianIndices(Tuple(0:1 for i=1:L))
-        if sum(i.I) % 2 == 0
-            push!(parity, collect(i.I))
-            dims = Tuple(i.I[j] == 0 ? deven[j] : dodd[j] for j in 1:L)
-            push!(tensor, atype(zeros(dtype, dims)))
-        end
-    end
-    dims = map(x -> [size(x)...], tensor)
-    Z2Array(parity, tensor, a, dims, 1)
-end
-
-function IZ2(atype, dtype, siteinds, D)
-    deven, dodd = z2bulkdims(siteinds, D, D)
-    Z2Array([[0, 0], [1, 1]], [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), [[deven...], [dodd...]], 1)
+    nozeroind = norm.(tensor) .!= 0
+    Z2Array(parity[nozeroind], tensor[nozeroind], size(A), dims, 1)
 end
 
 # only for OMEinsum binary permutedims before reshape
@@ -544,66 +551,186 @@ end
 
 Z2reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`
 """
-Z2reshape(A::Z2Array, siteinds, a::Tuple{Vararg{Int}}) = Z2reshape(A, siteinds, a...)
-function Z2reshape(A::Z2Array{T, N}, siteinds, a::Int...) where {T, N}
-    atype = _arraytype(A.tensor[1])
-    orderedparity = getparity(N)
-    if orderedparity == A.parity
-        Atensor = A.tensor
-        Adims = A.dims
-    else
-        exchangeind = indexin(orderedparity, A.parity)
-        Atensor = A.tensor[exchangeind]
-        Adims = A.dims[exchangeind]
-    end
-    if N > length(a)
-        div = division(a, size(A))
-        reparity = [[sum(p[d]) % 2 for d in div] for p in orderedparity]
+Z2reshape(A::Z2Array, siteinds, a::Tuple{Vararg{Int}}; kwarg...) = Z2reshape(A, siteinds, a...; kwarg...)
+# function Z2reshape(A::Z2Array{T, N}, siteinds, a::Int...) where {T, N}
+#     atype = _arraytype(A.tensor[1])
+#     orderedparity = getparity(N)
+#     if orderedparity == A.parity
+#         Atensor = A.tensor
+#         Adims = A.dims
+#     else
+#         exchangeind = indexin(orderedparity, A.parity)
+#         Atensor = A.tensor[exchangeind]
+#         Adims = A.dims[exchangeind]
+#     end
+#     if N > length(a)
+#         div = division(a, size(A))
+#         reparity = [[sum(p[d]) % 2 for d in div] for p in orderedparity]
+#         redims = [[prod(dims[d]) for d in div] for dims in Adims]
+#         retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
+#         ureparity = getparity(length(a))
+#         retensors = Vector{atype{T}}()
+#         for i in 1:length(ureparity)
+#             p = ureparity[i]
+#             bulkind = findall(x->x in [p], reparity)
+#             @show bulkind
+#             rebulkdims = Int.(.+(redims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
+#             rebulkdims1 = redims[bulkind[1]]
+#             silce = [[1:rebulkdims1[i], (rebulkdims1[i] == rebulkdims[i] ? 1 : 1+rebulkdims1[i]):rebulkdims[i]] for i in 1:length(rebulkdims)]
+#             tensor = atype(zeros(T, rebulkdims...))
+#             bits = Int(log2(length(bulkind)))
+#             for j in 1:length(bulkind)
+#                 choose = bitarray(j - 1, bits) .+ 1
+#                 length(choose) == 1 && (choose = [choose[], choose[], choose[]])
+#                 choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
+#                 tensor[choosesilce...] = retensor[bulkind[j]]
+#             end
+#             push!(retensors, tensor)
+#         end
+#         dims = map(x -> [size(x)...], retensors)
+#         Z2Array(ureparity, atype.(retensors), a, dims, 1)
+#     else
+#         div = division(size(A), a)
+#         reparity = getparity(length(a))
+#         parity = [[sum(p[d]) % 2 for d in div] for p in reparity]
+#         rebulkdims = z2bulkdims(siteinds, a...)
+#         redims = [[rebulkdims[p[i] + 1][i] for i in 1:length(a)] for p in reparity]
+#         dims = [[prod(dims[d]) for d in div] for dims in redims]
+#         retensors = Array{Array,1}(undef, length(reparity))
+#         for i in 1:length(orderedparity)
+#             p = orderedparity[i]
+#             bulkind = findall(x->x in [p], parity)
+#             z2bulkdims = Int.(.+(dims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
+#             bulkdims1 = dims[bulkind[1]]
+#             silce = [[1:bulkdims1[i], (bulkdims1[i] == z2bulkdims[i] ? 1 : 1+bulkdims1[i]):z2bulkdims[i]] for i in 1:length(z2bulkdims)]
+#             bits = Int(log2(length(bulkind)))
+#             for j in 1:length(bulkind)
+#                 choose = bitarray(j - 1, bits) .+ 1
+#                 length(choose) == 1 && (choose = [choose[], choose[], choose[]])
+#                 choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
+#                 retensors[bulkind[j]] = reshape(Array(Atensor[i])[choosesilce...], redims[bulkind[j]]...)
+#             end
+#         end
+#         dims = map(x -> [size(x)...], retensors)
+#         Z2Array(reparity, atype.(retensors), a, dims, 1)
+#     end
+# end
+
+"""
+    Z2reshape(A::U1Array{T, N}, a::Int...) where {T, N}
+
+Z2reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,χ) <-> (χ,D^2,χ)`, and the high-oreder U1tensor is from randZ2 or zerosZ2 function.
+"""
+# for consecutive storage
+# Z2reshape(A::U1Array, s::Tuple{Vararg{Int}}; kwarg...) = Z2reshape(A, s...; kwarg...)
+# function Z2reshape(A::U1Array{T, N}, s::Int...; reinfo = nothing) where {T <: Number, N}
+#     dims = A.dims
+#     bdiv = blockdiv(dims) 
+#     tensor = [reshape(@view(A.tensor[bdiv[i]]), dims[i]...) for i in 1:length(bdiv)]
+#     A = U1Array(A.qn, A.dir, tensor, A.size, dims, A.division)
+#     U1reshape(A, s; reinfo = reinfo)
+# end
+function Z2reshape(A::Z2Array{T, N}, siteinds, s::Int...; reinfo) where {T, N}
+    atype = typeof(A.tensor[1]) <: CuArray ? CuArray : Array
+    etype = eltype(A.tensor[1])
+    if N > length(s)
+        if reinfo === nothing
+            indims = getZ2blockdims(siteinds, size(A))
+        else
+            _, _, indims, _, _ = reinfo
+        end
+        indparity = [[0,1] for _ in 1:N]
+        cA = zerosZ2(Array, ComplexF64, siteinds, size(A)...; indims = indims)
+        paritydiff = setdiff(cA.parity, A.parity)
+        supind = indexin(paritydiff, cA.parity)
+        Aparity = [A.parity; cA.parity[supind]]
+        Atensor = [A.tensor; [cA.tensor[supind[i]] for i in 1:length(supind)]]
+        exchangeind = indexin(cA.parity, Aparity)
+        Aqn = cA.parity
+        Adims = cA.dims
+        Atensor = Atensor[exchangeind]
+        div = division(s, size(A))
+        reqn = [[sum(p[d]) % 2 for d in div] for p in Aqn]
         redims = [[prod(dims[d]) for d in div] for dims in Adims]
         retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
-        ureparity = getparity(length(a))
-        retensors = Vector{atype{T}}()
-        for i in 1:length(ureparity)
-            p = ureparity[i]
-            bulkind = findall(x->x in [p], reparity)
-            rebulkdims = Int.(.+(redims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
-            rebulkdims1 = redims[bulkind[1]]
-            silce = [[1:rebulkdims1[i], (rebulkdims1[i] == rebulkdims[i] ? 1 : 1+rebulkdims1[i]):rebulkdims[i]] for i in 1:length(rebulkdims)]
-            tensor = atype(zeros(T, rebulkdims...))
-            bits = Int(log2(length(bulkind)))
+        ureqn = unique(reqn)
+        retensors = Vector{atype{etype}}()
+        choosesilces = [[] for _ in 1:length(ureqn)]
+        chooseinds = [[] for _ in 1:length(ureqn)]
+        for i in 1:length(ureqn)
+            q = ureqn[i]
+            bulkind = findall(x->x in [q], reqn)
+            oriqn = Aqn[bulkind]
+        
+            indqnfrom = [unique(map(x->x[div], oriqn)) for div in div]
+            rebulkdims = [[prod(map((x,y,z)->x[indexin(y, z)...], indims[div[i]], indqnfrom, indparity[div[i]])) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
+            # @show indqnfrom
+            # indqnfrom = [[[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]]]
+            # rebulkdims = [[1, 4], [1, 4], [1, 4], [1, 4]]
+            silce = [[(sum(rebulkdims[1:(i-1)]) + 1) : sum(rebulkdims[1:i]) for i in 1:length(rebulkdims)] for rebulkdims in rebulkdims]
+            tensor = atype(zeros(etype, map(sum, rebulkdims)...))
             for j in 1:length(bulkind)
-                choose = bitarray(j - 1, bits) .+ 1
-                length(choose) == 1 && (choose = [choose[], choose[], choose[]])
-                choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
+                chooseind = [indexin([oriqn[j][div[i]]], indqnfrom[i]) for i in 1:length(div)]
+                choosesilce = map((s,i)->s[i...], silce, chooseind)
                 tensor[choosesilce...] = retensor[bulkind[j]]
+                push!(choosesilces[i], choosesilce)
+                push!(chooseinds[i], bulkind[j])
             end
             push!(retensors, tensor)
         end
-        dims = map(x -> [size(x)...], retensors)
-        Z2Array(ureparity, atype.(retensors), a, dims, 1)
+        nozeroind = norm.(retensors) .!= 0
+        dims = map(x -> collect(size(x)), retensors)[nozeroind]
+        qn = ureqn[nozeroind]
+        p = sortperm(qn)
+        Z2Array(qn[p], retensors[nozeroind][p], s, dims[p], 1), (choosesilces, chooseinds, indims, Aqn, Adims)
     else
-        div = division(size(A), a)
-        reparity = getparity(length(a))
-        parity = [[sum(p[d]) % 2 for d in div] for p in reparity]
-        rebulkdims = z2bulkdims(siteinds, a...)
-        redims = [[rebulkdims[p[i] + 1][i] for i in 1:length(a)] for p in reparity]
-        dims = [[prod(dims[d]) for d in div] for dims in redims]
-        retensors = Array{Array,1}(undef, length(reparity))
-        for i in 1:length(orderedparity)
-            p = orderedparity[i]
-            bulkind = findall(x->x in [p], parity)
-            z2bulkdims = Int.(.+(dims[bulkind]...) ./ (length(bulkind) ./ length.(div)))
-            bulkdims1 = dims[bulkind[1]]
-            silce = [[1:bulkdims1[i], (bulkdims1[i] == z2bulkdims[i] ? 1 : 1+bulkdims1[i]):z2bulkdims[i]] for i in 1:length(z2bulkdims)]
-            bits = Int(log2(length(bulkind)))
-            for j in 1:length(bulkind)
-                choose = bitarray(j - 1, bits) .+ 1
-                length(choose) == 1 && (choose = [choose[], choose[], choose[]])
-                choosesilce = [silce[i][choose[i]] for i in 1:length(silce)]
-                retensors[bulkind[j]] = reshape(Array(Atensor[i])[choosesilce...], redims[bulkind[j]]...)
+        choosesilces, chooseinds, indims, reqn, redims = reinfo
+        retensors = Array{Array,1}(undef, sum(length.(chooseinds)))
+        div = division(size(A), s)
+        ureqn = unique([[sum(p[d]) % 2 for d in div] for p in reqn])
+        exchangeind = indexin(ureqn, A.parity)
+        # @show ureqn A.qn exchangeind
+        Atensor = A.tensor[exchangeind]
+        for i in 1:length(choosesilces)
+            for j in 1:length(choosesilces[i])
+                retensors[chooseinds[i][j]] = reshape(Array(Atensor[i][choosesilces[i][j]...]), redims[chooseinds[i][j]]...)
             end
         end
-        dims = map(x -> [size(x)...], retensors)
-        Z2Array(reparity, atype.(retensors), a, dims, 1)
+        nozeroind = norm.(retensors) .!= 0
+        dims = map(x -> collect(size(x)), retensors)[nozeroind]
+        qn = reqn[nozeroind]
+        p = sortperm(qn)
+        Z2Array(qn[p], atype.(retensors[nozeroind][p]), s, dims[p], 1), (choosesilces, chooseinds, indims, reqn, redims)
     end
+end
+
+function Z2reshapeinfo(s, sizeA, siteinds, indims)
+    length(sizeA) < length(s) && throw(Base.error("$sizeA must be longer than $s"))
+    div = division(s, sizeA)
+    A = zerosZ2(Array, ComplexF64, siteinds, sizeA...; indims = indims)
+    indparity = [[0,1] for _ in 1:length(sizeA)]
+    reqn = [[sum(p[d]) % 2 for d in div] for p in A.parity]
+    ureqn = unique(reqn)
+    choosesilces = [[] for _ in 1:length(ureqn)]
+    chooseinds = [[] for _ in 1:length(ureqn)]
+    Aqn = A.parity
+    for i in 1:length(ureqn)
+        q = ureqn[i]
+        bulkind = findall(x->x in [q], reqn)
+        oriqn = Aqn[bulkind]
+    
+        indqnfrom = [unique(map(x->x[div], oriqn)) for div in div]
+        rebulkdims = [[prod(map((x,y,z)->x[indexin(y, z)...], indims[div[i]], indqnfrom, indparity[div[i]])) for indqnfrom in indqnfrom[i]] for i in 1:length(indqnfrom)]
+        # @show indqnfrom
+        # indqnfrom = [[[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]], [[0, 0], [1, -1]]]
+        # rebulkdims = [[1, 4], [1, 4], [1, 4], [1, 4]]
+        silce = [[(sum(rebulkdims[1:(i-1)]) + 1) : sum(rebulkdims[1:i]) for i in 1:length(rebulkdims)] for rebulkdims in rebulkdims]
+        for j in 1:length(bulkind)
+            chooseind = [indexin([oriqn[j][div[i]]], indqnfrom[i]) for i in 1:length(div)]
+            choosesilce = map((s,i)->s[i...], silce, chooseind)
+            push!(choosesilces[i], choosesilce)
+            push!(chooseinds[i], bulkind[j])
+        end
+    end
+    choosesilces, chooseinds, indims, Aqn, A.dims
 end
