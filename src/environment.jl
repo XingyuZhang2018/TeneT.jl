@@ -69,7 +69,7 @@ function ρmap(ρ,Ai,J)
     return ρ
 end
 
-function initialA(M, χ; U1info = nothing)
+function initialA(M, χ; info = nothing)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
@@ -77,11 +77,11 @@ function initialA(M, χ; U1info = nothing)
     # typeof(M[1]) <: U1Array && (getdir(M[1])[4] == -1 ? (dir = [-1, 1, 1]) : (dir = [1, -1, -1]))
     # typeof(M[1]) <: U1Array && (direction == "up" ? (dir = [-1, -1, 1, 1]) : (dir = [1, 1, -1, -1]))
     D = size(M[1], 4)
-    if U1info === nothing
+    if info === nothing
         indD, indχ = getqrange(Int(sqrt(D)), χ)
         dimsD, dimsχ = getblockdims(Int(sqrt(D)), χ)
     else
-        indD, indχ, dimsD, dimsχ = U1info
+        indD, indχ, dimsD, dimsχ = info
     end
     for k = 1:Ni*Nj
         i, j = ktoij(k, Ni, Nj)
@@ -97,13 +97,13 @@ function initialA(M, χ; U1info = nothing)
     return A
 end
 
-function cellones(A; U1info = nothing)
+function cellones(A; info = nothing)
     Ni, Nj = size(A)
     χ = size(A[1,1],1)
-    if U1info === nothing
+    if info === nothing
         indχ, dimsχ = getqrange(χ)[1], getblockdims(χ)[1]
     else
-        _, indχ, _, dimsχ = U1info
+        _, indχ, _, dimsχ = info
     end
     atype = _arraytype(A[1,1])
     Cell = Array{atype, 2}(undef, Ni, Nj)
@@ -285,14 +285,14 @@ function FRmap(ARi, ARip, Mi, FR, J)
     return FRm
 end
 
-function FLint(AL, M; U1info = nothing)
+function FLint(AL, M; info = nothing)
     Ni,Nj = size(AL)
     χ, D = size(AL[1],1), size(M[1],1)
-    if U1info === nothing
+    if info === nothing
         indD, indχ = getqrange(Int(sqrt(D)), χ)
         dimsD, dimsχ = getblockdims(Int(sqrt(D)), χ)
     else
-        indD, indχ, dimsD, dimsχ = U1info
+        indD, indχ, dimsD, dimsχ = info
     end
     # typeof(AL[1]) <: U1Array && (dir = [-sign(sum(AL[1].qn)[1]), -sign(sum(M[1].qn)[1]), sign(sum(AL[1].qn)[1])])
     dir = nothing
@@ -306,14 +306,14 @@ function FLint(AL, M; U1info = nothing)
         reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))[1] for i=1:Ni, j=1:Nj]
 end
 
-function FRint(AR, M; U1info = nothing)
+function FRint(AR, M; info = nothing)
     Ni,Nj = size(AR)
     χ, D = size(AR[1],3), size(M[1],3)
-    if U1info === nothing
+    if info === nothing
         indD, indχ = getqrange(Int(sqrt(D)), χ)
         dimsD, dimsχ = getblockdims(Int(sqrt(D)), χ)
     else
-        indD, indχ, dimsD, dimsχ = U1info
+        indD, indχ, dimsD, dimsχ = info
     end
     dir = nothing
     typeof(AR[1]) <: U1Array && (dir = [-1, getdir(M[1])[3], -getdir(M[1])[3], 1])

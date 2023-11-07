@@ -66,16 +66,16 @@ julia> size(rt.AL[1,1]) == (4,2,4)
 true
 ```
 "
-function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false, U1info = nothing)
-    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ, U1info)...)
+function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false, info = nothing)
+    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ, info)...)
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, U1info)
-    A = initialA(M, χ; U1info = U1info)
-    L = cellones(A; U1info = U1info)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, info)
+    A = initialA(M, χ; info = info)
+    L = cellones(A; info = info)
     AL, L = leftorth(A, L)
     R, AR = rightorth(AL, L)
-    FL = FLint(AL, M; U1info = U1info)
+    FL = FLint(AL, M; info = info)
     _, FL = leftenv(AL, AL, M, FL)
     _, FR = rightenv(AR, AR, M, conj(FL))
     C = LRtoC(L,R)
@@ -84,7 +84,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     AL, C, AR, FL, FR
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int, U1info)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int, info)
     env = load(chkp_file)["env"]
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
@@ -159,7 +159,7 @@ end
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
 """
-function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, U1info)
+function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, info)
     verbose && (direction == "up" ? print("↑ ") : print("↓ "))
     directionori = direction
     downfromup && direction == "down" && (direction = "up")
@@ -171,7 +171,7 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     if isfile(in_chkp_file)                               
         rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
     else
-        rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose, U1info = U1info)
+        rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose, info = info)
     end
     env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
@@ -193,10 +193,10 @@ conjM(M::AbstractArray) = conj(M)
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, U1info)
+function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, info)
     M /= norm(M)
     Random.seed!(100)
-    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, U1info = U1info)
+    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, info = info)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
     D = size(M[1,1],1)
@@ -222,7 +222,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Md = reshape(conj(Md), Ni, Nj)
 
         Random.seed!(100)
-        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every, U1info = U1info)
+        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every, info = info)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu
@@ -240,21 +240,21 @@ end
 
 
 function obs_env(M::AbstractArray, ::Val{:none}; kwargs...)
-    U1info = ([],[],[],[])
-    envir = obs_env(M; U1info=U1info, kwargs...)
+    info = ([],[],[],[])
+    envir = obs_env(M; info=info, kwargs...)
     return envir
 end
 
 function obs_env(M::AbstractArray, ::Val{:Z2}; kwargs...)
-    U1info = ([],[],[],[])
+    info = ([],[],[],[])
     M = map(x->asSymmetryArray(x, Val(:Z2)), M)
-    envir = obs_env(M; U1info=U1info, kwargs...)
+    envir = obs_env(M; info=info, kwargs...)
     envir = map(asArray, envir)
     return envir
 end
 
 function obs_env(M::AbstractArray, ::Val{:U1}; kwargs...)
-    envir = obs_env(M; U1info=U1info, kwargs...)
+    envir = obs_env(M; info=info, kwargs...)
     envir = map(asArray, envir)
     return envir
 end

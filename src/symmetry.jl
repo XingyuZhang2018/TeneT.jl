@@ -28,8 +28,8 @@ getdir(::AbstractArray) = nothing
 getdir(::Z2Array) = nothing
 
 randinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(rand(dtype, a...))
-randinitial(::Val{:Z2}, atype, dtype, siteinds, a...; kwarg...) = randZ2(atype, dtype, siteinds, a...)
-randinitial(::Val{:U1}, atype, dtype, siteinds, a...; kwarg...) = randU1(atype, dtype, siteinds, a...; kwarg...)
+randinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = randZ2(atype, dtype, a...; kwarg...)
+randinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = randU1(atype, dtype, a...; kwarg...)
 
 function randinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
     atype = typeof(A) <: Union{Array, CuArray} ? _arraytype(A) : _arraytype(A.tensor)
@@ -37,7 +37,7 @@ function randinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
 end
 
 Iinitial(::Val{:none}, atype, dtype, D; kwarg...) = atype{dtype}(I, D, D)
-Iinitial(::Val{:Z2}, atype, dtype, D; kwarg...) = IZ2(atype, dtype, D)
+Iinitial(::Val{:Z2}, atype, dtype, D; kwarg...) = IZ2(atype, dtype, D; kwarg...)
 Iinitial(::Val{:U1}, atype, dtype, D; kwarg...) = IU1(atype, dtype, D; kwarg...)
 
 function Iinitial(A::AbstractArray{T, N}, D; kwarg...) where {T, N}
@@ -46,7 +46,7 @@ function Iinitial(A::AbstractArray{T, N}, D; kwarg...) where {T, N}
 end
 
 zerosinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(zeros(dtype, a...))
-zerosinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = zerosZ2(atype, dtype, a...)
+zerosinitial(::Val{:Z2}, atype, dtype, a...; kwarg...) = zerosZ2(atype, dtype, a...; kwarg...)
 zerosinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = zerosU1(atype, dtype, a...; kwarg...)
 
 function zerosinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
@@ -66,9 +66,9 @@ now supports:
     `:U1`
 """
 asSymmetryArray(A::AbstractArray, ::Val{:none}; kwarg...) = A
-asSymmetryArray(A::AbstractArray, ::Val{:Z2}; kwarg...) = asZ2Array(A)
+asSymmetryArray(A::AbstractArray, ::Val{:Z2}; kwarg...) = asZ2Array(A; kwarg...)
 asSymmetryArray(A::AbstractArray, ::Val{:U1}; kwarg...) = asU1Array(A; kwarg...)
 
-symmetryreshape(A::AbstractArray, s...; kwarg...) = reshape(A, s...), nothing, nothing
-symmetryreshape(A::Z2Array, s...; kwarg...) = Z2reshape(A, s...), nothing, nothing
+symmetryreshape(A::AbstractArray, s...; kwarg...) = reshape(A, s...), nothing
+symmetryreshape(A::Z2Array, s...; kwarg...) = Z2reshape(A, s...; kwarg...)
 symmetryreshape(A::U1Array, s...; kwarg...) = U1reshape(A, s...; kwarg...)
