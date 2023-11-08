@@ -183,16 +183,6 @@ end
 #     (reA, choosesilces, chooseinds), back
 # end
 
-
-function ChainRulesCore.rrule(::typeof(Z2Array), parity::Vector{Vector{Int}}, tensor::Vector{<:AbstractArray{T}}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
-    function back(dA)
-        exchangeind = indexin(parity, dA.parity)
-        return NoTangent(), NoTangent(), dA.tensor[exchangeind], NoTangent(), NoTangent(), NoTangent()...
-    end
-    U1Array(parity, tensor, size, dims, division), back
-end
-
-
 # adjoint for QR factorization
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
@@ -779,7 +769,13 @@ end
 
 ChainRulesCore.rrule(::typeof(parityconserving),T::Union{Array,CuArray},siteinds) = parityconserving(T,siteinds), dT -> (NoTangent(), parityconserving(dT,siteinds), NoTangent())
 
-ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, s::Int...) = Z2reshape(A, s), dAr -> (NoTangent(), Z2reshape(dAr, size(A)), s...)
+function ChainRulesCore.rrule(::typeof(Z2reshape), A::Z2Array, s::Int...; kwarg...)
+    reA, reinfo = Z2reshape(A, s; kwarg...)
+    function back((dAr,))
+        return NoTangent(), Z2reshape(dAr, size(A); reinfo = reinfo)[1], s...
+    end
+    return (reA, reinfo), back
+end
 
 function ChainRulesCore.rrule(::typeof(U1reshape), A::U1Array, s::Int...; kwarg...)
     reA, reinfo = U1reshape(A, s; kwarg...)
@@ -789,7 +785,7 @@ function ChainRulesCore.rrule(::typeof(U1reshape), A::U1Array, s::Int...; kwarg.
     return (reA, reinfo), back
 end
 
-@adjoint function tr(A::AbstractSymmetricArray)
+@adjoint function tr(A::U1Array)
     function back(dtrA)
         dA = zero(A)
         atype = _arraytype(A.tensor)
@@ -802,7 +798,19 @@ end
     tr(A), back
 end
 
-function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) where {T,N}
+@adjoint function tr(A::Z2Array)
+    function back(dtrA)
+        dA = zero(A)
+        atype = _arraytype(A.tensor[1])
+        for i in 1:length(A.parity)
+            dA.tensor[i] = atype(Matrix(I,dA.dims[i]...) * dtrA)
+        end
+        return (dA, )
+    end
+    tr(A), back
+end
+
+function ChainRulesCore.rrule(::typeof(dtr), A::U1Array{T,N}) where {T,N}
     function back(dtrA)
         atype = _arraytype(A.tensor)
         Aqn = A.qn
@@ -820,6 +828,27 @@ function ChainRulesCore.rrule(::typeof(dtr), A::AbstractSymmetricArray{T,N}) whe
             end
         end
         return NoTangent(), atype(deletezeroblock(dA))
+    end
+    dtr(A), back
+end
+
+function ChainRulesCore.rrule(::typeof(dtr), A::Z2Array{T,N}) where {T,N}
+    function back(dtrA)
+        atype = _arraytype(A.tensor[1])
+        Aqn = A.parity
+        Adims = A.dims
+        dA = zero(A)
+        for i in 1:length(Aqn)
+            if Aqn[i][1] == Aqn[i][3] && Aqn[i][2] == Aqn[i][4]
+                d1 = Adims[i][1]
+                d2 = Adims[i][2]
+                dA.tensor[i] = atype(dtrA * ein"ab, cd -> acbd"(Matrix(I,d1,d1), Matrix(I,d2,d2)))
+                # for j = 1:d1, k = 1:d2
+                #     dA.tensor[i][j,k,j,k] = dtrA
+                # end
+            end
+        end
+        return NoTangent(), atype(dA)
     end
     dtr(A), back
 end

@@ -51,8 +51,8 @@ end
 @testset "general flatten reshape" for atype in [Array], dtype in [ComplexF64]
     # (D,D,D,D,D,D,D,D)->(D^2,D^2,D^2,D^2)
     D = 6
-    indims = [[4, 2],[4, 2],[2, 2],[4, 2],[4, 2]]
-    a = randZ2(atype, ComplexF64, D,D,4,D,D; indims=indims)
+    indims = [[4, 2],[4, 2],[4, 5],[4, 2],[4, 2]]
+    a = randZ2(atype, ComplexF64, D,D,9,D,D; indims=indims)
     a = ein"abcde, fgchi -> gbhdiefa"(a, conj(a))
     @test collect.(size.(a.tensor))[[1,2,3]] == a.dims[[1,2,3]]
     

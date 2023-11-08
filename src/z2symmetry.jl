@@ -136,7 +136,7 @@ function getparity(N; f::Vector{Int}=[0])
     sort!(parity)
 end
 
-function randZ2(atype, dtype, s...; indims::Vector{Vector{Int}}, f::Vector{Int}=[0])
+function randZ2(atype, dtype, s...; indims::Vector{Vector{Int}}, f::Vector{Int}=[0], dir=nothing, indqn=nothing)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(s)
     parity = Vector{Vector{Int}}()
@@ -174,28 +174,23 @@ function zerosZ2(atype, dtype, s...; indims::Vector{Vector{Int}}, f::Vector{Int}
     Z2Array(parity[p], tensor[p], s, dims[p], 1)
 end
 
-function IZ2(atype, dtype, D; kwargs...)
-    deven, dodd = getZ2blockdims(D, D; kwargs...)
-    Z2Array([[0, 0], [1, 1]], [atype{dtype}(I, deven...), atype{dtype}(I, dodd...)], (D, D), [[deven...], [dodd...]], 1)
-end
 
-function IZ2(atype, dtype, D; indims::Vector{Vector{Int}}, f::Vector{Int}=[0])
+function IZ2(atype, dtype, D; indims::Vector{Vector{Int}}, f::Vector{Int}=[0],dir=nothing, indqn=nothing)
     (D, D) != Tuple(map(sum, indims))
     parity = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(2 for i=1:2))
-        parityi = [[0,1][i.I[j]] for j in 1:L]
+        parityi = [[0,1][i.I[j]] for j in 1:2]
         if sum(parityi) % 2 in f
-            bulkdims = [indims[j][i.I[j]] for j in 1:L]
+            bulkdims = [indims[j][i.I[j]] for j in 1:2]
             push!(parity, parityi)
             push!(dims, bulkdims)
             push!(tensor, atype{dtype}(I, bulkdims...))
         end
     end
     p = sortperm(parity)
-    tensor = vcat(map(vec, tensor[p])...)
-    U1Array(parity[p], dir, tensor, (D, D), dims[p], 1)
+    Z2Array(parity[p], tensor[p], (D, D), dims[p], 1)
 end
 
 function z2selection(maxN::Int; siteinds, dir=nothing)
@@ -223,8 +218,8 @@ function asZ2Array(A::AbstractArray{T,N}; kwargs...) where {T,N}
     parity = getparity(N)
     tensor = [atype(Aarray[[qlist[j][parity[i][j]+1] for j = 1:N]...]) for i in 1:length(parity)]
     dims = map(x -> [size(x)...], tensor)
-    nozeroind = norm.(tensor) .!= 0
-    Z2Array(parity[nozeroind], tensor[nozeroind], size(A), dims, 1)
+    # nozeroind = norm.(tensor) .!= 0
+    Z2Array(parity, tensor, size(A), dims, 1)
 end
 
 # only for OMEinsum binary permutedims before reshape
@@ -274,7 +269,8 @@ function *(A::Z2Array{TA,NA}, B::Z2Array{TB,NB}) where {TA,TB,NA,NB}
     bulktimes!(parity, tensor, dims, A, B, 0)
     !(divA in [0, NA]) && !(divB in [0, NB]) && bulktimes!(parity, tensor, dims, A, B, 1)
     parity == [[]] && return Array(tensor[1])[]
-    Z2Array(parity, tensor, (size(A)[1:divA]..., size(B)[divB+1:end]...), dims, divA)
+    p = sortperm(parity)
+    Z2Array(parity[p], tensor[p], (size(A)[1:divA]..., size(B)[divB+1:end]...), dims[p], divA)
 end
 
 """
@@ -580,7 +576,7 @@ Z2reshape only for shape `(D,D,D,D,D,D,D,D) <-> (D^2,D^2,D^2,D^2)` and `(χ,D,D,
 #     U1reshape(A, s; reinfo = reinfo)
 # end
 
-Z2reshape(A::Z2Array, a::Tuple{Vararg{Int}}; kwarg...) = Z2reshape(A, siteinds, a...; kwarg...)
+Z2reshape(A::Z2Array, a::Tuple{Vararg{Int}}; kwarg...) = Z2reshape(A, a...; kwarg...)
 function Z2reshape(A::Z2Array{T, N}, s::Int...; reinfo, kwarg...) where {T, N}
     atype = typeof(A.tensor[1]) <: CuArray ? CuArray : Array
     etype = eltype(A.tensor[1])
@@ -629,11 +625,11 @@ function Z2reshape(A::Z2Array{T, N}, s::Int...; reinfo, kwarg...) where {T, N}
             end
             push!(retensors, tensor)
         end
-        nozeroind = norm.(retensors) .!= 0
-        dims = map(x -> collect(size(x)), retensors)[nozeroind]
-        qn = ureqn[nozeroind]
+        # nozeroind = norm.(retensors) .!= 0
+        dims = map(x -> collect(size(x)), retensors)
+        qn = ureqn
         p = sortperm(qn)
-        Z2Array(qn[p], retensors[nozeroind][p], s, dims[p], 1), (choosesilces, chooseinds, nothing, nothing, indims, Aqn, Adims)
+        Z2Array(qn[p], retensors[p], s, dims[p], 1), (choosesilces, chooseinds, nothing, nothing, indims, Aqn, Adims)
     else
         choosesilces, chooseinds, _, _, indims, reqn, redims = reinfo
         retensors = Array{Array,1}(undef, sum(length.(chooseinds)))
@@ -647,11 +643,11 @@ function Z2reshape(A::Z2Array{T, N}, s::Int...; reinfo, kwarg...) where {T, N}
                 retensors[chooseinds[i][j]] = reshape(Array(Atensor[i][choosesilces[i][j]...]), redims[chooseinds[i][j]]...)
             end
         end
-        nozeroind = norm.(retensors) .!= 0
-        dims = map(x -> collect(size(x)), retensors)[nozeroind]
-        qn = reqn[nozeroind]
+        # nozeroind = norm.(retensors) .!= 0
+        dims = map(x -> collect(size(x)), retensors)
+        qn = reqn
         p = sortperm(qn)
-        Z2Array(qn[p], atype.(retensors[nozeroind][p]), s, dims[p], 1), (choosesilces, chooseinds, nothing, nothing, indims, reqn, redims)
+        Z2Array(qn[p], atype.(retensors[p]), s, dims[p], 1), (choosesilces, chooseinds, nothing, nothing, indims, reqn, redims)
     end
 end
 
