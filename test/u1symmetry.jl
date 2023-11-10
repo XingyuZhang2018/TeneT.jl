@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA,zerosinitial
+using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA, zerosinitial
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -10,44 +10,64 @@ using Test
 using BenchmarkTools
 CUDA.allowscalar(false)
 
-@testset "U1 Tensor with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
-	Random.seed!(100)
-	@test U1Array <: AbstractSymmetricArray <: AbstractArray
+@testset "indextoqn and getblockdims" begin
+    @test electronPn <: AbstractSiteType
+    @test electronSz <: AbstractSiteType
+    @test electronZ2 <: AbstractSiteType
+    @test tJSz <: AbstractSiteType
+    @test tJZ2 <: AbstractSiteType
 
-    # getblockdims division
-    @test getblockdims(2,4) == [[1,1], [1,2,1]]
-    @test getblockdims(5,8) == [[1,3,1], [1,3,3,1]]
-    @test getblockdims(3,3,4) == [[1,2], [1,2], [1,2,1]]
-    for a = 5:8, b = 5:8
-        @test sum(getblockdims(a,b)[1]) == a
-        @test sum(getblockdims(a,b)[2]) == b
-    end
+    @test [indextoqn(electronPn(), i) for i in 1:8] == [0, 1, 1, 2, 1, 2, 2, 3]
+    @test getqrange(electronPn(), 8) == [[0,1,2,3]]
+    @test getblockdims(electronPn(), 8) == [[1,3,3,1]]
 
-    # # initial 
-    dir = [-1, 1, 1]
-    indqn = [[-1, 0, 1] for _ in 1:3]
-    indims = [[1,2,1], [1,2,1], [1,3,1]]
-    randinial = randU1(atype, dtype, 4, 4, 5; dir = dir, indqn = indqn, indims = indims)
+    @test [indextoqn(electronSz(), i) for i in 1:8] == [0, 1, -1, 0, 1, 2, 0, 1]
+    @test getqrange(electronSz(), 8) == [[-1,0,1,2]]
+    @test getblockdims(electronSz(), 8) == [[1,3,3,1]]
+
+    @test [indextoqn(electronZ2(), i) for i in 1:8] == [0, 1, 1, 0, 1, 0, 0, 1]
+    @test getqrange(electronZ2(), 8) == [[0,1]]
+    @test getblockdims(electronZ2(), 8) == [[4,4]]
+
+    @test [indextoqn(tJSz(), i) for i in 1:8] == [0, 1, -1, 1, 2, 0, -1, 0]
+    @test getqrange(tJSz(), 8) == [[-1,0,1,2]]
+    @test getblockdims(tJSz(), 8) == [[2,3,2,1]]
+
+    @test [indextoqn(tJZ2(), i) for i in 1:8] == [0, 1, 1, 1, 0, 0, 1, 0]
+    @test getqrange(tJZ2(), 8) == [[0,1]]
+    @test getblockdims(tJZ2(), 8) == [[4,4]]
+end
+
+@testset "U1Array with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], (sitetype,ifZ2) in [[electronPn(),false],[electronZ2(),true]]
+    Random.seed!(100)
+    # initial
+    @test U1Array <: AbstractSymmetricArray <: AbstractArray
+
+    dir = [-1,1,1]
+    indqn = getqrange(sitetype, 4,4,5)
+    indims = getblockdims(sitetype, 4,4,5)
+    
+    randinial = randU1(atype, dtype, 4,4,5; dir=dir, indqn=indqn, indims=indims, ifZ2=ifZ2)
     @test randinial isa U1Array
-    zeroinial = zerosU1(atype, dtype, 4, 4, 5; dir = dir, indqn = indqn, indims = indims)
-    Iinial = IU1(atype, dtype, 3; dir = [-1,1], indqn = [[-1, 0, 1] for _ in 1:2], indims = [[1, 2, 1] for _ in 1:2])
+    zeroinial = zerosU1(atype, dtype, 4,4,5; dir = dir, indqn=indqn, indims=indims, ifZ2=ifZ2)
+    Iinial = IU1(atype, dtype, 3; dir = [-1,1], indqn=getqrange(sitetype, 3,3), indims=getblockdims(sitetype, 3,3))
     @test size(randinial) == (4,4,5)
     @test size(zeroinial) == (4,4,5)
     @test size(Iinial) == (3,3)
 
     # asU1Array and asArray
-	A = randU1(atype, dtype, 4, 4, 5; dir = dir)
-	Atensor = asArray(A)
-    AA = asU1Array(Atensor; dir = dir)
-    AAtensor = asArray(AA)
+	A = randU1(atype, dtype, 4,4,5; dir = dir, indqn=indqn, indims=indims, ifZ2=ifZ2)
+	Atensor = asArray(sitetype, A)
+    AA = asU1Array(sitetype, Atensor; dir=dir, ifZ2=ifZ2)
+    AAtensor = asArray(sitetype, AA)
     @test A ≈ AA
     @test Atensor ≈ AAtensor
 
-	# permutedims
-	@test permutedims(Atensor,[3,2,1]) == asArray(permutedims(A,[3,2,1]))
+	# # permutedims
+	@test permutedims(Atensor,[3,2,1]) == asArray(sitetype, permutedims(A,[3,2,1]))
 
-	# reshape
-	@test reshape(Atensor,(16,5)) == reshape(asArray(reshape(reshape(A,16,5),4,4,5)),(16,5))
+	# # reshape
+	@test reshape(Atensor,(16,5)) == reshape(asArray(sitetype, reshape(reshape(A,16,5),4,4,5)),(16,5))
 end
 
 @testset "OMEinsum U1 with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]

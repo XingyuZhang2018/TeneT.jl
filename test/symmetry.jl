@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: getsymmetry, _arraytype, Iinitial, zerosZ2, bulkdims
+using TeneT: getsymmetry, _arraytype, Iinitial,  bulkdims
 using CUDA
 using Random
 using Test

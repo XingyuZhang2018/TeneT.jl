@@ -5,8 +5,8 @@ include("environment.jl")
 include("fixedpoint.jl")
 
 abstract type AbstractSymmetricArray{T,N} <: AbstractArray{T,N} end
-include("z2siteinds.jl")
-include("z2symmetry.jl")
+export AbstractSymmetricArray
+include("sitetype.jl")
 include("u1symmetry.jl")
 include("symmetry.jl")
 

@@ -1,5 +1,5 @@
 using TeneT
-using TeneT:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,asZ2Array,Z2Array,dtr
+using TeneT:qrpos,lqpos,leftorth,leftenv,rightorth,rightenv,ACenv,Cenv,LRtoC,ALCtoAC,ACCtoALAR,obs_FL,obs_FR,parity_conserving, asArray,dtr
 using ChainRulesCore
 using CUDA
 using LinearAlgebra

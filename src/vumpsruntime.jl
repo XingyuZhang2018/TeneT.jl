@@ -245,13 +245,6 @@ function obs_env(M::AbstractArray, ::Val{:none}; kwargs...)
     return envir
 end
 
-function obs_env(M::AbstractArray, ::Val{:Z2}; kwargs...)
-    info = ([],[],[],[])
-    M = map(x->asSymmetryArray(x, Val(:Z2)), M)
-    envir = obs_env(M; info=info, kwargs...)
-    envir = map(asArray, envir)
-    return envir
-end
 
 function obs_env(M::AbstractArray, ::Val{:U1}; kwargs...)
     envir = obs_env(M; info=info, kwargs...)

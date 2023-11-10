@@ -18,6 +18,7 @@ a struct to hold the N-order U1 tensors
 - `size`  : original none-symetric array size
 - `dims` size of `tensor`
 - `division`: division location for reshape
+- `ifZ2`: whether Z2 symmetry
 """
 struct U1Array{T, N} <: AbstractSymmetricArray{T,N}
     qn::Vector{Vector{Int}}
@@ -26,28 +27,30 @@ struct U1Array{T, N} <: AbstractSymmetricArray{T,N}
     size::Tuple{Vararg{Int, N}}
     dims::Vector{Vector{Int}}
     division::Int
-    function U1Array(qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::AbstractArray{T}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
-        new{T, N}(qn, dir, tensor, size, dims, division)
+    ifZ2::Bool
+    function U1Array(qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::AbstractArray{T}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int, ifZ2::Bool) where {T,N}
+        ifZ2 && @assert all(map(x->sum(x) % 2==0, qn))
+        new{T, N}(qn, dir, tensor, size, dims, division, ifZ2)
     end
 end
 
 size(A::U1Array) = A.size
 size(A::U1Array, a) = size(A)[a]
 getdir(A::U1Array) = A.dir
-conj(A::U1Array) = U1Array(A.qn, -A.dir, conj(A.tensor), A.size, A.dims, A.division)
+conj(A::U1Array) = U1Array(A.qn, -A.dir, conj(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 map(conj, A::U1Array) = conj(A)
 norm(A::U1Array) = norm(A.tensor)
 
-*(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor * B, A.size, A.dims, A.division)
+*(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor * B, A.size, A.dims, A.division, A.ifZ2)
 *(B::Number, A::U1Array) = A * B
-/(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor / B, A.size, A.dims, A.division)
-broadcasted(*, A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division)
-broadcasted(*, B::Number, A::U1Array) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division)
+/(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor / B, A.size, A.dims, A.division, A.ifZ2)
+broadcasted(*, A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
+broadcasted(*, B::Number, A::U1Array) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
 broadcasted(/, A::U1Array, B::Number) = A / B
 
 function +(A::U1Array, B::U1Array)
     if B.qn == A.qn
-        U1Array(A.qn, A.dir, A.tensor + B.tensor, A.size, A.dims, A.division)
+        U1Array(A.qn, A.dir, A.tensor + B.tensor, A.size, A.dims, A.division, A.ifZ2)
     else
         Aqn, Adims, Atensor = A.qn, A.dims, A.tensor
         Bqn, Bdims, Btensor = B.qn, B.dims, B.tensor
@@ -74,19 +77,19 @@ function +(A::U1Array, B::U1Array)
         p = sortperm(qn)
         bdiv = blockdiv(dims)
         tensor = tensor[vcat(bdiv[p]...)]
-        U1Array(qn[p], A.dir, tensor, A.size, dims[p], A.division)
+        U1Array(qn[p], A.dir, tensor, A.size, dims[p], A.division, A.ifZ2)
     end
 end
 
 function -(A::U1Array, B::U1Array)
     @assert A.qn == B.qn
-    U1Array(A.qn, A.dir, A.tensor - B.tensor, A.size, A.dims, A.division)
+    U1Array(A.qn, A.dir, A.tensor - B.tensor, A.size, A.dims, A.division, A.ifZ2)
 end
 
--(A::U1Array) = U1Array(A.qn, A.dir, -A.tensor, A.size, A.dims, A.division)
+-(A::U1Array) = U1Array(A.qn, A.dir, -A.tensor, A.size, A.dims, A.division, A.ifZ2)
 
-CuArray(A::U1Array) = U1Array(A.qn, A.dir, CuArray(A.tensor), A.size, A.dims, A.division)
-Array(A::U1Array) = U1Array(A.qn, A.dir, Array(A.tensor), A.size, A.dims, A.division)
+CuArray(A::U1Array) = U1Array(A.qn, A.dir, CuArray(A.tensor), A.size, A.dims, A.division, A.ifZ2)
+Array(A::U1Array) = U1Array(A.qn, A.dir, Array(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 
 function dot(A::U1Array, B::U1Array) 
     @assert A.qn == B.qn
@@ -126,29 +129,9 @@ function show(::IOBuffer, A::U1Array)
     println("tensor: \n", A.tensor)
 end
 
-"""
-    q = index_to_q(n::Int)
-
-transfer index to quantum number
-"""
-function index_to_q(n::Int)
-    n -= 1
-    n == 0 && return 0
-
-    ternary = []
-    while n > 0
-        remainder = n % 3
-        remainder == 2 && (remainder = -1)
-        pushfirst!(ternary, remainder)
-        n = div(n, 3)
-    end
-
-    return sum(ternary)
-end
-
-getq(s::Int...) = map(s -> [index_to_q(i) for i = 1:s], s)
-getqrange(s::Tuple{Vararg{Int}}) = getqrange(s...)
-getqrange(s::Int...) = (q = getq(s...); [map(q -> sort(unique(q)), q)...])
+getq(sitetype, s::Int...) = map(s -> [indextoqn(sitetype, i) for i = 1:s], s)
+getqrange(sitetype, s::Tuple{Vararg{Int}}) = getqrange(sitetype, s...)
+getqrange(sitetype, s::Int...) = (q = getq(sitetype, s...); [map(q -> sort(unique(q)), q)...])
 getshift(qrange) = map(q -> abs(q[1]), qrange) .+ 1
 
 """
@@ -156,13 +139,13 @@ getshift(qrange) = map(q -> abs(q[1]), qrange) .+ 1
 
 distribute dims of different part dims of U1 tensor bulk by bits division
 """
-getblockdims(s::Tuple{Vararg{Int}}) = getblockdims(s...)
-function getblockdims(s::Int...)
-    q = getq(s...)
+getblockdims(sitetype, s::Tuple{Vararg{Int}}) = getblockdims(sitetype, s...)
+function getblockdims(sitetype, s::Int...)
+    q = getq(sitetype, s...)
     [map(q -> [sum(q .== i) for i in sort(unique(q))], q)...]
 end
 
-function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}} = getqrange(s), indims::Vector{Vector{Int}} = getblockdims(s), q::Vector{Int}=[0])
+function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}=[0], ifZ2=false)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -170,7 +153,8 @@ function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        if sum(qni .* dir) in q
+        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
+        if qnisum in q
             bulkdims = [indims[j][i.I[j]] for j in 1:L]
             push!(qn, qni)
             push!(dims, bulkdims)
@@ -179,10 +163,10 @@ function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}
     end
     p = sortperm(qn)
     tensor = vcat(map(vec, tensor[p])...)
-    U1Array(qn[p], dir, tensor, s, dims[p], 1)
+    U1Array(qn[p], dir, tensor, s, dims[p], 1, ifZ2)
 end
 
-function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}} = getqrange(s), indims::Vector{Vector{Int}} = getblockdims(s), q::Vector{Int}=[0])
+function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}=[0], ifZ2=false)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -190,7 +174,8 @@ function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        if sum(qni .* dir) in q
+        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
+        if qnisum in q
             bulkdims = [indims[j][i.I[j]] for j in 1:L]
             push!(qn, qni)
             push!(dims, bulkdims)
@@ -199,20 +184,21 @@ function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}
     end
     p = sortperm(qn)
     tensor = vcat(map(vec, tensor[p])...)
-    U1Array(qn[p], dir, tensor, s, dims[p], 1)
+    U1Array(qn[p], dir, tensor, s, dims[p], 1, ifZ2)
 end
 
-zero(A::U1Array) = U1Array(A.qn, A.dir, zero(A.tensor), A.size, A.dims, A.division)
+zero(A::U1Array) = U1Array(A.qn, A.dir, zero(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 
-function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}} = getqrange(D, D), indims::Vector{Vector{Int}} = getblockdims(D, D), q::Vector{Int}=[0])
-    (D, D) != Tuple(map(sum, indims))
+function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}=[0], ifZ2=false)
+    (D, D) != Tuple(map(sum, indims)) && throw(Base.error("$D is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
     tensor = Vector{atype{dtype}}()
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        if sum(qni .* dir) in q
+        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
+        if qnisum in q
             bulkdims = [indims[j][i.I[j]] for j in 1:L]
             push!(qn, qni)
             push!(dims, bulkdims)
@@ -221,56 +207,26 @@ function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}} = get
     end
     p = sortperm(qn)
     tensor = vcat(map(vec, tensor[p])...)
-    U1Array(qn[p], dir, tensor, (D, D), dims[p], 1)
+    U1Array(qn[p], dir, tensor, (D, D), dims[p], 1, ifZ2)
 end
 
-# getindex(A::U1Array, index::CartesianIndex) = getindex(A, index.I...)
-# function getindex(A::U1Array{T,N}, index::Int...) where {T,N}
-#     bits = map(x -> ceil(Int, log2(x)), size(A))
-#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
-#     # sum(qn.*Adir) != 0 && return 0.0
-#     ind = findfirst(x->x in [qn], A.qn)
-#     ind === nothing && return 0.0
-#     qlist = [U1selection(size(A, i)) for i = 1:N]
-#     qrange = getqrange(size(A)...)
-#     shift = getshift(qrange)
-#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-#     Liner = LinearIndices(Tuple(A.dims[ind]))
-#     Abdiv = blockdiv(A.dims)
-#     CUDA.@allowscalar A.tensor[Abdiv[ind]][Liner[position...]]
-# end
-
-# setindex!(A::U1Array, x::Number, index::CartesianIndex) = setindex!(A, x, index.I...)
-# function setindex!(A::U1Array{T,N}, x::Number, index::Int...) where {T,N}
-#     bits = map(x -> ceil(Int, log2(x)), size(A))
-#     qn = collect(map((index, bits) -> sum(bitarray(index - 1, bits)), index, bits))
-#     ind = findfirst(x->x in [qn], A.qn)
-#     qlist = [U1selection(size(A, i)) for i = 1:N]
-#     qrange = getqrange(size(A)...)
-#     shift = getshift(qrange)
-#     position = [sum(qlist[i][qn[i] + shift[i]][1:index[i]]) for i in 1:N]
-#     Liner = LinearIndices(Tuple(A.dims[ind]))
-#     Abdiv = blockdiv(A.dims)
-#     CUDA.@allowscalar @view(A.tensor[Abdiv[ind]])[Liner[position...]] = x
-# end
-
-function U1selection(indqn::Vector{Int}, indims::Vector{Int})
+function U1selection(sitetype, indqn::Vector{Int}, indims::Vector{Int})
     maxs = sum(indims)
-    q = [index_to_q(i) for i = 1:maxs]
+    q = [indextoqn(sitetype, i) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
-function U1selection(maxs::Int)
-    q = [index_to_q(i) for i = 1:maxs]
+function U1selection(sitetype, maxs::Int)
+    q = [indextoqn(sitetype, i) for i = 1:maxs]
     [q .== i for i in sort(unique(q))]
 end
 
-function asArray(A::U1Array{T,N}; indqn::Vector{Vector{Int}} = getqrange(size(A)), indims::Vector{Vector{Int}} = getblockdims(size(A))) where {T <: Number, N}
+function asArray(sitetype, A::U1Array{T,N}; indqn::Vector{Vector{Int}}=getqrange(sitetype, size(A)), indims::Vector{Vector{Int}}=getblockdims(sitetype, size(A))) where {T <: Number, N}
     atype = _arraytype(A.tensor)
     tensor = zeros(T, size(A))
     Aqn = A.qn
     Atensor = A.tensor
-    qlist = [U1selection(indqn[i], indims[i]) for i = 1:N]
+    qlist = [U1selection(sitetype, indqn[i], indims[i]) for i = 1:N]
     div = blockdiv(A.dims)
     for i in 1:length(Aqn)
         tensor[[qlist[j][indexin([Aqn[i][j]], indqn[j])...] for j = 1:N]...] = Array(Atensor[div[i]])
@@ -278,13 +234,13 @@ function asArray(A::U1Array{T,N}; indqn::Vector{Vector{Int}} = getqrange(size(A)
     atype(tensor)
 end
 
-function asArray(A::U1Array{T,N}; indqn::Vector{Vector{Int}} = getqrange(size(A)), indims::Vector{Vector{Int}} = getblockdims(size(A))) where {T <: AbstractArray, N}
+function asArray(sitetype, A::U1Array{T,N}; indqn::Vector{Vector{Int}}=getqrange(sitetype, size(A)), indims::Vector{Vector{Int}}=getblockdims(sitetype, size(A))) where {T <: AbstractArray, N}
     atype = _arraytype(A.tensor[1])
     etype = eltype(A.tensor[1])
     tensor = zeros(etype, size(A))
     Aqn = A.qn
     Atensor = A.tensor
-    qlist = [U1selection(indqn[i], indims[i]) for i = 1:N]
+    qlist = [U1selection(sitetype, indqn[i], indims[i]) for i = 1:N]
     for i in 1:length(Aqn)
         tensor[[qlist[j][indexin([Aqn[i][j]], indqn[j])...] for j = 1:N]...] = Array(Atensor[i])
     end
@@ -296,12 +252,13 @@ end
 
 give the qn of length L
 """
-function getqn(dir::Vector{Int}, indqn::Vector{Vector{Int}}; q::Vector{Int}=[0])
+function getqn(dir::Vector{Int}, indqn::Vector{Vector{Int}}; q::Vector{Int}=[0], ifZ2)
     L = length(dir)
     qn = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        if sum(qni .* dir) in q
+        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
+        if qnisum in q
             push!(qn, qni)
         end
     end
@@ -314,21 +271,21 @@ function deletezeroblock(A::U1Array)
     Atensor = [A.tensor[Abdiv[i]] for i in 1:length(Abdiv)]
     nozeroind = norm.(Atensor) .!== 0
     Atensor = vcat(Atensor[nozeroind]...)
-    U1Array(A.qn[nozeroind], A.dir, A.tensor, A.size, A.dims[nozeroind], A.division)
+    U1Array(A.qn[nozeroind], A.dir, A.tensor, A.size, A.dims[nozeroind], A.division, A.ifZ2)
 end
 
 # have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 # which is fixed in new vervion, but its allocation is abnormal
-function asU1Array(A::AbstractArray{T,N}; dir::Vector{Int}, indqn::Vector{Vector{Int}} = getqrange(size(A)), indims::Vector{Vector{Int}} = getblockdims(size(A)), q::Vector{Int}=[0]) where {T, N}
+function asU1Array(sitetype, A::AbstractArray{T,N}; dir::Vector{Int}, indqn::Vector{Vector{Int}}=getqrange(sitetype, size(A)), indims::Vector{Vector{Int}}=getblockdims(sitetype, size(A)), q::Vector{Int}=[0], ifZ2) where {T, N}
     atype = _arraytype(A)
     Aarray = Array(A)
-    qlist = [U1selection(indqn[i], indims[i]) for i = 1:N]
-    Aqn = getqn(dir, indqn; q = q)
+    qlist = [U1selection(sitetype, indqn[i], indims[i]) for i = 1:N]
+    Aqn = getqn(dir, indqn; q = q, ifZ2=ifZ2)
     tensor = [atype(Aarray[[qlist[j][indexin([Aqn[i][j]], indqn[j])...] for j = 1:N]...]) for i in 1:length(Aqn)]
     dims = map(x -> collect(size(x)), tensor)
     nozeroind = norm.(tensor) .!= 0
     tensor = vcat(map(vec, tensor[nozeroind])...)
-    U1Array(Aqn[nozeroind], dir, tensor, size(A), dims[nozeroind], 1)
+    U1Array(Aqn[nozeroind], dir, tensor, size(A), dims[nozeroind], 1, ifZ2)
 end
 
 # 
@@ -347,7 +304,7 @@ function tensorpermute(A::U1Array{T, N}, perm) where {T <: Number, N}
     div = blockdiv(dims)
     tensor = vcat([vec(permutedims(reshape(@view(A.tensor[div[i]]), dims[i]...), perm)) for i in 1:length(div)][p]...)
     dims = map(x -> x[collect(perm)], dims)
-    U1Array(qn[p], A.dir[collect(perm)], tensor, A.size[collect(perm)], dims[p], A.division)
+    U1Array(qn[p], A.dir[collect(perm)], tensor, A.size[collect(perm)], dims[p], A.division, A.ifZ2)
 end
 
 reshape(A::U1Array, s::Tuple{Vararg{Int}}) = reshape(A, s...)
@@ -360,7 +317,7 @@ function reshape(A::U1Array{T,N}, s::Int...) where {T <: Number,N}
             div += 1
             p *= sizeA[div]
         end
-        return U1Array(A.qn, A.dir, A.tensor, A.size, A.dims, div)
+        return U1Array(A.qn, A.dir, A.tensor, A.size, A.dims, div, A.ifZ2)
     else
         return A
     end
@@ -515,16 +472,16 @@ function tr(A::U1Array{T,2}) where {T}
     s
 end
 
-function _compactify!(y, x::U1Array, indexer)
-    x = asArray(Array(x))
-    @inbounds @simd for ci in CartesianIndices(y)
-        y[ci] = x[subindex(indexer, ci.I)]
-    end
-    return y
-end
+# function _compactify!(y, x::U1Array, indexer)
+#     x = asArray(Array(x))
+#     @inbounds @simd for ci in CartesianIndices(y)
+#         y[ci] = x[subindex(indexer, ci.I)]
+#     end
+#     return y
+# end
 
-broadcasted(*, A::U1Array, B::Base.RefValue) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division)
-broadcasted(*, B::Base.RefValue, A::U1Array) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division)
+broadcasted(*, A::U1Array, B::Base.RefValue) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
+broadcasted(*, B::Base.RefValue, A::U1Array) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
 
 # for ein"abab ->"(A)[]
 function dtr(A::U1Array{T,4}) where {T}
@@ -547,8 +504,8 @@ accum(A::U1Array, B::U1Array...) = +(A, B...)
 # for KrylovKit compatibility
 rmul!(A::U1Array, B::Number) = (rmul!(A.tensor, B); A)
 
-similar(A::U1Array) = U1Array(map(copy, A.qn), copy(A.dir), similar(A.tensor), A.size, A.dims, A.division)
-similar(A::U1Array, atype) = U1Array(map(copy, A.qn), copy(A.dir), atype(similar(A.tensor)), A.size, A.dims, A.division)
+similar(A::U1Array) = U1Array(map(copy, A.qn), copy(A.dir), similar(A.tensor), A.size, A.dims, A.division, A.ifZ2)
+similar(A::U1Array, atype) = U1Array(map(copy, A.qn), copy(A.dir), atype(similar(A.tensor)), A.size, A.dims, A.division, A.ifZ2)
 function diag(A::U1Array)
     tensor = A.tensor
     dims = A.dims
@@ -556,7 +513,7 @@ function diag(A::U1Array)
     tensor = [reshape(tensor[bdiv[i]], dims[i]...) for i in 1:length(bdiv)]
     CUDA.@allowscalar collect(Iterators.flatten(diag.(tensor)))
 end
-copy(A::U1Array) = U1Array(map(copy, A.qn), copy(A.dir), copy(A.tensor), A.size, A.dims, A.division)
+copy(A::U1Array) = U1Array(map(copy, A.qn), copy(A.dir), copy(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 
 function mul!(Y::U1Array, A::U1Array, B::Number)
     @assert Y.qn == A.qn
@@ -582,14 +539,14 @@ function Diagonal(A::U1Array)
     blocklen = map(x->x[1], A.dims)
     bdiv = [sum(blocklen[1 : i - 1]) + 1 : sum(blocklen[1 : i]) for i in 1:length(blocklen)]
     tensor = CUDA.@allowscalar atype(vcat([vec(diagm(A.tensor[bdiv[i]])) for i in 1:length(bdiv)]...))
-    U1Array(A.qn, A.dir, tensor, A.size, A.dims, A.division)
+    U1Array(A.qn, A.dir, tensor, A.size, A.dims, A.division, A.ifZ2)
 end
 
 function sqrt(A::U1Array)
     blocklen = map(x->x[1], A.dims)
     bdiv = [sum(blocklen[1 : i - 1]) + 1 : sum(blocklen[1 : i]) for i in 1:length(blocklen)]
     tensor = vcat([vec(sqrt.(@view(A.tensor[bdiv[i]]))) for i in 1:length(bdiv)]...)
-    U1Array(A.qn, A.dir, tensor, A.size, A.dims, A.division)
+    U1Array(A.qn, A.dir, tensor, A.size, A.dims, A.division, A.ifZ2)
 end
 broadcasted(sqrt, A::U1Array) = sqrt(A)
 
@@ -699,7 +656,7 @@ function lqpos!(A::U1Array{T,N}) where {T,N}
         u1blockLQ!(Ltensor, Qtensor, Atensor, indexs[i], blockjdims[i], Qbdiv[bdivind[i]], Lbdiv[i])
     end
 
-    U1Array(Lqn[p], [A.dir[1], -A.dir[1]], Ltensor, (Asize[1], Asize[1]), Ldims[p], 1), U1Array(Aqn, A.dir, Qtensor, Asize, Adims, A.division)
+    U1Array(Lqn[p], [A.dir[1], -A.dir[1]], Ltensor, (Asize[1], Asize[1]), Ldims[p], 1), U1Array(Aqn, A.dir, Qtensor, Asize, Adims, A.division, A.ifZ2)
 end
 
 function u1blockLQinfo!(Lqn, Qqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q)
@@ -781,7 +738,7 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo = nothing) where {T <: Nu
     dims = A.dims
     bdiv = blockdiv(dims) 
     tensor = [reshape(@view(A.tensor[bdiv[i]]), dims[i]...) for i in 1:length(bdiv)]
-    A = U1Array(A.qn, A.dir, tensor, A.size, dims, A.division)
+    A = U1Array(A.qn, A.dir, tensor, A.size, dims, A.division, A.ifZ2)
     U1reshape(A, s; reinfo = reinfo)
 end
 
