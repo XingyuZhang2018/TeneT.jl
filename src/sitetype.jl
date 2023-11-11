@@ -14,7 +14,10 @@ state    qn | remainder
 |↑↓>  -> 2  | 3
 
 """
-struct electronPn <: AbstractSiteType end
+struct electronPn <: AbstractSiteType 
+    ifZ2::Bool
+end
+electronPn() = electronPn(false)
 export electronPn
 function indextoqn(::electronPn, i::Int)
     i -= 1
@@ -45,7 +48,10 @@ state    qn | remainder
 |↑↓>  ->  0 | 3
 
 """
-struct electronSz <: AbstractSiteType end
+struct electronSz <: AbstractSiteType 
+    ifZ2::Bool
+end
+electronSz() = electronSz(false)
 export electronSz
 function indextoqn(::electronSz, i::Int)
     i -= 1
@@ -78,7 +84,10 @@ state    qn | remainder
 |↑↓>  ->  0 | 3
 
 """
-struct electronZ2 <: AbstractSiteType end
+struct electronZ2 <: AbstractSiteType     
+    ifZ2::Bool
+end
+electronZ2() = electronZ2(true)
 export electronZ2
 function indextoqn(::electronZ2, i::Int)
     i -= 1
@@ -110,7 +119,10 @@ state    qn  | remainder
 |↑>  ->  1   | 1
 |↓>  -> -1   | 2   
 """
-struct tJSz <: AbstractSiteType end
+struct tJSz <: AbstractSiteType 
+    ifZ2::Bool
+end
+tJSz() = tJSz(false)
 export tJSz
 function indextoqn(::tJSz, i::Int)
     i -= 1
@@ -137,7 +149,10 @@ state    qn  | remainder
 |↑>  ->  1   | 1
 |↓>  ->  1   | 2   
 """
-struct tJZ2 <: AbstractSiteType end
+struct tJZ2 <: AbstractSiteType 
+    ifZ2::Bool
+end
+tJZ2() = tJZ2(true)
 export tJZ2
 function indextoqn(::tJZ2, i::Int)
     i -= 1

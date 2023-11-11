@@ -48,7 +48,7 @@ function zerosinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
     zerosinitial(Val(getsymmetry(A)), atype, T, a...; kwarg...)
 end
 
-asArray(A::AbstractArray) = A
+asArray(A::Union{Array, CuArray}) = A
 
 """
     asSymmetryArray(A::AbstractArray, symmetry; dir = nothing)

@@ -29,7 +29,8 @@ struct U1Array{T, N} <: AbstractSymmetricArray{T,N}
     division::Int
     ifZ2::Bool
     function U1Array(qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::AbstractArray{T}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int, ifZ2::Bool) where {T,N}
-        ifZ2 && @assert all(map(x->sum(x) % 2==0, qn))
+        # @show qn sort(unique(collect(Iterators.flatten(qn)))) map(x->sum(x) % 2==0, qn)
+        ifZ2 && all(map(x->sum(x) % 2==0, qn))
         new{T, N}(qn, dir, tensor, size, dims, division, ifZ2)
     end
 end
@@ -124,6 +125,7 @@ function show(::IOBuffer, A::U1Array)
     println("particle number: \n", A.qn)
     println("direction: \n", A.dir)
     println("dims: \n", A.dims)
+    println("ifZ2: \n", A.ifZ2)
     # div = blockdiv(A.dims)
     # tensor = [reshape(A.tensor[div[i]], A.dims[i]...) for i in 1:length(A.dims)]
     println("tensor: \n", A.tensor)
@@ -145,7 +147,9 @@ function getblockdims(sitetype, s::Int...)
     [map(q -> [sum(q .== i) for i in sort(unique(q))], q)...]
 end
 
-function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}=[0], ifZ2=false)
+randU1(sitetype::AbstractSiteType, atype, dtype, s...; dir::Vector{Int}, f::Vector{Int}=[0]) = randU1(atype, dtype, s...; dir=dir, indqn=getqrange(sitetype, s), indims=getblockdims(sitetype, s), f=f, ifZ2=sitetype.ifZ2)
+
+function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2=false)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -153,8 +157,8 @@ function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
-        if qnisum in q
+        qnisum = ifZ2 ? sum(qni) % 2 : sum(qni .* dir)
+        if qnisum in f
             bulkdims = [indims[j][i.I[j]] for j in 1:L]
             push!(qn, qni)
             push!(dims, bulkdims)
@@ -166,7 +170,9 @@ function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}
     U1Array(qn[p], dir, tensor, s, dims[p], 1, ifZ2)
 end
 
-function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}=[0], ifZ2=false)
+zerosU1(sitetype::AbstractSiteType, atype, dtype, s...; dir::Vector{Int}, f::Vector{Int}=[0]) = zerosU1(atype, dtype, s...; dir=dir, indqn=getqrange(sitetype, s), indims=getblockdims(sitetype, s), f=f, ifZ2=sitetype.ifZ2)
+
+function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2=false)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -174,8 +180,8 @@ function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
-        if qnisum in q
+        qnisum = ifZ2 ? sum(qni) % 2 : sum(qni .* dir)
+        if qnisum in f
             bulkdims = [indims[j][i.I[j]] for j in 1:L]
             push!(qn, qni)
             push!(dims, bulkdims)
@@ -189,7 +195,9 @@ end
 
 zero(A::U1Array) = U1Array(A.qn, A.dir, zero(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 
-function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, q::Vector{Int}=[0], ifZ2=false)
+IU1(sitetype::AbstractSiteType, atype, dtype, D; dir::Vector{Int}, f::Vector{Int}=[0]) = IU1(atype, dtype, D; dir=dir, indqn=getqrange(sitetype, D,D), indims=getblockdims(sitetype, D,D), f=f, ifZ2=sitetype.ifZ2)
+
+function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2=false)
     (D, D) != Tuple(map(sum, indims)) && throw(Base.error("$D is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -197,8 +205,8 @@ function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indi
     dims = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
-        if qnisum in q
+        qnisum = ifZ2 ? sum(qni) % 2 : sum(qni .* dir)
+        if qnisum in f
             bulkdims = [indims[j][i.I[j]] for j in 1:L]
             push!(qn, qni)
             push!(dims, bulkdims)
@@ -257,7 +265,7 @@ function getqn(dir::Vector{Int}, indqn::Vector{Vector{Int}}; q::Vector{Int}=[0],
     qn = Vector{Vector{Int}}()
     @inbounds for i in CartesianIndices(Tuple(length.(indqn)))
         qni = [indqn[j][i.I[j]] for j in 1:L]
-        qnisum = ifZ2 ? sum(qni .* dir) % 2 : sum(qni .* dir)
+        qnisum = ifZ2 ? sum(qni) % 2 : sum(qni .* dir)
         if qnisum in q
             push!(qn, qni)
         end
@@ -276,16 +284,16 @@ end
 
 # have Bugs with CUDA@v3.5.0, rely on https://github.com/JuliaGPU/CUDA.jl/issues/1304
 # which is fixed in new vervion, but its allocation is abnormal
-function asU1Array(sitetype, A::AbstractArray{T,N}; dir::Vector{Int}, indqn::Vector{Vector{Int}}=getqrange(sitetype, size(A)), indims::Vector{Vector{Int}}=getblockdims(sitetype, size(A)), q::Vector{Int}=[0], ifZ2) where {T, N}
+function asU1Array(sitetype, A::AbstractArray{T,N}; dir::Vector{Int}, indqn::Vector{Vector{Int}}=getqrange(sitetype, size(A)), indims::Vector{Vector{Int}}=getblockdims(sitetype, size(A)), q::Vector{Int}=[0]) where {T, N}
     atype = _arraytype(A)
     Aarray = Array(A)
     qlist = [U1selection(sitetype, indqn[i], indims[i]) for i = 1:N]
-    Aqn = getqn(dir, indqn; q = q, ifZ2=ifZ2)
+    Aqn = getqn(dir, indqn; q = q, ifZ2=sitetype.ifZ2)
     tensor = [atype(Aarray[[qlist[j][indexin([Aqn[i][j]], indqn[j])...] for j = 1:N]...]) for i in 1:length(Aqn)]
     dims = map(x -> collect(size(x)), tensor)
     nozeroind = norm.(tensor) .!= 0
     tensor = vcat(map(vec, tensor[nozeroind])...)
-    U1Array(Aqn[nozeroind], dir, tensor, size(A), dims[nozeroind], 1, ifZ2)
+    U1Array(Aqn[nozeroind], dir, tensor, size(A), dims[nozeroind], 1, sitetype.ifZ2)
 end
 
 # 
@@ -344,9 +352,10 @@ function *(A::U1Array{T, NA}, B::U1Array{T, NB}) where {T, NA, NB}
     timesBdir = getdir(B)[1:Bdiv]
     sum(timesAdir .+ timesBdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-timesAdir), got: $(timesBdir)"))
 
-    for q in unique!(map(qn -> sum(qn[Adiv+1:end] .* A.dir[Adiv+1:end]), Aqn))
+    qs = A.ifZ2 ? map(qn -> sum(qn[Adiv+1:end]) % 2, Aqn) : map(qn -> sum(qn[Adiv+1:end] .* A.dir[Adiv+1:end]), Aqn)
+    for q in unique!(qs)
         timesinfo!(qn, dims, Aindexs, Bindexs, blockidims, blockjdims, blockkdims,
-                        Aqn, Adiv, A.dir, size.(Atensor), Adims, Bqn, Bdiv, size.(Btensor), Bdims, q)
+                        Aqn, Adiv, A.dir, size.(Atensor), Adims, Bqn, Bdiv, size.(Btensor), Bdims, q, A.ifZ2)
     end
     tensorlen = sum([sum(blockidims[i]) * sum(blockkdims[i]) for i in 1:length(blockidims)])
     tensor = atype <: Array ? zeros(T, tensorlen) : CUDA.zeros(T, tensorlen)
@@ -360,7 +369,7 @@ function *(A::U1Array{T, NA}, B::U1Array{T, NB}) where {T, NA, NB}
         u1blocktimes!(tensor, Aindexs[i], Bindexs[i], blockidims[i], blockjdims[i], blockkdims[i], bdiv[bdivind[i]], Atensor, Btensor)
     end
     qn == [[]] && return Array(tensor)[]
-    U1Array(qn[p], [A.dir[1:Adiv]..., B.dir[Bdiv+1:end]...], tensor, (size(A)[1:Adiv]..., size(B)[Bdiv+1:end]...), dims[p], Adiv)
+    U1Array(qn[p], [A.dir[1:Adiv]..., B.dir[Bdiv+1:end]...], tensor, (size(A)[1:Adiv]..., size(B)[Bdiv+1:end]...), dims[p], Adiv, A.ifZ2)
 end
 
 function no_nothing_col(index)
@@ -395,9 +404,9 @@ end
 fill into different quantum number,  then dispatch to result tensor after product
 """
 function timesinfo!(qn, dims, Aindexs, Bindexs, blockidims, blockjdims, blockkdims,
-                    Aqn, Adiv, Adir, Atensorsize, Adims, Bqn, Bdiv, Btensorsize, Bdims, q)
+                    Aqn, Adiv, Adir, Atensorsize, Adims, Bqn, Bdiv, Btensorsize, Bdims, q, ifZ2)
     @inbounds @views begin
-        ind_A = [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
+        ind_A = ifZ2 ? [sum(Aqn[Adiv+1:end]) % 2 == q for Aqn in Aqn] : [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
         matrix_j = intersect!(map(x->x[Adiv+1:end], Aqn[ind_A]), map(x->x[1:Bdiv], Bqn))
         ind_A = [Aqn[Adiv+1:end] in matrix_j for Aqn in Aqn]
         matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
@@ -457,7 +466,7 @@ end
 # # for OMEinsum contract to get number
 # # vec(A::U1Array) = A
 
-transpose(A::U1Array) = U1Array(A.qn, A.dir, A.tensor, A.size, A.dims, 0)
+transpose(A::U1Array) = U1Array(A.qn, A.dir, A.tensor, A.size, A.dims, 0, A.ifZ2)
 
 function tr(A::U1Array{T,2}) where {T}
     qn = A.qn
@@ -571,8 +580,9 @@ function qrpos!(A::U1Array{T,N}) where {T,N}
     Abdiv = blockdiv(Adims)
     Atensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:Adiv]), prod(Adims[i][Adiv+1:end])) for i in 1:length(Abdiv)]
 
-    for q in unique!(map(x->sum(x[Adiv+1:end] .* Adir[Adiv+1:end]), A.qn))
-        u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, size.(Atensor), q)
+    qs = A.ifZ2 ? map(x->sum(x[Adiv+1:end]) % 2, A.qn) : map(x->sum(x[Adiv+1:end] .* Adir[Adiv+1:end]), A.qn)
+    for q in unique!(qs)
+        u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, size.(Atensor), q, A.ifZ2)
     end
     Qtensorlen = sum([sum(blockidims[i]) * blockjdims[i] for i in 1:length(blockidims)])
     Qtensor = typeof(A.tensor) <: Array ? zeros(T, Qtensorlen) : CUDA.zeros(T, Qtensorlen)
@@ -592,11 +602,11 @@ function qrpos!(A::U1Array{T,N}) where {T,N}
     for i in 1:length(indexs)
         u1blockQR!(Qtensor, Rtensor, Atensor, indexs[i], blockidims[i], Qbdiv[bdivind[i]], Rbdiv[i])
     end
-    U1Array(Aqn, Adir, Qtensor, Asize, Adims, Adiv), U1Array(Rqn[p], [-A.dir[end], A.dir[end]], Rtensor, (Asize[end], Asize[end]), Rdims[p], 1)
+    U1Array(Aqn, Adir, Qtensor, Asize, Adims, Adiv, A.ifZ2), U1Array(Rqn[p], [-A.dir[end], A.dir[end]], Rtensor, (Asize[end], Asize[end]), Rdims[p], 1, A.ifZ2)
 end
 
-function u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q)
-    ind_A = [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
+function u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q, ifZ2)
+    ind_A = ifZ2 ? [sum(Aqn[Adiv+1:end]) % 2 == q for Aqn in Aqn] : [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
     matrix_j = unique!(map(x->x[Adiv+1:end], Aqn[ind_A]))
     matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
 
@@ -633,8 +643,9 @@ function lqpos!(A::U1Array{T,N}) where {T,N}
     Abdiv = blockdiv(Adims)
     Atensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:Adiv]), prod(Adims[i][Adiv+1:end])) for i in 1:length(Abdiv)]
 
-    for q in unique!(map(x->x[1] * Adir[1], Aqn))
-        u1blockLQinfo!(Lqn, Qqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, size.(Atensor), q)
+    qs = A.ifZ2 ? map(x->x[1] % 2, Aqn) : map(x->x[1] * Adir[1], Aqn)
+    for q in unique!(qs)
+        u1blockLQinfo!(Lqn, Qqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, size.(Atensor), q, A.ifZ2)
     end
 
     Qtensorlen = sum([blockidims[i] * sum(blockjdims[i]) for i in 1:length(blockidims)])
@@ -656,11 +667,11 @@ function lqpos!(A::U1Array{T,N}) where {T,N}
         u1blockLQ!(Ltensor, Qtensor, Atensor, indexs[i], blockjdims[i], Qbdiv[bdivind[i]], Lbdiv[i])
     end
 
-    U1Array(Lqn[p], [A.dir[1], -A.dir[1]], Ltensor, (Asize[1], Asize[1]), Ldims[p], 1), U1Array(Aqn, A.dir, Qtensor, Asize, Adims, A.division, A.ifZ2)
+    U1Array(Lqn[p], [A.dir[1], -A.dir[1]], Ltensor, (Asize[1], Asize[1]), Ldims[p], 1, A.ifZ2), U1Array(Aqn, A.dir, Qtensor, Asize, Adims, A.division, A.ifZ2)
 end
 
-function u1blockLQinfo!(Lqn, Qqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q)
-    ind_A = [sum(Aqn[1] .* Adir[1]) == q for Aqn in Aqn]
+function u1blockLQinfo!(Lqn, Qqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q, ifZ2)
+    ind_A = ifZ2 ?  [sum(Aqn[1]) % 2 == q for Aqn in Aqn] : [sum(Aqn[1] .* Adir[1]) == q for Aqn in Aqn]
     matrix_j = unique!(map(x->x[Adiv+1:end], Aqn[ind_A]))
     matrix_i = unique!(map(x->x[1], Aqn[ind_A]))
 
@@ -695,7 +706,7 @@ function adjoint(A::U1Array{T,N}) where {T,N}
     bdiv = blockdiv(dims) 
     tensor = vcat([vec(adjoint(reshape(@view(A.tensor[bdiv[i]]), prod(dims[i][1:div]), prod(dims[i][div+1:end])))) for i in 1:length(bdiv)][p]...)
     dims = map(x -> x[[div+1:end;1:div]], A.dims)
-    U1Array(qn[p], -A.dir[[div+1:end;1:div]], tensor, A.size[[div+1:end;1:div]], dims[p], N - div)
+    U1Array(qn[p], -A.dir[[div+1:end;1:div]], tensor, A.size[[div+1:end;1:div]], dims[p], N - div, A.ifZ2)
 end
 
 # only for U1 Matrix
@@ -725,7 +736,28 @@ function sysvd!(A::U1Array{T,N}) where {T,N}
     Utensor = vcat(map(vec, Utensor)...)
     Stensor = vcat(map(vec, Stensor)...)
     Vtensor = vcat(map(vec, Vtensor)...)
-    U1Array(qn, A.dir, Utensor, (Asize[1], sm), N1, div), U1Array(qn, A.dir, Stensor, (sm, sm), [[Nm[i], Nm[i]] for i in 1:length(qn)], div), U1Array(qn, A.dir, Vtensor, (sm, Asize[2]), N2, div)
+    U1Array(qn, A.dir, Utensor, (Asize[1], sm), N1, div, A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), [[Nm[i], Nm[i]] for i in 1:length(qn)], div, A.ifZ2), U1Array(qn, A.dir, Vtensor, (sm, Asize[2]), N2, div, A.ifZ2)
+end
+
+"""
+    div = division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
+
+give the reshape division of b by a, where b is the original shape and a is the new shape.
+"""
+function division(a::NTuple{Na, Int}, b::NTuple{Nb, Int}) where {Na, Nb}
+    prod(a) != prod(b) && throw(Base.error("$a and $b must have the same product"))
+    Na > Nb && throw(Base.error("$a must be shorter than $b"))
+    div = Int[zeros(Int, Na)..., Nb]
+    for i in 2:Na
+        idiv = div[i-1] + 1
+        p = b[idiv]
+        while p != a[i-1]
+            idiv += 1 
+            p *= b[idiv]
+        end
+        div[i] = idiv
+    end
+    [div[i] + 1 : div[i+1] for i in 1:Na]
 end
 
 """
@@ -752,7 +784,7 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo) where {T <: AbstractArra
         else
             _, _, _, indqn, indims, _, _ = reinfo
         end
-        cA = zerosU1(Array, ComplexF64, size(A)...; dir = A.dir, indqn = indqn, indims = indims)
+        cA = zerosU1(Array, ComplexF64, size(A)...; dir=A.dir, indqn=indqn, indims=indims, ifZ2=A.ifZ2)
         qndiff = setdiff(cA.qn, A.qn)
         supind = indexin(qndiff, cA.qn)
         Aqn = [A.qn; cA.qn[supind]]
@@ -763,7 +795,7 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo) where {T <: AbstractArra
         Adims = cA.dims
         Atensor = Atensor[exchangeind]
         div = division(s, size(A))
-        reqn = [[sum(p[d] .* A.dir[d]) for d in div] for p in Aqn]
+        reqn = A.ifZ2 ? [[sum(p[d]) % 2 for d in div] for p in Aqn] : [[sum(p[d] .* A.dir[d]) for d in div] for p in Aqn]
         redims = [[prod(dims[d]) for d in div] for dims in Adims]
         retensor = [reshape(t, s...) for (t, s) in zip(map(Array, Atensor), redims)]
         ureqn = unique(reqn)
@@ -794,16 +826,16 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo) where {T <: AbstractArra
         nozeroind = norm.(retensors) .!= 0
         dims = map(x -> collect(size(x)), retensors)[nozeroind]
         dir = [A.dir[d][end] for d in div]     # last dir of reshape
-        qn = map(qn->qn .* dir, ureqn)[nozeroind]
+        qn = A.ifZ2 ? ureqn[nozeroind] : map(qn->qn .* dir, ureqn)[nozeroind]
         p = sortperm(qn)
         tensor = atype(vcat(map(vec, retensors[nozeroind][p])...))
-        U1Array(qn[p], dir, tensor, s, dims[p], 1), (choosesilces, chooseinds, A.dir, indqn, indims, Aqn, Adims)
+        U1Array(qn[p], dir, tensor, s, dims[p], 1, A.ifZ2), (choosesilces, chooseinds, A.dir, indqn, indims, Aqn, Adims)
     else
         choosesilces, chooseinds, redir, indqn, indims, reqn, redims = reinfo
         retensors = Array{Array,1}(undef, sum(length.(chooseinds)))
         div = division(size(A), s)
-        ureqn = unique([[sum(p[d] .* redir[d]) for d in div] for p in reqn])
-        exchangeind = indexin(ureqn, map(qn->qn .* A.dir, A.qn))
+        ureqn = A.ifZ2 ? unique([[sum(p[d]) % 2 for d in div] for p in reqn]) : unique([[sum(p[d] .* redir[d]) for d in div] for p in reqn])
+        exchangeind = A.ifZ2 ? indexin(ureqn, A.qn) : indexin(ureqn, map(qn->qn .* A.dir, A.qn))
         # @show ureqn A.qn exchangeind
         Atensor = A.tensor[exchangeind]
         for i in 1:length(choosesilces)
@@ -816,15 +848,15 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo) where {T <: AbstractArra
         qn = reqn[nozeroind]
         p = sortperm(qn)
         tensor = atype(vcat(map(vec, retensors[nozeroind][p])...))
-        U1Array(qn[p], redir, tensor, s, dims[p], 1), (choosesilces, chooseinds, redir, indqn, indims, reqn, redims)
+        U1Array(qn[p], redir, tensor, s, dims[p], 1, A.ifZ2), (choosesilces, chooseinds, redir, indqn, indims, reqn, redims)
     end
 end
 
-function U1reshapeinfo(s, sizeA, dir, indqn, indims)
+function U1reshapeinfo(s, sizeA, dir, indqn, indims, ifZ2)
     length(sizeA) < length(s) && throw(Base.error("$sizeA must be longer than $s"))
     div = division(s, sizeA)
-    A = zerosU1(Array, ComplexF64, sizeA...; dir = dir, indqn = indqn, indims = indims)
-    reqn = [[sum(p[d] .* dir[d]) for d in div] for p in A.qn]
+    A = zerosU1(Array, ComplexF64, sizeA...; dir=dir, indqn=indqn, indims=indims, ifZ2=ifZ2)
+    reqn = ifZ2 ? [[sum(p[d]) % 2 for d in div] for p in A.qn] : [[sum(p[d] .* dir[d]) for d in div] for p in A.qn]
     ureqn = unique(reqn)
     choosesilces = [[] for _ in 1:length(ureqn)]
     chooseinds = [[] for _ in 1:length(ureqn)]
