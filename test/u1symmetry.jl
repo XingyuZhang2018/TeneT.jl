@@ -261,6 +261,10 @@ end
     rerea = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo)[1]
     @test rerea ≈ a
 
+    reinfo2 = U1reshapeinfo((D^2,D^2,D^2,D^2), (D,D,D,D,D,D,D,D), a.dir, indqn, indims, ifZ2)
+    rerea2 = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo2)[1]
+    @test rerea2 ≈ a
+
     # (χ,D,D,χ) -> (χ,D^2,χ)
     D, χ = 2, 5
     indqn = [[-2, -1, 0, 1, 2], [0, 1], [0, 1], [-2, -1, 0, 1, 2]]
@@ -269,6 +273,10 @@ end
     rea, reinfo  = U1reshape(a, χ,D^2,χ; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))
     rerea = U1reshape(rea, χ,D,D,χ; reinfo = reinfo)[1]
     @test rerea ≈ a
+
+    reinfo2 = U1reshapeinfo((χ,D^2,χ), (χ,D,D,χ), a.dir, indqn, indims, ifZ2)
+    rerea2 = U1reshape(rea, χ,D,D,χ; reinfo = reinfo2)[1]
+    @test rerea2 ≈ a
 end
 
 @testset "general flatten reshape" for ifZ2 in [true]
@@ -288,6 +296,10 @@ end
     rerea = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo)[1]
     @test rerea ≈ a
 
+    reinfo2 = U1reshapeinfo((D^2,D^2,D^2,D^2), (D,D,D,D,D,D,D,D), a.dir, indqn, indims, ifZ2)
+    rerea2 = U1reshape(rea, D,D,D,D,D,D,D,D; reinfo = reinfo2)[1]
+    @test rerea2 ≈ a
+
     # (χ,D,D,χ) -> (χ,D^2,χ)
     D, χ = 2, 5
     indqn = [[0, 1], [0, 1], [0, 1], [0, 1]]
@@ -296,4 +308,8 @@ end
     rea, reinfo  = U1reshape(a, χ,D^2,χ; reinfo = (nothing, nothing, nothing, indqn, indims, nothing, nothing))
     rerea = U1reshape(rea, χ,D,D,χ; reinfo = reinfo)[1]
     @test rerea ≈ a
+
+    reinfo2 = U1reshapeinfo((χ,D^2,χ), (χ,D,D,χ), a.dir, indqn, indims, ifZ2)
+    rerea2 = U1reshape(rea, χ,D,D,χ; reinfo = reinfo2)[1]
+    @test rerea2 ≈ a
 end

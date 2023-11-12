@@ -149,7 +149,7 @@ end
 
 randU1(sitetype::AbstractSiteType, atype, dtype, s...; dir::Vector{Int}, f::Vector{Int}=[0]) = randU1(atype, dtype, s...; dir=dir, indqn=getqrange(sitetype, s), indims=getblockdims(sitetype, s), f=f, ifZ2=sitetype.ifZ2)
 
-function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2=false)
+function randU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2::Bool)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -172,7 +172,7 @@ end
 
 zerosU1(sitetype::AbstractSiteType, atype, dtype, s...; dir::Vector{Int}, f::Vector{Int}=[0]) = zerosU1(atype, dtype, s...; dir=dir, indqn=getqrange(sitetype, s), indims=getblockdims(sitetype, s), f=f, ifZ2=sitetype.ifZ2)
 
-function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2=false)
+function zerosU1(atype, dtype, s...; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2::Bool)
     s != Tuple(map(sum, indims)) && throw(Base.error("$s is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -197,7 +197,7 @@ zero(A::U1Array) = U1Array(A.qn, A.dir, zero(A.tensor), A.size, A.dims, A.divisi
 
 IU1(sitetype::AbstractSiteType, atype, dtype, D; dir::Vector{Int}, f::Vector{Int}=[0]) = IU1(atype, dtype, D; dir=dir, indqn=getqrange(sitetype, D,D), indims=getblockdims(sitetype, D,D), f=f, ifZ2=sitetype.ifZ2)
 
-function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2=false)
+function IU1(atype, dtype, D; dir::Vector{Int}, indqn::Vector{Vector{Int}}, indims::Vector{Vector{Int}}, f::Vector{Int}=[0], ifZ2::Bool)
     (D, D) != Tuple(map(sum, indims)) && throw(Base.error("$D is not valid"))
     L = length(dir)
     qn = Vector{Vector{Int}}()
@@ -778,12 +778,7 @@ function U1reshape(A::U1Array{T, N}, s::Int...; reinfo) where {T <: AbstractArra
     atype = typeof(A.tensor[1]) <: CuArray ? CuArray : Array
     etype = eltype(A.tensor[1])
     if N > length(s)
-        if reinfo === nothing
-            indqn = getqrange(size(A))
-            indims = getblockdims(size(A))
-        else
-            _, _, _, indqn, indims, _, _ = reinfo
-        end
+        _, _, _, indqn, indims, _, _ = reinfo
         cA = zerosU1(Array, ComplexF64, size(A)...; dir=A.dir, indqn=indqn, indims=indims, ifZ2=A.ifZ2)
         qndiff = setdiff(cA.qn, A.qn)
         supind = indexin(qndiff, cA.qn)

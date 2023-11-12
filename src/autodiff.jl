@@ -63,21 +63,21 @@ function num_grad(f, a::AbstractArray; δ::Real=1e-5)
 end
 
 
-function num_grad(f, a::U1Array; δ::Real=1e-5)
-    b = Array(copy(a))
-    intype = _arraytype(a.tensor)
-    df = copy(a)
-    bits = map(x -> ceil(Int, log2(x)), size(a))
-    Adir = getdir(a)
-    for i in CartesianIndices(b)
-        qn = collect(sum.(bitarray.(i.I .- 1, bits))) 
-        if sum(qn.*Adir) == 0
-            foo = x -> (ac = copy(b); ac[i] = x; f(intype(ac)))
-            df[i] = num_grad(foo, b[i], δ=δ)
-        end
-    end
-    return intype(deletezeroblock(df))
-end
+# function num_grad(f, a::U1Array, sitetype; δ::Real=1e-5)
+#     b = Array(copy(a))
+#     intype = _arraytype(a.tensor)
+#     df = copy(a)
+#     Adir = getdir(a)
+#     for i in CartesianIndices(b)
+#         qn = map(i->indextoqn(sitetype, i), i.I)
+#         qnsum = A.ifZ2 ? sum(qn) % 2 : sum(qn .* Adir)
+#         if qnsum == 0
+#             foo = x -> (ac = copy(b); ac[i] = x; f(intype(ac)))
+#             df[i] = num_grad(foo, b[i], δ=δ)
+#         end
+#     end
+#     return intype(deletezeroblock(df))
+# end
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
@@ -113,7 +113,7 @@ end
         @assert A.qn == dAr.qn
         # s = map(size, A.tensor) 
         # dAtensor = map((x, y) -> reshape(x, y), dAr.tensor, s)
-        return U1Array(A.qn, A.dir, dAr.tensor, A.size, A.dims, A.division), a...
+        return U1Array(A.qn, A.dir, dAr.tensor, A.size, A.dims, A.division, A.ifZ2), a...
     end
     return reshape(A, a...), back
 end
@@ -124,16 +124,16 @@ end
 
 @adjoint conjM(A::AbstractArray) = conjM(A), dA -> (conjM(dA), )
 
-ChainRulesCore.rrule(::typeof(asArray), A::AbstractSymmetricArray) = asArray(A), dAt -> (NoTangent(), asSymmetryArray(dAt, Val(getsymmetry(A)); dir = getdir(A)))
+ChainRulesCore.rrule(::typeof(asArray), sitetype::AbstractSiteType, A::AbstractSymmetricArray) = asArray(sitetype, A), dAt -> (NoTangent(), NoTangent(), asSymmetryArray(dAt, Val(getsymmetry(A)), sitetype; dir = getdir(A)))
 
-ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry; kwarg...) = asSymmetryArray(A, symmetry; kwarg...), dAt -> (NoTangent(), asArray(dAt), NoTangent()...)
+ChainRulesCore.rrule(::typeof(asSymmetryArray), A::AbstractArray, symmetry, sitetype; kwarg...) = asSymmetryArray(A, symmetry, sitetype; kwarg...), dAt -> (NoTangent(), asArray(sitetype, dAt), NoTangent(), NoTangent()...)
 
-function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::AbstractArray{T}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int) where {T,N}
+function ChainRulesCore.rrule(::typeof(U1Array), qn::Vector{Vector{Int}}, dir::Vector{Int}, tensor::AbstractArray{T}, size::Tuple{Vararg{Int, N}}, dims::Vector{Vector{Int}}, division::Int, ifZ2::Bool) where {T,N}
     function back(dA)
         @assert qn == dA.qn
-        return NoTangent(), NoTangent(), NoTangent(), dA.tensor, NoTangent(), NoTangent(), NoTangent()...
+        return NoTangent(), NoTangent(), NoTangent(), dA.tensor, NoTangent(), NoTangent(), NoTangent(), NoTangent()...
     end
-    U1Array(qn, dir, tensor, size, dims, division), back
+    U1Array(qn, dir, tensor, size, dims, division, ifZ2), back
 end
 
 # function ChainRulesCore.rrule(::typeof(symmetryreshape), A::AbstractArray, s...; kwarg...)
@@ -185,16 +185,17 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::U1Array)
         else
             dRtensor = [reshape(@view(dR.tensor[Rbdiv[i]]), Rdims[i]...) for i in 1:length(Rbdiv)]
         end
-        for q in unique(map(x->sum(x[A.division+1:end] .* A.dir[A.division+1:end]), A.qn))
-            blockbackQR!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Rqn, Rtensor, dQtensor, dRtensor, q)
+        qs = A.ifZ2 ? map(x->sum(x[A.division+1:end]) % 2, A.qn) : map(x->sum(x[A.division+1:end] .* A.dir[A.division+1:end]), A.qn)
+        for q in unique(qs)
+            blockbackQR!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Rqn, Rtensor, dQtensor, dRtensor, q, A.ifZ2)
         end
         return NoTangent(), dA
     end
     return (Q, R), back
 end
 
-function blockbackQR!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Rqn, Rtensor, dQtensor, dRtensor, q)
-    ind_A = findall(x->sum(x[Qdiv+1:end] .* Qdir[Qdiv+1:end]) == q, Qqn)
+function blockbackQR!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Rqn, Rtensor, dQtensor, dRtensor, q, ifZ2)
+    ind_A = ifZ2 ? findall(x->sum(x[Qdiv+1:end]) % 2 == q, Qqn) : findall(x->sum(x[Qdiv+1:end] .* Qdir[Qdiv+1:end]) == q, Qqn)
     m_j = unique(map(x->x[Qdiv+1:end], Qqn[ind_A]))
     m_i = unique(map(x->x[1:Qdiv], Qqn[ind_A]))
 
@@ -236,16 +237,17 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::U1Array)
         else
             dLtensor = [reshape(@view(dL.tensor[Lbdiv[i]]), Ldims[i]...) for i in 1:length(Lbdiv)]
         end
-        for q in unique(map(x->x[1] * A.dir[1], A.qn))
-            blockbackLQ!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Lqn, Ltensor, dQtensor, dLtensor, q)
+        qs = A.ifZ2 ? map(x->x[1] % 2, A.qn) : map(x->x[1] * A.dir[1], A.qn)
+        for q in unique(qs)
+            blockbackLQ!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Lqn, Ltensor, dQtensor, dLtensor, q, A.ifZ2)
         end
         return NoTangent(), dA
     end
     return (L, Q), back
 end
 
-function blockbackLQ!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Lqn, Ltensor, dQtensor, dLtensor, q)
-    ind_A = findall(x->x[1] * Qdir[1] == q, Qqn)
+function blockbackLQ!(dA::U1Array, Abdiv, Qqn, Qdiv, Qdir, Qtensor, Lqn, Ltensor, dQtensor, dLtensor, q, ifZ2)
+    ind_A = ifZ2 ? findall(x->x[1] % 2 == q, Qqn) : findall(x->x[1] * Qdir[1] == q, Qqn)
     m_j = unique(map(x->x[Qdiv+1:end], Qqn[ind_A]))
     m_i = unique(map(x->x[1], Qqn[ind_A]))
 
