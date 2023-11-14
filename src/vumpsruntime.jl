@@ -109,7 +109,7 @@ function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=
     stopfun = StopFunction(olderror, -1, tol, maxiter, miniter)
     rt, err = fixedpoint(res -> vumpstep(res...;show_counting=vumps_counting), (rt, olderror), stopfun)
     verbose && println("vumps done@step: $(stopfun.counter), error=$(err)")
-    return rt
+    return rt, err
 end
 
 function show_every_count(n::Number)
@@ -159,7 +159,7 @@ end
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
 """
-function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, info)
+function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, info, savetol)
     verbose && (direction == "up" ? print("↑ ") : print("↓ "))
     directionori = direction
     downfromup && direction == "down" && (direction = "up")
@@ -173,16 +173,16 @@ function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, 
     else
         rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose, info = info)
     end
-    env = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
+    env, err = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
 
-    Zygote.@ignore savefile && begin
+    Zygote.@ignore savefile && err < savetol && begin
         out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
         out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
         save(out_chkp_file, "env", envsave)
     end
-    env
+    env, err
 end
 
 conjM(M::U1Array) = U1Array(map(x->x .* [-1,1,-1,1], M.qn), M.dir .* [1,-1,1,-1], map(conj, M.tensor), M.size, M.dims, M.division)
@@ -193,10 +193,10 @@ conjM(M::AbstractArray) = conj(M)
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, info)
+function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, info, savetol=1e-5)
     M /= norm(M)
     Random.seed!(100)
-    envup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, info = info)
+    envup, errup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, info = info, savetol=savetol)
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
     D = size(M[1,1],1)
@@ -222,7 +222,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Md = reshape(conj(Md), Ni, Nj)
 
         Random.seed!(100)
-        envdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every, info = info)
+        envdown, errdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every, info = info, savetol=savetol)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu
@@ -230,24 +230,10 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     _, FL = obs_FL(ALu, conj(ALd), M, FL)
     _, FR = obs_FR(ARu, conj(ARd), M, FR)
-    Zygote.@ignore savefile && begin
+    Zygote.@ignore savefile && (errup + errdown < savetol) && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         FLs, FRs = map(x->map(Array, x), [FL, FR])
         save(out_chkp_file_obs, "env", (FLs, FRs))
     end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
-end
-
-
-function obs_env(M::AbstractArray, ::Val{:none}; kwargs...)
-    info = ([],[],[],[])
-    envir = obs_env(M; info=info, kwargs...)
-    return envir
-end
-
-
-function obs_env(M::AbstractArray, ::Val{:U1}; kwargs...)
-    envir = obs_env(M; info=info, kwargs...)
-    envir = map(asArray, envir)
-    return envir
 end
