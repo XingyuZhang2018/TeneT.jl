@@ -23,17 +23,17 @@ function indextoqn(::electronPn, i::Int)
     i -= 1
     i == 0 && return 0
 
-    ternary = []
+    qni = []
     while i > 0
         remainder = i % 4
         if remainder in [2,3]
             remainder -= 1
         end
-        pushfirst!(ternary, remainder)
+        pushfirst!(qni, remainder)
         i = div(i, 4)
     end
 
-    return sum(ternary)
+    return sum(qni)
 end
 
 """
@@ -57,7 +57,7 @@ function indextoqn(::electronSz, i::Int)
     i -= 1
     i == 0 && return 0
 
-    ternary = []
+    qni = []
     while i > 0
         remainder = i % 4
         if remainder == 2
@@ -65,11 +65,11 @@ function indextoqn(::electronSz, i::Int)
         elseif remainder == 3
             remainder = 0
         end
-        pushfirst!(ternary, remainder)
+        pushfirst!(qni, remainder)
         i = div(i, 4)
     end
 
-    return sum(ternary)
+    return sum(qni)
 end
 
 """
@@ -93,7 +93,7 @@ function indextoqn(::electronZ2, i::Int)
     i -= 1
     i == 0 && return 0
 
-    ternary = []
+    qni = []
     while i > 0
         remainder = i % 4
         if remainder == 2
@@ -101,11 +101,11 @@ function indextoqn(::electronZ2, i::Int)
         elseif remainder == 3
             remainder = 0
         end
-        pushfirst!(ternary, remainder)
+        pushfirst!(qni, remainder)
         i = div(i, 4)
     end
 
-    return sum(ternary) % 2
+    return sum(qni) % 2
 end
 
 
@@ -128,15 +128,15 @@ function indextoqn(::tJSz, i::Int)
     i -= 1
     i == 0 && return 0
 
-    ternary = []
+    qni = []
     while i > 0
         remainder = i % 3
         remainder == 2 && (remainder = -1)
-        pushfirst!(ternary, remainder)
+        pushfirst!(qni, remainder)
         i = div(i, 3)
     end
 
-    return sum(ternary)
+    return sum(qni)
 end
 
 """
@@ -158,13 +158,13 @@ function indextoqn(::tJZ2, i::Int)
     i -= 1
     i == 0 && return 0
 
-    ternary = []
+    qni = []
     while i > 0
         remainder = i % 3
         remainder == 2 && (remainder = 1)
-        pushfirst!(ternary, remainder)
+        pushfirst!(qni, remainder)
         i = div(i, 3)
     end
 
-    return sum(ternary) % 2
+    return sum(qni) % 2
 end
