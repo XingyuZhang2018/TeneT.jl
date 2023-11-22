@@ -40,6 +40,7 @@ size(A::U1Array, a) = size(A)[a]
 getdir(A::U1Array) = A.dir
 conj(A::U1Array) = U1Array(A.qn, -A.dir, conj(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 map(conj, A::U1Array) = conj(A)
+conj!(A::U1Array) = U1Array(A.qn, -A.dir, conj!(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 norm(A::U1Array) = norm(A.tensor)
 
 *(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor * B, A.size, A.dims, A.division, A.ifZ2)

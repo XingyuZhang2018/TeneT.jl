@@ -76,8 +76,8 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     AL, L = leftorth(A, L)
     R, AR = rightorth(AL, L)
     FL = FLint(AL, M; info = info)
-    _, FL = leftenv(AL, AL, M, FL)
-    _, FR = rightenv(AR, AR, M, conj(FL))
+    _, FL = leftenv(AL, conj(AL), M, FL)
+    _, FR = rightenv(AR, conj(AR), M, conj(FL))
     C = LRtoC(L,R)
     Ni, Nj = size(M)
     print("random initial $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry vumps_χ$(χ) environment-> ")
@@ -122,12 +122,12 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     temp = show_counting()
     temp != 0 && println("vumps@step: $(temp), error=$(err)")
     M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
-    AC = ALCtoAC(AL,C)
+    AC = Zygote.@ignore ALCtoAC(AL,C)
     _, AC = ACenv(AC, FL, M, FR)
     _, C = Cenv(C, FL, FR)
     ALp, ARp, _, _ = ACCtoALAR(AC, C)
-    _, FL = leftenv(AL, ALp, M, FL)
-    _, FR = rightenv(AR, ARp, M, FR)
+    _, FL = leftenv(AL, conj(ALp), M, FL)
+    _, FR = rightenv(AR, conj(ARp), M, FR)
     _, AC = ACenv(AC, FL, M, FR)
     _, C = Cenv(C, FL, FR)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
@@ -193,7 +193,7 @@ conjM(M::AbstractArray) = conj(M)
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, info, savetol=1e-5)
+function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, info=nothing, savetol=1e-5)
     M /= norm(M)
     Random.seed!(100)
     envup, errup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, info = info, savetol=savetol)
@@ -228,8 +228,8 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         ALd, ARd, Cd = ALu, ARu, Cu
     end
 
-    _, FL = obs_FL(ALu, conj(ALd), M, FL)
-    _, FR = obs_FR(ARu, conj(ARd), M, FR)
+    _, FL = leftenv(ALu, conj(ALd), M, FL; ifobs=true)
+    _, FR = rightenv(ARu, conj(ARd), M, FR; ifobs=true)
     Zygote.@ignore savefile && (errup + errdown < savetol) && begin
         out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
         FLs, FRs = map(x->map(Array, x), [FL, FR])
