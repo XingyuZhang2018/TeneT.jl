@@ -332,7 +332,7 @@ function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; ifobs = false,
         dM   = zero.(M)
         @inbounds for i = 1:Ni
             ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-            dFL[i,:] .-= sum([Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] for j in 1:Nj]) * FL[i,:]
+            dFL[i,:] .-= sum([dFL[i,j] !== ZeroTangent() && Array(ein"abc,abc ->"(conj(FL[i,j]), dFL[i,j]))[] for j in 1:Nj]) * FL[i,:]
             ξL, info = linsolve(X -> ξLmap(ALu[i,:], ALd[ir,:], M[i,:], X), conj(dFL[i,:]), -λL[i], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξL .= circshift(ξL, -1)
@@ -370,7 +370,7 @@ function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; ifobs = false
         dM   = zero.(M)
         @inbounds for i = 1:Ni
             ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-            dFR[i,:] .-= sum([Array(ein"abc,abc ->"(conj(FR[i,j]), dFR[i,j]))[] for j in 1:Nj]) * FR[i,:]
+            dFR[i,:] .-= sum([dFR[i,j] !== ZeroTangent() && Array(ein"abc,abc ->"(conj(FR[i,j]), dFR[i,j]))[] for j in 1:Nj]) * FR[i,:]
             ξR, info = linsolve(X -> ξRmap(ARu[i,:], ARd[ir,:], M[i,:], X), conj(dFR[i,:]), -λR[i], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξR .= circshift(ξR, 1)
@@ -442,7 +442,7 @@ function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
         dM  = zero.(M)
         dFR = zero.(FR)
         @inbounds for j = 1:Nj
-            dAC[:,j] .-= sum([Array(ein"abc,abc ->"(conj(AC[i,j]), dAC[i,j]))[] for i in 1:Ni]) * AC[:,j]
+            dAC[:,j] .-= sum([dAC[i,j] !== ZeroTangent() && Array(ein"abc,abc ->"(conj(AC[i,j]), dAC[i,j]))[] for i in 1:Ni]) * AC[:,j]
             ξAC, info = linsolve(X -> ξACmap(X, FL[:,j], FR[:,j], M[:,j]), conj(dAC[:,j]), -λAC[j], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξAC .= circshift(ξAC, -1)
@@ -504,7 +504,7 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
         dFR = zero.(FR)
         for j = 1:Nj
             jr = mod1(j+1, Nj)
-            dC[:,j] .-= sum([Array(ein"ab,ab ->"(conj(C[i,j]), dC[i,j]))[] for i in 1:Ni]) * C[:,j]
+            dC[:,j] .-= sum([dC[i,j] !== ZeroTangent() && Array(ein"ab,ab ->"(conj(C[i,j]), dC[i,j]))[] for i in 1:Ni]) * C[:,j]
             ξC, info = linsolve(X -> ξCmap(X, FL[:,jr], FR[:,j]), conj(dC[:, j]), -λC[j], 1; maxiter = 100)
             info.converged == 0 && @warn "ad's linsolve not converge"
             ξC .= circshift(ξC, -1)

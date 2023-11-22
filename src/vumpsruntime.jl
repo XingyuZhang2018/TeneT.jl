@@ -76,8 +76,9 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     AL, L = leftorth(A, L)
     R, AR = rightorth(AL, L)
     FL = FLint(AL, M; info = info)
+    FR = FRint(AR, M; info = info)
     _, FL = leftenv(AL, conj(AL), M, FL)
-    _, FR = rightenv(AR, conj(AR), M, conj(FL))
+    _, FR = rightenv(AR, conj(AR), M, FR)
     C = LRtoC(L,R)
     Ni, Nj = size(M)
     print("random initial $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry vumps_χ$(χ) environment-> ")
@@ -131,9 +132,9 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     _, AC = ACenv(AC, FL, M, FR)
     _, C = Cenv(C, FL, FR)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
-    erroverlap = error(AL, C, AR, FL, M, FR)
-    err = erroverlap + errL + errR
-    # err = errL + errR
+    # erroverlap = error(AL, C, AR, FL, M, FR)
+    # err = erroverlap + errL + errR
+    err = errL + errR
     err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR, erroverlap=$erroverlap")
     return SquareVUMPSRuntime(M, AL, C, AR, FL, FR), err
 end

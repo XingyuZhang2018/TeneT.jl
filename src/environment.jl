@@ -42,6 +42,11 @@ function qrpos!(A)
     return Q, R
 end
 
+function env_norm(F)
+    Ni,Nj = size(F)
+    reshape([F[i]/norm(F[i]) for i in 1:Ni*Nj], Ni,Nj)
+end
+
 """
     λs[1], Fs[1] = selectpos(λs, Fs)
 
@@ -318,7 +323,7 @@ function FRint(AR, M; info = nothing)
 
     if info === nothing
         for j in 1:Nj, i in 1:Ni
-            D = size(M[i,j], 4)
+            D = size(M[i,j], 3)
             FR[i,j] = atype == Array ? rand(ComplexF64, χ, D, χ) : CUDA.rand(ComplexF64, χ, D, χ)
         end
     else
@@ -329,7 +334,7 @@ function FRint(AR, M; info = nothing)
         indqn = [indχ, indD, indD, indχ]
         indims = [dimsχ, dimsD, dimsD, dimsχ]
         for j in 1:Nj, i in 1:Ni
-            D = size(M[i,j], 4)
+            D = size(M[i,j], 3)
             FR[i,j] = symmetryreshape(randinitial(AR[i,j], χ, Int(sqrt(D)), Int(sqrt(D)), χ; 
             dir = dir, indqn = indqn, indims = indims
             ), χ, D, χ; 
@@ -530,6 +535,8 @@ QR factorization to get `AL` and `AR` from `AC` and `C`
 """
 function ACCtoALAR(AC, C)
     Ni,Nj = size(AC)
+    AC = env_norm(AC)
+     C = env_norm(C)
     ALijerrL = [ACCtoAL(AC[i],C[i]) for i=1:Ni*Nj]
     AL = reshape([ALijerrL[i][1] for i=1:Ni*Nj],Ni,Nj)
     errL = Zygote.@ignore sum([ALijerrL[i][2] for i=1:Ni*Nj])
