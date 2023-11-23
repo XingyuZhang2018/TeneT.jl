@@ -716,7 +716,12 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     tensor = A.tensor
     qn = A.qn
     div = A.division
-    atype = _arraytype(tensor[1])
+    atype = _arraytype(A.tensor)
+
+    Adims = A.dims
+    Abdiv = blockdiv(Adims)
+    tensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:div]), prod(Adims[i][div+1:end])) for i in 1:length(Abdiv)]
+
     Utensor = Vector{atype{T}}()
     Stensor = Vector{atype{T}}()
     Vtensor = Vector{atype{T}}()
@@ -729,7 +734,6 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     if trunc != -1
         Sort = sort(abs.(vcat(Stensor...)); rev=true)
         minS = max(Sort[trunc], 1e-30)
-        @show sum(Sort .> 1e-10)
         ind = [abs.(Stensor[i]) .>= minS for i in 1:length(Stensor)]
         for i in 1:length(qn)
             Utensor[i] = Utensor[i][:, ind[i]]
@@ -748,7 +752,10 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     Vdims = map(x -> collect(size(x)), Vtensor)
     Asize = A.size
     sm = min(Asize...)
-    U1Array(qn, A.dir, Utensor, (Asize[1], sm), Udims, div, ifZ2=A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), Sdims, div, ifZ2=A.ifZ2), U1Array(qn, A.dir, Vtensor, (Asize[2], sm),  Vdims, div, ifZ2=A.ifZ2)
+    Utensor = vcat(map(vec, Utensor)...)
+    Stensor = vcat(map(vec, Stensor)...)
+    Vtensor = vcat(map(vec, Vtensor)...)
+    U1Array(qn, A.dir, Utensor, (Asize[1], sm), Udims, div, A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), Sdims, div, A.ifZ2), U1Array(qn, A.dir, Vtensor, (Asize[2], sm),  Vdims, div, A.ifZ2)
 end
 
 """

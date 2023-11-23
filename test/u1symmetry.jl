@@ -233,15 +233,15 @@ end
 	@test asArray(sitetype, reshape(Q,  χ,D,χ)) ≈ reshape(Qtensor,  χ,D,χ)
 end
 
-@testset "U1 svd with $atype{$dtype}" for atype in [Array], dtype in [Float64], sitetype in [electronPn(),electronZ2(),tJZ2()]
+@testset "U1 svd with $atype{$dtype} $sitetype" for atype in [Array], dtype in [Float64], sitetype in [electronPn(),electronZ2(),tJZ2()]
     Random.seed!(100)
-    χ = 10
+    χ = 20
     A = randU1(sitetype, atype, dtype, χ, χ; dir = [-1, 1])
 	Atensor = asArray(sitetype, A)
-	U, S, V = sysvd!(copy(A))
-    Utensor, Stensor, Vtensor = sysvd!(copy(Atensor))
-    @test Utensor * Diagonal(Stensor) * Vtensor ≈ Atensor
-	@test U * Diagonal(S) * V ≈ A
+	U, S, V = svd!(copy(A), trunc=20)
+    Utensor, Stensor, Vtensor = svd!(copy(Atensor))
+    @test Utensor * Diagonal(Stensor) * Vtensor' ≈ Atensor
+	@test U * Diagonal(S) * V' ≈ A
 end
 
 @testset "general flatten reshape" for ifZ2 in [false]
