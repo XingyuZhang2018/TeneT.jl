@@ -242,6 +242,9 @@ end
     Utensor, Stensor, Vtensor = svd!(copy(Atensor))
     @test Utensor * Diagonal(Stensor) * Vtensor' ≈ Atensor
 	@test U * Diagonal(S) * V' ≈ A
+
+    U, S, V = svd!(copy(A), trunc=10)
+    @test sum(S.dims) == [10, 10]
 end
 
 @testset "general flatten reshape" for ifZ2 in [false]
