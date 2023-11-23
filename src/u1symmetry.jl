@@ -711,33 +711,44 @@ function adjoint(A::U1Array{T,N}) where {T,N}
 end
 
 # only for U1 Matrix
-function sysvd!(A::U1Array{T,N}) where {T,N}
+svd(A::U1Array{T,2}; kwargs...) where {T} = svd!(copy(A); kwargs...)
+function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
+    tensor = A.tensor
     qn = A.qn
     div = A.division
-    atype = _arraytype(A.tensor)
-
-    Adims = A.dims
-    Abdiv = blockdiv(Adims)
-    tensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:div]), prod(Adims[i][div+1:end])) for i in 1:length(Abdiv)]
-
+    atype = _arraytype(tensor[1])
     Utensor = Vector{atype{T}}()
     Stensor = Vector{atype{T}}()
     Vtensor = Vector{atype{T}}()
     @inbounds @simd for t in tensor
-        U, S, V = sysvd!(t)
-        push!(Utensor, U)
-        push!(Stensor, S)
-        push!(Vtensor, V)
+        F = svd!(t)
+        push!(Utensor, F.U)
+        push!(Stensor, F.S)
+        push!(Vtensor, F.V)
     end
-    Nm = map(x->min(x...), Adims)
-    N1 = map((x, y) -> [x[1], y], Adims, Nm)
-    N2 = map((x, y) -> [y, x[2]], Adims, Nm)
+    if trunc != -1
+        Sort = sort(abs.(vcat(Stensor...)); rev=true)
+        minS = max(Sort[trunc], 1e-30)
+        @show sum(Sort .> 1e-10)
+        ind = [abs.(Stensor[i]) .>= minS for i in 1:length(Stensor)]
+        for i in 1:length(qn)
+            Utensor[i] = Utensor[i][:, ind[i]]
+            Stensor[i] = Stensor[i][ind[i]]
+            Vtensor[i] = Vtensor[i][:, ind[i]]
+        end
+        deleind = sum.(ind) .== 0
+        deleteat!(qn, deleind)
+        deleteat!(Utensor, deleind)
+        deleteat!(Stensor, deleind)
+        deleteat!(Vtensor, deleind)
+    end
+
+    Udims = map(x -> collect(size(x)), Utensor)
+    Sdims = map(x -> [length(x), length(x)], Stensor)
+    Vdims = map(x -> collect(size(x)), Vtensor)
     Asize = A.size
     sm = min(Asize...)
-    Utensor = vcat(map(vec, Utensor)...)
-    Stensor = vcat(map(vec, Stensor)...)
-    Vtensor = vcat(map(vec, Vtensor)...)
-    U1Array(qn, A.dir, Utensor, (Asize[1], sm), N1, div, A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), [[Nm[i], Nm[i]] for i in 1:length(qn)], div, A.ifZ2), U1Array(qn, A.dir, Vtensor, (sm, Asize[2]), N2, div, A.ifZ2)
+    U1Array(qn, A.dir, Utensor, (Asize[1], sm), Udims, div, ifZ2=A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), Sdims, div, ifZ2=A.ifZ2), U1Array(qn, A.dir, Vtensor, (Asize[2], sm),  Vdims, div, ifZ2=A.ifZ2)
 end
 
 """
