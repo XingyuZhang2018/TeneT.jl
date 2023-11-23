@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA, zerosinitial
+using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA, zerosinitial, randU1DiagMatrix, invDiagU1Matrix, show
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -209,7 +209,16 @@ end
 
 	@test asArray(sitetype, reshape(Q, χ,D,χ)) ≈ reshape(Qtensor, χ,D,χ)
 	@test asArray(sitetype, R) ≈ Rtensor
-end
+end 
+ 
+
+@testset "invDiagU1Matrix with $sitetype $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn(),electronZ2(),tJZ2()]
+    Random.seed!(100)
+    χ = 4
+    A = randU1DiagMatrix(sitetype, atype, dtype, χ; dir = [-1, 1])   
+    invA = invDiagU1Matrix(A)
+    @test A * invA ≈ IU1(sitetype, atype, dtype, χ; dir = [-1, 1])
+end      
 
 @testset "U1 lq with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn(),electronZ2(),tJZ2()]
     Random.seed!(100)
@@ -231,7 +240,7 @@ end
 
 	@test asArray(sitetype, L) ≈ Ltensor
 	@test asArray(sitetype, reshape(Q,  χ,D,χ)) ≈ reshape(Qtensor,  χ,D,χ)
-end
+end 
 
 @testset "U1 svd with $atype{$dtype} $sitetype" for atype in [Array], dtype in [Float64], sitetype in [electronPn(),electronZ2(),tJZ2()]
     Random.seed!(100)
