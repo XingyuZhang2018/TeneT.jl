@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, sysvd!, initialA, zerosinitial
+using TeneT: randU1, zerosU1, IU1, qrpos, lqpos, svd!, initialA, zerosinitial
 using CUDA
 using KrylovKit
 using LinearAlgebra
@@ -189,7 +189,7 @@ end
     @test asArray(sitetype, ξl) ≈ tξl
 end
 
-@testset "U1 qr with $sitetype $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn(),electronZ2(),tJZ2()]
+@testset "U1 order-3 tensor qr with $sitetype $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn(),electronZ2(),tJZ2()]
     Random.seed!(100)
     χ, D = 10, 4
     A = randU1(sitetype, atype, dtype, χ, D, χ; dir = [-1, 1, 1])
@@ -197,11 +197,14 @@ end
 	A = reshape(A, χ * D, χ) 
 	Atensor = reshape(Atensor, χ * D, χ)
 	Q, R = qrpos(A)
-    @test Q.qn == sort(Q.qn) 
-    @test R.qn == sort(R.qn)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor * Rtensor ≈ Atensor
 	@test Q * R ≈ A
+
+    Q = reshape(Q, χ,D,χ)
+    R = reshape(R, χ,χ)
+    A = reshape(A, χ,D,χ)
+    @test ein"abc,cd->abd"(Q, R) ≈ A
 
     @test Qtensor' * Qtensor ≈ I(χ)
     M = ein"cda,cdb -> ab"(reshape(Q, χ, D, χ), conj(reshape(Q, χ, D, χ)))
@@ -209,6 +212,23 @@ end
 
 	@test asArray(sitetype, reshape(Q, χ,D,χ)) ≈ reshape(Qtensor, χ,D,χ)
 	@test asArray(sitetype, R) ≈ Rtensor
+end
+
+@testset "U1 order-N tensor qr with $sitetype $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn()]
+    Random.seed!(100)
+    χ, D = 4, 4
+    A = randU1(sitetype, atype, dtype, χ, D, D, χ; dir = [-1,1,1,1])
+	Atensor = asArray(sitetype, A)
+	A = reshape(A, χ*D, χ*D) 
+	Atensor = reshape(Atensor, χ*D, χ*D)
+    
+	Q, R = qrpos(A)
+    @test Q * R ≈ A
+
+    Q = reshape(Q, χ, D, D*χ)
+    R = reshape(R, D*χ, D, χ)
+    A = reshape(A, χ, D, D, χ)
+	@test ein"abc,cde->abde"(Q, R) ≈ A
 end
 
 @testset "U1 lq with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn(),electronZ2(),tJZ2()]
@@ -238,12 +258,12 @@ end
     χ = 20
     A = randU1(sitetype, atype, dtype, χ, χ; dir = [-1, 1])
 	Atensor = asArray(sitetype, A)
-	U, S, V = svd!(copy(A), trunc=20)
+	U, S, V = svd!(copy(A))
     Utensor, Stensor, Vtensor = svd!(copy(Atensor))
     @test Utensor * Diagonal(Stensor) * Vtensor' ≈ Atensor
 	@test U * Diagonal(S) * V' ≈ A
 
-    U, S, V = svd!(copy(A), trunc=10)
+    U, S, V = svd!(copy(A); trunc=10)
     @test sum(S.dims) == [10, 10]
 end
 

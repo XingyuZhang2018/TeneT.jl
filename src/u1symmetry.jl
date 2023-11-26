@@ -1,7 +1,7 @@
 import Base: ==, +, -, *, /, ≈, size, reshape, permutedims, transpose, conj, conj!, show, similar, adjoint, copy, sqrt, getindex, setindex!, Array, broadcasted, vec, map, ndims, indexin, sum, zero
 using CUDA
 import CUDA: CuArray
-import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!, axpby!
+import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!, axpby!, svd, svd!
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export U1Array, U1reshape, U1reshapeinfo
@@ -570,8 +570,7 @@ broadcasted(sqrt, A::U1Array) = sqrt(A)
 
 # only for order-three tensor's qr and lq
 function qrpos!(A::U1Array{T,N}) where {T,N}
-    Qqn, Rqn, blockidims = [Vector{Vector{Int}}() for _ in 1:3]
-    blockjdims = Vector{Int}()
+    Qqn, Rqn, Qdims, Rdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:6]
     indexs = Vector()
     Adims = A.dims
     Aqn = A.qn
@@ -581,58 +580,77 @@ function qrpos!(A::U1Array{T,N}) where {T,N}
     Abdiv = blockdiv(Adims)
     Atensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:Adiv]), prod(Adims[i][Adiv+1:end])) for i in 1:length(Abdiv)]
 
-    qs = A.ifZ2 ? map(x->sum(x[Adiv+1:end]) % 2, A.qn) : map(x->sum(x[Adiv+1:end] .* Adir[Adiv+1:end]), A.qn)
+    qs = A.ifZ2 ? 
+         sort!(map(x->sum(x[Adiv+1:end]) % 2, A.qn)) : 
+         sort!(map(x->sum(x[Adiv+1:end] .* Adir[Adiv+1:end]), A.qn))
     for q in unique!(qs)
-        u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, size.(Atensor), q, A.ifZ2)
+        u1blockQRinfo!(Qqn, Rqn, Qdims, Rdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, size.(Atensor), q, A.ifZ2)
     end
-    Qtensorlen = sum([sum(blockidims[i]) * blockjdims[i] for i in 1:length(blockidims)])
-    Qtensor = typeof(A.tensor) <: Array ? zeros(T, Qtensorlen) : CUDA.zeros(T, Qtensorlen)
-    Rtensorlen = sum([blockjdims[i] ^ 2 for i in 1:length(blockjdims)])
-    Rtensor = typeof(A.tensor) <: Array ? zeros(T, Rtensorlen) : CUDA.zeros(T, Rtensorlen)
+    Qtensorlen = [sum(blockidims[i]) * min(sum(blockidims[i]), sum(blockjdims[i])) for i in 1:length(blockidims)]
+    Qtensor = typeof(A.tensor) <: Array ? zeros(T, sum(Qtensorlen)) : CUDA.zeros(T, sum(Qtensorlen))
 
-    pp = indexin(Qqn, Aqn)
-    Qbdiv = blockdiv(Adims)[pp]
-    divs = [length(indexs[i]) for i in 1:length(indexs)]
-    bdivind = [sum(divs[1:i-1]) + 1 : sum(divs[1:i]) for i in 1:length(indexs)]
+    Rtensorlen = [min(sum(blockidims[i]), sum(blockjdims[i])) * sum(blockjdims[i]) for i in 1:length(blockjdims)]
+    Rtensor = typeof(A.tensor) <: Array ? zeros(T, sum(Rtensorlen)) : CUDA.zeros(T, sum(Rtensorlen))
 
-    p = sortperm(Rqn)
-    pp = indexin(Rqn, Rqn[p])
-    Rdims = [[blockjdims[i], blockjdims[i]] for i in 1:length(blockjdims)]
-    Rbdiv = blockdiv(Rdims[p])[pp]
+    Qbdiv = blockdiv(Qdims)
+    Qdivs = length.(blockidims)
+    Qbdivind = [sum(Qdivs[1:i-1]) + 1 : sum(Qdivs[1:i]) for i in 1:length(indexs)]
+
+    Rbdiv = blockdiv(Rdims)
+    Rdivs = length.(blockjdims)
+    Rbdivind = [sum(Rdivs[1:i-1]) + 1 : sum(Rdivs[1:i]) for i in 1:length(indexs)]
 
     for i in 1:length(indexs)
-        u1blockQR!(Qtensor, Rtensor, Atensor, indexs[i], blockidims[i], Qbdiv[bdivind[i]], Rbdiv[i])
+        u1blockQR!(Qtensor, Rtensor, Atensor, indexs[i], blockidims[i], blockjdims[i], Qbdiv[Qbdivind[i]], Rbdiv[Rbdivind[i]])
     end
-    U1Array(Aqn, Adir, Qtensor, Asize, Adims, Adiv, A.ifZ2), U1Array(Rqn[p], [-A.dir[end], A.dir[end]], Rtensor, (Asize[end], Asize[end]), Rdims[p], 1, A.ifZ2)
+
+    middledim = min(prod(Asize[1:Adiv]), prod(Asize[Adiv+1:end]))
+
+    return U1Array(Qqn, [Adir[1:Adiv]...; 1], Qtensor, (Asize[1:Adiv]..., middledim), Qdims, Adiv, A.ifZ2), 
+    U1Array(Rqn, [-1, Adir[Adiv+1:end]...], Rtensor, (middledim, Asize[Adiv+1:end]...), Rdims, 1, A.ifZ2)
 end
 
-function u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q, ifZ2)
+function u1blockQRinfo!(Qqn, Rqn, Qdims, Rdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, Atensorsize, q, ifZ2)
     ind_A = ifZ2 ? [sum(Aqn[Adiv+1:end]) % 2 == q for Aqn in Aqn] : [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
-    matrix_j = unique!(map(x->x[Adiv+1:end], Aqn[ind_A]))
-    matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
+    
+    matrix_i = unique!(sort!(map(x->x[1:Adiv], Aqn[ind_A])))
+    matrix_j = unique!(sort!(map(x->x[Adiv+1:end], Aqn[ind_A])))
 
-    index = indexin([[i; matrix_j[1]] for i in matrix_i], Aqn)
+    index = indexin([[i; j] for i in matrix_i, j in matrix_j], Aqn) 
     push!(indexs, index)
-    push!(blockidims, [Atensorsize[i][1] for i in index])
-    push!(blockjdims, Atensorsize[index[1]][2])
+    push!(blockidims, [Atensorsize[i][1] for i in index[:, 1]])
+    push!(blockjdims, [Atensorsize[i][2] for i in index[1, :]])
+    middledim = min(sum([prod(Adims[i][1:Adiv]) for i in index[:, 1]]), sum([prod(Adims[i][Adiv+1:end]) for i in index[1, :]]))
+    [push!(Qdims, [Adims[i][1:Adiv]...; middledim]) for i in index[:, 1]]
+    [push!(Rdims, [middledim; Adims[i][Adiv+1:end]...]) for i in index[1, :]]
 
-    for i in 1:length(matrix_i)
-        push!(Qqn, [matrix_i[i]; matrix_j[1]])
+    for i in matrix_i
+        push!(Qqn, [i; q])
     end
-    push!(Rqn, [matrix_j[1]; matrix_j[1]])
+    for j in matrix_j
+        push!(Rqn, [q; j])
+    end
 end
 
-function u1blockQR!(Qtensor, Rtensor, Atensor, index, blockidims, Qbdiv, Rdiv)
-    Amatrix = vcat(Atensor[index]...)
-    Q, R = qrpos!(Amatrix)
-    for i in 1:length(index)
+function u1blockQR!(Qtensor, Rtensor, Atensor, index, blockidims, blockjdims, Qbdiv, Rbdiv)
+    Amatrix = _arraytype(Qtensor) <: Array ? zeros(eltype(Qtensor), sum(blockidims), sum(blockjdims)) : CUDA.zeros(eltype(Qtensor), sum(blockidims), sum(blockjdims))
+    for i in 1:size(index, 1), j in 1:size(index, 2)
+        index[i, j] !== nothing && (Amatrix[sum(blockidims[1:i-1])+1:sum(blockidims[1:i]), sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])] .= Atensor[index[i, j]])
+    end
+
+    Qmatrix, Rmatrix = qrpos!(Amatrix)
+
+    for i in 1:length(blockidims)
         idim = sum(blockidims[1:i-1])+1:sum(blockidims[1:i])
-        Qtensor[Qbdiv[i]] .= vec(@view(Q[idim, :]))
+        Qtensor[Qbdiv[i]] .= vec(@view(Qmatrix[idim, :]))
     end
-    Rtensor[Rdiv] .= vec(R)
+    for j in 1:length(blockjdims)
+        jdim = sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])
+        Rtensor[Rbdiv[j]] .= vec(@view(Rmatrix[:, jdim]))
+    end
 end
 
-function lqpos!(A::U1Array{T,N}) where {T,N}
+function lqpos!(A::U1Array{T,3}) where {T}
     Lqn, Qqn, blockjdims = [Vector{Vector{Int}}() for _ in 1:3]
     blockidims = Vector{Int}()
     indexs = Vector()
