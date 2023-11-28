@@ -136,11 +136,6 @@ function cellones(A; info = nothing)
     return Cell
 end
 
-function sysvd!(ρ::AbstractArray)
-    F = svd!(ρ)
-    F.U, F.S, F.Vt
-end
-
 """
     getL!(A,L; kwargs...)
 
@@ -163,8 +158,8 @@ function getL!(A,L; kwargs...)
         info.converged == 0 && @warn "getL not converged"
         ρ = ρs[1] + ρs[1]'
         ρ /= tr(ρ)
-        _, S, Vt = sysvd!(ρ)
-        Lo = Diagonal(sqrt.(S)) * Vt
+        _, S, V = svd!(ρ)
+        Lo = Diagonal(sqrt.(S)) * V'
         _, L[i,j] = qrpos!(Lo)
     end
     return L

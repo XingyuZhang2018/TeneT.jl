@@ -601,6 +601,16 @@ end
 #     B
 # end
 
+function sortqn(A::U1Array)
+    qn = A.qn
+    p = sortperm(qn)
+    qn[p] == qn && return A
+    dims = A.dims
+    div = blockdiv(dims)
+    tensor = vcat([vec(reshape(@view(A.tensor[div[i]]), dims[i]...)) for i in 1:length(div)][p]...)
+    U1Array(qn[p], A.dir, tensor, A.size, dims[p], A.division, A.ifZ2)
+end
+
 # only for order-three tensor's qr and lq
 function qrpos!(A::U1Array{T,N}) where {T,N}
     Qqn, Rqn, Qdims, Rdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:6]
@@ -639,8 +649,8 @@ function qrpos!(A::U1Array{T,N}) where {T,N}
 
     middledim = min(prod(Asize[1:Adiv]), prod(Asize[Adiv+1:end]))
 
-    return U1Array(Qqn, [Adir[1:Adiv]...; 1], Qtensor, (Asize[1:Adiv]..., middledim), Qdims, Adiv, A.ifZ2), 
-    U1Array(Rqn, [-1, Adir[Adiv+1:end]...], Rtensor, (middledim, Asize[Adiv+1:end]...), Rdims, 1, A.ifZ2)
+    return sortqn(U1Array(Qqn, [Adir[1:Adiv]...; -Adir[1]], Qtensor, (Asize[1:Adiv]..., middledim), Qdims, Adiv, A.ifZ2)), 
+    sortqn(U1Array(Rqn, [-Adir[end], Adir[Adiv+1:end]...], Rtensor, (middledim, Asize[Adiv+1:end]...), Rdims, 1, A.ifZ2))
 end
 
 function u1blockQRinfo!(Qqn, Rqn, Qdims, Rdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, Atensorsize, q, ifZ2)
@@ -683,7 +693,7 @@ function u1blockQR!(Qtensor, Rtensor, Atensor, index, blockidims, blockjdims, Qb
     end
 end
 
-function lqpos!(A::U1Array{T,3}) where {T}
+function lqpos!(A::U1Array{T,N}) where {T, N}
     Lqn, Qqn, blockjdims = [Vector{Vector{Int}}() for _ in 1:3]
     blockidims = Vector{Int}()
     indexs = Vector()

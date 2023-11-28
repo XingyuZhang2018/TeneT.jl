@@ -197,6 +197,8 @@ end
 	A = reshape(A, χ * D, χ) 
 	Atensor = reshape(Atensor, χ * D, χ)
 	Q, R = qrpos(A)
+    @test Q.qn == sort(Q.qn) 
+    @test R.qn == sort(R.qn)
     Qtensor, Rtensor = qrpos(Atensor)
     @test Qtensor * Rtensor ≈ Atensor
 	@test Q * R ≈ A
