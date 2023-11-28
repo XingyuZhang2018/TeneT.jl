@@ -568,7 +568,7 @@ end
  
 
 # # for leftorth and rightorth compatibility
-function Diagonal(A::U1Array)
+function Diagonal(A::U1Array{T,2}) where {T}
     atype = _arraytype(A.tensor)
     blocklen = map(x->x[1], A.dims)
     bdiv = [sum(blocklen[1 : i - 1]) + 1 : sum(blocklen[1 : i]) for i in 1:length(blocklen)]
@@ -674,7 +674,6 @@ function sortqn(A::U1Array)
     U1Array(qn[p], A.dir, tensor, A.size, dims[p], A.division, A.ifZ2)
 end
 
-# only for order-three tensor's qr and lq
 function qrpos!(A::U1Array{T,N}) where {T,N}
     Qqn, Rqn, Qdims, Rdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:6]
     indexs = Vector()
@@ -692,10 +691,10 @@ function qrpos!(A::U1Array{T,N}) where {T,N}
     for q in unique!(qs)
         u1blockQRinfo!(Qqn, Rqn, Qdims, Rdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, size.(Atensor), q, A.ifZ2)
     end
-    Qtensorlen = [sum(blockidims[i]) * min(sum(blockidims[i]), sum(blockjdims[i])) for i in 1:length(blockidims)]
+    Qtensorlen = [sum(blockidims[i]) * min(sum(blockidims[i]), sum(blockjdims[i])) for i in 1:length(indexs)]
     Qtensor = typeof(A.tensor) <: Array ? zeros(T, sum(Qtensorlen)) : CUDA.zeros(T, sum(Qtensorlen))
 
-    Rtensorlen = [min(sum(blockidims[i]), sum(blockjdims[i])) * sum(blockjdims[i]) for i in 1:length(blockjdims)]
+    Rtensorlen = [min(sum(blockidims[i]), sum(blockjdims[i])) * sum(blockjdims[i]) for i in 1:length(indexs)]
     Rtensor = typeof(A.tensor) <: Array ? zeros(T, sum(Rtensorlen)) : CUDA.zeros(T, sum(Rtensorlen))
 
     Qbdiv = blockdiv(Qdims)
@@ -835,7 +834,7 @@ function adjoint(A::U1Array{T,N}) where {T,N}
 end
 
 # only for U1 Matrix
-svd(A::U1Array{T,2}; kwargs...) where {T} = svd!(copy(A); kwargs...)
+svd(A::U1Array; kwargs...) = svd!(copy(A); kwargs...)
 function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     tensor = A.tensor
     qn = A.qn
@@ -880,6 +879,101 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     Stensor = vcat(map(vec, Stensor)...)
     Vtensor = vcat(map(vec, Vtensor)...)
     U1Array(qn, A.dir, Utensor, (Asize[1], sm), Udims, div, A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), Sdims, div, A.ifZ2), U1Array(qn, A.dir, Vtensor, (Asize[2], sm),  Vdims, div, A.ifZ2)
+end
+
+function svd!(A::U1Array{T,N}; trunc::Int = -1) where {T,N}
+    Uqn, Sqn, Vqn, Udims, Sdims, Vdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:8]
+    indexs = Vector()
+    Adims = A.dims
+    Aqn = A.qn
+    Adir = A.dir
+    Adiv = A.division
+    Asize = A.size
+    Abdiv = blockdiv(Adims)
+    Atensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:Adiv]), prod(Adims[i][Adiv+1:end])) for i in 1:length(Abdiv)]
+
+    qs = A.ifZ2 ? 
+         sort!(map(x->sum(x[Adiv+1:end]) % 2, A.qn)) : 
+         sort!(map(x->sum(x[Adiv+1:end] .* Adir[Adiv+1:end]), A.qn))
+    for q in unique!(qs)
+        u1blockSVDinfo!(Uqn, Sqn, Vqn, Udims, Sdims, Vdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, size.(Atensor), q, A.ifZ2)
+    end
+
+    qlen = length(indexs)
+
+    Utensorlen = [sum(blockidims[i]) * min(sum(blockidims[i]), sum(blockjdims[i])) for i in 1:qlen]
+    Utensor = typeof(A.tensor) <: Array ? zeros(T, sum(Utensorlen)) : CUDA.zeros(T, sum(Utensorlen))
+
+    Stensorlen = [min(sum(blockidims[i]), sum(blockjdims[i])) for i in 1:qlen]
+    Stensor = typeof(A.tensor) <: Array ? zeros(T, sum(Stensorlen)) : CUDA.zeros(T, sum(Stensorlen))
+
+    Vtensorlen = [min(sum(blockidims[i]), sum(blockjdims[i])) * sum(blockjdims[i]) for i in 1:qlen]
+    Vtensor = typeof(A.tensor) <: Array ? zeros(T, sum(Vtensorlen)) : CUDA.zeros(T, sum(Vtensorlen))
+
+    Ubdiv = blockdiv(Udims)
+    Udivs = length.(blockidims)
+    Ubdivind = [sum(Udivs[1:i-1]) + 1 : sum(Udivs[1:i]) for i in 1:qlen]
+
+    
+    blocklen = map(x->x[1], Sdims)
+    Sbdiv = [sum(blocklen[1:i-1]) + 1 : sum(blocklen[1:i]) for i in 1:length(blocklen)]
+
+    Vbdiv = blockdiv(Vdims)
+    Vdivs = length.(blockjdims)
+    Vbdivind = [sum(Vdivs[1:i-1]) + 1 : sum(Vdivs[1:i]) for i in 1:qlen]
+
+    for i in 1:qlen
+        u1blockSVD!(Utensor, Stensor, Vtensor, Atensor, indexs[i], blockidims[i], blockjdims[i], Ubdiv[Ubdivind[i]], Sbdiv[i], Vbdiv[Vbdivind[i]])
+    end
+
+    middledim = min(prod(Asize[1:Adiv]), prod(Asize[Adiv+1:end]))
+
+    return U1Array(Uqn, [Adir[1:Adiv]...; -Adir[1]], Utensor, (Asize[1:Adiv]..., middledim), Udims, Adiv, A.ifZ2), 
+    U1Array(Sqn, [Adir[1]; Adir[end]], Stensor, (middledim, middledim), Sdims, 1, A.ifZ2),
+    U1Array(Vqn, [-Adir[Adiv+1:end]..., Adir[end]], Vtensor, (middledim, Asize[Adiv+1:end]...), Vdims, Adiv, A.ifZ2)
+end
+
+function u1blockSVDinfo!(Uqn, Sqn, Vqn, Udims, Sdims, Vdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, Atensorsize, q, ifZ2)
+    ind_A = ifZ2 ? [sum(Aqn[Adiv+1:end]) % 2 == q for Aqn in Aqn] : [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
+    
+    matrix_i = unique!(sort!(map(x->x[1:Adiv], Aqn[ind_A])))
+    matrix_j = unique!(sort!(map(x->x[Adiv+1:end], Aqn[ind_A])))
+
+    index = indexin([[i; j] for i in matrix_i, j in matrix_j], Aqn) 
+    push!(indexs, index)
+    push!(blockidims, [Atensorsize[i][1] for i in index[:, 1]])
+    push!(blockjdims, [Atensorsize[i][2] for i in index[1, :]])
+    middledim = min(sum([prod(Adims[i][1:Adiv]) for i in index[:, 1]]), sum([prod(Adims[i][Adiv+1:end]) for i in index[1, :]]))
+    [push!(Udims, [Adims[i][1:Adiv]...; middledim]) for i in index[:, 1]]
+    push!(Sdims, [middledim; middledim])
+    [push!(Vdims, [Adims[i][Adiv+1:end]...; middledim]) for i in index[1, :]]
+
+    for i in matrix_i
+        push!(Uqn, [i; q])
+    end
+    push!(Sqn, [q; q])
+    for j in matrix_j
+        push!(Vqn, [j; q])
+    end
+end
+
+function u1blockSVD!(Utensor, Stensor, Vtensor, Atensor, index, blockidims, blockjdims, Ubdiv, Sbdiv, Vbdiv)
+    Amatrix = _arraytype(Utensor) <: Array ? zeros(eltype(Utensor), sum(blockidims), sum(blockjdims)) : CUDA.zeros(eltype(Utensor), sum(blockidims), sum(blockjdims))
+    for i in 1:size(index, 1), j in 1:size(index, 2)
+        index[i, j] !== nothing && (Amatrix[sum(blockidims[1:i-1])+1:sum(blockidims[1:i]), sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])] .= Atensor[index[i, j]])
+    end
+
+    Umatrix, Svector, Vmatrix = svd!(Amatrix)
+
+    for i in 1:length(blockidims)
+        idim = sum(blockidims[1:i-1])+1:sum(blockidims[1:i])
+        Utensor[Ubdiv[i]] .= vec(@view(Umatrix[idim, :]))
+    end
+    Stensor[Sbdiv] .= vec(@view(Svector[:]))
+    for j in 1:length(blockjdims)
+        jdim = sum(blockjdims[1:j-1])+1:sum(blockjdims[1:j])
+        Vtensor[Vbdiv[j]] .= vec(@view(Vmatrix[jdim, :]))
+    end
 end
 
 """
