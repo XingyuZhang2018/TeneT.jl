@@ -601,6 +601,69 @@ end
 #     B
 # end
 
+function qrpos!(A::Union{U1Array{T,2},U1Array{T,3}}) where {T}
+    Qqn, Rqn, blockidims = [Vector{Vector{Int}}() for _ in 1:3]
+    blockjdims = Vector{Int}()
+    indexs = Vector()
+    Adims = A.dims
+    Aqn = A.qn
+    Adir = A.dir
+    Adiv = A.division
+    Asize = A.size
+    Abdiv = blockdiv(Adims)
+    Atensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:Adiv]), prod(Adims[i][Adiv+1:end])) for i in 1:length(Abdiv)]
+
+    qs = A.ifZ2 ? map(x->sum(x[Adiv+1:end]) % 2, A.qn) : map(x->sum(x[Adiv+1:end] .* Adir[Adiv+1:end]), A.qn)
+    for q in unique!(qs)
+        u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, size.(Atensor), q, A.ifZ2)
+    end
+    Qtensorlen = sum([sum(blockidims[i]) * blockjdims[i] for i in 1:length(blockidims)])
+    Qtensor = typeof(A.tensor) <: Array ? zeros(T, Qtensorlen) : CUDA.zeros(T, Qtensorlen)
+    Rtensorlen = sum([blockjdims[i] ^ 2 for i in 1:length(blockjdims)])
+    Rtensor = typeof(A.tensor) <: Array ? zeros(T, Rtensorlen) : CUDA.zeros(T, Rtensorlen)
+
+    pp = indexin(Qqn, Aqn)
+    Qbdiv = blockdiv(Adims)[pp]
+    divs = [length(indexs[i]) for i in 1:length(indexs)]
+    bdivind = [sum(divs[1:i-1]) + 1 : sum(divs[1:i]) for i in 1:length(indexs)]
+
+    p = sortperm(Rqn)
+    pp = indexin(Rqn, Rqn[p])
+    Rdims = [[blockjdims[i], blockjdims[i]] for i in 1:length(blockjdims)]
+    Rbdiv = blockdiv(Rdims[p])[pp]
+
+    for i in 1:length(indexs)
+        u1blockQR!(Qtensor, Rtensor, Atensor, indexs[i], blockidims[i], Qbdiv[bdivind[i]], Rbdiv[i])
+    end
+    U1Array(Aqn, Adir, Qtensor, Asize, Adims, Adiv, A.ifZ2), U1Array(Rqn[p], [-A.dir[end], A.dir[end]], Rtensor, (Asize[end], Asize[end]), Rdims[p], 1, A.ifZ2)
+end
+
+function u1blockQRinfo!(Qqn, Rqn, indexs, blockidims, blockjdims, Aqn, Adiv, Adir, Atensorsize, q, ifZ2)
+    ind_A = ifZ2 ? [sum(Aqn[Adiv+1:end]) % 2 == q for Aqn in Aqn] : [sum(Aqn[Adiv+1:end] .* Adir[Adiv+1:end]) == q for Aqn in Aqn]
+    matrix_j = unique!(map(x->x[Adiv+1:end], Aqn[ind_A]))
+    matrix_i = unique!(map(x->x[1:Adiv], Aqn[ind_A]))
+
+    index = indexin([[i; matrix_j[1]] for i in matrix_i], Aqn)
+    push!(indexs, index)
+    push!(blockidims, [Atensorsize[i][1] for i in index])
+    push!(blockjdims, Atensorsize[index[1]][2])
+
+    for i in 1:length(matrix_i)
+        push!(Qqn, [matrix_i[i]; matrix_j[1]])
+    end
+    push!(Rqn, [matrix_j[1]; matrix_j[1]])
+end
+
+function u1blockQR!(Qtensor, Rtensor, Atensor, index, blockidims, Qbdiv, Rdiv)
+    Amatrix = vcat(Atensor[index]...)
+    Q, R = qrpos!(Amatrix)
+    for i in 1:length(index)
+        idim = sum(blockidims[1:i-1])+1:sum(blockidims[1:i])
+        Qtensor[Qbdiv[i]] .= vec(@view(Q[idim, :]))
+    end
+    Rtensor[Rdiv] .= vec(R)
+end
+
 function sortqn(A::U1Array)
     qn = A.qn
     p = sortperm(qn)
