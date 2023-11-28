@@ -914,7 +914,6 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1) where {T,N}
     Udivs = length.(blockidims)
     Ubdivind = [sum(Udivs[1:i-1]) + 1 : sum(Udivs[1:i]) for i in 1:qlen]
 
-    
     blocklen = map(x->x[1], Sdims)
     Sbdiv = [sum(blocklen[1:i-1]) + 1 : sum(blocklen[1:i]) for i in 1:length(blocklen)]
 
@@ -930,7 +929,7 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1) where {T,N}
 
     return U1Array(Uqn, [Adir[1:Adiv]...; -Adir[1]], Utensor, (Asize[1:Adiv]..., middledim), Udims, Adiv, A.ifZ2), 
     U1Array(Sqn, [Adir[1]; Adir[end]], Stensor, (middledim, middledim), Sdims, 1, A.ifZ2),
-    U1Array(Vqn, [-Adir[Adiv+1:end]..., Adir[end]], Vtensor, (middledim, Asize[Adiv+1:end]...), Vdims, Adiv, A.ifZ2)
+    U1Array(Vqn, [-Adir[Adiv+1:end]..., Adir[end]], Vtensor, (Asize[Adiv+1:end]..., middledim), Vdims, Adiv, A.ifZ2)
 end
 
 function u1blockSVDinfo!(Uqn, Sqn, Vqn, Udims, Sdims, Vdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, Atensorsize, q, ifZ2)

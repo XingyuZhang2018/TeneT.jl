@@ -287,6 +287,11 @@ end
 	U, S, V = svd!(copy(A))
 	@test U * Diagonal(S) * V' ≈ A
 
+    U = reshape(U, χ,D,D*χ)
+    S = reshape(Diagonal(S),D*χ,D*χ)
+    Vt = reshape(V', χ*D,D,χ)
+    A = reshape(A, χ,D,D,χ)
+    @test ein"(abc,cd),def->abef"(U, S, Vt) ≈ A
     # U, S, V = svd!(copy(A); trunc=10)
     # @test sum(S.dims) == [10, 10]
 end
