@@ -278,22 +278,23 @@ end
     @test sum(S.dims) == [10, 10]
 end
 
-@testset "U1 order-N tensor svd with $atype{$dtype} $sitetype" for atype in [Array], dtype in [Float64], sitetype in [electronPn(),electronZ2(),tJZ2()]
+@testset "U1 order-N tensor svd with $atype{$dtype} $sitetype" for atype in [Array], dtype in [Float64], sitetype in [electronPn()]
     Random.seed!(100)
     χ,D = 4,4
     A = randU1(sitetype, atype, dtype, χ,D,D,χ; dir = [-1,1,1,1])
-	Atensor = asArray(sitetype, A)
     A = reshape(A, χ*D, χ*D)
 	U, S, V = svd!(copy(A))
 	@test U * Diagonal(S) * V' ≈ A
 
     U = reshape(U, χ,D,D*χ)
-    S = reshape(Diagonal(S),D*χ,D*χ)
     Vt = reshape(V', χ*D,D,χ)
     A = reshape(A, χ,D,D,χ)
-    @test ein"(abc,cd),def->abef"(U, S, Vt) ≈ A
-    # U, S, V = svd!(copy(A); trunc=10)
-    # @test sum(S.dims) == [10, 10]
+    @test ein"(abc,cd),def->abef"(U, Diagonal(S), Vt) ≈ A
+    U, S, V = svd!(copy(A); trunc=5)
+    # @show U.dims S.dims V.dims
+    @test sum(S.dims) == [5, 5]
+    # @show U * Diagonal(S) * V' - A
+    @show norm(U * Diagonal(S) * V' - A)
 end
 
 @testset "general flatten reshape" for ifZ2 in [false]

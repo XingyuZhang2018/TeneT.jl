@@ -925,8 +925,43 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1) where {T,N}
         u1blockSVD!(Utensor, Stensor, Vtensor, Atensor, indexs[i], blockidims[i], blockjdims[i], Ubdiv[Ubdivind[i]], Sbdiv[i], Vbdiv[Vbdivind[i]])
     end
 
-    middledim = min(prod(Asize[1:Adiv]), prod(Asize[Adiv+1:end]))
+    middledim = min(prod(Asize[1:Adiv]), prod(Asize[Adiv+1:end]), sum([dims[1] for dims in Sdims]))
 
+    if trunc != -1 && trunc < middledim
+        middledim = trunc
+        Sort = sort(abs.(Stensor); rev=true)
+        minS = max(Sort[trunc], 1e-30)
+        ind = [abs.(Stensor[Sbdiv[i]]) .< minS for i in 1:qlen]
+
+        deleind = (1:qlen)[sum.(ind) .!== 0]
+
+        Udeleind = [[[block[end]-sum(ind[i])*dims+1 : block[end]...] for (block,dims) in zip(Ubdiv[Ubdivind[i]],blockidims[i])] for i in deleind]
+        Udeleind = vcat(vcat(Udeleind...)...)
+        deleteat!(Utensor, deleind)
+        [[dims .= [dims[1:end-1]; length(ind[i]) - sum(ind[i])] for dims in Udims[Ubdivind[i]]] for i in deleind]
+
+        Sdeleind = vcat(ind...)
+        deleteat!(Stensor, Sdeleind)
+        [[Sdims[i] .= [length(ind[i]) - sum(ind[i])]] for i in deleind]
+
+        Vdeleind = [[[block[end]-sum(ind[i])*dims+1 : block[end]...] for (block,dims) in zip(Vbdiv[Vbdivind[i]],blockjdims[i])] for i in deleind]
+        Vdeleind = vcat(vcat(Vdeleind...)...)
+        deleteat!(Vtensor, deleind)
+        [[dims .= [dims[1:end-1]; length(ind[i]) - sum(ind[i])] for dims in Vdims[Vbdivind[i]]] for i in deleind]
+
+        Sqdeleind = (1:qlen)[sum.(ind) .== length.(ind)]
+        deleteat!(Sqn, Sqdeleind)
+        deleteat!(Sdims, Sqdeleind)
+
+        Uqdeleind = vcat(Ubdivind[Sqdeleind]...)
+        deleteat!(Uqn, Uqdeleind)
+        deleteat!(Udims, Uqdeleind)
+
+        Vqdeleind = vcat(Vbdivind[Sqdeleind]...)
+        deleteat!(Vqn, Vqdeleind)
+        deleteat!(Vdims, Vqdeleind)
+    end
+    
     return U1Array(Uqn, [Adir[1:Adiv]...; -Adir[1]], Utensor, (Asize[1:Adiv]..., middledim), Udims, Adiv, A.ifZ2), 
     U1Array(Sqn, [Adir[1]; Adir[end]], Stensor, (middledim, middledim), Sdims, 1, A.ifZ2),
     U1Array(Vqn, [-Adir[Adiv+1:end]..., Adir[end]], Vtensor, (Asize[Adiv+1:end]..., middledim), Vdims, Adiv, A.ifZ2)
