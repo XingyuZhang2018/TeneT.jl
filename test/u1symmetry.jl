@@ -225,7 +225,7 @@ end
     @test A * invA ≈ IU1(sitetype, atype, dtype, χ; dir = [-1, 1])
 end      
 
-@testset "U1 order-N tensor qr with $sitetype $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn()]
+@testset "U1 order-N tensor qr with $sitetype $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], sitetype in [electronPn(),electronZ2(),tJZ2()]
     Random.seed!(100)
     χ, D = 4, 4
     A = randU1(sitetype, atype, dtype, χ, D, D, χ; dir = [-1,1,1,1])
@@ -278,7 +278,7 @@ end
     @test sum(S.dims) == [10, 10]
 end
 
-@testset "U1 order-N tensor svd with $atype{$dtype} $sitetype" for atype in [Array], dtype in [Float64], sitetype in [electronPn()]
+@testset "U1 order-N tensor svd with $atype{$dtype} $sitetype" for atype in [Array], dtype in [Float64], sitetype in [electronPn(),electronZ2(),tJZ2()]
     Random.seed!(100)
     χ,D = 4,4
     A = randU1(sitetype, atype, dtype, χ,D,D,χ; dir = [-1,1,1,1])

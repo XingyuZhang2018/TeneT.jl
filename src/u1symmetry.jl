@@ -674,7 +674,13 @@ function sortqn(A::U1Array)
     U1Array(qn[p], A.dir, tensor, A.size, dims[p], A.division, A.ifZ2)
 end
 
-function qrpos!(A::U1Array{T,N}) where {T,N}
+"""
+    qrpos!(A::U1Array{T,N}; middledir=1) where {T,N}
+
+QR decomposition for U1Array, return Q, R
+middledir is the direction of middle index, 1 for Q → R, -1 for Q ← R
+"""
+function qrpos!(A::U1Array{T,N}; middledir::Int = 1) where {T,N}
     Qqn, Rqn, Qdims, Rdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:6]
     indexs = Vector()
     Adims = A.dims
@@ -711,8 +717,8 @@ function qrpos!(A::U1Array{T,N}) where {T,N}
 
     middledim = min(prod(Asize[1:Adiv]), prod(Asize[Adiv+1:end]))
 
-    return sortqn(U1Array(Qqn, [Adir[1:Adiv]...; -Adir[1]], Qtensor, (Asize[1:Adiv]..., middledim), Qdims, Adiv, A.ifZ2)), 
-    sortqn(U1Array(Rqn, [-Adir[end], Adir[Adiv+1:end]...], Rtensor, (middledim, Asize[Adiv+1:end]...), Rdims, 1, A.ifZ2))
+    return sortqn(U1Array(Qqn, [Adir[1:Adiv]...; middledir], Qtensor, (Asize[1:Adiv]..., middledim), Qdims, Adiv, A.ifZ2)), 
+    sortqn(U1Array(Rqn, [-middledir, Adir[Adiv+1:end]...], Rtensor, (middledim, Asize[Adiv+1:end]...), Rdims, 1, A.ifZ2))
 end
 
 function u1blockQRinfo!(Qqn, Rqn, Qdims, Rdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, Atensorsize, q, ifZ2)
@@ -881,7 +887,14 @@ function svd!(A::U1Array{T,2}; trunc::Int = -1) where {T}
     U1Array(qn, A.dir, Utensor, (Asize[1], sm), Udims, div, A.ifZ2), U1Array(qn, A.dir, Stensor, (sm, sm), Sdims, div, A.ifZ2), U1Array(qn, A.dir, Vtensor, (Asize[2], sm),  Vdims, div, A.ifZ2)
 end
 
-function svd!(A::U1Array{T,N}; trunc::Int = -1) where {T,N}
+"""
+    svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1) where {T,N}
+
+SVD decomposition for U1Array, return U, S, V
+trunc is the truncation dimension, -1 for no truncation
+middledir is the direction of middle index, 1 for U → S → V, -1 for U ← S ← V
+"""
+function svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1) where {T,N}
     Uqn, Sqn, Vqn, Udims, Sdims, Vdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:8]
     indexs = Vector()
     Adims = A.dims
@@ -962,9 +975,9 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1) where {T,N}
         deleteat!(Vdims, Vqdeleind)
     end
     
-    return U1Array(Uqn, [Adir[1:Adiv]...; -Adir[1]], Utensor, (Asize[1:Adiv]..., middledim), Udims, Adiv, A.ifZ2), 
-    U1Array(Sqn, [Adir[1]; Adir[end]], Stensor, (middledim, middledim), Sdims, 1, A.ifZ2),
-    U1Array(Vqn, [-Adir[Adiv+1:end]..., Adir[end]], Vtensor, (Asize[Adiv+1:end]..., middledim), Vdims, N-Adiv, A.ifZ2)
+    return U1Array(Uqn, [Adir[1:Adiv]...; middledir], Utensor, (Asize[1:Adiv]..., middledim), Udims, Adiv, A.ifZ2), 
+    U1Array(Sqn, [-middledir; middledir], Stensor, (middledim, middledim), Sdims, 1, A.ifZ2),
+    U1Array(Vqn, [-Adir[Adiv+1:end]..., middledir], Vtensor, (Asize[Adiv+1:end]..., middledim), Vdims, N-Adiv, A.ifZ2)
 end
 
 function u1blockSVDinfo!(Uqn, Sqn, Vqn, Udims, Sdims, Vdims, indexs, blockidims, blockjdims, Aqn, Adims, Adiv, Adir, Atensorsize, q, ifZ2)
