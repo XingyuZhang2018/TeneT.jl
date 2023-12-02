@@ -950,7 +950,7 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1) where {T,N}
 
         Udeleind = [[[block[end]-sum(ind[i])*dims+1 : block[end]...] for (block,dims) in zip(Ubdiv[Ubdivind[i]],blockidims[i])] for i in deleind]
         Udeleind = vcat(vcat(Udeleind...)...)
-        deleteat!(Utensor, deleind)
+        deleteat!(Utensor, Udeleind)
         [[dims .= [dims[1:end-1]; length(ind[i]) - sum(ind[i])] for dims in Udims[Ubdivind[i]]] for i in deleind]
 
         Sdeleind = vcat(ind...)
@@ -959,7 +959,7 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1) where {T,N}
 
         Vdeleind = [[[block[end]-sum(ind[i])*dims+1 : block[end]...] for (block,dims) in zip(Vbdiv[Vbdivind[i]],blockjdims[i])] for i in deleind]
         Vdeleind = vcat(vcat(Vdeleind...)...)
-        deleteat!(Vtensor, deleind)
+        deleteat!(Vtensor, Vdeleind)
         [[dims .= [dims[1:end-1]; length(ind[i]) - sum(ind[i])] for dims in Vdims[Vbdivind[i]]] for i in deleind]
 
         Sqdeleind = (1:qlen)[sum.(ind) .== length.(ind)]
