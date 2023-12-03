@@ -593,6 +593,14 @@ function invDiagU1Matrix(A::U1Array{T,2}) where {T}
     U1Array(A.qn, A.dir, Atensor, A.size, A.dims, A.division, A.ifZ2)
 end
 
+function sqrtDiagU1Matrix(A::U1Array{T,2}) where {T}
+    Adims = A.dims   
+    Abdiv = blockdiv(Adims)
+    Atensor = vcat([ vec(diagm( sqrt.(diag(reshape(@view(A.tensor[Abdiv[i]]), Adims[i][1], Adims[i][2])) )))  for i in 1:length(Abdiv)]...)
+    #@show Atensor
+    U1Array(A.qn, A.dir, Atensor, A.size, A.dims, A.division, A.ifZ2)
+end
+
 # function lmul!(A::U1Array, B::U1Array)
 #     dims = A.dims
 #     bdiv = blockdiv(Adims)
