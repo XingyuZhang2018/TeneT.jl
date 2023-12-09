@@ -1,5 +1,7 @@
 module TeneT
 
+using Parameters
+
 include("cuda_patch.jl")
 include("environment.jl")
 include("fixedpoint.jl")
