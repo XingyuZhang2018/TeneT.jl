@@ -366,3 +366,18 @@ end
     rerea2 = U1reshape(rea, χ,D,D,χ; reinfo = reinfo2)[1]
     @test rerea2 ≈ a
 end
+
+@testset "qndims" begin
+    indqn = [[0, 1] for _ in 1:5]
+    indims = [[1, 3] for _ in 1:5]
+    a = randU1(Array, ComplexF64, sum.(indims)...; dir=[-1,-1,1,1,1], 
+                indqn=indqn, indims=indims, ifZ2=true)
+    @test all((indqn[i],indims[i]) == qndims(a,i) for i in 1:5)
+
+    indqn = [[0, 1, 2] for _ in 1:5]
+    indims = [[1, 3, 2] for _ in 1:5]
+    a = randU1(Array, ComplexF64, sum.(indims)...; dir=[-1,-1,1,1,1], 
+                indqn=indqn, indims=indims, ifZ2=false)
+    
+    @test all((indqn[i],indims[i]) == qndims(a,i) for i in 1:5)
+end

@@ -5,7 +5,7 @@ import LinearAlgebra: tr, norm, dot, rmul!, axpy!, mul!, diag, Diagonal, lmul!, 
 import OMEinsum: _compactify!, subindex, einsum, Tr, Repeat, tensorpermute
 import Zygote: accum
 export U1Array, U1reshape, U1reshapeinfo
-export randU1, asU1Array, asArray, getqrange, getblockdims
+export randU1, asU1Array, asArray, getqrange, getblockdims, qndims
 export dtr
 
 """
@@ -120,6 +120,20 @@ get divsions of block U1 array from U1 contious storge block dims
 function blockdiv(dims::Vector{Vector{Int}}) 
     blocklen = map(prod, dims)
     [sum(blocklen[1 : i - 1]) + 1 : sum(blocklen[1 : i]) for i in 1:length(blocklen)]
+end
+
+function qndims(A::U1Array, ind::Int)     
+    indqn = Int64[]
+    indims = Int64[]
+    qn = A.qn 
+    dims = A.dims 
+    for i in 1:length(A.qn)
+        if !(qn[i][ind] in indqn)
+            push!(indqn, qn[i][ind]) 
+            push!(indims, dims[i][ind]) 
+        end 
+    end   
+    return indqn, indims
 end
 
 function show(::IOBuffer, A::U1Array)
