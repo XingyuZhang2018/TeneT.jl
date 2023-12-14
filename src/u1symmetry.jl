@@ -916,7 +916,7 @@ SVD decomposition for U1Array, return U, S, V
 trunc is the truncation dimension, -1 for no truncation
 middledir is the direction of middle index, 1 for U → S → V, -1 for U ← S ← V
 """
-function svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1) where {T,N}
+function svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1, ifSU = false) where {T,N}
     Uqn, Sqn, Vqn, Udims, Sdims, Vdims, blockidims, blockjdims = [Vector{Vector{Int}}() for _ in 1:8]
     indexs = Vector()
     Adims = A.dims
@@ -964,9 +964,18 @@ function svd!(A::U1Array{T,N}; trunc::Int = -1, middledir::Int = 1) where {T,N}
 
     if trunc != -1 && trunc < middledim
         middledim = trunc
-        Sort = sort(abs.(Stensor); rev=true)
-        minS = max(Sort[trunc], 1e-30)
-        ind = [abs.(Stensor[Sbdiv[i]]) .< minS for i in 1:qlen]
+        if ifSU # for the moment, only for simple update Z2 symmetry case
+            Slen = length(Stensor)
+            evenhalf = ceil(Int, trunc / 2)
+            oddhalf = trunc - evenhalf
+            ind = [[true for _ in 1:Slen÷2] for _ in 1:2]
+            ind[1][1:evenhalf] .= false
+            ind[2][1:oddhalf] .= false
+        else
+            Sort = sort(abs.(Stensor); rev=true)
+            minS = max(Sort[trunc], 1e-30)
+            ind = [abs.(Stensor[Sbdiv[i]]) .< minS for i in 1:qlen]
+        end
 
         deleind = (1:qlen)[sum.(ind) .!== 0]
 
