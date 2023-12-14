@@ -32,10 +32,34 @@ struct VUMPSRuntime{LT,T,N,AT <: AbstractArray{<:AbstractArray,2},CT,ET1,ET2}
     end
 end
 
+struct VUMPSEnv{LT,T,N,AT <: AbstractArray{<:AbstractArray,2},CT,ET1,ET2}
+    M::AT
+    ALu::ET1
+    Cu::CT
+    ARu::ET1
+    ALd::ET1
+    Cd::CT
+    ARd::ET1
+    FLo::ET2
+    FRo::ET2
+    FLu::ET2
+    FRu::ET2
+    function VUMPSEnv{LT}(M::AT, ALu::ET1, Cu::CT, ARu::ET1, ALd::ET1, Cd::CT, ARd::ET1, FLo::ET2, FRo::ET2, FLu::ET2, FRu::ET2) where {LT <: AbstractLattice, AT <: AbstractArray{<:AbstractArray,2}, CT <: AbstractArray{<:AbstractArray,2}, ET1 <: AbstractArray{<:AbstractArray,2}, ET2 <: AbstractArray{<:AbstractArray,2}}
+        T, N = eltype(ALu[1,1]), ndims(ALu[1,1])
+        new{LT,T,N,AT,CT,ET1,ET2}(M, ALu, Cu, ARu, ALd, Cd, ARd, FLo, FRo, FLu, FRu)
+    end
+end
+
 const SquareVUMPSRuntime{T,AT} = VUMPSRuntime{SquareLattice,T,4,AT}
 function SquareVUMPSRuntime(M::AT, AL, C, AR, FL, FR) where {AT <: AbstractArray{<:AbstractArray,2}}
     ndims(M[1,1]) == 4 || throw(DimensionMismatch("M dimensions error, should be `4`, got $(ndims(M[1,1]))."))
     VUMPSRuntime{SquareLattice}(M, AL, C, AR, FL, FR)
+end
+
+const SquareVUMPSEnv{T,AT} = VUMPSEnv{SquareLattice,T,4,AT}
+function SquareVUMPSEnv(M::AT, ALu, Cu, ARu, ALd, Cd, ARd, FLo, FRo, FLu, FRu) where {AT <: AbstractArray{<:AbstractArray,2}}
+    ndims(M[1,1]) == 4 || throw(DimensionMismatch("ALu dimensions error, should be `4`, got $(ndims(ALu[1,1]))."))
+    VUMPSEnv{SquareLattice}(M, ALu, Cu, ARu, ALd, Cd, ARd, FLo, FRo, FLu, FRu)
 end
 
 @doc raw"
@@ -66,17 +90,17 @@ julia> size(rt.AL[1,1]) == (4,2,4)
 true
 ```
 "
-function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false, info = nothing)
-    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ, info)...)
+function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false, U1info = nothing)
+    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ, U1info)...)
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, info)
-    A = initialA(M, χ; info = info)
-    L = cellones(A; info = info)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, U1info)
+    A = initialA(M, χ; U1info = U1info)
+    L = cellones(A; U1info = U1info)
     AL, L = leftorth(A, L)
     R, AR = rightorth(AL, L)
-    FL = FLint(AL, M; info = info)
-    FR = FRint(AR, M; info = info)
+    FL = FLint(AL, M; U1info = U1info)
+    FR = FRint(AR, M; U1info = U1info)
     _, FL = leftenv(AL, conj(AL), M, FL)
     _, FR = rightenv(AR, conj(AR), M, FR)
     C = LRtoC(L,R)
@@ -85,7 +109,7 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     AL, C, AR, FL, FR
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int, info)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int, U1info)
     env = load(chkp_file)["env"]
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
@@ -102,14 +126,14 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::St
     AL, C, AR, FL, FR
 end
 
-function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, show_every = Inf)
+function vumps(rt::VUMPSRuntime, VUMPS)
     # initialize
     olderror = Inf
-    vumps_counting = show_every_count(show_every)
+    vumps_counting = show_every_count(VUMPS.show_every)
 
-    stopfun = StopFunction(olderror, -1, tol, maxiter, miniter)
+    stopfun = StopFunction(olderror, -1, VUMPS.tol, VUMPS.maxiter, VUMPS.miniter)
     rt, err = fixedpoint(res -> vumpstep(res...;show_counting=vumps_counting), (rt, olderror), stopfun)
-    verbose && println("vumps done@step: $(stopfun.counter), error=$(err)")
+    VUMPS.verbose && println("vumps done@step: $(stopfun.counter), error=$(err)")
     return rt, err
 end
 
@@ -135,7 +159,7 @@ function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf))
     # erroverlap = error(AL, C, AR, FL, M, FR)
     # err = erroverlap + errL + errR
     err = errL + errR
-    err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR, erroverlap=$erroverlap")
+    # err > 1e-8 && temp >= 10 && println("errL=$errL, errR=$errR, erroverlap=$erroverlap")
     return SquareVUMPSRuntime(M, AL, C, AR, FL, FR), err
 end
 
@@ -156,31 +180,31 @@ function uptodown(i,Ni,Nj)
 end
 
 """
-    env = vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf)
+    env = vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, U1infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf)
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
 """
-function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, info, savetol)
-    verbose && (direction == "up" ? print("↑ ") : print("↓ "))
+function vumps_env(M::AbstractArray, VUMPS; direction::String)
+    VUMPS.verbose && (direction == "up" ? print("↑ ") : print("↓ "))
     directionori = direction
-    downfromup && direction == "down" && (direction = "up")
+    VUMPS.downfromup && direction == "down" && (direction = "up")
 
     D = size(M[1,1],1)
-    savefile && mkpath(outfolder)
-    in_chkp_file = infolder*"/$(direction)_D$(D)_χ$(χ).jld2"
+    VUMPS.savefile && mkpath(VUMPS.outfolder)
+    in_chkp_file = VUMPS.infolder*"/$(direction)_D$(D)_χ$(VUMPS.χ).jld2"
 
     if isfile(in_chkp_file)                               
-        rtup = SquareVUMPSRuntime(M, in_chkp_file, χ; verbose = verbose)   
+        rtup = SquareVUMPSRuntime(M, in_chkp_file, VUMPS.χ; verbose = VUMPS.verbose)   
     else
-        rtup = SquareVUMPSRuntime(M, Val(:random), χ; verbose = verbose, info = info)
+        rtup = SquareVUMPSRuntime(M, Val(:random), VUMPS.χ; verbose = VUMPS.verbose, U1info = VUMPS.U1info)
     end
-    env, err = vumps(rtup; tol=tol, maxiter=maxiter, miniter=miniter, verbose = verbose, show_every = show_every)
+    env, err = vumps(rtup, VUMPS)
 
-    Zygote.@ignore savefile && err < savetol && begin
-        out_chkp_file = outfolder*"/$(direction)_D$(D)_χ$(χ).jld2"
+    Zygote.@ignore VUMPS.savefile && err < VUMPS.savetol && begin
+        out_chkp_file = VUMPS.outfolder*"/$(direction)_D$(D)_χ$(VUMPS.χ).jld2"
         ALs, Cs, ARs, FLs, FRs = map(x -> map(Array, x), [env.AL, env.C, env.AR, env.FL, env.FR])
         envsave = SquareVUMPSRuntime(M, ALs, Cs, ARs, FLs, FRs)
-        out_chkp_file = outfolder*"/$(directionori)_D$(D)_χ$(χ).jld2"
+        out_chkp_file = VUMPS.outfolder*"/$(directionori)_D$(D)_χ$(VUMPS.χ).jld2"
         save(out_chkp_file, "env", envsave)
     end
     env, err
@@ -189,22 +213,23 @@ end
 conjM(M::U1Array) = U1Array(map(x->x .* [-1,1,-1,1], M.qn), M.dir .* [1,-1,1,-1], map(conj, M.tensor), M.size, M.dims, M.division)
 
 conjM(M::AbstractArray) = conj(M)
+
 """
-    M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR = obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf)
+    M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR = obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, U1infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf)
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, info=nothing, savetol=1e-5)
+function obs_env(M::AbstractArray, VUMPS)
     M /= norm(M)
     Random.seed!(100)
-    envup, errup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, info = info, savetol=savetol)
+    envup, errup = vumps_env(M, VUMPS; direction="up")
     ALu,ARu,Cu = envup.AL,envup.AR,envup.C
 
     D = size(M[1,1],1)
     atype = _arraytype(M[1,1])
-    in_chkp_file_obs = infolder*"/obs_D$(D)_χ$(χ).jld2"
+    in_chkp_file_obs = VUMPS.infolder*"/obs_D$(D)_χ$(VUMPS.χ).jld2"
     if isfile(in_chkp_file_obs)   
-        verbose && println("←→ observable $(getsymmetry(M[1])) symmetry environment load from $(in_chkp_file_obs)")
+        VUMPS.verbose && println("←→ observable $(getsymmetry(M[1])) symmetry environment load from $(in_chkp_file_obs)")
         FL, FR = load(in_chkp_file_obs)["env"]
         Zygote.@ignore begin
             FL, FR = Array{atype{ComplexF64, 3}, 2}(FL), Array{atype{ComplexF64, 3}, 2}(FR)
@@ -217,13 +242,13 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         FL, FR = envup.FL, envup.FR
     end
 
-    if updown 
+    if VUMPS.updown 
         Ni, Nj = size(ALu)
         Md = [permutedims(M[uptodown(i,Ni,Nj)], (1,4,3,2)) for i = 1:Ni*Nj]
         Md = reshape(conj(Md), Ni, Nj)
 
         Random.seed!(100)
-        envdown, errdown = vumps_env(Md; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder, outfolder=outfolder, direction="down", downfromup=downfromup, show_every = show_every, info = info, savetol=savetol)
+        envdown, errdown = vumps_env(Md, VUMPS; direction="down")
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu
@@ -231,10 +256,10 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
 
     _, FL = leftenv(ALu, conj(ALd), M, FL; ifobs=true)
     _, FR = rightenv(ARu, conj(ARd), M, FR; ifobs=true)
-    Zygote.@ignore savefile && (errup + errdown < savetol) && begin
-        out_chkp_file_obs = outfolder*"/obs_D$(D)_χ$(χ).jld2"
+    Zygote.@ignore VUMPS.savefile && (errup + errdown < VUMPS.savetol) && begin
+        out_chkp_file_obs = VUMPS.outfolder*"/obs_D$(D)_χ$(VUMPS.χ).jld2"
         FLs, FRs = map(x->map(Array, x), [FL, FR])
         save(out_chkp_file_obs, "env", (FLs, FRs))
     end
-    return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
+    return SquareVUMPSEnv(M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR)
 end

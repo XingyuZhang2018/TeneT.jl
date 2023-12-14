@@ -32,7 +32,7 @@ getsymmetry(::U1Array) = :U1
 
 getdir(::AbstractArray) = nothing
 
-randinitial(SD::SymmetricType, a...; kwarg...) = randinitial(SD.symmetry, SD.stype, SD.atype, SD.dtype, a...; kwarg...)
+randinitial(ST::SymmetricType, a...; kwarg...) = randinitial(ST.symmetry, ST.stype, ST.atype, ST.dtype, a...; kwarg...)
 randinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(rand(dtype, a...))
 randinitial(::Val{:none}, sitetype::AbstractSiteType, atype, dtype, a...; kwarg...) = atype(rand(dtype, a...))
 randinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = randU1(atype, dtype, a...; kwarg...)
@@ -43,7 +43,7 @@ function randinitial(A::AbstractArray{T, N}, a...; kwarg...) where {T, N}
     randinitial(Val(getsymmetry(A)), atype, T, a...; ifZ2=A.ifZ2, kwarg...)
 end
 
-Iinitial(SD::SymmetricType, a...; kwarg...) = Iinitial(SD.symmetry, SD.stype, SD.atype, SD.dtype, a...; kwarg...)
+Iinitial(ST::SymmetricType, a...; kwarg...) = Iinitial(ST.symmetry, ST.stype, ST.atype, ST.dtype, a...; kwarg...)
 Iinitial(::Val{:none}, atype, dtype, D; kwarg...) = atype{dtype}(I, D, D)
 Iinitial(::Val{:none}, sitetype::AbstractSiteType, atype, dtype, D; kwarg...) = atype{dtype}(I, D, D)
 Iinitial(::Val{:U1}, atype, dtype, D; kwarg...) = IU1(atype, dtype, D; kwarg...)
@@ -54,6 +54,7 @@ function Iinitial(A::AbstractArray{T, N}, D; kwarg...) where {T, N}
     Iinitial(Val(getsymmetry(A)), atype, ComplexF64, D; ifZ2=A.ifZ2, kwarg...)
 end
 
+zerosinitial(ST::SymmetricType, a...; kwarg...) = zerosinitial(ST.symmetry, ST.stype, ST.atype, ST.dtype, a...; kwarg...)
 zerosinitial(::Val{:none}, atype, dtype, a...; kwarg...) = atype(zeros(dtype, a...))
 zerosinitial(::Val{:U1}, atype, dtype, a...; kwarg...) = zerosU1(atype, dtype, a...; kwarg...)
 
@@ -73,6 +74,7 @@ now supports:
     `:Z2`
     `:U1`
 """
+asSymmetryArray(A::AbstractArray, ST; kwarg...) = asSymmetryArray(A, ST.symmetry, ST.stype; kwarg...)
 asSymmetryArray(A::AbstractArray, ::Val{:none}; kwarg...) = A
 asSymmetryArray(A::AbstractArray, ::Val{:U1}, sitetype::AbstractSiteType;  kwarg...) = asU1Array(sitetype, A; kwarg...)
 

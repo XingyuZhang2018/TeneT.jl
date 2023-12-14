@@ -8,6 +8,7 @@ using SparseArrays
 using Random
 using Test
 using BenchmarkTools
+using Parameters
 CUDA.allowscalar(false)
 
 @testset "indextoqn and getblockdims" begin

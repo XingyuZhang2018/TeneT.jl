@@ -91,21 +91,21 @@ function ρmap(ρ,Ai,J)
     return ρ
 end
 
-function initialA(M, χ; info = nothing)
+function initialA(M, χ; U1info)
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
     A = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
-    if info === nothing
+    if atype != U1Array
         for j in 1:Nj, i in 1:Ni
             D = size(M[i,j], 4)
             A[i,j] = atype == Array ? rand(ComplexF64, χ,D,χ) : CUDA.rand(ComplexF64, χ,D,χ)
         end
     else
-        indD, indχ, dimsD, dimsχ = info
+        qnD, qnχ, dimsD, dimsχ = U1info
         for j in 1:Nj, i in 1:Ni
             D = size(M[i,j], 4)
             # A[i,j] = randinitial(M[1,1], D,D,D; dir = [-1, 1, 1]) # ordinary random initial
-            indqn = [indχ, indD, indD, indχ]
+            indqn = [qnχ, qnD, qnD, qnχ]
             indims = [dimsχ, dimsD, dimsD, dimsχ]
             A[i,j] = symmetryreshape(randinitial(M[1,1], χ, Int(sqrt(D)), Int(sqrt(D)), χ; 
             dir = [-1, -1, 1, 1], indqn = indqn, indims = indims
@@ -116,21 +116,21 @@ function initialA(M, χ; info = nothing)
     return A
 end
 
-function cellones(A; info = nothing)
+function cellones(A; U1info)
     Ni, Nj = size(A)
     χ = size(A[1,1],1)
     atype = _arraytype(A[1,1])
     Cell = Array{atype, 2}(undef, Ni, Nj)
-    if info === nothing
+    if atype != U1Array
         for j = 1:Nj, i = 1:Ni
             Cell[i,j] = atype{ComplexF64}(I, χ, χ)
         end
     else
-        _, indχ, _, dimsχ = info
+        _, qnχ, _, dimsχ = U1info
         dir = getdir(A[1,1])[[1,3]]
         for k = 1:Ni*Nj
             i, j = ktoij(k, Ni, Nj)
-            Cell[i,j] = Iinitial(A[1,1], χ; dir = dir, indqn = [indχ, indχ], indims = [dimsχ, dimsχ])
+            Cell[i,j] = Iinitial(A[1,1], χ; dir = dir, indqn = [qnχ, qnχ], indims = [dimsχ, dimsχ])
         end
     end
     return Cell
@@ -284,20 +284,20 @@ function FRmap(ARui, ARdir, Mi, FRi)
     circshift(FRij, -1)
 end
 
-function FLint(AL, M; info = nothing)
+function FLint(AL, M; U1info)
     Ni,Nj = size(AL)
     χ = size(AL[1],1)
     atype = _arraytype(AL[1])
     FL = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
-    if info === nothing
+    if atype != U1Array
         for j in 1:Nj, i in 1:Ni
             D = size(M[i,j], 1)
             FL[i,j] = atype == Array ? rand(ComplexF64, χ, D, χ) : CUDA.rand(ComplexF64, χ, D, χ)
         end
     else
-        indD, indχ, dimsD, dimsχ = info
+        qnD, qnχ, dimsD, dimsχ = U1info
         dir = [1, getdir(M[1])[1], -getdir(M[1])[1], -1]
-        indqn = [indχ, indD, indD, indχ]
+        indqn = [qnχ, qnD, qnD, qnχ]
         indims = [dimsχ, dimsD, dimsD, dimsχ]
         for j in 1:Nj, i in 1:Ni
             D = size(M[i,j], 1)
@@ -310,23 +310,23 @@ function FLint(AL, M; info = nothing)
     return FL
 end
 
-function FRint(AR, M; info = nothing)
+function FRint(AR, M; U1info)
     Ni,Nj = size(AR)
     χ = size(AR[1],3)
     atype = _arraytype(AR[1])
     FR = Array{atype{ComplexF64, 3}, 2}(undef, Ni, Nj)
 
-    if info === nothing
+    if atype != U1Array
         for j in 1:Nj, i in 1:Ni
             D = size(M[i,j], 3)
             FR[i,j] = atype == Array ? rand(ComplexF64, χ, D, χ) : CUDA.rand(ComplexF64, χ, D, χ)
         end
     else
-        indD, indχ, dimsD, dimsχ = info
+        qnD, qnχ, dimsD, dimsχ = U1info
         dir = nothing
         typeof(AR[1]) <: U1Array && (dir = [-1, getdir(M[1])[3], -getdir(M[1])[3], 1])
         # [randinitial(AR[i,j], χ,D,χ; dir = [-1,-1,1]) for i=1:Ni, j=1:Nj]
-        indqn = [indχ, indD, indD, indχ]
+        indqn = [qnχ, qnD, qnD, qnχ]
         indims = [dimsχ, dimsD, dimsD, dimsχ]
         for j in 1:Nj, i in 1:Ni
             D = size(M[i,j], 3)
