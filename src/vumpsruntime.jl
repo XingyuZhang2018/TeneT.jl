@@ -91,10 +91,10 @@ true
 ```
 "
 function SquareVUMPSRuntime(M::AbstractArray{<:AbstractArray,2}, env, χ::Int; verbose=false, U1info = nothing)
-    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ, U1info)...)
+    return SquareVUMPSRuntime(M, _initializect_square(M, env, χ, U1info, verbose)...)
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, U1info)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:random}, χ::Int, U1info, verbose)
     A = initialA(M, χ; U1info = U1info)
     L = cellones(A; U1info = U1info)
     AL, L = leftorth(A, L)
@@ -105,15 +105,15 @@ function _initializect_square(M::AbstractArray{<:AbstractArray,2}, env::Val{:ran
     _, FR = rightenv(AR, conj(AR), M, FR)
     C = LRtoC(L,R)
     Ni, Nj = size(M)
-    print("random initial $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry vumps_χ$(χ) environment-> ")
+    verbose && print("random initial $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry vumps_χ$(χ) environment-> ")
     AL, C, AR, FL, FR
 end
 
-function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int, U1info)
+function _initializect_square(M::AbstractArray{<:AbstractArray,2}, chkp_file::String, χ::Int, U1info, verbose)
     env = load(chkp_file)["env"]
     Ni, Nj = size(M)
     atype = _arraytype(M[1,1])
-    print("vumps $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry environment load from $(chkp_file) -> ")   
+    verbose && print("vumps $(Ni)×$(Nj) $(getsymmetry(M[1])) symmetry environment load from $(chkp_file) -> ")   
     AL, C, AR, FL, FR = env.AL, env.C, env.AR, env.FL, env.FR
     Zygote.@ignore begin
         AL, AR, FL, FR = map(Array{atype{ComplexF64, 3}, 2}, [env.AL, env.AR, env.FL, env.FR])
