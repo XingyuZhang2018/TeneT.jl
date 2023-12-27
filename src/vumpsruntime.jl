@@ -190,7 +190,7 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         Md = Zygote.Buffer(M)
         @inbounds @views for j in 1:Nj, i in 1:Ni
             ir = Ni + 1 - i 
-            Md[:,:,:,:,i,j] = permutedims(M[:,:,:,:,ir,j], (1,4,3,2))
+            Md[:,:,:,:,i,j] = permutedims(conj(M[:,:,:,:,ir,j]), (1,4,3,2))
         end
         Md = copy(Md)
         
@@ -201,8 +201,8 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         errdown = errup
     end
 
-    _, FL =  leftenv(ALu, ALd, M; ifobs = true)
-    _, FR = rightenv(ARu, ARd, M; ifobs = true)
+    _, FL =  leftenv(ALu, conj(ALd), M; ifobs = true)
+    _, FR = rightenv(ARu, conj(ARd), M; ifobs = true)
     Zygote.@ignore savefile &&  (errup + errdown < savetol) && begin
         out_chkp_file_obs = joinpath(outfolder, "obs_D$(D)_χ$(χ).jld2")
         envsave = (Array(FL), Array(FR))
