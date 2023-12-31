@@ -252,6 +252,7 @@ function obs_env(M::AbstractArray, VUMPS)
         ALd, ARd, Cd = envdown.AL, envdown.AR, envdown.C
     else
         ALd, ARd, Cd = ALu, ARu, Cu
+        errdown = errup
     end
 
     _, FL = leftenv(ALu, conj(ALd), M, FL; ifobs=true)
