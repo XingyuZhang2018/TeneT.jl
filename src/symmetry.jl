@@ -76,6 +76,7 @@ now supports:
 """
 asSymmetryArray(A::AbstractArray, ST; kwarg...) = asSymmetryArray(A, ST.symmetry, ST.stype; kwarg...)
 asSymmetryArray(A::AbstractArray, ::Val{:none}; kwarg...) = A
+asSymmetryArray(A::AbstractArray, ::Val{:none}, sitetype::AbstractSiteType; kwarg...) = A
 asSymmetryArray(A::AbstractArray, ::Val{:U1}, sitetype::AbstractSiteType;  kwarg...) = asU1Array(sitetype, A; kwarg...)
 
 symmetryreshape(A::AbstractArray, s...; kwarg...) = reshape(A, s...), nothing

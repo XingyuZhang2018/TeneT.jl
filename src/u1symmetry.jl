@@ -46,6 +46,8 @@ norm(A::U1Array) = norm(A.tensor)
 *(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor * B, A.size, A.dims, A.division, A.ifZ2)
 *(B::Number, A::U1Array) = A * B
 /(A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor / B, A.size, A.dims, A.division, A.ifZ2)
+/(A::Number, B::U1Array) = U1Array(B.qn, B.dir, A / B.tensor, B.size, B.dims, B.division, B.ifZ2)
+
 broadcasted(*, A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
 broadcasted(*, B::Number, A::U1Array) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
 broadcasted(/, A::U1Array, B::Number) = A / B
@@ -84,11 +86,47 @@ function +(A::U1Array, B::U1Array)
 end
 
 function -(A::U1Array, B::U1Array)
-    @assert A.qn == B.qn
-    U1Array(A.qn, A.dir, A.tensor - B.tensor, A.size, A.dims, A.division, A.ifZ2)
+    if B.qn == A.qn
+        U1Array(A.qn, A.dir, A.tensor - B.tensor, A.size, A.dims, A.division, A.ifZ2)
+    else
+        Aqn, Adims, Atensor = A.qn, A.dims, A.tensor
+        Bqn, Bdims, Btensor = B.qn, B.dims, B.tensor
+        Abdiv = blockdiv(Adims)
+        Bbdiv = blockdiv(Bdims)
+        qn = intersect(Aqn, Bqn)
+        tensor = Atensor[vcat(Abdiv[indexin(qn, Aqn)]...)] - Btensor[vcat(Bbdiv[indexin(qn, Bqn)]...)]
+        dims = A.dims[indexin(qn, Aqn)]
+        extraqn = setdiff(Aqn, Bqn)            # setdiff result is dependent on order
+        if length(extraqn) !== 0
+            push!(qn, extraqn...)
+            extraind = indexin(extraqn, Aqn) 
+            push!(dims, Adims[extraind]...)
+            tensor = [tensor; Atensor[vcat(Abdiv[extraind]...)]]
+        end
+        extraqn = setdiff(Bqn, Aqn)
+        if length(extraqn) !== 0
+            push!(qn, extraqn...)
+            extraind = indexin(extraqn, Bqn)
+            push!(dims, Bdims[extraind]...)
+            tensor = [tensor; -Btensor[vcat(Bbdiv[extraind]...)]]
+        end
+
+        p = sortperm(qn)
+        bdiv = blockdiv(dims)
+        tensor = tensor[vcat(bdiv[p]...)]
+        U1Array(qn[p], A.dir, tensor, A.size, dims[p], A.division, A.ifZ2)
+    end
 end
 
+# function -(A::U1Array, B::U1Array)
+#     @assert A.qn == B.qn
+#     U1Array(A.qn, A.dir, A.tensor - B.tensor, A.size, A.dims, A.division, A.ifZ2)
+# end
+
 -(A::U1Array) = U1Array(A.qn, A.dir, -A.tensor, A.size, A.dims, A.division, A.ifZ2)
+
+CuArray{T}(A::U1Array) where {T} = U1Array(A.qn, A.dir, CuArray{T}(A.tensor), A.size, A.dims, A.division, A.ifZ2)
+Array{T}(A::U1Array) where {T} = U1Array(A.qn, A.dir, Array{T}(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 
 CuArray(A::U1Array) = U1Array(A.qn, A.dir, CuArray(A.tensor), A.size, A.dims, A.division, A.ifZ2)
 Array(A::U1Array) = U1Array(A.qn, A.dir, Array(A.tensor), A.size, A.dims, A.division, A.ifZ2)
@@ -330,7 +368,7 @@ function asU1Array(sitetype, A::AbstractArray{T,N}; dir::Vector{Int}, indqn::Vec
     tensor = [atype(Aarray[[qlist[j][indexin([Aqn[i][j]], indqn[j])...] for j = 1:N]...]) for i in 1:length(Aqn)]
     dims = map(x -> collect(size(x)), tensor)
     nozeroind = norm.(tensor) .!= 0
-    tensor = vcat(map(vec, tensor[nozeroind])...)
+    tensor = atype{T}(vcat(map(vec, tensor[nozeroind])...))
     U1Array(Aqn[nozeroind], dir, tensor, size(A), dims[nozeroind], 1, sitetype.ifZ2)
 end
 
@@ -348,7 +386,7 @@ function tensorpermute(A::U1Array{T, N}, perm) where {T <: Number, N}
     qn = map(x -> x[collect(perm)], A.qn)
     p = sortperm(qn)
     div = blockdiv(dims)
-    tensor = vcat([vec(permutedims(reshape(@view(A.tensor[div[i]]), dims[i]...), perm)) for i in 1:length(div)][p]...)
+    tensor = _arraytype(A.tensor){T}(vcat([vec(permutedims(reshape(@view(A.tensor[div[i]]), dims[i]...), perm)) for i in 1:length(div)][p]...))
     dims = map(x -> x[collect(perm)], dims)
     U1Array(qn[p], A.dir[collect(perm)], tensor, A.size[collect(perm)], dims[p], A.division, A.ifZ2)
 end
@@ -386,9 +424,9 @@ function *(A::U1Array{T, NA}, B::U1Array{T, NB}) where {T, NA, NB}
     Atensor = [reshape(@view(A.tensor[Abdiv[i]]), prod(Adims[i][1:Adiv]), prod(Adims[i][Adiv+1:end])) for i in 1:length(Abdiv)]
     Btensor = [reshape(@view(B.tensor[Bbdiv[i]]), prod(Bdims[i][1:Bdiv]), prod(Bdims[i][Bdiv+1:end])) for i in 1:length(Bbdiv)]
     
-    timesAdir = getdir(A)[Adiv+1:end]
-    timesBdir = getdir(B)[1:Bdiv]
-    sum(timesAdir .+ timesBdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-timesAdir), got: $(timesBdir)"))
+    # timesAdir = getdir(A)[Adiv+1:end]
+    # timesBdir = getdir(B)[1:Bdiv]
+    # sum(timesAdir .+ timesBdir) !== 0 && throw(Base.error("U1Array product: out and in direction not match, expect: $(-timesAdir), got: $(timesBdir)"))
 
     qs = A.ifZ2 ? map(qn -> sum(qn[Adiv+1:end]) % 2, Aqn) : map(qn -> sum(qn[Adiv+1:end] .* A.dir[Adiv+1:end]), Aqn)
     for q in unique!(qs)
