@@ -51,6 +51,7 @@ norm(A::U1Array) = norm(A.tensor)
 broadcasted(*, A::U1Array, B::Number) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
 broadcasted(*, B::Number, A::U1Array) = U1Array(A.qn, A.dir, A.tensor .* B, A.size, A.dims, A.division, A.ifZ2)
 broadcasted(/, A::U1Array, B::Number) = A / B
+broadcasted(/, A::Number, B::U1Array) = U1Array(B.qn, B.dir, A ./ B.tensor, B.size, B.dims, B.division, B.ifZ2)
 
 function +(A::U1Array, B::U1Array)
     if B.qn == A.qn
