@@ -96,7 +96,7 @@ function _initializect_square(M::AbstractArray, chkp_file::String, χ::Int; verb
     AL, C, AR, FL, FR
 end
 
-function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, show_every = Inf, finalize!)
+function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, show_every = Inf, finalize! = _finalize!)
     # initialize
     olderror = Inf
     vumps_counting = show_every_count(show_every)
@@ -115,7 +115,7 @@ end
 
 _finalize!(rt::VUMPSRuntime) = temp, err, rt
 
-function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf), finalize!)
+function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf), finalize! = _finalize!)
     temp = show_counting()
     temp != 0 && println("vumps@step: $(temp), error=$(err)")
     M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
@@ -140,7 +140,7 @@ end
 
 sometimes the finally observable is symetric, so we can use the same up and down environment. 
 """
-function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, savetol = 1e-5, finalize!)
+function vumps_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose = false, savefile = false, infolder::String="./data/", outfolder::String="./data/", direction::String= "up", downfromup = false, show_every = Inf, savetol = 1e-5, finalize! = _finalize!)
     verbose && (direction == "up" ? print("↑ ") : print("↓ "))
     downfromup && direction == "down" && (direction = "up")
     
