@@ -96,6 +96,8 @@ function _initializect_square(M::AbstractArray, chkp_file::String, χ::Int; verb
     AL, C, AR, FL, FR
 end
 
+_finalize!(temp, err, rt::VUMPSRuntime) = temp, err, rt
+
 function vumps(rt::VUMPSRuntime; tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, show_every = Inf, finalize! = _finalize!)
     # initialize
     olderror = Inf
@@ -112,8 +114,6 @@ function show_every_count(n::Number)
     counting() = (i += 1; mod(i,n)==0 ? i : 0)
     return counting
 end
-
-_finalize!(rt::VUMPSRuntime) = temp, err, rt
 
 function vumpstep(rt::VUMPSRuntime, err; show_counting = show_every_count(Inf), finalize! = _finalize!)
     temp = show_counting()
