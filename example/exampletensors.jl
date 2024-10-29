@@ -10,7 +10,7 @@ abstract type HamiltonianModel end
 struct Ising <: HamiltonianModel 
     Ni::Int
     Nj::Int
-    β::Float64
+    β
 end
 
 """
@@ -21,10 +21,10 @@ square lattice tensor-network.
 """
 function model_tensor(model::Ising, ::Val{:bulk})
     Ni, Nj, β = model.Ni, model.Nj, model.β
-    ham = Zygote.@ignore ComplexF64[-1. 1;1 -1]
-    w = exp.(- β * ham)
-    wsq = sqrt(w)
-    m = ein"ia,ib,ic,id -> abcd"(wsq, wsq, wsq, wsq)
+    a = reshape(ComplexF64[1 0 0 0; 0 0 0 0; 0 0 0 0; 0 0 0 1], 2,2,2,2)
+    cβ, sβ = sqrt(cosh(β)), sqrt(sinh(β))
+    q = 1/sqrt(2) * [cβ+sβ cβ-sβ; cβ-sβ cβ+sβ]
+    m = ein"abcd,ai,bj,ck,dl -> ijkl"(a,q,q,q,q)
 
     M = Zygote.Buffer(m, 2,2,2,2,Ni,Nj)
     @inbounds @views for j = 1:Nj,i = 1:Ni

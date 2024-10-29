@@ -337,3 +337,16 @@ function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
     end
     return (λC, C), back
 end
+
+function ChainRulesCore.frule((ΔALu, ΔALd, ΔM, _), ::typeof(leftenv), ALu, ALd, M, FL; ifobs = false, kwargs...)
+    λL, FL = leftenv(ALu, ALd, M, FL; ifobs = ifobs, kwargs...)
+    Ni = size(M, 5)
+    @inbounds for i = 1:Ni
+        ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
+        
+        ΔFL, info = linsolve(X -> ξLmap(ALu[:,:,:,i,:], ALd[:,:,:,ir,:], M[:,:,:,:,i,:], X), conj(dFL[:,:,:,i,:]), -λL[i], 1; maxiter = 100)
+        info.converged == 0 && @warn "ad's linsolve not converge"
+        ΔFL .= circshift(ΔFL, (0,0,0,-1))
+    end
+    return (λL, FL), (NoTangent(), ΔFL)
+end

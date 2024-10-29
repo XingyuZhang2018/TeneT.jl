@@ -166,7 +166,11 @@ end
 
 If `Ni,Nj>1` and `Mij` are different bulk tensor, the up and down environment are different. So to calculate observable, we must get ACup and ACdown, which is easy to get by overturning the `Mij`. Then be cautious to get the new `FL` and `FR` environment.
 """
-function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, savetol = 1e-5)
+function obs_env(M::AbstractArray{T, 4}; kwargs...) where T
+    obs_env(reshape(M, (size(M)...,1,1) ); kwargs...)
+end
+
+function obs_env(M::AbstractArray{T, 6}; χ::Int, tol::Real=1e-10, maxiter::Int=10, miniter::Int=1, verbose=false, savefile= false, infolder::String="./data/", outfolder::String="./data/", updown = true, downfromup = false, show_every = Inf, savetol = 1e-5) where T
     M = _arraytype(M){ComplexF64}(M)
     M /= norm(M)
     envup, errup = vumps_env(M; χ=χ, tol=tol, maxiter=maxiter, miniter=miniter, verbose=verbose, savefile=savefile, infolder=infolder,outfolder=outfolder, direction="up", downfromup=downfromup, show_every = show_every, savetol = savetol)
@@ -209,5 +213,43 @@ function obs_env(M::AbstractArray; χ::Int, tol::Real=1e-10, maxiter::Int=10, mi
         save(out_chkp_file_obs, "env", envsave)
     end
     return M, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, envup.FL, envup.FR
+end
+
+# function fixedpointmap(rt)
+#     M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
+#     AC = Zygote.@ignore ALCtoAC(AL,C)
+#     _, ACp = ACenv(AC, FL, M, FR)
+#     _, Cp = Cenv(C, FL, FR)
+#     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
+#     _, FL = leftenv(AL, conj(ALp), M, FL)
+#     _, FR = rightenv(AR, conj(ARp), M, FR)
+#     _, ACp = ACenv(ACp, FL, M, FR)
+#     _, Cp = Cenv(Cp, FL, FR)
+#     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
+#     return SquareVUMPSRuntime(M, ALp, Cp, ARp, FL, FR)
+# end
+
+function fixedpointmap(rt; verbose = false)
+    M, AL, C, AR, FL, FR = rt.M, rt.AL, rt.C, rt.AR, rt.FL, rt.FR
+    _, FL = leftenv(AL, conj(AL), M, FL)
+    _, FR = rightenv(AR, conj(AR), M, FR)
+    AC = Zygote.@ignore ALCtoAC(AL,C)
+    _, AC = ACenv(AC, FL, M, FR)
+    _, C = Cenv(C, FL, FR)
+    AL, AR, errL, errR = ACCtoALAR(AC, C)
+    verbose && println("errL=$errL, errR=$errR")
+    return SquareVUMPSRuntime(M, AL, C, AR, FL, FR)
+end
+
+function fixedpointmap(ACC, M; verbose = false)
+    AC, C = ACC
+    AL, AR, errL, errR = ACCtoALAR(AC, C)
+    verbose && println("errL=$errL, errR=$errR")
+    _, FL = leftenv(AL, conj(AL), M)
+    _, FR = rightenv(AR, conj(AR), M)
+    AC = Zygote.@ignore ALCtoAC(AL,C)
+    _, AC = ACenv(AC, FL, M, FR)
+    _, C = Cenv(C, FL, FR)
+    return [AC, C], [FL, FR]
 end
 
