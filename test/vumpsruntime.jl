@@ -2,34 +2,88 @@ using CUDA
 using Random
 using Test
 using TeneT
-using TeneT: vumps, vumps_env, env_norm
 
-@testset "$(Ni)x$(Nj) VUMPSRuntime with $atype{$dtype}" for Ni = [1,2,3], Nj = [1,2,3], atype = [Array], dtype = [Float64, ComplexF64]
+@testset "VUMPSRuntime with $atype{$dtype} $Ni x $Nj" for atype = [CuArray], dtype = [ComplexF64], Ni = [1,2,3], Nj = [1,2,3]
     Random.seed!(100)
-    @test SquareLattice <: AbstractLattice
+    D, χ = 2, 10
+    M = [atype(rand(dtype,D,D,D,D)) for i in 1:Ni, j in 1:Nj]
+    rt = CUDA.@time VUMPSRuntime(M, χ)
+    @test rt isa VUMPSRuntime
 
-    M = atype(rand(dtype,2,2,2,2,Ni,Nj))
-    rt = SquareVUMPSRuntime(M, Val(:random), 4)
+    env = VUMPSEnv(rt, M)
+    @test env isa VUMPSEnv
 end
 
-@testset "$(Ni)x$(Nj) vumps with $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array], dtype = [ComplexF64]
+@testset "VUMPSRuntime with $atype{$dtype} $Ni x $Nj" for atype = [Array], dtype = [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)
-    M = atype(rand(dtype,2,2,2,2,Ni,Nj))
-    rt = SquareVUMPSRuntime(M, Val(:random), 2)
-    env = vumps(rt; verbose = true)
-    @test env !== nothing
+    M = Matrix{atype}(undef, Ni, Nj)
+    M[1,1] = atype(rand(dtype,1,2,3,4))
+    M[1,2] = atype(rand(dtype,3,5,1,6))
+    M[2,1] = atype(rand(dtype,7,4,8,2))
+    M[2,2] = atype(rand(dtype,8,6,7,5))
+    rt = VUMPSRuntime(M, 2)
+    @test rt isa VUMPSRuntime
+
+    env = VUMPSEnv(rt, M)
+    @test env isa VUMPSEnv
 end
 
-@testset "$(Ni)x$(Nj) vumps_env with $atype{$dtype}" for Ni = [2], Nj = [2], atype = [Array], dtype = [Float64, ComplexF64]
+@testset "oneside vumps with $atype{$dtype} $Ni x $Nj" for atype = [Array, CuArray], dtype = [ComplexF64], Ni = [1,2,3], Nj = [1,2,3]
     Random.seed!(100)
-    M = atype(rand(dtype,2,2,2,2,Ni,Nj))
-    env = vumps_env(M; χ = 10, verbose = true)
-    @test env !== nothing
+    D, χ = 2, 3
+    M = [atype(rand(dtype,D,D,D,D)) for i in 1:Ni, j in 1:Nj]
+    alg = VUMPS(maxiter=100, verbosity=2, ifupdown=false)
+    rt = VUMPSRuntime(M, χ, alg)
+    rt = leading_boundary(rt, M, alg)
+    @test rt isa VUMPSRuntime
+
+    env = VUMPSEnv(rt, M)
+    @test env isa VUMPSEnv
 end
 
-@testset "$(Ni)x$(Nj) obs_env" for Ni = [2], Nj = [2], atype = [Array], dtype = [Float64, ComplexF64]
+@testset "oneside vumps with $atype{$dtype} $Ni x $Nj" for atype = [Array], dtype = [ComplexF64], Ni = [2], Nj = [2]
     Random.seed!(100)
-    M = atype(rand(dtype,2,2,2,2,Ni,Nj))
-    env = obs_env(M; χ = 10, verbose = true, savefile = true, infolder = "./test/data1/", outfolder = "./test/data2/", show_every = 3)
-    @test env !== nothing
+    χ = 10
+    M = Matrix{atype}(undef, Ni, Nj)
+    M[1,1] = atype(rand(dtype,1,2,3,4))
+    M[1,2] = atype(rand(dtype,3,5,1,6))
+    M[2,1] = atype(rand(dtype,7,4,8,2))
+    M[2,2] = atype(rand(dtype,8,6,7,5))
+    alg = VUMPS(maxiter=100, verbosity=3, show_every=1, ifupdown=false)
+    rt = VUMPSRuntime(M, χ, alg)
+    rt = leading_boundary(rt, M, alg)
+    @test rt isa VUMPSRuntime
+
+    env = VUMPSEnv(rt, M)
+    @test env isa VUMPSEnv
+end
+
+@testset "twoside vumps with $atype{$dtype} $Ni x $Nj" for atype = [Array], dtype = [ComplexF64], Ni = [1,2,3], Nj = [1,2,3]
+    Random.seed!(100)
+    D, χ = 2, 3
+    M = [atype(rand(dtype,D,D,D,D)) for i in 1:Ni, j in 1:Nj]
+    alg = VUMPS(maxiter=100, verbosity=3, ifupdown=true)
+    rt = VUMPSRuntime(M, χ, alg)
+    rt = leading_boundary(rt, M, alg)
+    @test rt isa Tuple{VUMPSRuntime, VUMPSRuntime}
+
+    env = VUMPSEnv(rt, M)
+    @test env isa VUMPSEnv
+end
+
+@testset "oneside vumps with $atype{$dtype} $Ni x $Nj" for atype = [Array], dtype = [ComplexF64], Ni = [2], Nj = [2]
+    Random.seed!(100)
+    D, χ = 2, 3
+    M = Matrix{atype}(undef, Ni, Nj)
+    M[1,1] = atype(rand(dtype,1,2,3,4))
+    M[1,2] = atype(rand(dtype,3,5,1,6))
+    M[2,1] = atype(rand(dtype,7,4,8,2))
+    M[2,2] = atype(rand(dtype,8,6,7,5))
+    alg = VUMPS(maxiter=100, verbosity=2, ifupdown=true)
+    rt = VUMPSRuntime(M, χ, alg)
+    rt = leading_boundary(rt, M, alg)
+    @test rt isa Tuple{VUMPSRuntime, VUMPSRuntime}
+
+    env = VUMPSEnv(rt, M)
+    @test env isa VUMPSEnv
 end

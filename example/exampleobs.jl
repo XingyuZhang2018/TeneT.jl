@@ -1,43 +1,32 @@
-using OMEinsum
-using TeneT: ALCtoAC
 """
     observable(env, model::MT, type)
 
 return the `type` observable of the `model`. Requires that `type` tensor defined in model_tensor(model, Val(:type)).
 """
 function observable(env, model::MT, ::Val{:Z}) where {MT <: HamiltonianModel}
-    _, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, FLu, FRu = env
-    atype = _arraytype(ALu)
-    M   = atype(model_tensor(model, Val(:bulk)))
-    χ,D,Ni,Nj = size(ALu)[[1,2,4,5]]
-    
-    z_tol = 1
-    ACu = ALCtoAC(ALu, Cu)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    atype = _arraytype(ACu[1])
+    Ni,Nj = size(ACu)
+    M   = atype.(model_tensor(model, Val(:bulk)))
+    λFLo, _ =  rightenv(ARu, conj.(ARu), M; ifobs=true)
+      λC, _ = rightCenv(ARu, conj.(ARu);    ifobs=true)
 
-    for j = 1:Nj,i = 1:Ni
-        ir = i + 1 - Ni * (i==Ni)
-        jr = j + 1 - Nj * (j==Nj)
-        z = ein"(((adf,abc),dgeb),ceh),fgh ->"(FLu[:,:,:,i,j],ACu[:,:,:,i,j],M[:,:,:,:,i,j],FRu[:,:,:,i,j],conj(ACu[:,:,:,ir,j]))
-        λ = ein"(acd,ab),(bce,de) ->"(FLu[:,:,:,i,jr],Cu[:,:,i,j],FRu[:,:,:,i,j],conj(Cu[:,:,ir,j]))
-        z_tol *= Array(z)[]/Array(λ)[]
-    end
-    return z_tol^(1/Ni/Nj)
+    return prod(λFLo./λC)^(1/Ni)
 end
 
 function observable(env, model::MT, type) where {MT <: HamiltonianModel}
-    _, ALu, Cu, ARu, ALd, Cd, ARd, FL, FR, FLu, FRu = env
-    χ,D,Ni,Nj = size(ALu)[[1,2,4,5]]
-    atype = _arraytype(ALu)
-    M     = atype(model_tensor(model, Val(:bulk)))
-    M_obs = atype(model_tensor(model, type      ))
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    Ni,Nj = size(ACu)
+    atype = _arraytype(ACu[1])
+    M     = atype.(model_tensor(model, Val(:bulk)))
+    M_obs = atype.(model_tensor(model, type      ))
     obs_tol = 0
-    ACu = ALCtoAC(ALu, Cu)
-    ACd = ALCtoAC(ALd, Cd)
 
     for j = 1:Nj,i = 1:Ni
         ir = Ni + 1 - i
-        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M_obs[:,:,:,:,i,j],ACd[:,:,:,ir,j],FR[:,:,:,i,j])
-        λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FL[:,:,:,i,j],ACu[:,:,:,i,j],M[:,:,:,:,i,j],ACd[:,:,:,ir,j],FR[:,:,:,i,j])
+        # ir = mod1(i + 1, Ni)
+        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],conj(ACd[ir,j]),FRo[i,j])
+          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],conj(ACd[ir,j]),FRo[i,j])
         obs_tol += Array(obs)[]/Array(λ)[]
     end
     if type == Val(:mag)

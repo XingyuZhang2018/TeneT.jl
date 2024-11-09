@@ -1,7 +1,8 @@
 using TeneT
-using TeneT: _arraytype
+using TeneT: _arraytype, rightenv, rightCenv
 using OMEinsum
 using Zygote
+using Parameters
 
 const isingβc = log(1+sqrt(2))/2
 
@@ -26,11 +27,7 @@ function model_tensor(model::Ising, ::Val{:bulk})
     wsq = sqrt(w)
     m = ein"ia,ib,ic,id -> abcd"(wsq, wsq, wsq, wsq)
 
-    M = Zygote.Buffer(m, 2,2,2,2,Ni,Nj)
-    @inbounds @views for j = 1:Nj,i = 1:Ni
-        M[:,:,:,:,i,j] = m
-    end
-    return copy(M)
+    return [m for _ = 1:Ni, _ = 1:Nj]
 end
 
 function model_tensor(model::Ising, ::Val{:mag})
@@ -39,11 +36,7 @@ function model_tensor(model::Ising, ::Val{:mag})
     cβ, sβ = sqrt(cosh(β)), sqrt(sinh(β))
     q = 1/sqrt(2) * [cβ+sβ cβ-sβ; cβ-sβ cβ+sβ]
     m = ein"abcd,ai,bj,ck,dl -> ijkl"(a,q,q,q,q)
-    M = Zygote.Buffer(m, 2,2,2,2,Ni,Nj)
-    @inbounds @views for j = 1:Nj,i = 1:Ni
-        M[:,:,:,:,i,j] = m
-    end
-    return copy(M)
+    return [m for _ = 1:Ni, _ = 1:Nj]
 end
 
 function model_tensor(model::Ising, ::Val{:energy})
@@ -55,11 +48,7 @@ function model_tensor(model::Ising, ::Val{:energy})
     wsqi = wsq^(-1)
     e = (ein"ai,im,bm,cm,dm -> abcd"(wsqi,we,wsq,wsq,wsq) + ein"am,bi,im,cm,dm -> abcd"(wsq,wsqi,we,wsq,wsq) + 
         ein"am,bm,ci,im,dm -> abcd"(wsq,wsq,wsqi,we,wsq) + ein"am,bm,cm,di,im -> abcd"(wsq,wsq,wsq,wsqi,we)) / 2
-    M = Zygote.Buffer(e, 2,2,2,2,Ni,Nj)
-    @inbounds @views for j = 1:Nj,i = 1:Ni
-        M[:,:,:,:,i,j] = e
-    end
-    return copy(M)
+    return [e for _ = 1:Ni, _ = 1:Nj]
 end
 
 

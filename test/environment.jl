@@ -1,5 +1,5 @@
 using TeneT
-using TeneT:qrpos,lqpos,leftorth,rightorth,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, env_norm
+using TeneT:qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, env_norm
 using CUDA
 using LinearAlgebra
 using Random
@@ -7,7 +7,9 @@ using Test
 using OMEinsum
 CUDA.allowscalar(false)
 
-@testset "qr with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
+test_type = [Array, CuArray]
+
+@testset "qr with $atype{$dtype}" for atype in test_type, dtype in [Float64, ComplexF64]
     Random.seed!(100)
     A = atype(rand(dtype, 4,4))
     Q, R = qrpos(A)
@@ -16,7 +18,7 @@ CUDA.allowscalar(false)
     @test all(imag.(diag(R)) .≈ 0)
 end
 
-@testset "lq with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
+@testset "lq with $atype{$dtype}" for atype in test_type, dtype in [Float64, ComplexF64]
     Random.seed!(100)
     A = atype(rand(dtype, 4,4))
     L, Q = lqpos(A)
@@ -25,56 +27,54 @@ end
     @test all(imag.(diag(L)) .≈ 0)
 end
 
-@testset "leftorth and rightorth with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+@testset "left_canonical and right_canonical with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
     χ, D = 3, 2
-    A = atype(rand(dtype, χ, D, χ, Ni, Nj))
-    AL,  L, λ =  leftorth(A)
-     R, AR, λ = rightorth(A)
+    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    AL,  L, λ =  left_canonical(A)
+     R, AR, λ = right_canonical(A)
      
     for j = 1:Nj,i = 1:Ni
-        M = ein"cda,cdb -> ab"(AL[:,:,:,i,j],conj(AL[:,:,:,i,j]))
-        @test (Array(M) ≈ I(χ))
+        @test Array(ein"cda,cdb -> ab"(AL[i,j],conj(AL[i,j]))) ≈ I(χ)
 
-        LA = reshape(L[:,:,i,j] * reshape(A[:,:,:,i,j], χ, D*χ), D*χ, χ)
-        ALL = reshape(AL[:,:,:,i,j], χ*D, χ) * L[:,:,i,j] * λ[i,j]
+        LA = reshape(L[i,j] * reshape(A[i,j], χ, D*χ), D*χ, χ)
+        ALL = reshape(AL[i,j], χ*D, χ) * L[i,j] * λ[i,j]
         @test (Array(ALL) ≈ Array(LA))
 
-        M = ein"acd,bcd -> ab"(AR[:,:,:,i,j],conj(AR[:,:,:,i,j]))
-        @test (Array(M) ≈ I(χ))
+        @test (Array(ein"acd,bcd -> ab"(AR[i,j],conj(AR[i,j]))) ≈ I(χ))
 
-        AxR = reshape(reshape(A[:,:,:,i,j], D*χ, χ)*R[:,:,i,j], χ, D*χ)
-        RAR = R[:,:,i,j] * reshape(AR[:,:,:,i,j], χ, D*χ) * λ[i,j]
+        AxR = reshape(reshape(A[i,j], D*χ, χ)*R[i,j], χ, D*χ)
+        RAR = R[i,j] * reshape(AR[i,j], χ, D*χ) * λ[i,j]
         @test (Array(RAR) ≈ Array(AxR))
     end
 end
 
-@testset "leftenv and rightenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], ifobs in [false, true], Ni = [3], Nj = [3]
+@testset "leftenv and rightenv with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], ifobs in [false, true], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
     χ, D = 3, 2
-    A = atype(rand(dtype, χ, D, χ, Ni, Nj))
-    M = atype(rand(dtype, D, D, D, D, Ni, Nj))
+    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
 
-    AL,    =  leftorth(A)
+    AL,    =  left_canonical(A)
     λL,FL  =  leftenv(AL, conj(AL), M; ifobs = ifobs)
-    _, AR, = rightorth(A)
+    _, AR, = right_canonical(A)
     λR,FR  = rightenv(AR, conj(AR), M; ifobs = ifobs)
 
     for i in 1:Ni
-        ir = ifobs ? Ni+1-i : i+1-Ni*(i==Ni)
-        @test λL[i] * FL[:,:,:,i,:] ≈ FLmap(AL[:,:,:,i,:], conj(AL[:,:,:,ir,:]), M[:,:,:,:,i,:], FL[:,:,:,i,:])
-        @test λR[i] * FR[:,:,:,i,:] ≈ FRmap(AR[:,:,:,i,:], conj(AR[:,:,:,ir,:]), M[:,:,:,:,i,:], FR[:,:,:,i,:])
+        ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
+        @test λL[i] * FL[i,:] ≈ FLmap(AL[i,:], conj(AL[ir,:]), M[i,:], FL[i,:])
+        @test λR[i] * FR[i,:] ≈ FRmap(AR[i,:], conj(AR[ir,:]), M[i,:], FR[i,:])
     end
 end
 
-@testset "ACenv and Cenv with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+@testset "ACenv and Cenv with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], ifobs in [false, true], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
     χ, D = 3, 2
-    A = atype(rand(dtype, χ, D, χ, Ni, Nj))
-    M = atype(rand(dtype, D, D, D, D, Ni, Nj))
+    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
 
-    AL,  L, _ =  leftorth(A)
-     R, AR, _ = rightorth(A)
+    AL,  L, _ =  left_canonical(A)
+     R, AR, _ = right_canonical(A)
     λL, FL    =  leftenv(AL, conj(AL), M)
     λR, FR    = rightenv(AR, conj(AR), M)
 
@@ -84,21 +84,21 @@ end
     λAC, AC = ACenv(AC, FL, M, FR)
      λC,  C =  Cenv( C, FL,    FR)
 
-    for j in 1:Ni
-        jr = j + 1 - Ni*(j==Ni)
-        @test λAC[j] * AC[:,:,:,:,j] ≈ ACmap(AC[:,:,:,:,j], FL[:,:,:,:,j],  FR[:,:,:,:,j], M[:,:,:,:,:,j])
-        @test  λC[j] *  C[:,:,  :,j] ≈  Cmap( C[:,:,  :,j], FL[:,:,:,:,jr], FR[:,:,:,:,j])
+    for j in 1:Nj
+        jr = mod1(j + 1, Nj)
+        @test λAC[j] * AC[:,j] ≈ ACmap(AC[:,j], FL[:,j],  FR[:,j], M[:,j])
+        @test  λC[j] *  C[:,j] ≈  Cmap( C[:,j], FL[:,jr], FR[:,j])
     end
 end
 
-@testset "bcvumps unit test with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64], Ni = [2], Nj = [2]
+@testset "bcvumps unit test with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], ifobs in [false, true], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
     χ, D = 3, 2
-    A = atype(rand(dtype, χ, D, χ, Ni, Nj))
-    M = atype(rand(dtype, D, D, D, D, Ni, Nj))
+    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
 
-    AL,  L, _ =  leftorth(A)
-     R, AR, _ = rightorth(A)
+    AL,  L, _ =  left_canonical(A)
+     R, AR, _ = right_canonical(A)
     λL, FL    =  leftenv(AL, conj(AL), M)
     λR, FR    = rightenv(AR, conj(AR), M)
 
@@ -107,7 +107,6 @@ end
     
     λAC, AC = ACenv(AC, FL, M, FR)
      λC,  C =  Cenv( C, FL,    FR)
-    AL, AR = ACCtoALAR(AC, C)
-    err = error(AL,C,AR,FL,M,FR)
-    @test err !== nothing
+    AL, AR, errL, errR = ACCtoALAR(AC, C)
+    @test errL + errR !== nothing
 end
