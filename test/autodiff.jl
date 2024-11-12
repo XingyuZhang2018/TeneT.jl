@@ -103,11 +103,10 @@ end
         end
         return s
     end 
-    # @show foo1(M)
     @test Zygote.gradient(foo1, M)[1] ≈ num_grad(foo1, M) atol = 1e-7
 
     function foo2(M)
-        _,FR = rightenv(ARu, conj(ARd), M; ifobs = ifobs)
+        _,FR = rightenv(ARu, conj(ARd), M; ifobs)
         s = 0
         for j in 1:Nj, i in 1:Ni
             A  = Array(ein"(abc,abcdef),def -> "(FR[i,j], S[i,j], FR[i,j]))[]
