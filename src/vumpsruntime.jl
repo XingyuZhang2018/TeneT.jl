@@ -76,10 +76,12 @@ function leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS)
     end
 end
 
-function VUMPSEnv(rt::VUMPSRuntime, ::Matrix)
+function VUMPSEnv(rt::VUMPSRuntime, M::Matrix)
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
-    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FL, FR)
+    _, FLo =  leftenv(AL, conj.(AL), M, FL; ifobs = true)
+    _, FRo = rightenv(AR, conj.(AR), M, FR; ifobs = true)
+    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
 end
 
 function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS)

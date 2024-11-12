@@ -89,6 +89,11 @@ function update!(env::Tuple{VUMPSRuntime, VUMPSRuntime}, env´::Tuple{VUMPSRunti
     return env
 end
 
+function update!(env::VUMPSRuntime, env´::Tuple{VUMPSRuntime, VUMPSRuntime}) 
+    update!(env, env´[1])
+    return env
+end
+
 """
 tensor order graph: from left to right, top to bottom.
 ```

@@ -108,8 +108,23 @@ end
 
 @testset "Array of CuArray" begin
     Random.seed!(100)
-    χ = 1024
-    A = [CuArray(rand(ComplexF64, χ, χ)) for _ in 1:10]
-    @show dot.(A, A)
+    χ = 100
+    A = [CuArray(rand(ComplexF64, χ, χ)) for _ in 1:4]
     @btime CUDA.@sync dot.($A, $A)
+    # A = CuArray(rand(ComplexF64, χ*4, χ))
+    # @btime CUDA.@sync dot($A, $A)
+
+    # A = [CuArray(rand(ComplexF64, χ, χ)) for _ in 1:4]
+    function foo(A)
+        # B = CuArray(zeros(ComplexF64, 4*χ*χ))
+        # B[1:χ^2] .= vec(A[1])
+        # B[χ^2+1:2*χ^2] .= vec(A[2])
+        # B[2χ^2+1:3*χ^2] .= vec(A[3])
+        # B[3*χ^2+1:4*χ^2] .= vec(A[4])
+        # return dot(B, B)
+        for i in 1:4
+            dot(Array(A[i]), Array(A[i]))
+        end
+    end
+    @btime CUDA.@sync $foo($A)
 end

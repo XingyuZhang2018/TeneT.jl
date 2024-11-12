@@ -6,7 +6,7 @@ module Defaults
     const VERBOSE_ALL = 4
 
     const verbosity = VERBOSE_WARN
-    const maxiter = 3
+    const maxiter = 10
     const miniter = 3
     const tol = 1e-10
 end
