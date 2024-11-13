@@ -176,12 +176,11 @@ function cellones(A)
     return [atype{ComplexF64}(I, χ, χ) for i = 1:Ni, j = 1:Nj]
 end
 
-function ρmap(ρ,A)
-    Ni, Nj = size(A)
-    ρ = copy(ρ)
-    @inbounds @views for j in 1:Nj, i in 1:Ni
-        jr = mod1(j + 1, Nj)
-        ρ[i,jr] = ein"(dc,csb),dsa -> ab"(ρ[i,j], A[i,j], conj(A[i,j]))
+function ρmap(ρ,Ai,J)
+    Nj = size(Ai,1)
+    for j = 1:Nj
+        jr = mod1(J+j-1, Nj)
+        ρ = ein"(dc,csb),dsa -> ab"(ρ,Ai[jr],conj(Ai[jr]))
     end
     return ρ
 end
@@ -207,11 +206,10 @@ If ρ is not exactly positive definite, cholesky will fail
 """
 function getL!(A, L; kwargs...)
     Ni,Nj = size(A)
-    λs, ρs, info = eigsolve(ρ->ρmap(ρ,A), L, 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
-    info.converged == 0 && @warn "getL not converged"
-    _, ρs1 = selectpos(λs, ρs, Nj)
     @inbounds for j = 1:Nj, i = 1:Ni
-        ρ = ρs1[i,j] + ρs1[i,j]'
+        _, ρs, info = eigsolve(ρ->ρmap(ρ,A[i,:],j), L[i,j]'*L[i,j], 1, :LM; ishermitian = false, maxiter = 1, kwargs...)
+        info.converged == 0 && @warn "getL not converged"
+        ρ = real(ρs[1] + ρs[1]')
         ρ ./= tr(ρ)
         F = svd!(ρ)
         Lo = Diagonal(sqrt.(F.S)) * F.Vt
@@ -325,11 +323,18 @@ FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d �
 ```
 """
 
-function FLmap(ALui, ALdir, Mi, FLi)
-    FLm = [ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu) for (FL,ALd,M,ALu) in zip(FLi,ALdir,Mi,ALui)]
-    return circshift(FLm, 1)
+function FLmap(FL, ALu, ALd, M)
+    return ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu)
 end
 
+function FLmap(J::Int, FLij, ALui, ALdir, Mi)
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        FLij = FLmap(FLij, ALui[jr], ALdir[jr], Mi[jr])
+    end
+    return FLij
+end
 """
     FRm = FRmap(ARu, ARd, M, FR, i)
 
@@ -341,9 +346,17 @@ end
     ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h 
 ```
 """
-function FRmap(ARui, ARdir, Mi, FRi)
-    FRm = [ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd) for (ARu,FR,M,ARd) in zip(ARui,FRi,Mi,ARdir)]
-    circshift(FRm, -1)
+function FRmap(FR, ARu, ARd, M)
+    return ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd)
+end
+
+function FRmap(J::Int, FRij, ARui, ARdir, Mi)
+    Nj = length(ARui)
+    for j in J:-1:(J - Nj + 1)
+        jr = mod1(j, Nj)
+        FRij = FRmap(FRij, ARui[jr], ARdir[jr], Mi[jr])
+    end
+    return FRij
 end
 
 function FLint(AL, M)
@@ -378,12 +391,16 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, verbosity=Defaults.v
     λL = Zygote.Buffer(zeros(ComplexF64, Ni))
     FL′ = Zygote.Buffer(FL)
     for i in 1:Ni
-        ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-        λLs, FL1s, info = eigsolve(X->FLmap(ALu[i,:], ALd[ir,:], M[i,:], X), FL[i,:], 1, :LM; 
-                                   alg_rrule=KrylovKit.GMRES(), maxiter=100, ishermitian = false, kwargs...)
+        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), 
+                                   FL[i,1], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
-        λL[i], FL′[i,:] = selectpos(λLs, FL1s, Nj)
+        λL[i], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
+        for j in 2:Nj
+            FL′[i,j] = FLmap(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1])
+        end
     end
+    
     return copy(λL), copy(FL′)
 end
 
@@ -405,11 +422,14 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, verbosity=Defaults.
     λR = Zygote.Buffer(zeros(ComplexF64, Ni))
     FR′ = Zygote.Buffer(FR)
     for i in 1:Ni
-        ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-        λRs, FR1s, info= eigsolve(X->FRmap(ARu[i,:], ARd[ir,:], M[i,:], X), FR[i,:], 1, :LM;
-                                  alg_rrule=KrylovKit.GMRES(), maxiter=100, ishermitian = false, kwargs...)
+        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), 
+                                   FR[i,Nj], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-        λR[i], FR′[i,:] = selectpos(λRs, FR1s, Nj)
+        λR[i], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
+        for j in Nj-1:-1:1
+            FR′[i,j] = FRmap(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1])
+        end
     end
     return copy(λR), copy(FR′)
 end
@@ -475,11 +495,18 @@ end
                                                                
 ```
 """
-function ACmap(ACj, FLj, FRj, Mj)
-    ACm = [ein"((abc,ceh),dgeb),adf -> fgh"(AC,FR,M,FL) for (AC,FR,M,FL) in zip(ACj,FRj,Mj,FLj)]
-    return circshift(ACm, 1)
+function ACmap(AC, FL, FR, M)
+    return ein"((abc,ceh),dgeb),adf -> fgh"(AC,FR,M,FL)
 end
 
+function ACmap(I::Int, ACij, FLj, FRj, Mj)
+    Ni = length(FLj)
+    for i in I:(I + Ni - 1)
+        ir = mod1(i, Ni)
+        ACij = ACmap(ACij, FLj[ir], FRj[ir], Mj[ir])
+    end
+    return ACij
+end
 """
     Cmap(Cij, FLjp, FRj, II)
 
@@ -491,9 +518,17 @@ end
                                              d ─── e                                    
 ```
 """
-function Cmap(Cj, FLjr, FRj)
-    Cm = [ein"(ab,bce),acd -> de"(C,FR,FL) for (C,FR,FL) in zip(Cj,FRj,FLjr)]
-    return circshift(Cm, 1)
+function Cmap(C, FL, FR)
+    return ein"acd,(ab,bce) -> de"(FL,C,FR)
+end
+
+function Cmap(I, Cij, FLjr, FRj)
+    Ni = length(FLjr)
+    for i in I:(I + Ni - 1)
+        ir = mod1(i, Ni)
+        Cij = Cmap(Cij, FLjr[ir], FRj[ir])
+    end
+    return Cij
 end
 
 """
@@ -513,10 +548,13 @@ function ACenv(AC, FL, M, FR; verbosity=Defaults.verbosity, kwargs...)
     λAC = Zygote.Buffer(zeros(ComplexF64, Nj))
     AC′ = Zygote.Buffer(AC)
     for j in 1:Nj
-        λACs, ACs, info = eigsolve(X->ACmap(X, FL[:,j], FR[:,j], M[:,j]), AC[:,j], 1, :LM; 
-                                   alg_rrule=KrylovKit.GMRES(), maxiter=100, ishermitian = false, kwargs...)
+        λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), 
+                                   AC[1,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
-        λAC[j], AC′[:,j] = selectpos(λACs, ACs, Ni)
+        λAC[j], AC′[1,j] = selectpos(λACs, ACs, Ni)
+        for i in 2:Ni
+            AC′[i,j] = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
+        end
     end
     return copy(λAC), copy(AC′)
 end
@@ -539,10 +577,13 @@ function Cenv(C, FL, FR; verbosity=Defaults.verbosity, kwargs...)
     C′ = Zygote.Buffer(C)
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
-        λCs, Cs, info = eigsolve(X->Cmap(X, FL[:,jr], FR[:,j]), C[:,j], 1, :LM; 
-                                 alg_rrule=KrylovKit.GMRES(), maxiter=100, ishermitian = false, kwargs...)
+        λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
+                                 C[1,j], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
-        λC[j], C′[:,j] = selectpos(λCs, Cs, Ni)
+        λC[j], C′[1,j] = selectpos(λCs, Cs, Ni)
+        for i in 2:Ni
+            C′[i,j] = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
+        end
     end
     return copy(λC), copy(C′)
 end

@@ -62,8 +62,10 @@ end
 
     for i in 1:Ni
         ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-        @test λL[i] * FL[i,:] ≈ FLmap(AL[i,:], conj(AL[ir,:]), M[i,:], FL[i,:])
-        @test λR[i] * FR[i,:] ≈ FRmap(AR[i,:], conj(AR[ir,:]), M[i,:], FR[i,:])
+        for j in 1:Nj
+            @test λL[i] * FL[i,j] ≈ FLmap(j, FL[i,j], AL[i,:], conj.(AL)[ir,:], M[i,:]) rtol = 1e-12
+            @test λR[i] * FR[i,j] ≈ FRmap(j, FR[i,j], AR[i,:], conj.(AR)[ir,:], M[i,:]) rtol = 1e-12
+        end
     end
 end
 
@@ -86,8 +88,11 @@ end
 
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
-        @test λAC[j] * AC[:,j] ≈ ACmap(AC[:,j], FL[:,j],  FR[:,j], M[:,j])
-        @test  λC[j] *  C[:,j] ≈  Cmap( C[:,j], FL[:,jr], FR[:,j])
+        for i in 1:Ni
+            ir = mod1(i + 1, Ni)
+            @test λAC[j] * AC[i,j] ≈ ACmap(i, AC[i,j], FL[:,j],  FR[:,j], M[:,j]) rtol = 1e-12
+            @test  λC[j] *  C[i,j] ≈  Cmap(i,  C[i,j], FL[:,jr], FR[:,j]) rtol = 1e-10
+        end
     end
 end
 

@@ -5,6 +5,7 @@ using Test
 using OMEinsum
 using Random
 using LinearAlgebra
+using TeneT: left_canonical, right_canonical, leftenv, rightenv
 CUDA.allowscalar(false)
 
 # i9-14900KF RTX 4090
@@ -127,4 +128,59 @@ end
         end
     end
     @btime CUDA.@sync $foo($A)
+end
+
+# i9-14900KF RTX 4090
+# χ = 30 D = 16 Ni = 2 Nj = 2
+#   1.005 s (50126 allocations: 1.75 GiB)
+#   1.013 s (56488 allocations: 1.87 GiB)
+# Test Summary:                                     | Total   Time
+# leftenv and rightenv with Array{ComplexF64} 2 x 2 |     0  30.4s
+# χ = 30 D = 16 Ni = 2 Nj = 2
+#   196.972 ms (141841 allocations: 4.98 MiB)
+#   194.184 ms (152401 allocations: 5.35 MiB)
+# Test Summary:                                       | Total   Time
+# leftenv and rightenv with CuArray{ComplexF64} 2 x 2 |     0  33.0s
+@testset "leftenv and rightenv with $atype{$dtype} $Ni x $Nj" for atype in [Array, CuArray], dtype in [ComplexF64], ifobs in [false], Ni in 2:2, Nj in 2:2
+    Random.seed!(100)
+    χ, D = 30, 16
+    println("χ = $(χ) D = $(D) Ni = $(Ni) Nj = $(Nj)")
+    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+
+    AL,    =  left_canonical(A)
+    @btime λL,FL  =  leftenv($AL, conj($AL), $M; ifobs = $ifobs)
+    _, AR, = right_canonical(A)
+    @btime λR,FR  = rightenv($AR, conj($AR), $M; ifobs = $ifobs)
+end
+
+# i9-14900KF RTX 4090
+# χ = 30 D = 16 Ni = 2 Nj = 2
+#   1.147 s (56377 allocations: 1.86 GiB)
+#   29.043 ms (41332 allocations: 111.91 MiB)
+# Test Summary:                               | Total   Time
+# ACenv and Cenv with Array{ComplexF64} 2 x 2 |     0  30.7s
+# χ = 30 D = 16 Ni = 2 Nj = 2
+#   198.691 ms (147859 allocations: 4.39 MiB)
+#   2.288 s (126598 allocations: 3.51 MiB)
+# Test Summary:                                 | Total   Time
+# ACenv and Cenv with CuArray{ComplexF64} 2 x 2 |     0  37.2s
+@testset "ACenv and Cenv with $atype{$dtype} $Ni x $Nj" for atype in [CuArray], dtype in [ComplexF64], ifobs in [false], Ni in 1:1, Nj in 1:1
+    Random.seed!(100)
+    χ, D = 30, 16
+    println("χ = $(χ) D = $(D) Ni = $(Ni) Nj = $(Nj)")
+    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+
+    AL,  L, _ =  left_canonical(A)
+     R, AR, _ = right_canonical(A)
+    λL, FL    =  leftenv(AL, conj(AL), M)
+    λR, FR    = rightenv(AR, conj(AR), M)
+
+     C =  LRtoC(  L, R)
+    AC = ALCtoAC(AL, C)
+    @btime λAC, AC = ACenv($AC, $FL, $M, $FR)
+    @btime  λC,  C =  Cenv( $C, $FL,     $FR)
+    # ProfileView.@profview ACenv(AC, FL, M, FR)
+    # ProfileView.@profview λC,  C =  Cenv( C, FL,     FR)
 end

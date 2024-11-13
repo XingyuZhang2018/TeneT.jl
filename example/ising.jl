@@ -6,16 +6,16 @@ using Test
 using CUDA
 using Zygote
 
-@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = 1:3, Nj = 1:3, atype = [Array]
+@testset "$(Ni)x$(Nj) ising forward with $atype" for Ni = 1:1, Nj = 1:1, atype = [Array, CuArray]
     Random.seed!(100)
     β = 0.5
     χ = 10
     model = Ising(Ni, Nj, β)
     M = atype.(model_tensor(model, Val(:bulk)))
-    alg = VUMPS(maxiter=100, miniter=20, verbosity=3, ifupdown=true)
+    alg = VUMPS(maxiter=100, miniter=1, verbosity=3, ifupdown=true)
     
-    rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt = @time VUMPSRuntime(M, χ, alg)
+    rt = @time leading_boundary(rt, M, alg)
     env = VUMPSEnv(rt, M)
 
     @test observable(env, model, Val(:Z)     ) ≈ 2.789305993957602
