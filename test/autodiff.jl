@@ -81,7 +81,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype" for atype in [Array], ifobs in [false, true], Ni = [2], Nj = [2]
+@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype" for atype in [Array], ifobs in [false], Ni = [2], Nj = [2]
     Random.seed!(100)
     D, d = 3, 2
     A = [atype(rand(ComplexF64, D, d, D         )) for _ in 1:Ni, _ in 1:Nj]

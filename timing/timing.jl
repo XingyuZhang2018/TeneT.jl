@@ -5,7 +5,9 @@ using Test
 using OMEinsum
 using Random
 using LinearAlgebra
-using TeneT: left_canonical, right_canonical, leftenv, rightenv
+using TeneT: left_canonical, right_canonical, leftenv, rightenv, LRtoC, ALCtoAC, ACenv, Cenv, _arraytype
+using BenchmarkTools
+using Zygote
 CUDA.allowscalar(false)
 
 # i9-14900KF RTX 4090
@@ -107,29 +109,6 @@ end
     # @btime CUDA.@sync $ACmap2($(AC[:,:,:,:,1]), $(FL[:,:,:,:,1]), $(FR[:,:,:,:,1]), $(M[:,:,:,:,:,1]))
 end
 
-@testset "Array of CuArray" begin
-    Random.seed!(100)
-    χ = 100
-    A = [CuArray(rand(ComplexF64, χ, χ)) for _ in 1:4]
-    @btime CUDA.@sync dot.($A, $A)
-    # A = CuArray(rand(ComplexF64, χ*4, χ))
-    # @btime CUDA.@sync dot($A, $A)
-
-    # A = [CuArray(rand(ComplexF64, χ, χ)) for _ in 1:4]
-    function foo(A)
-        # B = CuArray(zeros(ComplexF64, 4*χ*χ))
-        # B[1:χ^2] .= vec(A[1])
-        # B[χ^2+1:2*χ^2] .= vec(A[2])
-        # B[2χ^2+1:3*χ^2] .= vec(A[3])
-        # B[3*χ^2+1:4*χ^2] .= vec(A[4])
-        # return dot(B, B)
-        for i in 1:4
-            dot(Array(A[i]), Array(A[i]))
-        end
-    end
-    @btime CUDA.@sync $foo($A)
-end
-
 # i9-14900KF RTX 4090
 # χ = 30 D = 16 Ni = 2 Nj = 2
 #   1.005 s (50126 allocations: 1.75 GiB)
@@ -165,7 +144,7 @@ end
 #   2.288 s (126598 allocations: 3.51 MiB)
 # Test Summary:                                 | Total   Time
 # ACenv and Cenv with CuArray{ComplexF64} 2 x 2 |     0  37.2s
-@testset "ACenv and Cenv with $atype{$dtype} $Ni x $Nj" for atype in [CuArray], dtype in [ComplexF64], ifobs in [false], Ni in 1:1, Nj in 1:1
+@testset "ACenv and Cenv with $atype{$dtype} $Ni x $Nj" for atype in [Array, CuArray], dtype in [ComplexF64], ifobs in [false], Ni in 2:2, Nj in 2:2
     Random.seed!(100)
     χ, D = 30, 16
     println("χ = $(χ) D = $(D) Ni = $(Ni) Nj = $(Nj)")
@@ -183,4 +162,60 @@ end
     @btime  λC,  C =  Cenv( $C, $FL,     $FR)
     # ProfileView.@profview ACenv(AC, FL, M, FR)
     # ProfileView.@profview λC,  C =  Cenv( C, FL,     FR)
+end
+
+begin "test utils"
+    function num_grad(f, K; δ::Real=1e-5)
+        if eltype(K) == ComplexF64
+            (f(K + δ / 2) - f(K - δ / 2)) / δ + 
+                (f(K + δ / 2 * 1.0im) - f(K - δ / 2 * 1.0im)) / δ * 1.0im
+        else
+            (f(K + δ / 2) - f(K - δ / 2)) / δ
+        end
+    end
+    
+    function num_grad(f, a::AbstractArray; δ::Real=1e-5)
+        b = Array(copy(a))
+        df = map(CartesianIndices(b)) do i
+            foo = x -> (ac = copy(b); ac[i] = x; f(_arraytype(a)(ac)))
+            num_grad(foo, b[i], δ=δ)
+        end
+        return _arraytype(a)(df)
+    end
+end
+
+# i9-14900KF RTX 4090
+# D = 16 d = 30
+# ┌ Warning: `eigsolve` cotangent for eigenvector 1 is sensitive to gauge choice: (|gauge| = 1.0764722446765518e-12)
+# └ @ KrylovKitChainRulesCoreExt C:\Users\xingzhan\.julia\packages\KrylovKit\jOhQS\ext\KrylovKitChainRulesCoreExt\eigsolve.jl:141
+#   7.896 s (1488022 allocations: 15.63 GiB)
+# Test Summary:                       | Total   Time
+# 2x2 leftenv and rightenv with Array |     0  27.8s
+# D = 16 d = 30
+#   757.880 ms (533808 allocations: 24.18 MiB)
+# Test Summary:                         | Total   Time
+# 2x2 leftenv and rightenv with CuArray |     0  20.5s
+@testset "$(Ni)x$(Nj) leftenv and rightenv with $atype" for atype in [Array], ifobs in [false], Ni = [2], Nj = [2]
+    Random.seed!(100)
+    D, d = 3, 2
+    println("D = $(D) d = $(d)")
+    A = [atype(rand(ComplexF64, D, d, D         )) for _ in 1:Ni, _ in 1:Nj]
+    S = [atype(rand(ComplexF64, D, d, D, D, d, D)) for _ in 1:Ni, _ in 1:Nj]
+    M = [atype(rand(ComplexF64, d, d, d, d      )) for _ in 1:Ni, _ in 1:Nj]
+
+       ALu, =  left_canonical(A) 
+    _, ARu, = right_canonical(A)
+
+    function foo1(M)
+        _,FL = leftenv(ALu, conj(ALu), M; ifobs)
+        s = 0.0
+        for j in 1:Nj, i in 1:Ni
+            A  = Array(ein"(abc,abcdef),def -> "(FL[i,j], S[i,j], FL[i,j]))[]
+            B  = Array(ein"abc,abc -> "(FL[i,j], FL[i,j]))[]
+            s += norm(A/B)
+        end
+        return s
+    end
+    # @btime CUDA.@sync Zygote.gradient($foo1, $M)[1]
+    @show norm(Zygote.gradient(foo1, M)[1]  - num_grad(foo1, M))
 end
