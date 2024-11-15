@@ -16,7 +16,7 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `Ro`: The right mixed environment tensor.
 """
 struct VUMPSEnv{T<:Number,
-                ET<:AbstractArray{T, 3}}
+                ET<:AbstractArray}
     ACu::Matrix{ET}
     ARu::Matrix{ET}
     ACd::Matrix{ET}
@@ -48,7 +48,6 @@ A struct that contains the environment of the VUMPS algorithm for runtime calcul
     
 For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 
-- `O`: The center transfer matrix PEPO tensor.
 - `AL`: The left canonical environment tensor.
 - `AR`: The right canonical environment tensor.
 - `C`: The canonical environment tensor.
@@ -56,8 +55,8 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `R`: The right environment tensor.
 """
 struct VUMPSRuntime{T<:Number, 
-                    ET<:AbstractArray{T, 3},
-                    CT<:AbstractArray{T, 2}}
+                    ET<:AbstractArray,
+                    CT<:AbstractArray}
     AL::Matrix{ET}
     AR::Matrix{ET}
     C::Matrix{CT}
@@ -173,22 +172,31 @@ function cellones(A)
     Ni, Nj = size(A)
     χ = size(A[1], 1)
     atype = _arraytype(A[1])
-    return [atype{ComplexF64}(I, χ, χ) for i = 1:Ni, j = 1:Nj]
+    return [atype{ComplexF64}(I, χ, χ) for _ = 1:Ni, _ = 1:Nj]
 end
 
-function ρmap(ρ,Ai,J)
-    Nj = size(Ai,1)
-    for j = 1:Nj
-        jr = mod1(J+j-1, Nj)
-        ρ = ein"(dc,csb),dsa -> ab"(ρ,Ai[jr],conj(Ai[jr]))
-    end
-    return ρ
-end
-
-function initial_A(M, χ)
+function initial_A(M::leg4, χ::Int)
     Ni, Nj = size(M)
     atype = _arraytype(M[1])
     return [(D = size(M[i,j], 4); atype(rand(ComplexF64, χ,D,χ))) for i = 1:Ni, j = 1:Nj]
+end
+
+function initial_A(M::leg5, χ::Int)
+    Ni, Nj = size(M)
+    atype = _arraytype(M[1])
+    return [(D = size(M[i,j], 4); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:Ni, j = 1:Nj]
+end
+
+ρmap(ρ, Au::leg3, Ad::leg3) = ein"(dc,csb),dsa -> ab"(ρ,Au,Ad)
+ρmap(ρ, Au::leg4, Ad::leg4) = ein"(dc,cstb),dsta -> ab"(ρ,Au,Ad)
+
+function ρmap(ρ, Ai, J::Int)
+    Nj = size(Ai,1)
+    for j = 1:Nj
+        jr = mod1(J+j-1, Nj)
+        ρ = ρmap(ρ,Ai[jr],conj(Ai[jr]))
+    end
+    return ρ
 end
 
 """
@@ -231,9 +239,8 @@ function getAL(A, L)
     Le = similar(L)
     λ = zeros(Ni,Nj)
     @inbounds @views for j = 1:Nj, i = 1:Ni
-        χ, D, _ = size(A[i,j])
-        Q, R = qrpos!(reshape(L[i,j]*reshape(A[i,j], χ, D*χ), D*χ, χ))
-        AL[i,j] = reshape(Q, χ, D, χ)
+        Q, R = qrpos!(_to_tail(L[i,j]*_to_front(A[i,j])))
+        AL[i,j] = reshape(Q, size(A[i,j]))
         λ[i,j] = norm(R)
         Le[i,j] = rmul!(R, 1/λ[i,j])
     end
@@ -244,7 +251,7 @@ function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
     L = similar(Le)
     @inbounds @views for j = 1:Nj, i = 1:Ni
-        λs, Ls, info = eigsolve(X -> ein"(dc,csb),dsa -> ab"(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
+        λs, Ls, info = eigsolve(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
         @debug "getLsped eigsolve" λs info sort(abs.(λs))
         info.converged == 0 && @warn "getLsped not converged"
         _, Ls1 = selectpos(λs, Ls, Nj)
@@ -281,20 +288,20 @@ Given an MPS tensor `A`, return a gauge transform R, a right-canonical MPS tenso
 a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for `R` can be
 provided.
 """
-function right_canonical(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
+function right_canonical(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     Ni,Nj = size(A)
     Ar = similar(A)
     Lr = similar(L)
     @inbounds for j = 1:Nj, i = 1:Ni
-        Ar[i,j] = permutedims(A[i,j],(3,2,1))
+        Ar[i,j] = permute_fronttail(A[i,j])
         Lr[i,j] = permutedims(L[i,j],(2,1))
     end
     AL, L, λ = left_canonical(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
     R  = similar(L)
     AR = similar(AL)
     @inbounds for j = 1:Nj, i = 1:Ni
-         R[i,j] = permutedims( L[i,j],(2,1))
-        AR[i,j] = permutedims(AL[i,j],(3,2,1))
+         R[i,j] = permutedims(L[i,j],(2,1))
+        AR[i,j] = permute_fronttail(AL[i,j])
     end
     return R, AR, λ
 end
@@ -323,9 +330,8 @@ FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d �
 ```
 """
 
-function FLmap(FL, ALu, ALd, M)
-    return ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu)
-end
+FLmap(FL, ALu, ALd, M::leg4) = ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu)
+FLmap(FL, ALu, ALd, M::leg5) = ein"(((aefi,ijkl),ejgbp),fkhcp),abcd -> dghl"(FL, ALd, M, conj(M), ALu)
 
 function FLmap(J::Int, FLij, ALui, ALdir, Mi)
     Nj = length(ALui)
@@ -346,9 +352,8 @@ end
     ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h 
 ```
 """
-function FRmap(FR, ARu, ARd, M)
-    return ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd)
-end
+FRmap(FR, ARu, ARd, M::leg4) = ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd)
+FRmap(FR, ARu, ARd, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M, conj(M), ARd)
 
 function FRmap(J::Int, FRij, ARui, ARdir, Mi)
     Nj = length(ARui)
@@ -359,18 +364,32 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi)
     return FRij
 end
 
-function FLint(AL, M)
+function FLint(AL, M::leg4)
     Ni, Nj = size(AL)
     χ = size(AL[1], 1)
     atype = _arraytype(AL[1])
     return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, χ))) for i = 1:Ni, j = 1:Nj]
 end
 
-function FRint(AR, M)
+function FLint(AL, M::leg5)
+    Ni, Nj = size(AL)
+    χ = size(AL[1], 1)
+    atype = _arraytype(AL[1])
+    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+end
+
+function FRint(AR, M::leg4)
     Ni, Nj = size(AR)
     χ = size(AR[1], 1)
     atype = _arraytype(AR[1])
     return [(D = size(M[i, j], 3); atype(rand(ComplexF64, χ, D, χ))) for i = 1:Ni, j = 1:Nj]
+end
+
+function FRint(AR, M::leg5)
+    Ni, Nj = size(AR)
+    χ = size(AR[1], 1)
+    atype = _arraytype(AR[1])
+    return [(D = size(M[i, j], 3); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
 end
 
 """
@@ -495,9 +514,8 @@ end
                                                                
 ```
 """
-function ACmap(AC, FL, FR, M)
-    return ein"((abc,ceh),dgeb),adf -> fgh"(AC,FR,M,FL)
-end
+ACmap(AC, FL, FR, M::leg4) = ein"((abc,ceh),dgeb),adf -> fgh"(AC,FR,M,FL)
+ACmap(AC, FL, FR, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),aefi -> ijkl"(AC,FR,M,conj(M),FL)
 
 function ACmap(I::Int, ACij, FLj, FRj, Mj)
     Ni = length(FLj)
@@ -518,9 +536,8 @@ end
                                              d ─── e                                    
 ```
 """
-function Cmap(C, FL, FR)
-    return ein"acd,(ab,bce) -> de"(FL,C,FR)
-end
+Cmap(C, FL::leg3, FR) = ein"acd,(ab,bce) -> de"(FL,C,FR)
+Cmap(C, FL::leg4, FR) = ein"acde,(ab,bcdf) -> ef"(FL,C,FR)
 
 function Cmap(I, Cij, FLjr, FRj)
     Ni = length(FLjr)
@@ -593,11 +610,10 @@ function ACCtoAL(AC, C)
     errL = 0.0
     AL = Zygote.Buffer(AC)
     @inbounds for j in 1:Nj, i in 1:Ni
-        χ, D = size(AC[i,j])[[1,2]]
-        QAC, RAC = qrpos(reshape(AC[i,j],(χ*D, χ)))
+        QAC, RAC = qrpos(_to_tail(AC[i,j]))
          QC, RC  = qrpos(C[i,j])
         errL += norm(RAC-RC)
-        AL[i,j] = reshape(QAC*QC', (χ, D, χ))
+        AL[i,j] = reshape(QAC*QC', size(AC[i,j]))
     end
     return copy(AL), errL
 end
@@ -607,19 +623,17 @@ function ACCtoAR(AC, C)
     errR = 0.0
     AR = Zygote.Buffer(AC)
     @inbounds for j in 1:Nj, i in 1:Ni
-        χ, D = size(AC[i,j])[[1,2]]
         jr = mod1(j - 1, Nj)
-        LAC, QAC = lqpos(reshape(AC[i,j],(χ, D*χ)))
+        LAC, QAC = lqpos(_to_front(AC[i,j]))
          LC, QC  = lqpos(C[i,jr])
         errR += norm(LAC-LC)
-        AR[i,j] = reshape(QC'*QAC, (χ, D, χ))
+        AR[i,j] = reshape(QC'*QAC, size(AC[i,j]))
     end
     return copy(AR), errR
 end
 
-function ALCtoAC(AL,C)
-    return [ein"asc,cb -> asb"(AL, C) for (AL, C) in zip(AL, C)]
-end
+ALCtoAC(AL::leg3, C) = [ein"asc,cb -> asb"(AL, C) for (AL, C) in zip(AL, C)]
+ALCtoAC(AL::leg4, C) = [ein"astc,cb -> astb"(AL, C) for (AL, C) in zip(AL, C)]
 
 """
     AL, AR = ACCtoALAR(AC, C)

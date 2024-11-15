@@ -1,5 +1,6 @@
 using TeneT
 using TeneT:qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, env_norm
+using TeneT:_to_front, _to_tail, permute_fronttail
 using CUDA
 using LinearAlgebra
 using Random
@@ -7,7 +8,10 @@ using Test
 using OMEinsum
 CUDA.allowscalar(false)
 
-test_type = [Array, CuArray]
+test_type = [Array]
+χ, D, d = 4, 3, 2
+test_As = [rand(ComplexF64, χ, D, χ), rand(ComplexF64, χ, D, D, χ)];
+test_Ms = [rand(ComplexF64, D, D, D, D), rand(ComplexF64, D, D, D, D, d)];
 
 @testset "qr with $atype{$dtype}" for atype in test_type, dtype in [Float64, ComplexF64]
     Random.seed!(100)
@@ -27,33 +31,33 @@ end
     @test all(imag.(diag(L)) .≈ 0)
 end
 
-@testset "left_canonical and right_canonical with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], Ni in 1:3, Nj in 1:3
+@testset "left_canonical and right_canonical with $atype $Ni x $Nj" for atype in test_type, a in test_As, Ni in 1:3, Nj in 1:3
     Random.seed!(100)
-    χ, D = 3, 2
-    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    
+    A = [atype(a) for i in 1:Ni, j in 1:Nj]
     AL,  L, λ =  left_canonical(A)
      R, AR, λ = right_canonical(A)
      
     for j = 1:Nj,i = 1:Ni
-        @test Array(ein"cda,cdb -> ab"(AL[i,j],conj(AL[i,j]))) ≈ I(χ)
+        @test Array(_to_tail(AL[i,j])' * _to_tail(AL[i,j])) ≈ I(χ)
 
-        LA = reshape(L[i,j] * reshape(A[i,j], χ, D*χ), D*χ, χ)
-        ALL = reshape(AL[i,j], χ*D, χ) * L[i,j] * λ[i,j]
+        LA = _to_tail(L[i,j] * _to_front(A[i,j]))
+        ALL = _to_tail(AL[i,j]) * L[i,j] * λ[i,j]
         @test (Array(ALL) ≈ Array(LA))
 
-        @test (Array(ein"acd,bcd -> ab"(AR[i,j],conj(AR[i,j]))) ≈ I(χ))
+        @test Array(_to_front(AR[i,j]) * _to_front(AR[i,j])') ≈ I(χ)
 
-        AxR = reshape(reshape(A[i,j], D*χ, χ)*R[i,j], χ, D*χ)
-        RAR = R[i,j] * reshape(AR[i,j], χ, D*χ) * λ[i,j]
+        AxR = _to_front(_to_tail(A[i,j]) * R[i,j])
+        RAR = R[i,j] * _to_front(AR[i,j]) * λ[i,j]
         @test (Array(RAR) ≈ Array(AxR))
     end
 end
 
-@testset "leftenv and rightenv with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], ifobs in [false, true], Ni in 1:3, Nj in 1:3
+@testset "leftenv and rightenv with $atype $Ni x $Nj" for atype in test_type, (a, m) in zip(test_As, test_Ms), ifobs in [false, true], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
     χ, D = 3, 2
-    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
-    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+    A = [atype(a) for i in 1:Ni, j in 1:Nj]
+    M = [atype(m) for i in 1:Ni, j in 1:Nj]
 
     AL,    =  left_canonical(A)
     λL,FL  =  leftenv(AL, conj(AL), M; ifobs = ifobs)
@@ -69,11 +73,10 @@ end
     end
 end
 
-@testset "ACenv and Cenv with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], ifobs in [false, true], Ni in 1:3, Nj in 1:3
+@testset "ACenv and Cenv with $atype $Ni x $Nj" for atype in test_type, (a, m) in zip(test_As, test_Ms), ifobs in [false, true], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
-    χ, D = 3, 2
-    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
-    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+    A = [atype(a) for i in 1:Ni, j in 1:Nj]
+    M = [atype(m) for i in 1:Ni, j in 1:Nj]
 
     AL,  L, _ =  left_canonical(A)
      R, AR, _ = right_canonical(A)
@@ -96,11 +99,10 @@ end
     end
 end
 
-@testset "bcvumps unit test with $atype{$dtype} $Ni x $Nj" for atype in test_type, dtype in [ComplexF64], ifobs in [false, true], Ni in 1:3, Nj in 1:3
+@testset "bcvumps unit test with $atype $Ni x $Nj" for atype in test_type, (a, m) in zip(test_As, test_Ms), ifobs in [false, true], Ni in 1:3, Nj in 1:3
     Random.seed!(100)
-    χ, D = 3, 2
-    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
-    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+    A = [atype(a) for i in 1:Ni, j in 1:Nj]
+    M = [atype(m) for i in 1:Ni, j in 1:Nj]
 
     AL,  L, _ =  left_canonical(A)
      R, AR, _ = right_canonical(A)

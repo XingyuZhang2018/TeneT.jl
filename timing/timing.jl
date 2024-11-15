@@ -120,12 +120,26 @@ end
 #   194.184 ms (152401 allocations: 5.35 MiB)
 # Test Summary:                                       | Total   Time
 # leftenv and rightenv with CuArray{ComplexF64} 2 x 2 |     0  33.0s
+# χ = 30 D = 4 d = 2 Ni = 2 Nj = 2
+#   1.184 s (76934 allocations: 3.43 GiB)
+#   1.130 s (82684 allocations: 3.43 GiB)
+# Test Summary:                                     | Total   Time
+# leftenv and rightenv with Array{ComplexF64} 2 x 2 |     0  33.2s
+# χ = 30 D = 4 d = 2 Ni = 2 Nj = 2
+#   183.178 ms (185263 allocations: 6.70 MiB)
+#   298.098 ms (195699 allocations: 7.08 MiB)
+# Test Summary:                                       | Total   Time
+# leftenv and rightenv with CuArray{ComplexF64} 2 x 2 |     0  28.6s
 @testset "leftenv and rightenv with $atype{$dtype} $Ni x $Nj" for atype in [Array, CuArray], dtype in [ComplexF64], ifobs in [false], Ni in 2:2, Nj in 2:2
     Random.seed!(100)
-    χ, D = 30, 16
-    println("χ = $(χ) D = $(D) Ni = $(Ni) Nj = $(Nj)")
-    A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
-    M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+    # χ, D = 30, 16
+    # println("χ = $(χ) D = $(D) Ni = $(Ni) Nj = $(Nj)")
+    # A = [atype(rand(dtype, χ, D, χ)) for i in 1:Ni, j in 1:Nj]
+    # M = [atype(rand(dtype, D, D, D, D)) for i in 1:Ni, j in 1:Nj]
+    χ, D, d = 30, 4, 2
+    println("χ = $(χ) D = $(D) d = $(d) Ni = $(Ni) Nj = $(Nj)")
+    A = [atype(rand(dtype, χ, D, D, χ)) for i in 1:Ni, j in 1:Nj]
+    M = [atype(rand(dtype, D, D, D, D, d)) for i in 1:Ni, j in 1:Nj]
 
     AL,    =  left_canonical(A)
     @btime λL,FL  =  leftenv($AL, conj($AL), $M; ifobs = $ifobs)

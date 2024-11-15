@@ -1,6 +1,6 @@
 @kwdef mutable struct VUMPS
     ifupdown::Bool = true
-    ifdownfromup::Bool = true
+    ifdownfromup::Bool = false
     tol::Float64 = Defaults.tol
     maxiter::Int = Defaults.maxiter
     miniter::Int = Defaults.miniter
@@ -18,12 +18,14 @@ function VUMPSRuntime(M, χ::Int)
     return VUMPSRuntime(AL, AR, C, FL, FR)
 end
 
+_down_m(m::leg4) = permutedims(conj(m), (1,4,3,2))
+_down_m(m::leg5) = permutedims(conj(m), (1,4,3,2,5))
 function _down_M(M)
     Ni, Nj = size(M)
     Md = Zygote.Buffer(M)
     for j in 1:Nj, i in 1:Ni
         ir = Ni + 1 - i
-        Md[i, j] = permutedims(conj(M[ir, j]), (1,4,3,2))
+        Md[i, j] = _down_m(M[ir, j])
     end
     return copy(Md)
 end
@@ -67,7 +69,7 @@ end
 
 function leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS)
     rtup = vumps_itr(rt, M, alg)
-    if alg.ifdownfromup
+    if alg.ifupdown && alg.ifdownfromup
         Md = _down_M(M)
         rtdown = vumps_itr(rtup, Md, alg)
         return rtup, rtdown
