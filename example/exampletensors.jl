@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: _arraytype, rightenv, rightCenv
+using TeneT: _arraytype, rightenv, rightCenv, ALCtoAC
 using OMEinsum
 using Zygote
 using Parameters

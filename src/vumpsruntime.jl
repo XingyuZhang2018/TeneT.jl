@@ -1,4 +1,4 @@
-@kwdef mutable struct VUMPS
+@kwdef mutable struct VUMPS{L<:AbstractLattice}
     ifupdown::Bool = true
     ifdownfromup::Bool = false
     tol::Float64 = Defaults.tol
@@ -8,14 +8,20 @@
     verbosity::Int = Defaults.verbosity
 end
 
-function VUMPSRuntime(M, χ::Int)
+function init_VUMPSRuntime(M, χ::Int, ::VUMPS{Lattice}) where Lattice
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
-    _, FL = leftenv(AL, conj.(AL), M)
-    _, FR = rightenv(AR, conj.(AR), M)
+    AL′ = Zygote.Buffer(AL)
+    Ni, Nj = size(M)
+    for j in  1:Nj, i in 1:Ni
+        AL′[i,j] = ein"abc->cba"(AR[i, mod1(j+1, Nj)]) 
+    end
+    AL′ = copy(AL′)
+    _, FL = leftenv(AL, conj.(AL′), M)
+    # _, FR = rightenv(AR, conj.(AR), M)
     C = LRtoC(L, R)
-    return VUMPSRuntime(AL, AR, C, FL, FR)
+    return VUMPSRuntime{Lattice}(AL, AR, C, FL)
 end
 
 _down_m(m::leg4) = permutedims(conj(m), (1,4,3,2))
@@ -33,7 +39,7 @@ end
 function VUMPSRuntime(M, χ::Int, alg::VUMPS)
     Ni, Nj = size(M)
 
-    rtup = VUMPSRuntime(M, χ)
+    rtup = init_VUMPSRuntime(M, χ, alg)
     alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
 
     if alg.ifupdown     
@@ -42,7 +48,7 @@ function VUMPSRuntime(M, χ::Int, alg::VUMPS)
             return rtup
         else
             Md = _down_M(M)
-            rtdown = VUMPSRuntime(Md, χ)
+            rtdown = init_VUMPSRuntime(Md, χ, alg)
             alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
             return rtup, rtdown
         end
@@ -78,12 +84,12 @@ function leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS)
     end
 end
 
-function VUMPSEnv(rt::VUMPSRuntime, M::Matrix)
+function VUMPSEnv(rt::VUMPSRuntime{L}, M::Matrix) where L
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
-    _, FLo =  leftenv(AL, conj.(AL), M, FL; ifobs = true)
-    _, FRo = rightenv(AR, conj.(AR), M, FR; ifobs = true)
-    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+    # _, FLo =  leftenv(AL, conj.(AL), M, FL; ifobs = true)
+    # _, FRo = rightenv(AR, conj.(AR), M, FR; ifobs = true)
+    return VUMPSEnv{L}(AC, AR, AC, AR, FL, FR, FL, FR)
 end
 
 function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS)
@@ -96,7 +102,7 @@ function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS)
     return rtup, rtdown
 end
 
-function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M)
+function VUMPSEnv(rt::Tuple{VUMPSRuntime{L}, VUMPSRuntime{L}}, M) where L
     rtup, rtdown = rt
 
     ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR
@@ -107,44 +113,50 @@ function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M)
 
     _, FLo =  leftenv(ALu, conj.(ALd), M, FLu; ifobs = true)
     _, FRo = rightenv(ARu, conj.(ARd), M, FRu; ifobs = true)
-    return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
+    return VUMPSEnv{L}(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
 
-function vumps_step_power(rt::VUMPSRuntime, M, alg::VUMPS)
+function vumps_step_power(rt::VUMPSRuntime{L}, M, alg::VUMPS{L}) where L
     verbosity = alg.verbosity
-    @unpack AL, C, AR, FL, FR = rt
+    @unpack AL, C, AR, FL = rt
     AC = ALCtoAC(AL,C)
-    _, ACp = ACenv(AC, FL, M, FR; verbosity)
-    _,  Cp =  Cenv( C, FL, FR; verbosity)
+    _, ACp = ACenv(AC, FL, M, FL; verbosity)
+    _,  Cp =  Cenv( C, FL, FL; verbosity)
     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
-    _, FL =  leftenv(AL, conj.(ALp), M, FL; verbosity)
-    _, FR = rightenv(AR, conj.(ARp), M, FR; verbosity)
-    _, ACp = ACenv(ACp, FL, M, FR; verbosity)
-    _,  Cp =  Cenv( Cp, FL, FR; verbosity)
+    ALp′ = Zygote.Buffer(ALp)
+    Ni, Nj = size(M)
+    for j in  1:Nj, i in 1:Ni
+        ALp′[i,j] = ein"abc->cba"(ARp[i, mod1(j+1, Nj)]) 
+    end
+    ALp′ = copy(ALp′)
+    _, FL =  leftenv(AL, conj.(ALp′), M, FL; verbosity)
+    # _, FR = rightenv(AR, conj.(ARp), M, FR; verbosity)
+    _, ACp = ACenv(ACp, FL, M, FL; verbosity)
+    _,  Cp =  Cenv( Cp, FL, FL; verbosity)
     ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
-    return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
+    return VUMPSRuntime{L}(ALp, ARp, Cp, FL), err
 end
 
-function vumps_step_Hermitian(rt::VUMPSRuntime, M, alg::VUMPS)
+function vumps_step_Hermitian(rt::VUMPSRuntime{L}, M, alg::VUMPS{L}) where L 
     verbosity = alg.verbosity
-    @unpack AL, C, AR, FL, FR = rt
+    @unpack AL, C, AR, FL = rt
     AC = ALCtoAC(AL,C)
     _, FL =  leftenv(AL, conj.(AL), M, FL; verbosity)
-    _, FR = rightenv(AR, conj.(AR), M, FR; verbosity)
-    _, AC = ACenv(AC, FL, M, FR; verbosity)
-    _,  C =  Cenv( C, FL, FR; verbosity)
+    # _, FR = rightenv(AR, conj.(AR), M, FR; verbosity)
+    _, AC = ACenv(AC, FL, M, FL; verbosity)
+    _,  C =  Cenv( C, FL, FL; verbosity)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
-    return VUMPSRuntime(AL, AR, C, FL, FR), err
+    return VUMPSRuntime{L}(AL, AR, C, FL), err
 end
 
-function fix_gauge_vumps_step(rt::VUMPSRuntime, M, alg::VUMPS)
+function fix_gauge_vumps_step(rt::VUMPSRuntime{L}, M, alg::VUMPS{L}) where L
     rt′, err = vumps_step_Hermitian(rt, M, alg)
-    ALu, ARu, Cu, FLu, FRu = rt.AL, rt.AR, rt.C, rt.FL, rt.FR
-    ALd, ARd, Cd, FLd, FRd = rt′.AL, rt′.AR, rt′.C, rt′.FL, rt′.FR
+    ALu, ARu, Cu, FLu = rt.AL, rt.AR, rt.C, rt.FL
+    ALd, ARd, Cd, FLd = rt′.AL, rt′.AR, rt′.C, rt′.FL
 
     # _, σ = rightCenv(ARu, conj.(ARd); ifobs=false, verbosity=alg.verbosity) 
     # U, _ = Zygote.@ignore qrpos(σ[1])
@@ -158,17 +170,17 @@ function fix_gauge_vumps_step(rt::VUMPSRuntime, M, alg::VUMPS)
     AR_gauged = ARd
     C_gauged = Cd   
     FL_gauged = FLd
-    FR_gauged = FRd
+    # FR_gauged = FRd
     λ1 = Zygote.@ignore [ALu ./ AL_gauged  for (AL_gauged, ALu) in zip(AL_gauged, ALu)]
     λ2 = Zygote.@ignore [ARu ./ AR_gauged  for (AR_gauged, ARu) in zip(AR_gauged, ARu)]
     λ3 = Zygote.@ignore [Cu ./ C_gauged for (C_gauged, Cu) in zip(C_gauged, Cu)] 
     λ4 = Zygote.@ignore [FLu ./ FL_gauged  for (FL_gauged, FLu) in zip(FL_gauged, FLu)]
-    λ5 = Zygote.@ignore [FRu ./ FR_gauged  for (FR_gauged, FRu) in zip(FR_gauged, FRu)]
+    # λ5 = Zygote.@ignore [FRu ./ FR_gauged  for (FR_gauged, FRu) in zip(FR_gauged, FRu)]
 
     AL_gauged = [AL_gauged .* λ1 for (AL_gauged,λ1) in zip(AL_gauged,λ1)]
     AR_gauged = [AR_gauged .* λ2 for (AR_gauged,λ2) in zip(AR_gauged,λ2)]
     C_gauged = [C_gauged .* λ3 for (C_gauged,λ3) in zip(C_gauged,λ3)]
     FL_gauged = [FL_gauged .* λ4 for (FL_gauged,λ4) in zip(FL_gauged,λ4)]
-    FR_gauged = [FR_gauged .* λ5 for (FR_gauged,λ5) in zip(FR_gauged,λ5)]
-    return VUMPSRuntime(AL_gauged, AR_gauged, C_gauged, FL_gauged, FR_gauged), err
+    # FR_gauged = [FR_gauged .* λ5 for (FR_gauged,λ5) in zip(FR_gauged,λ5)]
+    return VUMPSRuntime{L}(AL_gauged, AR_gauged, C_gauged, FL_gauged), err
 end

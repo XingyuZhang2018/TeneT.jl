@@ -13,6 +13,7 @@ import Base: +, -, *, getindex
 import LinearAlgebra: norm,  mul!
 import VectorInterface: inner, scale, scale!!, scalartype, zerovector
 # import KrylovKit: RealVec
+export SquareLattice, HoneycombLattice
 export VUMPS, VUMPSRuntime, VUMPSEnv
 export leading_boundary
 

@@ -1,3 +1,7 @@
+abstract type AbstractLattice end
+struct SquareLattice <: AbstractLattice end
+struct HoneycombLattice <: AbstractLattice end
+
 """
     VUMPSEnv{T<:Number, S<:IndexSpace,
              OT<:AbstractArray{S, 2, 2},
@@ -15,27 +19,15 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `Lo`: The left mixed environment tensor.
 - `Ro`: The right mixed environment tensor.
 """
-struct VUMPSEnv{T<:Number,
-                ET<:AbstractArray}
-    ACu::Matrix{ET}
-    ARu::Matrix{ET}
-    ACd::Matrix{ET}
-    ARd::Matrix{ET}
-    FLu::Matrix{ET}
-    FRu::Matrix{ET}
-    FLo::Matrix{ET}
-    FRo::Matrix{ET}
-    function VUMPSEnv(ACu::Matrix{ET},
-                      ARu::Matrix{ET},
-                      ACd::Matrix{ET},
-                      ARd::Matrix{ET},
-                      FLu::Matrix{ET},
-                      FRu::Matrix{ET},
-                      FLo::Matrix{ET},
-                      FRo::Matrix{ET}) where {ET}
-        T = eltype(ACu[1])
-        new{T, ET}(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
-    end
+struct VUMPSEnv{L<:AbstractLattice}
+    ACu
+    ARu
+    ACd
+    ARd
+    FLu
+    FRu
+    FLo
+    FRo
 end
 
 """
@@ -54,12 +46,11 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `L`: The left environment tensor.
 - `R`: The right environment tensor.
 """
-struct VUMPSRuntime             
+struct VUMPSRuntime{L<:AbstractLattice}       
     AL
     AR
     C
     FL
-    FR
 end
 
 # In-place update of environment
@@ -68,7 +59,6 @@ function update!(env::VUMPSRuntime, env´::VUMPSRuntime)
     env.AR .= env´.AR
     env.C .= env´.C
     env.FL .= env´.FL
-    env.FR .= env´.FR
     return env
 end
 
@@ -83,13 +73,12 @@ function update!(env::VUMPSRuntime, env´::Tuple{VUMPSRuntime, VUMPSRuntime})
     return env
 end
 
-function binary_op(op, env1::VUMPSRuntime, env2::VUMPSRuntime)
+function binary_op(op, env1::VUMPSRuntime{L}, env2::VUMPSRuntime{L}) where {L}
     AL = isnothing(env2.AL) ? env1.AL : op(env1.AL, env2.AL)
     AR = isnothing(env2.AR) ? env1.AR : op(env1.AR, env2.AR)
     C  = isnothing(env2.C)  ? env1.C  : op(env1.C, env2.C)
     FL = isnothing(env2.FL) ? env1.FL : op(env1.FL, env2.FL)
-    FR = isnothing(env2.FR) ? env1.FR : op(env1.FR, env2.FR)
-    return VUMPSRuntime(AL, AR, C, FL, FR)
+    return VUMPSRuntime{L}(AL, AR, C, FL)
 end
 
 function +(env1::VUMPSRuntime, env2::VUMPSRuntime)
@@ -102,11 +91,10 @@ end
 
 function norm(x::VUMPSRuntime)
     total = []
-    append!(total, isnothing(x.AL) ? [] : x.AL)
-    append!(total, isnothing(x.AR) ? [] : x.AR)
-    append!(total, isnothing(x.C)  ? [] : x.C)
-    append!(total, isnothing(x.FL) ? [] : x.FL)
-    append!(total, isnothing(x.FR) ? [] : x.FR)
+    append!(total, (x.AL isa AbstractZero) ? [] : x.AL)
+    append!(total, (x.AR isa AbstractZero) ? [] : x.AR)
+    x.C isa AbstractZero || isnothing(x.C) || append!(total, x.C)
+    x.FL isa AbstractZero || isnothing(x.FL) || append!(total, x.FL)
     return norm(total)
 end
 
@@ -116,69 +104,62 @@ function inner(x::VUMPSRuntime, y::VUMPSRuntime)
     total += isnothing(x.AR) ? 0 : inner(x.AR, y.AR)
     total += isnothing(x.C)  ? 0 : inner(x.C, y.C)
     total += isnothing(x.FL) ? 0 : inner(x.FL, y.FL)
-    total += isnothing(x.FR) ? 0 : inner(x.FR, y.FR)
     return total
 end
 
-function scale(env::VUMPSRuntime, α::Number)
-    return VUMPSRuntime(
-        isnothing(env.AL) ? nothing : scale(env.AL, α),
-        isnothing(env.AR) ? nothing : scale(env.AR, α),
-        isnothing(env.C)  ? nothing : scale(env.C, α),
-        isnothing(env.FL) ? nothing : scale(env.FL, α),
-        isnothing(env.FR) ? nothing : scale(env.FR, α)
+function scale(env::VUMPSRuntime{L}, α::Number) where L
+    return VUMPSRuntime{L}(
+        (isnothing(env.AL) | (env.AL isa AbstractZero)) ? nothing : scale(env.AL, α),
+        (isnothing(env.AR) | (env.AR isa AbstractZero)) ? nothing : scale(env.AR, α),
+        (isnothing(env.C)  | (env.C  isa AbstractZero)) ? nothing : scale(env.C, α),
+        (isnothing(env.FL) | (env.FL isa AbstractZero)) ? nothing : scale(env.FL, α)
     )
 end
 
-function scale!!(env::VUMPSRuntime, α::Number)
-    return VUMPSRuntime(
-        isnothing(env.AL) ? nothing : scale!!(env.AL, α),
-        isnothing(env.AR) ? nothing : scale!!(env.AR, α),
-        isnothing(env.C)  ? nothing : scale!!(env.C, α),
-        isnothing(env.FL) ? nothing : scale!!(env.FL, α),
-        isnothing(env.FR) ? nothing : scale!!(env.FR, α)
+function scale!!(env::VUMPSRuntime{L}, α::Number) where L
+    return VUMPSRuntime{L}(
+        (isnothing(env.AL) | (env.AL isa AbstractZero)) ? nothing : scale!!(env.AL, α),
+        (isnothing(env.AR) | (env.AR isa AbstractZero)) ? nothing : scale!!(env.AR, α),
+        (isnothing(env.C)  | (env.C  isa AbstractZero)) ? nothing : scale!!(env.C, α),
+        (isnothing(env.FL) | (env.FL isa AbstractZero)) ? nothing : scale!!(env.FL, α)
     )
 end
 
 scalartype(x::VUMPSRuntime) = scalartype(x.AL)
 
-function zerovector(x::VUMPSRuntime)
-    return VUMPSRuntime(
-        isnothing(x.AL) ? nothing : zerovector(x.AL),
-        isnothing(x.AR) ? nothing : zerovector(x.AR),
-        isnothing(x.C)  ? nothing : zerovector(x.C),
-        isnothing(x.FL) ? nothing : zerovector(x.FL),
-        isnothing(x.FR) ? nothing : zerovector(x.FR)
+function zerovector(x::VUMPSRuntime{L}) where L 
+    return VUMPSRuntime{L}(
+        (isnothing(x.AL) | (x.AL isa AbstractZero)) ? nothing : zerovector(x.AL),
+        (isnothing(x.AR) | (x.AR isa AbstractZero)) ? nothing : zerovector(x.AR),
+        (isnothing(x.C)  | (x.C  isa AbstractZero)) ? nothing : zerovector(x.C),
+        (isnothing(x.FL) | (x.FL isa AbstractZero)) ? nothing : zerovector(x.FL)
     )
 end
 
-function zerovector(x::VUMPSRuntime, T::Type{S}) where S<:Number
-    return VUMPSRuntime(
-        isnothing(x.AL) ? nothing : zerovector(x.AL, T),
-        isnothing(x.AR) ? nothing : zerovector(x.AR, T),
-        isnothing(x.C)  ? nothing : zerovector(x.C, T),
-        isnothing(x.FL) ? nothing : zerovector(x.FL, T),
-        isnothing(x.FR) ? nothing : zerovector(x.FR, T)
+function zerovector(x::VUMPSRuntime{L}, T::Type{S}) where {S<:Number, L}
+    return VUMPSRuntime{L}(
+        (isnothing(x.AL) | (x.AL isa AbstractZero)) ? nothing : zerovector(x.AL, T),
+        (isnothing(x.AR) | (x.AR isa AbstractZero)) ? nothing : zerovector(x.AR, T),
+        (isnothing(x.C)  | (x.C  isa AbstractZero)) ? nothing : zerovector(x.C, T),
+        (isnothing(x.FL) | (x.FL isa AbstractZero)) ? nothing : zerovector(x.FL, T)
     )
 end
 
 function mul!(y::VUMPSRuntime, x::VUMPSRuntime, α)
-    isnothing(x.AL) || mul!.(y.AL, x.AL, α)
-    isnothing(x.AR) || mul!.(y.AR, x.AR, α)
-    isnothing(x.C)  || mul!.(y.C, x.C, α)
-    isnothing(x.FL) || mul!.(y.FL, x.FL, α)
-    isnothing(x.FR) || mul!.(y.FR, x.FR, α)
+    (isnothing(x.AL) | (x.AL isa AbstractZero)) || mul!.(y.AL, x.AL, α)
+    (isnothing(x.AR) | (x.AR isa AbstractZero)) || mul!.(y.AR, x.AR, α)
+    (isnothing(x.C)  | (x.C  isa AbstractZero)) || mul!.(y.C, x.C, α)
+    (isnothing(x.FL) | (x.FL isa AbstractZero)) || mul!.(y.FL, x.FL, α)
     return y
 end
 
-function RealVec(x::VUMPSRuntime)
+function RealVec(x::VUMPSRuntime{L}) where L
     # @show typeof(RealVec(x.AL))
-    return VUMPSRuntime(
-        isnothing(x.AL) ? nothing : RealVec.(x.AL),
-        isnothing(x.AR) ? nothing : RealVec.(x.AR),
-        isnothing(x.C)  ? nothing : RealVec.(x.C),
-        isnothing(x.FL) ? nothing : RealVec.(x.FL),
-        isnothing(x.FR) ? nothing : RealVec.(x.FR)
+    return VUMPSRuntime{L}(
+        (isnothing(x.AL) | (x.AL isa AbstractZero)) ? nothing : RealVec.(x.AL),
+        (isnothing(x.AR) | (x.AR isa AbstractZero)) ? nothing : RealVec.(x.AR),
+        (isnothing(x.C)  | (x.C  isa AbstractZero)) ? nothing : RealVec.(x.C),
+        (isnothing(x.FL) | (x.FL isa AbstractZero)) ? nothing : RealVec.(x.FL)
     )
 end
 
@@ -520,11 +501,11 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, verbosity=Defaults.v
     FL′ = Zygote.Buffer(FL)
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
-        # λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), 
-        #                             FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
-        # verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
-        # λL[i], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
-        λL[i], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1]; kwargs...)
+        λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), 
+                                    FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+        verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
+        λL[i], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
+        # λL[i], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1]; kwargs...)
         for j in 2:Nj
             FL′[i,j] = FLmap(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1])
         end
@@ -552,11 +533,11 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, verbosity=Defaults.
     FR′ = Zygote.Buffer(FR)
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
-        # λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), 
-        #                            FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-        # verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-        # λR[i], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
-        λR[i], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj]; kwargs...)
+        λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), 
+                                   FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+        verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
+        λR[i], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
+        # λR[i], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj]; kwargs...)
         for j in Nj-1:-1:1
             FR′[i,j] = FRmap(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1])
         end
@@ -676,11 +657,11 @@ function ACenv(AC, FL, M, FR; verbosity=Defaults.verbosity, kwargs...)
     λAC = Zygote.Buffer(zeros(ComplexF64, Nj))
     AC′ = Zygote.Buffer(AC)
     for j in 1:Nj
-        # λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), 
-        #                            AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-        # verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
-        # λAC[j], AC′[1,j] = selectpos(λACs, ACs, Ni)
-        λAC[j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j]; kwargs...)
+        λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,mod1(j+1,Nj)], M[:,j]), 
+                                   AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+        verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
+        λAC[j], AC′[1,j] = selectpos(λACs, ACs, Ni)
+        # λAC[j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j]; kwargs...)
         for i in 2:Ni
             AC′[i,j] = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
         end
@@ -706,11 +687,11 @@ function Cenv(C, FL, FR; verbosity=Defaults.verbosity, kwargs...)
     C′ = Zygote.Buffer(C)
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
-        # λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
-        #                          C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-        # verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
-        # λC[j], C′[1,j] = selectpos(λCs, Cs, Ni)
-        λC[j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; kwargs...)
+        λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,mod1(j+1,Nj)]), 
+                                 C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+        verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
+        λC[j], C′[1,j] = selectpos(λCs, Cs, Ni)
+        # λC[j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; kwargs...)
         for i in 2:Ni
             C′[i,j] = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
         end
