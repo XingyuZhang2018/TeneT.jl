@@ -164,28 +164,27 @@ function selectpos(λs, Fs, N)
 end
 
 function cellones(A)
-    Ni, Nj = size(A)
-    χ = size(A[1], 1)
     atype = _arraytype(A[1])
-    return [atype{ComplexF64}(I, χ, χ) for _ = 1:Ni, _ = 1:Nj]
+    χ = size(A[1], 1)
+    return [atype{ComplexF64}(I, χ, χ) for _ = 1:length(A)]
 end
 
-function initial_A(M::leg4, χ::Int)
-    Ni, Nj = size(M)
+function initial_A(M::leg4, χ::Int, pattern)
+    l = length(unique(pattern))
     atype = _arraytype(M[1])
-    return [(D = size(M[i,j], 4); atype(rand(ComplexF64, χ,D,χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 4); atype(rand(ComplexF64, χ,D,χ))) for i = 1:l]
 end
 
-function initial_A(M::leg5, χ::Int)
-    Ni, Nj = size(M)
+function initial_A(M::leg5, χ::Int, pattern)
+    l = length(unique(pattern))
     atype = _arraytype(M[1])
-    return [(D = size(M[i,j], 4); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 4); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:l]
 end
 
-function initial_A(M::leg8, χ::Int)
-    Ni, Nj = size(M)
+function initial_A(M::leg8, χ::Int, pattern)
+    l = length(unique(pattern))
     atype = _arraytype(M[1])
-    return [(D = size(M[i,j], 7); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 7); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:l]
 end
 
 ρmap(ρ, Au::leg3, Ad::leg3) = ein"(dc,csb),dsa -> ab"(ρ,Au,Ad)
@@ -237,30 +236,26 @@ Given an MPS tensor `A` and `L` ，return a left-canonical MPS tensor `AL`, a ga
 a scalar factor `λ` such that ``λ AR R = L A``
 """
 function getAL(A, L)
-    Ni,Nj = size(A)
+    len = length(A)
     AL = similar(A)
     Le = similar(L)
-    λ = zeros(Ni,Nj)
-    @inbounds @views for j = 1:Nj, i = 1:Ni
-        Q, R = qrpos!(_to_tail(L[i,j]*_to_front(A[i,j])))
-        AL[i,j] = reshape(Q, size(A[i,j]))
-        λ[i,j] = norm(R)
-        Le[i,j] = rmul!(R, 1/λ[i,j])
+    λ = zeros(len)
+    @inbounds @views for i in 1:len
+        Q, R = qrpos!(_to_tail(L[i]*_to_front(A[i])))
+        AL[i] = reshape(Q, size(A[i]))
+        λ[i] = norm(R)
+        Le[i] = rmul!(R, 1/λ[i])
     end
     return AL, Le, λ
 end
 
 function getLsped(Le, A, AL; kwargs...)
-    Ni,Nj = size(A)
+    len = length(A)
     L = similar(Le)
-    @inbounds @views for j = 1:Nj, i = 1:Ni
-        # λs, Ls, info = eigsolve(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
-        # @debug "getLsped eigsolve" λs info sort(abs.(λs))
-        # info.converged == 0 && @warn "getLsped not converged"
-        # _, Ls1 = selectpos(λs, Ls, Nj)
-        _, Ls1 = simple_eig(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j]; kwargs...)
+    @inbounds @views for i in 1:len
+        _, Ls1 = simple_eig(X -> ρmap(X,A[i],conj(AL[i])), Le[i]; kwargs...)
         _, R = qrpos!(Ls1)
-        L[i,j] = R
+        L[i] = R
     end
     return L
 end
@@ -272,9 +267,9 @@ Given an MPS tensor `A`, return a left-canonical MPS tensor `AL`, a gauge transf
 a scalar factor `λ` such that ``λ AL L = L A``, where an initial guess for `L` can be
 provided.
 """
-function left_canonical(A,L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
+function left_canonical(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     # L = getL!(A,L; kwargs...) # seems not necessary
-    AL, Le, λ = getAL(A,L;kwargs...)
+    AL, Le, λ = getAL(A, L; kwargs...)
     numiter = 1
     while norm(L.-Le) > tol && numiter < maxiter
         L = getLsped(Le, A, AL; kwargs...)
@@ -293,19 +288,19 @@ a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for
 provided.
 """
 function right_canonical(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
-    Ni,Nj = size(A)
+    len = length(A)
     Ar = similar(A)
     Lr = similar(L)
-    @inbounds for j = 1:Nj, i = 1:Ni
-        Ar[i,j] = permute_fronttail(A[i,j])
-        Lr[i,j] = permutedims(L[i,j],(2,1))
+    @inbounds for i in 1:len
+        Ar[i] = permute_fronttail(A[i])
+        Lr[i] = permutedims(L[i],(2,1))
     end
-    AL, L, λ = left_canonical(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
+    AL, L, λ = left_canonical(Ar; tol = tol, maxiter = maxiter, kwargs...)
     R  = similar(L)
     AR = similar(AL)
-    @inbounds for j = 1:Nj, i = 1:Ni
-         R[i,j] = permutedims(L[i,j],(2,1))
-        AR[i,j] = permute_fronttail(AL[i,j])
+    @inbounds for i in 1:len
+         R[i] = permutedims(L[i],(2,1))
+        AR[i] = permute_fronttail(AL[i])
     end
     return R, AR, λ
 end
@@ -322,6 +317,15 @@ function LRtoC(L, R)
     return [L * R for (L, R) in zip(L, Rijr)]
 end
 
+function LRtoC(L, R)
+    Rijr = circshift(R, (0,-1))
+    C = similar(L)
+    @inbounds for p in 1:length(L.data)
+        i, j = Tuple(findfirst(==(p), L.pattern))
+        C[i,j] = L[i,j] * Rijr[i,j]
+    end
+    return C
+end
 """
     FLm = FLmap(ALu, ALd, M, FL)
 
@@ -371,45 +375,45 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi)
 end
 
 function FLint(AL, M::leg4)
-    Ni, Nj = size(AL)
+    len = length(AL)
     χ = size(AL[1], 1)
     atype = _arraytype(AL[1])
-    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 1); atype(rand(ComplexF64, χ, D, χ))) for i = 1:len]
 end
 
 function FLint(AL, M::leg5)
-    Ni, Nj = size(AL)
+    len = length(AL)
     χ = size(AL[1], 1)
     atype = _arraytype(AL[1])
-    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:len]
 end
 
 function FLint(AL, M::leg8)
-    Ni, Nj = size(AL)
+    len = length(AL)
     χ = size(AL[1], 1)
     atype = _arraytype(AL[1])
-    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:len]
 end
 
 function FRint(AR, M::leg4)
-    Ni, Nj = size(AR)
+    len = length(AR)
     χ = size(AR[1], 1)
     atype = _arraytype(AR[1])
-    return [(D = size(M[i, j], 3); atype(rand(ComplexF64, χ, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 3); atype(rand(ComplexF64, χ, D, χ))) for i = 1:len]
 end
 
 function FRint(AR, M::leg5)
-    Ni, Nj = size(AR)
+    len = length(AR)
     χ = size(AR[1], 1)
     atype = _arraytype(AR[1])
-    return [(D = size(M[i, j], 3); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 3); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:len]
 end
 
 function FRint(AR, M::leg8)
-    Ni, Nj = size(AR)
+    len = length(AR)
     χ = size(AR[1], 1)
     atype = _arraytype(AR[1])
-    return [(D = size(M[i, j], 5); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return [(D = size(M[i], 5); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:len]
 end
 
 """
@@ -425,26 +429,41 @@ FLᵢⱼ ─ Mᵢⱼ   ──   = λLᵢⱼ FLᵢⱼ₊₁
  └──  ALdᵢᵣⱼ  ─          └── 
 ```
 """
-function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, alg, kwargs...) 
-    Ni, Nj = size(M)
+function leftenv(M, rt::VUMPSRuntime; ifobs=false, alg, kwargs...) 
+    pattern = alg.pattern
+    Ni, Nj = size(pattern)
+    len = length(M)
+    @unpack FL, AL, AR = rt
     λL = Zygote.Buffer(zeros(ComplexF64, Ni))
     FL′ = Zygote.Buffer(FL)
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        iseq = is_rotational_equal(pattern[i, :], pattern[ir, :])
+        if iseq
+            ALd = conj(AL[pattern[ir,:]])
+        else
+            ALd = conj(permute_fronttail.(AR[pattern[ir,:]]))
+        end
+        fmap(FLij) = FLmap(1, FLij, AL[pattern[i,:]], ALd, M[pattern[i,:]])
         if alg.ifsimple_eig
             if alg.ifcheckpoint
-                λL[i], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1])
+                λL[i], FL′[pattern[i,1]] = checkpoint(simple_eig, fmap, FL[pattern[i,1]])
             else
-                λL[i], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1])
+                λL[i], FL′[pattern[i,1]] = simple_eig(fmap, FL[pattern[i,1]])
             end
         else
-            λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), 
-                                        FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+            λLs, FLi1s, info = eigsolve(fmap, FL[pattern[i,1]], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
             alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
-            λL[i], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
+            λL[i], FL′[pattern[i,1]] = selectpos(λLs, FLi1s, Nj)
         end
         for j in 2:Nj
-            FL′[i,j] = FLmap(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1])
+            ALd = conj(AL[pattern[ir,j-1]])
+            if iseq
+                ALd = conj(AL[pattern[ir,j-1]])
+            else
+                ALd = conj(permute_fronttail(AR[pattern[ir,j-1]]))
+            end
+            FL′[pattern[i,j]] = FLmap(FL′[pattern[i,j-1]], AL[pattern[i,j-1]], ALd, M[pattern[i,j-1]])
         end
     end
     

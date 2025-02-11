@@ -2,6 +2,7 @@
     ifupdown::Bool = true
     ifdownfromup::Bool = false
     ifsimple_eig::Bool = false
+    pattern::Matrix{Int}
     tol::Float64 = Defaults.tol
     maxiter::Int = Defaults.maxiter
     miniter::Int = Defaults.miniter
