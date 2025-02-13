@@ -1,5 +1,5 @@
 using TeneT
-using TeneT: _arraytype, rightenv, rightCenv
+using TeneT: _arraytype, rightenv, rightCenv, is_rotational_equal
 using OMEinsum
 using Zygote
 using Parameters

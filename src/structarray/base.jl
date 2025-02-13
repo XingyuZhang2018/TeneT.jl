@@ -40,6 +40,7 @@ Base.size(S::StructArray, i::Int) = size(S.pattern, i)
 Base.getindex(S::StructArray, i::Int, j::Int) = S.data[S.pattern[i, j]]
 Base.getindex(S::StructArray, i::Int, ::Colon) = S.data[S.pattern[i, :]]
 Base.getindex(S::StructArray, ::Colon, j::Int) = S.data[S.pattern[:, j]]
+Base.getindex(S::StructArray, i::Int, r::UnitRange) = S.data[S.pattern[i, r]]
 Base.getindex(S::StructArray, i::Int) = S.data[S.pattern[i]]
 Base.setindex!(S::StructArray, value, i::Int, j::Int) = (S.data[S.pattern[i, j]] = value)
 Base.setindex!(S::StructArray, value, i::Int) = (S.data[S.pattern[i]] = value)

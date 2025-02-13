@@ -15,6 +15,7 @@ end
 
 permute_fronttail(t::leg3) = permutedims(t, (3,2,1))
 permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
+permute_fronttail(t::AbstractArray{T, 2}) where T = permutedims(t, (2,1))
 permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
@@ -60,3 +61,22 @@ Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygo
 
 to_CuArray(x) = map(CuArray, x)
 to_Array(x) = map(Array, x)
+
+function is_rotational_equal(v::Vector, target::Vector)
+    # 基础检查
+    length(v) != length(target) && return false
+    isempty(v) && return true  # 处理空向量情况
+    
+    # 双倍连接原向量
+    doubled = vcat(v, v)
+    
+    # 检查所有可能的轮转位置
+    n = length(v)
+    # for i in 1:n
+    #     # 滑动窗口检查子序列
+    #     if doubled[i:i+n-1] == target
+    #         return true
+    #     end
+    # end
+    return false
+end

@@ -23,16 +23,22 @@ function observable(env, model::MT, pattern::Matrix{Int}, type) where {MT <: Ham
     M_obs = StructArray([atype(model_tensor(model, type      )) for _ = 1:l], pattern)
     obs_tol = 0
 
-    for p in 1:l
-        i, j = Tuple(findfirst(==(p), M.pattern))
+    # for p in 1:l
+    #     i, j = Tuple(findfirst(==(p), M.pattern))
+    for j in 1:3, i in 1:1
         # for i in 1:Ni, j in 1:Nj
         if ACu.pattern == ACd.pattern
             ir = mod1(i + 1, Ni)
         else
             ir = Ni + 1 - i
         end
-        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],conj(ACd[ir,j]),FRo[i,j])
-          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],conj(ACd[ir,j]),FRo[i,j])
+        if is_rotational_equal(ACu.pattern[i, :], ACd.pattern[ir,:])
+            Ad = ACd[ir,j]
+        else
+            Ad = permute_fronttail(ACd[ir,j])
+        end
+        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],conj(Ad),FRo[i,j])
+          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],conj(Ad),FRo[i,j])
         obs_tol += Array(obs)[]/Array(λ)[]
     end
     if type == Val(:mag)
