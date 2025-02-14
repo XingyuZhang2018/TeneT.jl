@@ -1,11 +1,3 @@
-using TeneT
-using KrylovKit
-using CUDA
-using Test
-using OMEinsum
-using Random
-CUDA.allowscalar(false)
-
 @testset "OMEinsum with $atype{$dtype} " for atype in [Array], dtype in [Float64, ComplexF64]
     Random.seed!(100)
     d = 9

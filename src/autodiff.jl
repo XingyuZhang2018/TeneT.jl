@@ -2,24 +2,8 @@ export num_grad
 
 @non_differentiable VUMPSRuntime(M, χ::Int)
 @non_differentiable VUMPSRuntime(M, χ::Int, alg::VUMPS)
-
-function num_grad(f, K; δ::Real=1e-5)
-    if eltype(K) == ComplexF64
-        (f(K + δ / 2) - f(K - δ / 2)) / δ + 
-            (f(K + δ / 2 * 1.0im) - f(K - δ / 2 * 1.0im)) / δ * 1.0im
-    else
-        (f(K + δ / 2) - f(K - δ / 2)) / δ
-    end
-end
-
-function num_grad(f, a::AbstractArray; δ::Real=1e-5)
-    b = Array(copy(a))
-    df = map(CartesianIndices(b)) do i
-        foo = x -> (ac = copy(b); ac[i] = x; f(_arraytype(a)(ac)))
-        num_grad(foo, b[i], δ=δ)
-    end
-    return _arraytype(a)(df)
-end
+@non_differentiable randSA(kwargs...)
+@non_differentiable ISA(kwargs...)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
@@ -92,6 +76,23 @@ function ChainRulesCore.rrule(::typeof(to_CuArray), x)
         return NoTangent(), to_Array(dx)
     end
     return to_CuArray(x), back
+end
+
+function ChainRulesCore.rrule(::Type{StructArray}, data, pattern)
+    S = StructArray(data, pattern)
+    function back(dS)
+        return NoTangent(), dS.data, dS.pattern
+    end
+    return S, back
+end
+
+function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
+    y = norm(S)
+    function back(dy)
+        data_grad = pullback(norm, S.data)[2](dy)[1]
+        return NoTangent(), StructArray(data_grad, S.pattern)
+    end
+    return y, back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)

@@ -1,7 +1,7 @@
-const leg3 = Union{<:AbstractArray{ComplexF64, 3}, Vector{<:AbstractArray{ComplexF64, 3}}, Matrix{<:AbstractArray{ComplexF64, 3}}}
-const leg4 = Union{<:AbstractArray{ComplexF64, 4}, Vector{<:AbstractArray{ComplexF64, 4}}, Matrix{<:AbstractArray{ComplexF64, 4}}}
-const leg5 = Union{<:AbstractArray{ComplexF64, 5}, Vector{<:AbstractArray{ComplexF64, 5}}, Matrix{<:AbstractArray{ComplexF64, 5}}}
-const leg8 = Union{<:AbstractArray{ComplexF64, 8}, Vector{<:AbstractArray{ComplexF64, 8}}, Matrix{<:AbstractArray{ComplexF64, 8}}}
+const leg3 = Union{<:AbstractArray{ComplexF64, 3}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 3}}}}
+const leg4 = Union{<:AbstractArray{ComplexF64, 4}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 4}}}}
+const leg5 = Union{<:AbstractArray{ComplexF64, 5}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 5}}}}
+const leg8 = Union{<:AbstractArray{ComplexF64, 8}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 8}}}}
 
 function _to_front(t)
     χ = size(t)[end]
@@ -19,7 +19,7 @@ permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
 orth_for_ad(v) = v
-function simple_eig(f, v; max_iter=20, ifvalue=false)
+function simple_eig(f, v; max_iter=20, ifvalue=true)
     λ = 0.0
     Zygote.@ignore begin
         for _ in 1:max_iter
@@ -37,15 +37,8 @@ function simple_eig(f, v; max_iter=20, ifvalue=false)
 
     v = orth_for_ad(v)
     if ifvalue
-        if v isa DoubleArray
-            v′ = f(v)
-            CUDA.@allowscalar λ = v′.real.tensor[1] ./ v.real.tensor[1] 
-        else
-            CUDA.@allowscalar λ = f(v)[1] ./ v[1]
-            @show f(v) ./ v
-        end
+        CUDA.@allowscalar λ = f(v)[1] ./ v[1]
     end
-    
     return λ, v
 end
 
@@ -62,8 +55,8 @@ function mcform(M)
 end    
 
 # See Zygote Checkpointing https://fluxml.ai/Zygote.jl/latest/adjoints/#Checkpointing-1
-checkpoint(f, x...) = f(x...) 
-Zygote.@adjoint checkpoint(f, x...) = f(x...), ȳ -> Zygote._pullback(f, x...)[2](ȳ)
+checkpoint(f, x...; kwargs...) = f(x...; kwargs...) 
+Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...; kwargs...)[2](ȳ)
 
 to_CuArray(x) = map(CuArray, x)
 to_Array(x) = map(Array, x)

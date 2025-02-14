@@ -19,9 +19,11 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 KrylovKit = "0.8.2"
+OMEinsum = "0.7.6"
 Parameters = "0.12.3"
 Printf = "1.11.0"
 VectorInterface = "0.4.9"
+Zygote = "0.6.73"
 
 [extras]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"

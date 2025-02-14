@@ -15,27 +15,15 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `Lo`: The left mixed environment tensor.
 - `Ro`: The right mixed environment tensor.
 """
-struct VUMPSEnv{T<:Number,
-                ET<:AbstractArray}
-    ACu::Matrix{ET}
-    ARu::Matrix{ET}
-    ACd::Matrix{ET}
-    ARd::Matrix{ET}
-    FLu::Matrix{ET}
-    FRu::Matrix{ET}
-    FLo::Matrix{ET}
-    FRo::Matrix{ET}
-    function VUMPSEnv(ACu::Matrix{ET},
-                      ARu::Matrix{ET},
-                      ACd::Matrix{ET},
-                      ARd::Matrix{ET},
-                      FLu::Matrix{ET},
-                      FRu::Matrix{ET},
-                      FLo::Matrix{ET},
-                      FRo::Matrix{ET}) where {ET}
-        T = eltype(ACu[1])
-        new{T, ET}(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
-    end
+struct VUMPSEnv
+    ACu::StructArray
+    ARu::StructArray
+    ACd::StructArray
+    ARd::StructArray
+    FLu::StructArray
+    FRu::StructArray
+    FLo::StructArray
+    FRo::StructArray
 end
 
 """
@@ -55,11 +43,11 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `R`: The right environment tensor.
 """
 struct VUMPSRuntime             
-    AL
-    AR
-    C
-    FL
-    FR
+    AL::StructArray
+    AR::StructArray
+    C::StructArray
+    FL::StructArray
+    FR::StructArray
 end
 
 # In-place update of environment
@@ -137,10 +125,10 @@ function lqpos!(A)
     return L, Q
 end
 
-function env_norm(F::Matrix)
-    Ni,Nj = size(F)
+function env_norm(F::StructArray)
     buf = Zygote.Buffer(F)
-    @inbounds @views for j in 1:Nj, i in 1:Ni
+    @inbounds @views for p in 1:length(F.data)
+        i, j = Tuple(findfirst(==(p), F.pattern))
         buf[i,j] = F[i,j]/norm(F[i,j])
     end
     return copy(buf)
@@ -164,28 +152,20 @@ function selectpos(λs, Fs, N)
 end
 
 function cellones(A)
-    Ni, Nj = size(A)
     χ = size(A[1], 1)
-    atype = _arraytype(A[1])
-    return [atype{ComplexF64}(I, χ, χ) for _ = 1:Ni, _ = 1:Nj]
+    return ISA(A, [(χ,χ) for _ = 1:length(A.data)])
 end
 
 function initial_A(M::leg4, χ::Int)
-    Ni, Nj = size(M)
-    atype = _arraytype(M[1])
-    return [(D = size(M[i,j], 4); atype(rand(ComplexF64, χ,D,χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 4); (χ, D, χ)) for m in M.data])
 end
 
 function initial_A(M::leg5, χ::Int)
-    Ni, Nj = size(M)
-    atype = _arraytype(M[1])
-    return [(D = size(M[i,j], 4); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 4); (χ, D, D, χ)) for m in M.data])
 end
 
 function initial_A(M::leg8, χ::Int)
-    Ni, Nj = size(M)
-    atype = _arraytype(M[1])
-    return [(D = size(M[i,j], 7); atype(rand(ComplexF64, χ,D,D,χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 7); (χ, D, D, χ)) for m in M.data])
 end
 
 ρmap(ρ, Au::leg3, Ad::leg3) = ein"(dc,csb),dsa -> ab"(ρ,Au,Ad)
@@ -237,33 +217,48 @@ Given an MPS tensor `A` and `L` ，return a left-canonical MPS tensor `AL`, a ga
 a scalar factor `λ` such that ``λ AR R = L A``
 """
 function getAL(A, L)
-    Ni,Nj = size(A)
     AL = similar(A)
     Le = similar(L)
-    λ = zeros(Ni,Nj)
-    @inbounds @views for j = 1:Nj, i = 1:Ni
-        Q, R = qrpos!(_to_tail(L[i,j]*_to_front(A[i,j])))
-        AL[i,j] = reshape(Q, size(A[i,j]))
-        λ[i,j] = norm(R)
-        Le[i,j] = rmul!(R, 1/λ[i,j])
+    λ = randSA(Array, AL.pattern)
+    Ni, Nj = size(A)
+    processed_indices = Set{Int}()  # Track which pattern values have been processed
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        p = AL.pattern[i,j]
+        if p ∉ processed_indices  # Only process pattern values that haven't been computed yet
+            Q, R = qrpos!(_to_tail(L[i,j]*_to_front(A[i,j])))
+            AL[i,j] = reshape(Q, size(A[i,j]))
+            λ[i,j] = norm(R)
+            Le[i,j] = rmul!(R, 1/λ[i,j])
+            push!(processed_indices, p)
+            if length(processed_indices) == length(AL.data)
+                break  # Exit when all unique pattern values have been processed
+            end
+        end
     end
+    
     return AL, Le, λ
 end
+
 
 function getLsped(Le, A, AL; kwargs...)
     Ni,Nj = size(A)
     L = similar(Le)
-    @inbounds @views for j = 1:Nj, i = 1:Ni
-        # λs, Ls, info = eigsolve(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j], 1, :LM; ishermitian = false, kwargs...)
-        # @debug "getLsped eigsolve" λs info sort(abs.(λs))
-        # info.converged == 0 && @warn "getLsped not converged"
-        # _, Ls1 = selectpos(λs, Ls, Nj)
-        _, Ls1 = simple_eig(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j]; kwargs...)
-        _, R = qrpos!(Ls1)
-        L[i,j] = R
+    processed_indices = Set{Int}() 
+    @inbounds @views for j in 1:Nj, i in 1:Ni
+        p = Le.pattern[i,j]
+        if p ∉ processed_indices
+            _, Ls1 = simple_eig(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j]; kwargs...)
+            _, R = qrpos!(Ls1)
+            L[i,j] = R
+            push!(processed_indices, p)
+            if length(processed_indices) == length(Le.data)
+                break
+            end
+        end
     end
     return L
 end
+
 
 """
     left_canonical(A,L=cellones(size(A,1),size(A,2),size(A[1,1],1)); tol = 1e-12, maxiter = 100, kwargs...)
@@ -293,18 +288,20 @@ a scalar factor `λ` such that ``λ R AR^s = A^s R``, where an initial guess for
 provided.
 """
 function right_canonical(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
-    Ni,Nj = size(A)
     Ar = similar(A)
     Lr = similar(L)
-    @inbounds for j = 1:Nj, i = 1:Ni
+    @inbounds for p in 1:length(A.data)
+        i, j = Tuple(findfirst(==(p), A.pattern))
         Ar[i,j] = permute_fronttail(A[i,j])
         Lr[i,j] = permutedims(L[i,j],(2,1))
     end
+
     AL, L, λ = left_canonical(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
     R  = similar(L)
     AR = similar(AL)
-    @inbounds for j = 1:Nj, i = 1:Ni
-         R[i,j] = permutedims(L[i,j],(2,1))
+    @inbounds for p in 1:length(AL.data)
+        i, j = Tuple(findfirst(==(p), AL.pattern))
+        R[i,j] = permutedims(L[i,j],(2,1))
         AR[i,j] = permute_fronttail(AL[i,j])
     end
     return R, AR, λ
@@ -319,7 +316,12 @@ end
 """
 function LRtoC(L, R)
     Rijr = circshift(R, (0,-1))
-    return [L * R for (L, R) in zip(L, Rijr)]
+    C = similar(L)
+    @inbounds for p in 1:length(L.data)
+        i, j = Tuple(findfirst(==(p), L.pattern))
+        C[i,j] = L[i,j] * Rijr[i,j]
+    end
+    return C
 end
 
 """
@@ -371,45 +373,33 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi)
 end
 
 function FLint(AL, M::leg4)
-    Ni, Nj = size(AL)
     χ = size(AL[1], 1)
-    atype = _arraytype(AL[1])
-    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 1); (χ, D, χ)) for m in M.data])
 end
 
 function FLint(AL, M::leg5)
-    Ni, Nj = size(AL)
     χ = size(AL[1], 1)
-    atype = _arraytype(AL[1])
-    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
 end
 
 function FLint(AL, M::leg8)
-    Ni, Nj = size(AL)
     χ = size(AL[1], 1)
-    atype = _arraytype(AL[1])
-    return [(D = size(M[i, j], 1); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
 end
 
 function FRint(AR, M::leg4)
-    Ni, Nj = size(AR)
-    χ = size(AR[1], 1)
-    atype = _arraytype(AR[1])
-    return [(D = size(M[i, j], 3); atype(rand(ComplexF64, χ, D, χ))) for i = 1:Ni, j = 1:Nj]
+    χ = size(AR[1], 1)  
+    return randSA(M, [(D = size(m, 3); (χ, D, χ)) for m in M.data])
 end
 
 function FRint(AR, M::leg5)
-    Ni, Nj = size(AR)
     χ = size(AR[1], 1)
-    atype = _arraytype(AR[1])
-    return [(D = size(M[i, j], 3); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 3); (χ, D, D, χ)) for m in M.data])
 end
 
 function FRint(AR, M::leg8)
-    Ni, Nj = size(AR)
     χ = size(AR[1], 1)
-    atype = _arraytype(AR[1])
-    return [(D = size(M[i, j], 5); atype(rand(ComplexF64, χ, D, D, χ))) for i = 1:Ni, j = 1:Nj]
+    return randSA(M, [(D = size(m, 5); (χ, D, D, χ)) for m in M.data])
 end
 
 """
@@ -425,26 +415,42 @@ FLᵢⱼ ─ Mᵢⱼ   ──   = λLᵢⱼ FLᵢⱼ₊₁
  └──  ALdᵢᵣⱼ  ─          └── 
 ```
 """
-function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, alg, kwargs...) 
-    Ni, Nj = size(M)
-    λL = Zygote.Buffer(zeros(ComplexF64, Ni))
+function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, kwargs...) 
+    λL = Zygote.Buffer(randSA(Array, M.pattern))
     FL′ = Zygote.Buffer(FL)
+    Ni, Nj = size(M)
+    processed_indices = Set{Int}()
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
-        if alg.ifsimple_eig
-            if alg.ifcheckpoint
-                λL[i], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1])
+        p = FL.pattern[i,1]
+        if p ∉ processed_indices
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λL[i,1], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1]; ifvalue=ifvalue)
+                else
+                    λL[i,1], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1]; ifvalue=ifvalue)
+                end
             else
-                λL[i], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1])
+                λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), 
+                                            FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
+                λL[i,1], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
             end
-        else
-            λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), 
-                                        FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
-            alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
-            λL[i], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
+            push!(processed_indices, p)
+            if length(processed_indices) == length(FL.data)
+                break
+            end
         end
         for j in 2:Nj
-            FL′[i,j] = FLmap(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1])
+            p = FL.pattern[i,j]
+            if p ∉ processed_indices
+                FL′[i,j] = FLmap(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1])
+                λL[i,j] = λL[i,1]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(FL.data)
+                    break
+                end
+            end
         end
     end
     
@@ -464,26 +470,42 @@ of AR - M - conj(AR) contracted along the physical dimension.
     ── ARdᵢᵣⱼ ──┘          ──┘  
 ```
 """
-function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, alg, kwargs...) 
+function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg, kwargs...) 
     Ni,Nj = size(M)
-    λR = Zygote.Buffer(zeros(ComplexF64, Ni))
+    λR = Zygote.Buffer(randSA(Array, M.pattern))
     FR′ = Zygote.Buffer(FR)
+    processed_indices = Set{Int}()
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
-        if alg.ifsimple_eig
-            if alg.ifcheckpoint
-                λR[i], FR′[i,Nj] = checkpoint(simple_eig, FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj])
+        p = FR.pattern[i,Nj]
+        if p ∉ processed_indices
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj]; ifvalue=ifvalue)
+                else
+                    λR[i,Nj], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj]; ifvalue=ifvalue)
+                end
             else
-                λR[i], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj])
+                λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), 
+                                        FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
+                λR[i,Nj], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
             end
-        else
-            λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), 
-                                    FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-            alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-            λR[i], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
+            push!(processed_indices, p)
+            if length(processed_indices) == length(FR.data)
+                break
+            end
         end
         for j in Nj-1:-1:1
-            FR′[i,j] = FRmap(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1])
+            p = FR.pattern[i,j]
+            if p ∉ processed_indices
+                FR′[i,j] = FRmap(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1])
+                λR[i,j] = λR[i,Nj]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(FR.data)
+                    break
+                end
+            end
         end
     end
     return copy(λR), copy(FR′)
@@ -597,25 +619,41 @@ FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ               │      │  
 │        │         │   
 ```
 """
-function ACenv(AC, FL, M, FR; alg, kwargs...)
+function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
     Ni, Nj = size(M)
-    λAC = Zygote.Buffer(zeros(ComplexF64, Nj))
+    λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
+    processed_indices = Set{Int}()
     for j in 1:Nj
-        if alg.ifsimple_eig
-            if alg.ifcheckpoint
-                λAC[j], AC′[1,j] = checkpoint(simple_eig, AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j])
+        p = AC.pattern[1,j]
+        if p ∉ processed_indices
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λAC[1,j], AC′[1,j] = checkpoint(simple_eig, AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j]; ifvalue=ifvalue)
+                else
+                    λAC[1,j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j]; ifvalue=ifvalue)
+                end
             else
-                λAC[j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j])
+                λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), 
+                                        AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
+                λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
             end
-        else
-            λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), 
-                                    AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-            alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
-            λAC[j], AC′[1,j] = selectpos(λACs, ACs, Ni)
+            push!(processed_indices, p)
+            if length(processed_indices) == length(AC.data)
+                break
+            end
         end
         for i in 2:Ni
-            AC′[i,j] = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
+            p = AC.pattern[i,j]
+            if p ∉ processed_indices
+                AC′[i,j] = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
+                λAC[i,j] = λAC[1,j]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(AC.data)
+                    break
+                end
+            end
         end
     end
     return copy(λAC), copy(AC′)
@@ -633,36 +671,52 @@ FLᵢⱼ₊₁ ──── FRᵢⱼ            │       │
 │           │   
 ```
 """
-function Cenv(C, FL, FR; alg, kwargs...)
+function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
     Ni, Nj = size(C)
-    λC = Zygote.Buffer(zeros(ComplexF64, Nj))
+    λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
+    processed_indices = Set{Int}()
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
-        if alg.ifsimple_eig
-            if alg.ifcheckpoint
-                λC[j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j])
+        p = C.pattern[1,j]
+        if p ∉ processed_indices
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue=ifvalue)
+                else
+                    λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue=ifvalue)
+                end
             else
-                λC[j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j])
+                λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
+                                        C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
+                λC[1,j], C′[1,j] = selectpos(λCs, Cs, Ni)
             end
-        else
-            λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
-                                    C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-            alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
-            λC[j], C′[1,j] = selectpos(λCs, Cs, Ni)
+            push!(processed_indices, p)
+            if length(processed_indices) == length(C.data)
+                break
+            end
         end
         for i in 2:Ni
-            C′[i,j] = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
+            p = C.pattern[i,j]
+            if p ∉ processed_indices
+                C′[i,j] = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
+                λC[i,j] = λC[1,j]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(C.data)
+                    break
+                end
+            end
         end
     end
     return copy(λC), copy(C′)
 end
 
 function ACCtoAL(AC, C)
-    Ni, Nj = size(AC)
     errL = 0.0
     AL = Zygote.Buffer(AC)
-    @inbounds for j in 1:Nj, i in 1:Ni
+    @inbounds for p in 1:length(AC.data)
+        i, j = Tuple(findfirst(==(p), AC.pattern))
         QAC, RAC = qrpos(_to_tail(AC[i,j]))
          QC, RC  = qrpos(C[i,j])
         errL += norm(RAC-RC)
@@ -672,10 +726,11 @@ function ACCtoAL(AC, C)
 end
 
 function ACCtoAR(AC, C)
-    Ni, Nj = size(AC)
     errR = 0.0
     AR = Zygote.Buffer(AC)
-    @inbounds for j in 1:Nj, i in 1:Ni
+    Nj = size(AC, 2)
+    @inbounds for p in 1:length(AC.data)
+        i, j = Tuple(findfirst(==(p), AC.pattern))
         jr = mod1(j - 1, Nj)
         LAC, QAC = lqpos(_to_front(AC[i,j]))
          LC, QC  = lqpos(C[i,jr])
@@ -685,8 +740,23 @@ function ACCtoAR(AC, C)
     return copy(AR), errR
 end
 
-ALCtoAC(AL::leg3, C) = [ein"asc,cb -> asb"(AL, C) for (AL, C) in zip(AL, C)]
-ALCtoAC(AL::leg4, C) = [ein"astc,cb -> astb"(AL, C) for (AL, C) in zip(AL, C)]
+function ALCtoAC(AL::leg3, C)
+    AC = Zygote.Buffer(AL)
+    @inbounds for p in 1:length(AL.data)
+        i, j = Tuple(findfirst(==(p), AL.pattern))
+        AC[i,j] = ein"asc,cb -> asb"(AL[i,j], C[i,j])
+    end
+    return copy(AC)
+end
+
+function ALCtoAC(AL::leg4, C)
+    AC = Zygote.Buffer(AL)
+    @inbounds for p in 1:length(AL.data)
+        i, j = Tuple(findfirst(==(p), AL.pattern))
+        AC[i,j] = ein"astc,cb -> astb"(AL[i,j], C[i,j])
+    end
+    return copy(AC)
+end
 
 """
     AL, AR = ACCtoALAR(AC, C)

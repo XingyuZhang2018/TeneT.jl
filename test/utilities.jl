@@ -1,6 +1,5 @@
 using Test
 using TeneT
-using TeneT: project_AL!, project_AR!, retract!, project_AL, project_AR, permute_fronttail
 
 @testset "retract!" begin
     Random.seed!(100)
