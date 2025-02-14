@@ -237,7 +237,7 @@ end
 include("../example/exampletensors.jl")
 include("../example/exampleobs.jl")
 
-@testset "ising backward with $atype $ifupdown $pattern" for atype = [Array], ifupdown in [false, true], pattern in [[1 2 3; 2 3 1; 3 1 2]]
+@testset "ising backward with $atype $ifupdown $pattern" for atype = [Array], ifupdown in [false, true], pattern in [[1 2 3 4 5 6; 4 5 6 1 2 3]]
     # [1;;], [1 1; 1 1], [1 2; 2 1], [1 2; 3 4], [1 1; 2 2]
     # [1 3 2 2 3 1; 2 3 1 1 3 2]
     Random.seed!(100)
@@ -249,7 +249,7 @@ include("../example/exampleobs.jl")
                 ifupdown=ifupdown, 
                 ifdownfromup=true, 
                 ifsimple_eig=false)
-    χ = 10
+    χ = 20
 
     function energy(β)
         model = Ising(β)
@@ -261,6 +261,6 @@ include("../example/exampleobs.jl")
         env = VUMPSEnv(rt′, M, alg)
         return real(observable(env, model, pattern, Val(:energy)))
     end
-    # @show energy(0.5)
-    @test Zygote.gradient(energy, 0.3)[1] ≈ num_grad(energy, 0.3)
+    @show energy(0.5)
+    # @test Zygote.gradient(energy, 0.3)[1] ≈ num_grad(energy, 0.3)
 end

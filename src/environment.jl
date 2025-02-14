@@ -52,11 +52,11 @@ end
 
 # In-place update of environment
 function update!(env::VUMPSRuntime, env´::VUMPSRuntime) 
-    env.AL .= env´.AL
-    env.AR .= env´.AR
-    env.C .= env´.C
-    env.FL .= env´.FL
-    env.FR .= env´.FR
+    env.AL.data .= env´.AL.data
+    env.AR.data .= env´.AR.data
+    env.C.data .= env´.C.data
+    env.FL.data .= env´.FL.data
+    env.FR.data .= env´.FR.data
     return env
 end
 

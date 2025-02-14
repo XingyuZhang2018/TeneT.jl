@@ -42,12 +42,12 @@ end
 function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
     @unpack AL, AR, C, FL, FR = rtup
     Ni = size(AL, 1)
-    index = [Ni + 1 - i for i in 1:Ni]
-    ALd = StructArray(AL.data[index], Md.pattern)
-    ARd = StructArray(AR.data[index], Md.pattern)
-    Cd = StructArray(C.data[index], Md.pattern)
-    FLd = StructArray(FL.data[index], Md.pattern)
-    FRd = StructArray(FR.data[index], Md.pattern)
+    # index = [Ni + 1 - i for i in 1:Ni]
+    ALd = StructArray(AL.data, Md.pattern)
+    ARd = StructArray(AR.data, Md.pattern)
+    Cd = StructArray(C.data, Md.pattern)
+    FLd = StructArray(FL.data, Md.pattern)
+    FRd = StructArray(FR.data, Md.pattern)
     return VUMPSRuntime(ALd, ARd, Cd, FLd, FRd)
 end
 

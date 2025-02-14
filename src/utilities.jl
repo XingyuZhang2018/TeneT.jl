@@ -19,7 +19,7 @@ permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
 orth_for_ad(v) = v
-function simple_eig(f, v; max_iter=20, ifvalue=true)
+function simple_eig(f, v; max_iter=20, ifvalue=false)
     λ = 0.0
     Zygote.@ignore begin
         for _ in 1:max_iter
@@ -56,7 +56,7 @@ end
 
 # See Zygote Checkpointing https://fluxml.ai/Zygote.jl/latest/adjoints/#Checkpointing-1
 checkpoint(f, x...; kwargs...) = f(x...; kwargs...) 
-Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...; kwargs...)[2](ȳ)
+Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...)[2](ȳ)
 
 to_CuArray(x) = map(CuArray, x)
 to_Array(x) = map(Array, x)
