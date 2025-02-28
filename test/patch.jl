@@ -1,23 +1,8 @@
-@testset "OMEinsum with $atype{$dtype} " for atype in [Array], dtype in [Float64, ComplexF64]
-    Random.seed!(100)
-    d = 9
-    D = 20
-    AL = atype(rand(dtype, D, d, D))
-    M = atype(rand(dtype, d, d, d, d))
-    FL = atype(rand(dtype, D, d, D))
-    @time ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
+@testset "_arraytype with $atype{$T} " for atype in [Array, CuArray], T in [Float64, ComplexF64] 
+    @test _arraytype(atype{T}([1,2,3])) == atype
 end
-
-@testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
-    Random.seed!(100)
-    d = 4
-    D = 10
-    FL = atype(rand(dtype, D, d, D))
-    M = atype(rand(dtype, d, d, d, d))
-    AL = atype(rand(dtype, D, d, D))
-    @time λs, FLs, info = eigsolve(FL -> ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL)), FL, 1, :LM; ishermitian = false)
-
-    λl,FL = real(λs[1]),real(FLs[1])
-    dFL = atype(rand(dtype, D, d, D))
-    @time ξl, info = linsolve(FR -> ein"((ηpβ,βaα),csap),γsα -> ηcγ"(AL, FR, M, conj(AL)), permutedims(dFL, (3, 2, 1)), -λl, 1)
+    
+@testset "TensorMap with $atype{$T}" for atype in [Array, CuArray], T in [Float64, ComplexF64]
+    A = rand(T, ℂ^2 ← ℂ^2)
+    @test _arraytype(atype(A)) == atype
 end

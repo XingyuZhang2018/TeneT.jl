@@ -12,19 +12,18 @@
     verbosity::Int = Defaults.verbosity
 end
 
-function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
+function init_VUMPSRuntime(M, χ, alg::VUMPS)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
-    _, FL = leftenv(AL, conj(AL), M; alg)
-    _, FR = rightenv(AR, conj(AR), M; alg)
+    _, FL =  leftenv(AL, adjoint(AL), M; alg)
+    _, FR = rightenv(AR, adjoint(AR), M; alg)
     C = LRtoC(L, R)
     return VUMPSRuntime(AL, AR, C, FL, FR)
 end
 
-_down_m(m::leg4) = permutedims(conj(m), (1,4,3,2))
-_down_m(m::leg5) = permutedims(conj(m), (1,4,3,2,5))
-_down_m(m::leg8) = permutedims(conj(m), (1,2,7,8,5,6,3,4))
+_down_m(m::ipeps) = _fit_spaces(permute(m', ((2,5,4,3), (1,))), m)
+_down_m(m::bulk) = _fit_spaces(permute(m', ((3,2), (1,4))), m)
 function _down_M(M::StructArray)
     Ni, Nj = size(M)
     pattern_d = copy(M.pattern)
@@ -51,7 +50,7 @@ function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
     return VUMPSRuntime(ALd, ARd, Cd, FLd, FRd)
 end
 
-function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
+function VUMPSRuntime(M::StructArray, χ, alg::VUMPS)
     Ni, Nj = size(M)
 
     rtup = init_VUMPSRuntime(M, χ, alg)
@@ -135,20 +134,20 @@ function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg)
     ALd, ARd, Cd = rtdown.AL, rtdown.AR, rtdown.C
     ACd = ALCtoAC(ALd, Cd)
 
-    _, FLo =  leftenv(ALu, conj(ALd), M, FLu; ifobs = true, alg)
-    _, FRo = rightenv(ARu, conj(ARd), M, FRu; ifobs = true, alg)
+    _, FLo =  leftenv(ALu, adjoint(ALd), M, FLu; ifobs = true, alg)
+    _, FRo = rightenv(ARu, adjoint(ARd), M, FRu; ifobs = true, alg)
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
 
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL,C)
-    _, ACp = ACenv(AC, FL, M, FR; alg)
+    _, ACp = ACenv(AC, FL, FR, M; alg)
     _,  Cp =  Cenv( C, FL, FR; alg)
     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
-    _, FL =  leftenv(AL, conj(ALp), M, FL; alg)
-    _, FR = rightenv(AR, conj(ARp), M, FR; alg)
-    _, ACp = ACenv(ACp, FL, M, FR; alg)
+    _, FL =  leftenv(AL, adjoint(ALp), M, FL; alg)
+    _, FR = rightenv(AR, adjoint(ARp), M, FR; alg)
+    _, ACp = ACenv(ACp, FL, FR, M; alg)
     _,  Cp =  Cenv( Cp, FL, FR; alg)
     ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
     err = errL + errR
@@ -159,44 +158,12 @@ end
 function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL,C)
-    _, FL =  leftenv(AL, conj(AL), M, FL; alg)
-    _, FR = rightenv(AR, conj(AR), M, FR; alg)
-    _, AC = ACenv(AC, FL, M, FR; alg)
+    _, FL =  leftenv(AL, adjoint(AL), M, FL; alg)
+    _, FR = rightenv(AR, adjoint(AR), M, FR; alg)
+    _, AC = ACenv(AC, FL, FR, M; alg)
     _,  C =  Cenv( C, FL, FR; alg)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
     return VUMPSRuntime(AL, AR, C, FL, FR), err
-end
-
-function fix_gauge_vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
-    rt′, err = vumps_step_Hermitian(rt, M, alg)
-    ALu, ARu, Cu, FLu, FRu = rt.AL, rt.AR, rt.C, rt.FL, rt.FR
-    ALd, ARd, Cd, FLd, FRd = rt′.AL, rt′.AR, rt′.C, rt′.FL, rt′.FR
-
-    # _, σ = rightCenv(ARu, conj.(ARd); ifobs=false, verbosity=alg.verbosity) 
-    # U, _ = Zygote.@ignore qrpos(σ[1])
-    # AL_gauged = [ein"(ba,bcd),ed -> ace"(U, ALd, U') for ALd in ALd]
-    # AR_gauged = [ein"(ba,bcd),ed -> ace"(U, ARd, U') for ARd in ARd]
-    #  C_gauged = [ein"(ba,bc),dc -> ad"(U, Cd, U') for Cd in Cd]
-    # FL_gauged = [ein"(ba,bcd),ed -> ace"(U', FLd, U) for FLd in FLd]
-    # FR_gauged = [ein"(ab,bcd),de -> ace"(U, FRd, U') for FRd in FRd]
-
-    AL_gauged = ALd
-    AR_gauged = ARd
-    C_gauged = Cd   
-    FL_gauged = FLd
-    FR_gauged = FRd
-    λ1 = Zygote.@ignore [ALu ./ AL_gauged  for (AL_gauged, ALu) in zip(AL_gauged, ALu)]
-    λ2 = Zygote.@ignore [ARu ./ AR_gauged  for (AR_gauged, ARu) in zip(AR_gauged, ARu)]
-    λ3 = Zygote.@ignore [Cu ./ C_gauged for (C_gauged, Cu) in zip(C_gauged, Cu)] 
-    λ4 = Zygote.@ignore [FLu ./ FL_gauged  for (FL_gauged, FLu) in zip(FL_gauged, FLu)]
-    λ5 = Zygote.@ignore [FRu ./ FR_gauged  for (FR_gauged, FRu) in zip(FR_gauged, FRu)]
-
-    AL_gauged = [AL_gauged .* λ1 for (AL_gauged,λ1) in zip(AL_gauged,λ1)]
-    AR_gauged = [AR_gauged .* λ2 for (AR_gauged,λ2) in zip(AR_gauged,λ2)]
-    C_gauged = [C_gauged .* λ3 for (C_gauged,λ3) in zip(C_gauged,λ3)]
-    FL_gauged = [FL_gauged .* λ4 for (FL_gauged,λ4) in zip(FL_gauged,λ4)]
-    FR_gauged = [FR_gauged .* λ5 for (FR_gauged,λ5) in zip(FR_gauged,λ5)]
-    return VUMPSRuntime(AL_gauged, AR_gauged, C_gauged, FL_gauged, FR_gauged), err
 end

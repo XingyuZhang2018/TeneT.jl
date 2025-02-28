@@ -95,6 +95,13 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
+function ChainRulesCore.rrule(::typeof(_fit_spaces), y::AbstractTensorMap, x::AbstractTensorMap)
+    function pullback(Δ)
+        return NoTangent(), _fit_spaces(Δ, y), NoTangent()
+    end
+    return _fit_spaces(y, x), pullback
+end
+
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)
 #     rt = vumps_itr(rt, M, alg)
 #     function back(∂rt)

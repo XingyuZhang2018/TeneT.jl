@@ -12,5 +12,5 @@ module Defaults
     const miniter_ad = 3
     const tol = 1e-10
     const ifcheckpoint = false
-    const ifsimple_eig = true
+    const ifsimple_eig = false
 end

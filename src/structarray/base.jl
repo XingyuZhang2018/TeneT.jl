@@ -34,9 +34,9 @@ struct StructArray{A}
     end
 end
 
-# 实现必要的AbstractArray接口
 Base.size(S::StructArray) = size(S.pattern)
 Base.size(S::StructArray, i::Int) = size(S.pattern, i)
+Base.length(S::StructArray) = length(S.data)
 Base.getindex(S::StructArray, i::Int, j::Int) = S.data[S.pattern[i, j]]
 Base.getindex(S::StructArray, i::Int, ::Colon) = S.data[S.pattern[i, :]]
 Base.getindex(S::StructArray, ::Colon, j::Int) = S.data[S.pattern[:, j]]
@@ -45,12 +45,16 @@ Base.setindex!(S::StructArray, value, i::Int, j::Int) = (S.data[S.pattern[i, j]]
 Base.setindex!(S::StructArray, value, i::Int) = (S.data[S.pattern[i]] = value)
 Base.vec(S::StructArray) = S
 Base.similar(S::StructArray) = StructArray(similar(S.data), S.pattern)
+Base.Array(S::StructArray{<:AbstractVector{<:Number}}) = StructArray(Array(S.data), S.pattern)
 Base.Array(S::StructArray) = StructArray(Array.(S.data), S.pattern)
 Base.copy(S::StructArray) = StructArray(copy(S.data), S.pattern)
+CUDA.CuArray(S::StructArray{<:AbstractVector{<:Number}}) = StructArray(CuArray(S.data), S.pattern)
 CUDA.CuArray(S::StructArray) = StructArray(CUDA.CuArray.(S.data), S.pattern)
 LinearAlgebra.norm(S::StructArray) = norm(S.data)
 LinearAlgebra.conj(S::StructArray) = StructArray(conj(S.data), S.pattern)
 Base.isapprox(S::StructArray, T::StructArray; atol=1e-12) = ==(S.pattern, T.pattern) && isapprox(S.data, T.data; atol=atol)
+LinearAlgebra.adjoint(S::StructArray) = StructArray(adjoint.(S.data), S.pattern)
+
 function Base.show(io::IO, S::StructArray)
     println(io, "StructArray with pattern:")
     show(io, S.pattern)

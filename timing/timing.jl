@@ -64,7 +64,7 @@ end
     ipeps = atype(rand(dtype, D,D,D,D,d))
     FL = atype(rand(dtype, χ,D,D,χ))
 
-    # FRmap(FR, ARu, ARd, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M, conj(M), ARd)
+    # FRmap(FR, ARu, ARd, M::ipeps) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M, conj(M), ARd)
     code = ein"aefi,ijkl,ejgbp,fkhcp,abcd -> dghl"
     size_dict = OMEinsum.get_size_dict(getixsv(code), (FL, AL, ipeps, conj(ipeps), AL))
     code = optimize_code(code, size_dict, TreeSA(nslices=0))

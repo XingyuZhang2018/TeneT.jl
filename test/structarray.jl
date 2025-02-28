@@ -39,12 +39,11 @@
     end
 end
 
-
-@testset "StructArray Random" for atype in [Array, CuArray]
+@testset "StructArray Random $atype{$T}" for atype in [Array, CuArray], T in [ComplexF64, Float32]
     @testset "Array of Numbers" begin
         pattern = [1 2; 
                    2 1]
-        SA = randSA(atype, pattern)
+        SA = atype(rand(T, pattern))
         @test CUDA.@allowscalar SA[1,1] == SA[2,2]
         @test CUDA.@allowscalar SA[1,2] == SA[2,1]
         @test size(SA) == (2, 2)
@@ -53,7 +52,7 @@ end
 
         pattern = [1 2 3; 
                    3 2 1]
-        SA = randSA(atype, pattern)
+        SA = atype(rand(T, pattern))
         @test CUDA.@allowscalar SA[1,1] == SA[2,3]
         @test CUDA.@allowscalar SA[1,2] == SA[2,2]
         @test CUDA.@allowscalar SA[1,3] == SA[2,1]
@@ -65,7 +64,7 @@ end
     @testset "Array of Arrays" begin
         pattern = [1 2; 2 1]
         sizes = [(2,), (2,)]
-        SA = randSA(atype, pattern, sizes)
+        SA = atype(rand(T, sizes, pattern))
         @test SA[1,1] == SA[2,2]
         @test SA[1,2] == SA[2,1]
         @test size(SA) == (2, 2)
@@ -77,7 +76,7 @@ end
 
         pattern = [1 2 3; 3 2 1]
         sizes = [(2,3), (2,4), (3,5)]
-        SA = randSA(atype, pattern, sizes)
+        SA = atype(rand(T, sizes, pattern))
         @test size(SA) == (2, 3)
         @test size(SA[1,1]) == sizes[1]
         @test size(SA[1,2]) == sizes[2]
@@ -87,7 +86,7 @@ end
         @test size(SA[2,3]) == sizes[1] 
         @test _arraytype(SA.data[1]) == atype
 
-        SA = randSA(SA)
+        SA = rand!(SA)
         @test size(SA) == (2, 3)
         @test size(SA[1,1]) == sizes[1]
         @test size(SA[1,2]) == sizes[2]
@@ -97,66 +96,66 @@ end
         @test size(SA[2,3]) == sizes[1]
         @test _arraytype(SA.data[1]) == atype
     end
+
+    @testset "Array of TensorMaps" begin
+        pattern = [1 2; 2 1]
+        spaces = [ℂ^2 ← ℂ^2, ℂ^2 ← ℂ^2]
+        SA = atype(rand(T, spaces, pattern))
+        @test SA[1,1] == SA[2,2]
+        @test SA[1,2] == SA[2,1]
+        @test size(SA) == (2, 2)
+        @test space(SA[1,1]) == spaces[1]
+        @test space(SA[1,2]) == spaces[2]
+        @test space(SA[2,1]) == spaces[2]
+        @test space(SA[2,2]) == spaces[1]
+        @test _arraytype(SA.data[1]) == atype
+
+        pattern = [1 2 3; 3 2 1]
+        spaces = [ℂ^2 ← ℂ^3, ℂ^2 ← ℂ^4, ℂ^3 ← ℂ^5]
+        SA = atype(rand(T, spaces, pattern))
+        @test size(SA) == (2, 3)
+        @test space(SA[1,1]) == spaces[1]
+        @test space(SA[1,2]) == spaces[2]
+        @test space(SA[1,3]) == spaces[3]
+        @test space(SA[2,1]) == spaces[3]
+        @test space(SA[2,2]) == spaces[2]
+        @test space(SA[2,3]) == spaces[1] 
+        @test _arraytype(SA.data[1]) == atype
+
+        SA = rand!(SA)
+        @test size(SA) == (2, 3)
+        @test space(SA[1,1]) == spaces[1]
+        @test space(SA[1,2]) == spaces[2]
+        @test space(SA[1,3]) == spaces[3]
+        @test space(SA[2,1]) == spaces[3]
+        @test space(SA[2,2]) == spaces[2]
+        @test space(SA[2,3]) == spaces[1]
+        @test _arraytype(SA.data[1]) == atype
+    end
 end
 
 
-@testset "StructArray Indexing" begin
+@testset "StructArray Indexing $atype{$T}" for atype in [Array, CuArray], T in [ComplexF64, Float32]
     @testset "Array of Numbers" begin
         pattern = [1 2; 2 1]
-        SA = randSA(Array, pattern)
-        SA[1,1] = 0.0
-        @test SA[1,1] == SA[2,2] == 0.0
+        SA = atype(rand(T, pattern))
+        CUDA.@allowscalar SA[1,1] = 0.0
+        CUDA.@allowscalar @test SA[1,1] == SA[2,2] == 0.0
     end
 
     @testset "Array of Arrays" begin
         pattern = [1 2; 2 1]
         sizes = [(2,3), (2,3)]
-        SA = randSA(Array, pattern, sizes)
-        SA[1,1] = zeros(ComplexF64, 2, 3)
-        @test SA[1,1] == SA[2,2] == zeros(ComplexF64, 2, 3)
+        SA = atype(rand(T, sizes, pattern))
+        CUDA.@allowscalar SA[1,1] = zeros(T, 2, 3)
+        CUDA.@allowscalar @test SA[1,1] == SA[2,2] == zeros(T, 2, 3)
+    end
+
+    @testset "Array of TensorMaps" begin
+        pattern = [1 2; 2 1]
+        spaces = [ℂ^2 ← ℂ^3, ℂ^2 ← ℂ^3]
+        SA = atype(rand(T, spaces, pattern))
+        CUDA.@allowscalar SA[1,1] = zeros(T, spaces[1])
+        CUDA.@allowscalar @test SA[1,1] == SA[2,2] == zeros(T, spaces[1])
     end
 end
-
-# @testset "StructArray Iteration" begin
-#     pattern = [1 2; 
-#                2 1]
-#     sizes = [(2,3), (2,3)]
-#     SA = randSA(Array, pattern, sizes)
-    
-#     # 测试迭代所有独特元素
-#     elements = collect(SA)
-#     @test length(elements) == 2  # 只有2个独特的元素
-#     @test elements[1] == SA[1,1] == SA[2,2] # 第一个独特元素
-#     @test elements[2] == SA[1,2] == SA[2,1]  # 第二个独特元素
-    
-
-#     # 测试迭代顺序
-#     count = 0
-#     expected_elements = [SA[1,1], SA[1,2]]
-#     for element in SA
-#         count += 1
-#         @test element == expected_elements[count]
-#     end
-#     @test count == 2
-
-#     pattern = [1 2 3; 
-#                3 2 1]
-#     sizes = [(2,3), (2,3), (2,3)]
-#     SA = randSA(Array, pattern, sizes)
-    
-#     # 测试迭代所有独特元素
-#     elements = collect(SA)
-#     @test length(elements) == 3  # 只有3个独特的元素
-#     @test elements[1] == SA[1,1] == SA[2,3] # 第一个独特元素
-#     @test elements[2] == SA[2,1] == SA[1,3] # 第二个独特元素
-#     @test elements[3] == SA[1,2] == SA[2,2]  # 第三个独特元素
-    
-#     # 测试迭代顺序
-#     count = 0
-#     expected_elements = [SA[1,1], SA[1,2], SA[2,1]]
-#     for element in SA
-#         count += 1
-#         @test element == expected_elements[count]
-#     end
-#     @test count == 3
-# end
