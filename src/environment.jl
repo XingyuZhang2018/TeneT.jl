@@ -279,6 +279,68 @@ function leftenv(ALu::StructArray,
 end
 
 """
+        leftCenv(ALu::Matrix{<:AbstractTensorMap}, 
+                    ALd::Matrix{<:AbstractTensorMap}, 
+                    L::Matrix{<:AbstractTensorMap} = initial_C(ALu); 
+                    ifobs=false, verbosity = Defaults.verbosity, kwargs...) 
+
+Compute the left environment tensor for MPS A, by finding the left fixed point
+of ALu - ALd contracted along the physical dimension.
+```
+   ┌── ALuᵢⱼ  ──          ┌──  
+   Lᵢⱼ   |        = λLᵢⱼ  Lᵢⱼ₊₁
+   └── ALdᵢᵣⱼ ──          └──  
+```
+"""
+function leftCenv(ALu::StructArray, 
+                  ALd::StructArray, 
+                  L::StructArray = initial_C(ALu); 
+                  ifobs=false, ifvalue=false, alg, kwargs...) 
+
+    Ni, Nj = size(L)
+    λL = Zygote.Buffer(rand(eltype(L.data[1]), L.pattern))
+    L′ = Zygote.Buffer(L)
+    processed_indices = Set{Int}()
+    for i in 1:Ni
+        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        p = L.pattern[i,1]
+        if p ∉ processed_indices
+            f(Lij) = Lmap(1, Lij, ALu[i,:], ALd[ir,:])
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λL[i,1], L′[i,1] = checkpoint(simple_eig, f, L[i,1]; ifvalue=ifvalue)
+                else
+                    λL[i,1], L′[i,1] = simple_eig(f, L[i,1]; ifvalue=ifvalue)
+                end
+            else
+                λLs, Li1s, info = eigsolve(f, L[i,1], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
+                λL[i,1], L′[i,1] = λLs[1], Li1s[1]
+            end
+            push!(processed_indices, p)
+            if length(processed_indices) == length(L.data)
+                break
+            end
+        end
+        for j in 2:Nj
+            p = L.pattern[i,j]
+            if p ∉ processed_indices
+                Lij = Lmap(L′[i,j-1], ALu[i,j-1], ALd[ir,j-1])
+                L′[i,j] = Lij / norm(Lij)
+                λL[i,j] = λL[i,1]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(L.data)
+                    break
+                end
+            end
+        end
+    end
+
+    return copy(λL), copy(L′)
+end
+
+
+"""
     λR, FR = rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...)
 
 Compute the right environment tensor for MPS A and MPO M, by finding the left fixed point
@@ -465,10 +527,10 @@ function ACCtoALAR(AC::StructArray, C::StructArray)
 end
 
 function ACCtoAL(AC::StructArray, C::StructArray)
-    Ni, Nj = size(AC)
     errL = 0.0
     AL = Zygote.Buffer(AC)
-    @inbounds for j in 1:Nj, i in 1:Ni
+    @inbounds for p in 1:length(AC.data)
+        i, j = Tuple(findfirst(==(p), AC.pattern))
         QAC, RAC = leftorth(AC[i,j])
          QC, RC  = leftorth( C[i,j])
         errL += norm(RAC - RC)
@@ -478,10 +540,11 @@ function ACCtoAL(AC::StructArray, C::StructArray)
 end
 
 function ACCtoAR(AC::StructArray, C::StructArray)
-    Ni, Nj = size(AC)
     errR = 0.0
     AR = Zygote.Buffer(AC)
-    @inbounds for j in 1:Nj, i in 1:Ni
+    Nj = size(AC, 2)
+    @inbounds for p in 1:length(AC.data)
+        i, j = Tuple(findfirst(==(p), AC.pattern))
         jr = mod1(j - 1, Nj)
         LAC, QAC = rightorth(_to_tail(AC[i,j]))
          LC, QC  = rightorth(C[i,jr])

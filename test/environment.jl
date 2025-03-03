@@ -224,3 +224,28 @@ end
     @test errL isa Real
     @test errR isa Real
 end
+
+@testset "leftCenv for ifsimple_eig=$ifsimple_eig ifobs=$ifobs" for M in Ms, (d, D, χ) in zip(ds, Ds, χs), ifsimple_eig in [true, false], ifobs in [true, false]
+    Random.seed!(42)
+
+    A = initial_A(M, χ)
+    AL, L, λ = left_canonical(A)
+    R, AR, λ = right_canonical(A)
+    alg = VUMPS(ifsimple_eig = true)
+
+    λL, L =  leftCenv(AL, adjoint(AL); ifobs, ifvalue=true, alg)
+
+    @test L[1,1] == L[2,2]
+    @test L[1,2] == L[2,1]
+    @test λL[1,1] == λL[2,2]
+    @test λL[1,2] == λL[2,1]
+    @test all(i -> space(i) == (χ ← χ), L)
+
+    Ni, Nj = size(A)
+    for i in 1:Ni
+        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        for j in 1:Nj
+            @test λL[i,j] * L[i,j] ≈ Lmap(j, L[i,j], AL[i,:], adjoint.(AL[ir,:])) rtol = 1e-12
+        end
+    end
+end

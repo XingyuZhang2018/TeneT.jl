@@ -1,9 +1,5 @@
-export num_grad
-
-@non_differentiable VUMPSRuntime(M, χ::Int)
-@non_differentiable VUMPSRuntime(M, χ::Int, alg::VUMPS)
-@non_differentiable randSA(kwargs...)
-@non_differentiable ISA(kwargs...)
+@non_differentiable init_VUMPSRuntime(kwargs...)
+@non_differentiable rand(kwargs...)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
@@ -23,31 +19,9 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
     return As, back
 end
 
-# adjoint for QR factorization
-# https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
-function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
-    Q, R = qrpos(A)
-    function back((dQ, dR))
-        M = Array(R * dR' - dQ' * Q)
-        dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * _arraytype(Q)(Hermitian(M, :L)))' )'
-        return NoTangent(), _arraytype(Q)(dA)
-    end
-    return (Q, R), back
-end
-
-function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
-    L, Q = lqpos(A)
-    function back((dL, dQ))
-        M = Array(L' * dL - dQ * Q')
-        dA = LowerTriangular(L + I * 1e-12)' \ (dQ + _arraytype(Q)(Hermitian(M, :L)) * Q)
-        return NoTangent(), _arraytype(Q)(dA)
-    end
-    return (L, Q), back
-end
-
 function ChainRulesCore.rrule(::typeof(orth_for_ad), v)
     function back(dv)
-        dv .-= dot(v, dv) * v
+        dv -= dot(v, dv) * v
         return NoTangent(), dv
     end
     return v, back

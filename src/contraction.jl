@@ -97,12 +97,26 @@ end
     └── ALdᵢᵣⱼ ──      └──  
     ```
 """
-function Lmap(Li::Vector{<:AbstractTensorMap}, 
+function Lmap(Lij, ALuij::leg3, ALdirj::leg3)
+    @tensoropt Lij[-5; -3] := ALuij[1 2; -3] * Lij[4; 1] * ALdirj[-5; 4 2]
+    return Lij
+end
+
+function Lmap(Lij, ALuij::leg4, ALdirj::leg4)
+    @tensoropt Lij[-6; -4] := ALuij[1 2 3; -4] * Lij[5; 1] * ALdirj[-6; 5 2 3]
+    return Lij
+end
+
+function Lmap(J::Int, Lij::AbstractTensorMap, 
               ALui::Vector{<:AbstractTensorMap}, 
               ALdir::Vector{<:AbstractTensorMap})
-    Lm = [@tensoropt L[-6; -4] := ALu[1 2 3; -4] * L[5; 1] * ALd[-6; 5 2 3] for (L, ALu, ALd) in zip(Li, ALui, ALdir)]
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        Lij = Lmap(Lij, ALui[jr], ALdir[jr])
+    end
 
-    return circshift(Lm, 1)
+    return Lij
 end
 
 """

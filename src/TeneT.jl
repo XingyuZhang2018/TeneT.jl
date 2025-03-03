@@ -6,7 +6,6 @@ using TensorKit
 using LinearAlgebra
 using KrylovKit
 using Zygote
-using OMEinsum
 using Printf
 using Parameters
 using Random
@@ -32,7 +31,6 @@ include("initial.jl")
 include("contraction.jl")
 include("environment.jl")
 include("vumpsruntime.jl")
-# include("grassmann.jl")
-# include("autodiff.jl")
+include("autodiff.jl")
 
 end
