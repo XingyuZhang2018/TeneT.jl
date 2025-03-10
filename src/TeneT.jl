@@ -10,12 +10,12 @@ using Printf
 using Parameters
 using Random
 
-import Base: +, -, *, getindex, Array
+import Base: +, -, *, /, getindex, Array
 import Random: rand, rand!
 import LinearAlgebra: norm,  mul!
 import CUDA: CuArray
 
-export StructArray, randSA
+export StructArray
 export VUMPS, VUMPSRuntime, VUMPSEnv
 export leading_boundary
 
@@ -25,6 +25,7 @@ include("defaults.jl")
 include("structarray/base.jl")
 include("structarray/initial.jl")
 include("structarray/buffer.jl")
+include("structarray/autodiff.jl")
 include("utilities.jl")
 include("patch.jl")
 include("initial.jl")

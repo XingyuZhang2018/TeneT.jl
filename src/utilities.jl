@@ -4,17 +4,18 @@ const leg4 = Union{<:AbstractTensorMap{ComplexF64,S,3,1} where S, StructArray{<:
                    <:AbstractTensorMap{ComplexF64,S,1,3} where S, StructArray{<:Vector{<:AbstractTensorMap{ComplexF64,S,1,3}} where S}}
 const bulk  = Union{<:AbstractTensorMap{ComplexF64,S,2,2} where S, StructArray{<:Vector{<:AbstractTensorMap{ComplexF64,S,2,2}} where S}}
 const ipeps = Union{<:AbstractTensorMap{ComplexF64,S,4,1} where S, StructArray{<:Vector{<:AbstractTensorMap{ComplexF64,S,4,1}} where S}}
+# const doubleipeps = Union{<:AbstractTensorMap{ComplexF64,S,4,4} where S, StructArray{<:Vector{<:AbstractTensorMap{ComplexF64,S,4,4}} where S}}
 
 function _to_front(t::AbstractTensorMap) # make TensorMap{S,N₁+N₂-1,1}
     I1 = TensorKit.codomainind(t)
     I2 = TensorKit.domainind(t)
-    return transpose(t, ((I1..., reverse(Base.tail(I2))...), (I2[1],)))
+    return permute(t, ((I1..., reverse(Base.tail(I2))...), (I2[1],)))
 end
 
 function _to_tail(t::AbstractTensorMap) # make TensorMap{S,1,N₁+N₂-1}
     I1 = TensorKit.codomainind(t)
     I2 = TensorKit.domainind(t)
-    return transpose(t, ((I1[1],), (I2..., reverse(Base.tail(I1))...)))
+    return permute(t, ((I1[1],), (I2..., reverse(Base.tail(I1))...)))
 end
 
 permute_fronttail(t::leg3) = permute(t, ((3,2),   (1,)))

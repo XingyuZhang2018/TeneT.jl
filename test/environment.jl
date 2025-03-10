@@ -6,7 +6,7 @@
     @test space(A, 3) == (ℂ^4)'
 
     @test dot(A, A) ≈ (@tensor B = conj(A[1 2; 3]) * A[1 2; 3]) ≈ (@tensor B = adjoint(A)[3; 1 2] * A[1 2; 3])
-    @test A'*A ≈ (@tensor B[-1; -2] := conj(A[1 2; -1]) * A[1 2; -2]) ≈ (@tensor B[-1; -2] := adjoint(A)[-1; 1 2] * A[1 2; -2])
+    @test A'*A ≈ (@tensor B[-1; -2] := conj(A[1 2; -1]) * A[1 2; -2]) ≈ (@tensor B[-1; -2] := adjoint(A)[-1; 1 2] * A[1 2; -2]) ≈ (@tensor B[-1; -2] := A'[-1; 1 2] * A[1 2; -2])
 end
 
 @testset "initialize A C" for M in Ms, (d, D, χ) in zip(ds, Ds, χs)

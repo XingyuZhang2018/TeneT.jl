@@ -52,23 +52,6 @@ function ChainRulesCore.rrule(::typeof(to_CuArray), x)
     return to_CuArray(x), back
 end
 
-function ChainRulesCore.rrule(::Type{StructArray}, data, pattern)
-    S = StructArray(data, pattern)
-    function back(dS)
-        return NoTangent(), dS.data, dS.pattern
-    end
-    return S, back
-end
-
-function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
-    y = norm(S)
-    function back(dy)
-        data_grad = pullback(norm, S.data)[2](dy)[1]
-        return NoTangent(), StructArray(data_grad, S.pattern)
-    end
-    return y, back
-end
-
 function ChainRulesCore.rrule(::typeof(_fit_spaces), y::AbstractTensorMap, x::AbstractTensorMap)
     function pullback(Δ)
         return NoTangent(), _fit_spaces(Δ, y), NoTangent()

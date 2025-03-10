@@ -22,6 +22,12 @@ function initial_A(M::ipeps, χ::VectorSpace)
     return _arraytype(M[1])(A)
 end
 
+# function initial_A(M::doubleipeps, χ::VectorSpace)
+#     T = eltype(M[1])
+#     A = rand(T, [(D = space(M, 8)'; χ*D*D' ← χ)  for M in M.data], M.pattern)
+#     return _arraytype(M[1])(A)
+# end
+
 """
 ````
    l ←------- r
@@ -54,6 +60,17 @@ function initial_FL(AL::leg4, M::ipeps)
     )
     return FL
 end
+
+# function initial_FL(AL::leg4, M::doubleipeps)
+#     T = eltype(M[1])
+#     FL = rand(T, [(D = space(M,  1)';
+#                    χ = space(AL, 1);
+#                    χ*D*D' ← χ) for (M, AL) in zip(M.data, AL.data)
+#                  ], 
+#               M.pattern
+#     )
+#     return FL
+# end
 
 function initial_FR(AR::leg3, M::bulk)
     T = eltype(M[1])
