@@ -399,6 +399,68 @@ function rightenv(ARu::StructArray,
     return copy(λR), copy(FR′)
 end
 
+
+"""
+        rightCenv(ARu::Matrix{<:AbstractTensorMap}, 
+                    ARd::Matrix{<:AbstractTensorMap}, 
+                    L::Matrix{<:AbstractTensorMap} = initial_C(ARu); 
+                    ifobs=false, verbosity = Defaults.verbosity, kwargs...) 
+
+Compute the left environment tensor for MPS A, by finding the left fixed point
+of ARu - ARd contracted along the physical dimension.
+```
+    ── ARuᵢⱼ  ──┐          ──┐    
+        │       Rᵢⱼ  =       Rᵢⱼ₋₁ 
+    ── ARdᵢᵣⱼ ──┘          ──┘     
+```
+"""
+function rightCenv(ARu::StructArray, 
+                  ARd::StructArray, 
+                  R::StructArray = initial_C(ARu); 
+                  ifobs=false, ifvalue=false, alg, kwargs...) 
+
+    Ni, Nj = size(R)
+    λR = Zygote.Buffer(rand(eltype(R.data[1]), R.pattern))
+    R′ = Zygote.Buffer(R)
+    processed_indices = Set{Int}()
+    for i in 1:Ni
+        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        p = R.pattern[i,Nj]
+        if p ∉ processed_indices
+            f(RiNj) = Rmap(Ni, RiNj, ARu[i,:], ARd[ir,:])
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λR[i,Nj], R′[i,Nj] = checkpoint(simple_eig, f, R[i,Nj]; ifvalue=ifvalue)
+                else
+                    λR[i,Nj], R′[i,Nj] = simple_eig(f, R[i,Nj]; ifvalue=ifvalue)
+                end
+            else
+                λLs, Li1s, info = eigsolve(f, R[i,Nj], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= Nj && info.converged == 0 && @warn "leftenv not converged"
+                λR[i,Nj], R′[i,Nj] = λLs[1], Li1s[1]
+            end
+            push!(processed_indices, p)
+            if length(processed_indices) == length(R.data)
+                break
+            end
+        end
+        for j in 2:Nj
+            p = R.pattern[i,j]
+            if p ∉ processed_indices
+                Rij = Rmap(R′[i,j+1], ARu[i,j+1], ARd[ir,j+1])
+                R′[i,j] = Rij / norm(Lij)
+                λR[i,j] = λR[i,Nj]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(R.data)
+                    break
+                end
+            end
+        end
+    end
+
+    return copy(λR), copy(R′)
+end
+
 """
     ACenv(AC, FL, M, FR;kwargs...)
 

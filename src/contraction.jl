@@ -171,9 +171,13 @@ end
     ── ARdᵢᵣⱼ ──┘          ──┘     
 ```
 """
-function Rmap(Rij::AbstractTensorMap, 
-              ARuij::AbstractTensorMap, 
-              ARdirj::AbstractTensorMap)
+function Rmap(Rij::AbstractTensorMap, ARuij::leg3, ARdirj::leg3)
+    @tensoropt Rij[-1; -5] := ARuij[-1 2; 3] * Rij[3; 4] * ARdirj[4; -5 2] 
+
+    return Rij
+end
+
+function Rmap(Rij::AbstractTensorMap, ARuij::leg4, ARdirj::leg4)
     @tensoropt Rij[-1; -5] := ARuij[-1 2 3; 4] * Rij[4; 6] * ARdirj[6; -5 2 3] 
 
     return Rij
