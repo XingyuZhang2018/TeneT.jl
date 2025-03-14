@@ -125,15 +125,6 @@ function lqpos!(A)
     return L, Q
 end
 
-function env_norm(F::StructArray)
-    buf = Zygote.Buffer(F)
-    @inbounds @views for p in 1:length(F.data)
-        i, j = Tuple(findfirst(==(p), F.pattern))
-        buf[i,j] = F[i,j]/norm(F[i,j])
-    end
-    return copy(buf)
-end
-
 """
     λs[1], Fs[1] = selectpos(λs, Fs)
 
@@ -647,7 +638,8 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                AC′[i,j] = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
+                ACij = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
+                AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(AC.data)
@@ -700,7 +692,8 @@ function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
         for i in 2:Ni
             p = C.pattern[i,j]
             if p ∉ processed_indices
-                C′[i,j] = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
+                Cij = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
+                C′[i,j] = Cij/norm(Cij)
                 λC[i,j] = λC[1,j]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(C.data)
@@ -769,8 +762,6 @@ QR factorization to get `AL` and `AR` from `AC` and `C`
 ````
 """
 function ACCtoALAR(AC, C)
-    AC = env_norm(AC)
-     C = env_norm( C)
     AL, errL = ACCtoAL(AC, C)
     AR, errR = ACCtoAR(AC, C)
     return AL, AR, errL, errR
