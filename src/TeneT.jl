@@ -8,6 +8,7 @@ using OMEinsum
 using Printf
 using Parameters
 using ChainRulesCore
+using FileIO
 
 import Base: +, -, *, getindex, Array
 import LinearAlgebra: norm,  mul!
@@ -17,6 +18,7 @@ import CUDA: CuArray
 export StructArray, randSA
 export VUMPS, VUMPSRuntime, VUMPSEnv
 export leading_boundary
+export save_rt, load_rt
 
 CUDA.allowscalar(false)
 

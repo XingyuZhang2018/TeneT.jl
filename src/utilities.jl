@@ -1,7 +1,7 @@
-const leg3 = Union{<:AbstractArray{ComplexF64, 3}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 3}}}}
-const leg4 = Union{<:AbstractArray{ComplexF64, 4}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 4}}}}
-const leg5 = Union{<:AbstractArray{ComplexF64, 5}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 5}}}}
-const leg8 = Union{<:AbstractArray{ComplexF64, 8}, StructArray{<:Vector{<:AbstractArray{ComplexF64, 8}}}}
+const leg3 = Union{<:AbstractArray{T, 3}, StructArray{<:Vector{<:AbstractArray{T, 3}}}} where T
+const leg4 = Union{<:AbstractArray{T, 4}, StructArray{<:Vector{<:AbstractArray{T, 4}}}} where T
+const leg5 = Union{<:AbstractArray{T, 5}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
+const leg8 = Union{<:AbstractArray{T, 8}, StructArray{<:Vector{<:AbstractArray{T, 8}}}} where T
 
 function _to_front(t)
     χ = size(t)[end]
@@ -60,3 +60,37 @@ Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygo
 
 to_CuArray(x) = map(CuArray, x)
 to_Array(x) = map(Array, x)
+
+function save_rt(folder, rt)
+    p = joinpath(folder, "VUMPS_rt.jld2")
+    if rt.AL[1] isa CuArray
+        data = []
+        for field in fieldnames(typeof(rt))
+            A = getfield(rt, field)
+            push!(data, Array(A))
+        end
+        rt_save = VUMPSRuntime(data...)
+        println("save a CuArray rt in $p")
+        save(p, "rt", rt_save)
+    else
+        println("save a Array rt in $p")
+        save(p, "rt", rt)
+    end
+end
+
+function load_rt(folder, atype)
+    p = joinpath(folder, "VUMPS_rt.jld2")
+    rt = load(p, "rt")
+    if atype == CuArray
+        data = []
+        for field in fieldnames(typeof(rt))
+            A = getfield(rt, field)
+            push!(data, CuArray(A))
+        end
+        println("load a CuArray rt in $p")
+        rt = VUMPSRuntime(data...)
+    else
+        println("load a Array rt in $p")
+    end
+    return rt
+end
