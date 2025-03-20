@@ -16,16 +16,16 @@ end
     @test all(imag.(diag(L)) .≈ 0)
 end
 
-@testset "left_canonical and right_canonical with $atype" for atype in test_type, A in test_As
+@testset "left_canonical and right_canonical" for A in test_As
     Random.seed!(100)
     AL,  L, λ =  left_canonical(A)
      R, AR, λ = right_canonical(A)
     Ni, Nj = size(A)
 
     @test AL[1,1] == AL[2,2]
-    # @test AL[2,1] == AL[1,2]
+    @test AL[2,1] == AL[1,2]
     @test AR[1,1] == AR[2,2]
-    # @test AR[2,1] == AR[1,2]
+    @test AR[2,1] == AR[1,2]
     for p in 1:length(AL.data)
         i, j = Tuple(findfirst(==(p), AL.pattern))
         @test Array(_to_tail(AL[i,j])' * _to_tail(AL[i,j])) ≈ I(χ)
@@ -42,7 +42,7 @@ end
     end
 end
 
-@testset "leftenv and rightenv with $atype" for atype in test_type, (A, M) in zip(test_As, test_Ms), ifobs in [false, true]
+@testset "leftenv and rightenv" for (A, M) in zip(test_As, test_Ms), ifobs in [false, true]
     Random.seed!(100)
     χ, D = 3, 2
 
@@ -63,7 +63,7 @@ end
     end
 end
 
-@testset "ACenv and Cenv with $atype" for atype in test_type, (A, M)  in zip(test_As, test_Ms), ifobs in [false, true]
+@testset "ACenv and Cenv" for (A, M) in zip(test_As, test_Ms), ifobs in [false, true]
     Random.seed!(100)
     Ni, Nj = size(A)
 
@@ -90,7 +90,7 @@ end
     end
 end
 
-@testset "bcvumps unit test with $atype" for atype in test_type, (A, M) in zip(test_As, test_Ms), ifobs in [false]
+@testset "bcvumps unit test" for (A, M) in zip(test_As, test_Ms), ifobs in [false]
     Random.seed!(100)
     Ni, Nj = size(A)
 

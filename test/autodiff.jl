@@ -27,7 +27,7 @@ begin "test utils"
     end
 end
 
-@testset "zygote mutable arrays with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
+@testset "zygote mutable arrays with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     function foo(F) 
         buf = Zygote.Buffer(F) # https://fluxml.ai/Zygote.jl/latest/utils/#Zygote.Buffer
@@ -40,7 +40,7 @@ end
     @test Zygote.gradient(foo, F)[1] ≈ num_grad(foo, F) atol = 1e-8
 end
 
-@testset "loop_einsum mistake with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
+@testset "loop_einsum mistake with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     D = 5
     A = atype(rand(dtype, D,D,D))
@@ -58,7 +58,7 @@ end
     @test Zygote.gradient(foo, 1)[1] ≈ num_grad(foo, 1) atol = 1e-8
 end
 
-@testset "structarray AD for $atype" for atype in [Array, CuArray]
+@testset "structarray AD for $atype" for atype in test_type
     Random.seed!(100)
     M = randSA(atype, [1 2; 2 1], [(1,2), (1,2)])
     function foo(M)
@@ -68,7 +68,7 @@ end
     @test Zygote.gradient(foo, M)[1].data ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "structarray buffer for $atype" for atype in [Array]
+@testset "structarray buffer for $atype" for atype in test_type
     Random.seed!(100)
     M = randSA(atype, [1 2; 2 1], [(1,2), (1,2)])
     function foo(M)
@@ -82,8 +82,7 @@ end
     @test Zygote.gradient(foo, M)[1].data ≈ num_grad(foo, M) atol = 1e-8
 end
 
-
-@testset "QR factorization with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
+@testset "QR factorization with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     M = atype(rand(dtype, 3, 3))
 
@@ -94,7 +93,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "LQ factorization with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
+@testset "LQ factorization with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     M = atype(rand(dtype, 3, 3))
     function foo(M)
@@ -104,7 +103,7 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "leftenv and rightenv with $atype" for atype in [Array], (A, M, S) in zip(test_As, test_Ms, test_S1s), ifobs in [false]
+@testset "leftenv and rightenv" for (A, M, S) in zip(test_As, test_Ms, test_S1s), ifobs in [false]
     Random.seed!(100)
 
        ALu, =  left_canonical(A) 
@@ -132,8 +131,8 @@ end
         s = 0
         for p in 1:length(M.data)
             i, j = Tuple(findfirst(==(p), M.pattern))
-            A  = Array(ein"(abc,abcdef),def -> "(FR[i,j], S[i,j], FR[i,j]))[]
-            B  = Array(ein"abc,abc -> "(FR[i,j], FR[i,j]))[]
+            A  = sum(ein"(abc,abcdef),def -> "(FR[i,j], S[i,j], FR[i,j]))
+            B  = sum(ein"abc,abc -> "(FR[i,j], FR[i,j]))
             s += norm(A/B)
         end
         return s
@@ -141,7 +140,7 @@ end
     @test Zygote.gradient(foo2, M)[1].data ≈ num_grad(foo2, M) atol = 1e-7
 end
 
-@testset "ACenv and Cenv with $atype" for atype in [Array], (A, M, S1, S2) in zip(test_As, test_Ms, test_S1s, test_S2s), ifobs in [false]
+@testset "ACenv and Cenv" for (A, M, S1, S2) in zip(test_As, test_Ms, test_S1s, test_S2s), ifobs in [false]
     Random.seed!(100)
     AL, L, _ =  left_canonical(A) 
     R, AR, _ = right_canonical(A)
@@ -162,7 +161,7 @@ end
         end
         return s
     end
-    # @test Zygote.gradient(foo1, M)[1].data ≈ num_grad(foo1, M) atol = 1e-7
+    @test Zygote.gradient(foo1, M)[1].data ≈ num_grad(foo1, M) atol = 1e-7
 
     function foo2(M)
         _, FL = leftenv(AL, conj(AL), M, FL; ifobs, alg)
@@ -180,7 +179,7 @@ end
     @test Zygote.gradient(foo2, M)[1].data ≈ num_grad(foo2, M) atol = 1e-7
 end
 
-@testset "ACCtoALAR with $atype" for atype in [Array], (A, M, S1, S2) in zip(test_As, test_Ms, test_S1s, test_S2s), ifobs in [false]
+@testset "ACCtoALAR" for (A, M, S1, S2) in zip(test_As, test_Ms, test_S1s, test_S2s), ifobs in [false]
     Random.seed!(42)
 
     AL, L, _ =  left_canonical(A) 
@@ -237,7 +236,7 @@ end
 include("../example/exampletensors.jl")
 include("../example/exampleobs.jl")
 
-@testset "ising backward with $atype $ifupdown $pattern" for atype = [Array], ifupdown in [false, true], pattern in [[1 2 3 4 5 6; 4 5 6 1 2 3]]
+@testset "ising backward with $atype $ifupdown $pattern" for atype = [Array, ROCArray], ifupdown in [false], pattern in [[1;;]]
     # [1;;], [1 1; 1 1], [1 2; 2 1], [1 2; 3 4], [1 1; 2 2]
     # [1 3 2 2 3 1; 2 3 1 1 3 2]
     Random.seed!(100)
@@ -261,6 +260,6 @@ include("../example/exampleobs.jl")
         env = VUMPSEnv(rt′, M, alg)
         return real(observable(env, model, pattern, Val(:energy)))
     end
-    @show energy(0.5)
-    # @test Zygote.gradient(energy, 0.3)[1] ≈ num_grad(energy, 0.3)
+    # @show energy(0.5) Zygote.gradient(energy, 0.3)[1]
+    @test Zygote.gradient(energy, 0.3)[1] ≈ num_grad(energy, 0.3) atol=1e-6
 end

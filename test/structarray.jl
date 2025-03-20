@@ -40,7 +40,7 @@
 end
 
 
-@testset "StructArray Random" for atype in [Array, CuArray]
+@testset "StructArray Random for $atype" for atype in test_type
     @testset "Array of Numbers" begin
         pattern = [1 2; 
                    2 1]
@@ -117,46 +117,43 @@ end
     end
 end
 
-# @testset "StructArray Iteration" begin
-#     pattern = [1 2; 
-#                2 1]
-#     sizes = [(2,3), (2,3)]
-#     SA = randSA(Array, pattern, sizes)
+@testset "StructArray Iteration" begin
+    pattern = [1 2; 
+               2 1]
+    sizes = [(2,3), (2,3)]
+    SA = randSA(Array, pattern, sizes)
     
-#     # 测试迭代所有独特元素
-#     elements = collect(SA)
-#     @test length(elements) == 2  # 只有2个独特的元素
-#     @test elements[1] == SA[1,1] == SA[2,2] # 第一个独特元素
-#     @test elements[2] == SA[1,2] == SA[2,1]  # 第二个独特元素
+    elements = collect(SA)
+    @test length(elements) == 2  
+    @test elements[1] == SA[1,1] == SA[2,2] 
+    @test elements[2] == SA[1,2] == SA[2,1]  
     
 
-#     # 测试迭代顺序
-#     count = 0
-#     expected_elements = [SA[1,1], SA[1,2]]
-#     for element in SA
-#         count += 1
-#         @test element == expected_elements[count]
-#     end
-#     @test count == 2
+    count = 0
+    expected_elements = [SA[1,1], SA[1,2]]
+    for element in SA
+        count += 1
+        @test element == expected_elements[count]
+    end
+    @test count == 2
 
-#     pattern = [1 2 3; 
-#                3 2 1]
-#     sizes = [(2,3), (2,3), (2,3)]
-#     SA = randSA(Array, pattern, sizes)
+    pattern = [1 2 3; 
+               3 2 1]
+    sizes = [(2,3), (2,3), (2,3)]
+    SA = randSA(Array, pattern, sizes)
     
-#     # 测试迭代所有独特元素
-#     elements = collect(SA)
-#     @test length(elements) == 3  # 只有3个独特的元素
-#     @test elements[1] == SA[1,1] == SA[2,3] # 第一个独特元素
-#     @test elements[2] == SA[2,1] == SA[1,3] # 第二个独特元素
-#     @test elements[3] == SA[1,2] == SA[2,2]  # 第三个独特元素
+
+    elements = collect(SA)
+    @test length(elements) == 3  
+    @test elements[1] == SA[1,1] == SA[2,3]
+    @test elements[2] == SA[2,1] == SA[1,3]
+    @test elements[3] == SA[1,2] == SA[2,2]
     
-#     # 测试迭代顺序
-#     count = 0
-#     expected_elements = [SA[1,1], SA[1,2], SA[2,1]]
-#     for element in SA
-#         count += 1
-#         @test element == expected_elements[count]
-#     end
-#     @test count == 3
-# end
+    count = 0
+    expected_elements = [SA[1,1], SA[1,2], SA[2,1]]
+    for element in SA
+        count += 1
+        @test element == expected_elements[count]
+    end
+    @test count == 3
+end

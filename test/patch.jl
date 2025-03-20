@@ -1,4 +1,4 @@
-@testset "OMEinsum with $atype{$dtype} " for atype in [Array], dtype in [Float64, ComplexF64]
+@testset "OMEinsum with $atype{$dtype} " for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     d = 9
     D = 20
@@ -8,7 +8,7 @@
     @time ein"((γcη,ηpβ),csap),γsα -> αaβ"(FL,AL,M,conj(AL))
 end
 
-@testset "KrylovKit with $atype{$dtype}" for atype in [Array], dtype in [Float64, ComplexF64]
+@testset "KrylovKit with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     d = 4
     D = 10
