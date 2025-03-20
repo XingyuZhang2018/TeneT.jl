@@ -1,5 +1,6 @@
 module TeneT
 
+using AMDGPU
 using CUDA
 using LinearAlgebra
 using KrylovKit

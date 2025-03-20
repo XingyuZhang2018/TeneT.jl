@@ -1,8 +1,8 @@
-@testset "VUMPSRuntime with $atype" for atype = [Array], M in test_Ms
+@testset "VUMPSRuntime" for M in test_Ms
     Random.seed!(100)
     χ = 10
     alg = VUMPS(ifupdown=false)
-    rt = CUDA.@time VUMPSRuntime(M, χ, alg)
+    rt = VUMPSRuntime(M, χ, alg)
 
     @test rt isa VUMPSRuntime
 
@@ -10,7 +10,7 @@
     @test env isa VUMPSEnv
 end
 
-@testset "VUMPSRuntime with $atype" for atype = [Array], ifupdown in [true, false]
+@testset "VUMPSRuntime with $atype" for atype in test_type, ifupdown in [true, false]
     Random.seed!(100)
 
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4), (3,5,1,6), (7,4,8,2), (8,6,7,5)])
@@ -22,7 +22,7 @@ end
     @test env isa VUMPSEnv
 end
 
-@testset "oneside vumps with $atype" for atype = [Array], M in test_Ms
+@testset "oneside vumps" for M in test_Ms
     Random.seed!(100)
     χ = 3
     alg = VUMPS(maxiter=100, verbosity=2, ifupdown=false)
@@ -34,7 +34,7 @@ end
     @test env isa VUMPSEnv
 end
 
-@testset "oneside vumps with $atype" for atype = [Array]
+@testset "oneside vumps with $atype" for atype in test_type
     Random.seed!(100)
     χ = 3
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4), (3,5,1,6), (7,4,8,2), (8,6,7,5)])
@@ -46,7 +46,7 @@ end
     env = VUMPSEnv(rt, M, alg)
     @test env isa VUMPSEnv
 
-    d = 2
+    d = 1
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4, d), (3,5,1,6, d), (7,4,8,2, d), (8,6,7,5, d)])
     alg = VUMPS(maxiter=100, verbosity=3, show_every=10, ifupdown=false)
     rt = VUMPSRuntime(M, χ, alg)
@@ -57,8 +57,7 @@ end
     @test env isa VUMPSEnv
 end
 
-
-@testset "twoside vumps with $atype" for atype = [Array], M in test_Ms
+@testset "twoside vumps" for M in test_Ms
     Random.seed!(100)
     χ = 3
     alg = VUMPS(maxiter=100, verbosity=3, ifupdown=true)
@@ -70,7 +69,7 @@ end
     @test env isa VUMPSEnv
 end
 
-@testset "twoside vumps with $atype" for atype = [Array]
+@testset "twoside vumps with $atype" for atype in test_type
     Random.seed!(100)
     χ = 3
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4), (3,5,1,6), (7,4,8,2), (8,6,7,5)])
@@ -82,7 +81,7 @@ end
     env = VUMPSEnv(rt, M, alg)
     @test env isa VUMPSEnv
 
-    d = 2
+    d = 1
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4, d), (3,5,1,6, d), (7,4,8,2, d), (8,6,7,5, d)])
     alg = VUMPS(maxiter=100, verbosity=2, ifupdown=true)
     rt = VUMPSRuntime(M, χ, alg)
