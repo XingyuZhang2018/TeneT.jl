@@ -12,8 +12,8 @@
     verbosity::Int = Defaults.verbosity
 end
 
-function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
-    A = initial_A(M, χ)
+function init_VUMPSRuntime(M, χ1::Int, χ2::Int, alg::VUMPS)
+    A = initial_A(M, χ1, χ2)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
     _, FL = leftenv(AL, conj(AL), M; alg)
@@ -51,11 +51,11 @@ function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
     return VUMPSRuntime(ALd, ARd, Cd, FLd, FRd)
 end
 
-function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
+function VUMPSRuntime(M::StructArray, χ1::Int, χ2::Int, alg::VUMPS)
     Ni, Nj = size(M)
 
-    rtup = init_VUMPSRuntime(M, χ, alg)
-    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+    rtup = init_VUMPSRuntime(M, χ1, χ2, alg)
+    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ1 = $(χ1) χ2 = $(χ2) up(↑) environment"
 
     if alg.ifupdown    
         Md = _down_M(M) 

@@ -143,12 +143,12 @@ function selectpos(λs, Fs, N)
 end
 
 function cellones(A)
-    χ = size(A[1], 1)
-    return ISA(A, [(χ,χ) for _ = 1:length(A.data)])
+    χ1, χ2 = size(A[1])[[1,3]]
+    return ISA(A, [i in [1,4] ? (χ2,χ2) : (χ1,χ1) for i = 1:length(A.data)])
 end
 
-function initial_A(M::leg4, χ::Int)
-    return randSA(M, [(D = size(m, 4); (χ, D, χ)) for m in M.data])
+function initial_A(M::leg4, χ1::Int, χ2::Int)
+    return randSA(M, [(D = size(M[i], 4); i in [1,4] ? (χ1,D,χ2) : (χ2,D,χ1)) for i in 1:4])
 end
 
 function initial_A(M::leg5, χ::Int)
@@ -167,6 +167,15 @@ function ρmap(ρ, Ai, J::Int)
     for j = 1:Nj
         jr = mod1(J+j-1, Nj)
         ρ = ρmap(ρ,Ai[jr],conj(Ai[jr]))
+    end
+    return ρ
+end
+
+function ρmap(ρ, Ai, Air, J::Int)
+    Nj = size(Ai,1)
+    for j = 1:Nj
+        jr = mod1(J+j-1, Nj)
+        ρ = ρmap(ρ,Ai[jr],Air[jr])
     end
     return ρ
 end
@@ -216,8 +225,10 @@ function getAL(A, L)
     @inbounds @views for j in 1:Nj, i in 1:Ni
         p = AL.pattern[i,j]
         if p ∉ processed_indices  # Only process pattern values that haven't been computed yet
-            Q, R = qrpos!(_to_tail(L[i,j]*_to_front(A[i,j])))
-            AL[i,j] = reshape(Q, size(A[i,j]))
+            jr = mod1(j-1, Nj)
+            χ1, D, χ2 = size(A[i,j])
+            Q, R = qrpos!(reshape(ein"ab,bcd->acd"(L[i,jr], A[i,j]), χ1*D, χ2))
+            AL[i,j] = reshape(Q, χ1, D, χ2)
             λ[i,j] = norm(R)
             Le[i,j] = rmul!(R, 1/λ[i,j])
             push!(processed_indices, p)
@@ -238,9 +249,10 @@ function getLsped(Le, A, AL; kwargs...)
     @inbounds @views for j in 1:Nj, i in 1:Ni
         p = Le.pattern[i,j]
         if p ∉ processed_indices
-            _, Ls1 = simple_eig(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j]; kwargs...)
+            jr = mod1(j-1,Nj)
+            _, Ls1 = simple_eig(X -> ρmap(X,A[:,j],conj(AL[:,j]), i), Le[i,jr]; kwargs...)
             _, R = qrpos!(Ls1)
-            L[i,j] = R
+            L[i,jr] = R
             push!(processed_indices, p)
             if length(processed_indices) == length(Le.data)
                 break
@@ -281,10 +293,12 @@ provided.
 function right_canonical(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     Ar = similar(A)
     Lr = similar(L)
+    Nj = size(A,2)
     @inbounds for p in 1:length(A.data)
         i, j = Tuple(findfirst(==(p), A.pattern))
         Ar[i,j] = permute_fronttail(A[i,j])
-        Lr[i,j] = permutedims(L[i,j],(2,1))
+        jr = mod1(j-1,Nj)
+        Lr[i,j] = permutedims(L[i,jr],(2,1))
     end
 
     AL, L, λ = left_canonical(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
@@ -364,8 +378,8 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi)
 end
 
 function FLint(AL, M::leg4)
-    χ = size(AL[1], 1)
-    return randSA(M, [(D = size(m, 1); (χ, D, χ)) for m in M.data])
+    χ1,χ2 = size(AL[1])[[1,3]]
+    return randSA(M, [(D = size(M[i], 1); i in [1,4] ? (χ1,D,χ2) : (χ2,D,χ1)) for i in 1:4])
 end
 
 function FLint(AL, M::leg5)
@@ -379,8 +393,8 @@ function FLint(AL, M::leg8)
 end
 
 function FRint(AR, M::leg4)
-    χ = size(AR[1], 1)  
-    return randSA(M, [(D = size(m, 3); (χ, D, χ)) for m in M.data])
+    χ1,χ2 = size(AR[1])[[1,3]]
+    return randSA(M, [(D = size(M[i], 3); i in [2,3] ? (χ1,D,χ2) : (χ2,D,χ1)) for i in 1:4])
 end
 
 function FRint(AR, M::leg5)
