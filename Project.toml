@@ -20,11 +20,8 @@ VectorInterface = "409d34a3-91d5-4945-b6ec-7529ddf182d8"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
-<<<<<<< HEAD
 FileIO = "1.17.0"
-=======
 AMDGPU = "1.2.4"
->>>>>>> 9e500d04d5a14e7e578e28839a3b5a1cde09fb80
 KrylovKit = "0.8.2"
 OMEinsum = "0.7.6"
 Parameters = "0.12.3"
