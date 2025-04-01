@@ -3,13 +3,12 @@
 
 return the `type` observable of the `model`. Requires that `type` tensor defined in model_tensor(model, Val(:type)).
 """
-function observable(env, model::MT, pattern::Matrix{Int}, ::Val{:Z}) where {MT <: HamiltonianModel}
+function observable(env, M, pattern::Matrix{Int}, ::Val{:Z}, alg)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
     Ni,Nj = size(ACu)
     l = length(unique(pattern))
-    M   = StructArray([atype(model_tensor(model, Val(:bulk))) for _ = 1:l], pattern)
-    λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true)  
+    λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg)  
       λC, _ = rightCenv(ARu, conj(ARu);    ifobs=true)
     return prod(λFLo./λC)^(1/Ni)
 end

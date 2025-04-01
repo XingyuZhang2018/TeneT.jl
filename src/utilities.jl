@@ -58,8 +58,6 @@ end
 checkpoint(f, x...; kwargs...) = f(x...; kwargs...) 
 Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...)[2](ȳ)
 
-to_CuArray(x) = map(CuArray, x)
-to_Array(x) = map(Array, x)
 
 function save_rt(folder, rt)
     p = joinpath(folder, "VUMPS_rt.jld2")
