@@ -1,7 +1,7 @@
 using TeneT
 using TeneT: _arraytype
 using TeneT: StructArray, ISA
-using TeneT: qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, env_norm
+using TeneT: qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error
 using TeneT: _to_front, _to_tail, permute_fronttail
 using TeneT: project_AL!, project_AR!, retract!, project_AL, project_AR, permute_fronttail
 using Test
