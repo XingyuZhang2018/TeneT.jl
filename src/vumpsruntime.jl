@@ -1,15 +1,17 @@
 @kwdef mutable struct VUMPS
-    ifupdown::Bool = true
-    ifdownfromup::Bool = false
-    ifsimple_eig::Bool = Defaults.ifsimple_eig
-    tol::Float64 = Defaults.tol
-    maxiter::Int = Defaults.maxiter
-    miniter::Int = Defaults.miniter
-    maxiter_ad::Int = Defaults.maxiter_ad
-    miniter_ad::Int = Defaults.miniter_ad
-    ifcheckpoint::Bool = Defaults.ifcheckpoint
-    show_every::Int = 10
-    verbosity::Int = Defaults.verbosity
+    tol::Float64 = 1e-10                # VUMPS error tolerance
+    maxiter::Int = 10                   # maxiter iteration of VUMPS without AD
+    miniter::Int = 1                    # miniter iteration of VUMPS without AD
+    maxiter_ad::Int = 10                # maxiter iteration of VUMPS with AD
+    miniter_ad::Int = 3                 # miniter iteration of VUMPS with AD
+    show_every::Int = 10                # show the iteration result at every n iterations
+    verbosity::Int = Defaults.verbosity # verbosity control the output message
+
+    ifupdown::Bool = true               # if compute two-side up and down environment
+    ifdownfromup::Bool = false          # if reuse up environment as the initial of down environment
+    ifsimple_eig::Bool = true           # if use the simple power method as eigsolve
+    ifcheckpoint::Bool = false          # if checkpoint at every iteration
+    ifgpu_cpu_combo::Bool = false       # if save the environment on the CPU memory but calculate on the GPU 
 end
 
 function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
