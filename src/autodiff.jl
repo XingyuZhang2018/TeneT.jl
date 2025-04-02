@@ -4,6 +4,7 @@ export num_grad
 @non_differentiable VUMPSRuntime(M, χ::Int, alg::VUMPS)
 @non_differentiable randSA(kwargs...)
 @non_differentiable ISA(kwargs...)
+@non_differentiable set_device_id!(kwargs...)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
@@ -21,6 +22,18 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
         return NoTangent(), dA
     end
     return As, back
+end
+
+function ChainRulesCore.rrule(::typeof(atype_device!), atype, x, i::Int)
+    id_old = get_device_id(atype)
+    function back(dx)
+        f = pullback(atype, x)[2]
+        set_device_id!(atype, get_device_id(x))
+        dx = atype(f(dx)[1])
+        set_device_id!(atype, id_old)
+        return NoTangent(), NoTangent(), dx, NoTangent()
+    end
+    return atype_device!(atype, x, i), back
 end
 
 # adjoint for QR factorization
@@ -64,20 +77,6 @@ function ChainRulesCore.rrule(::Type{<:VUMPSRuntime}, AL, AR, C, FL, FR)
     return rt, back
 end
 
-function ChainRulesCore.rrule(::typeof(to_Array), x)
-    function back(dx)
-        return NoTangent(), to_CuArray(dx)
-    end
-    return to_Array(x), back
-end
-
-function ChainRulesCore.rrule(::typeof(to_CuArray), x)
-    function back(dx)
-        return NoTangent(), to_Array(dx)
-    end
-    return to_CuArray(x), back
-end
-
 function ChainRulesCore.rrule(::Type{StructArray}, data, pattern)
     S = StructArray(data, pattern)
     function back(dS)
@@ -93,6 +92,37 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
         return NoTangent(), StructArray(data_grad, S.pattern)
     end
     return y, back
+end
+
+function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+    function back((∂rtup, ∂rtdown))
+        atype = _arraytype(M)
+        ∂Mup = 0
+        ∂Mdown = 0
+        if alg.ifparallelupdown
+            @sync begin
+                @async begin
+                    set_device_id!(atype, 1)
+                    ∂Mup = pullback(vumps_itr, rt[1], M, alg)[2](∂rtup)[2]
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    Md = _down_M(atype(M))
+                    ∂Mddown = pullback(vumps_itr, rt[2], Md, alg)[2](∂rtdown)[2]
+                    ∂Mdown = pullback(_down_M, atype(M))[2](∂Mddown)[1]
+                end
+            end
+        else
+            ∂Mup = pullback(vumps_itr, rt[1], M, alg)[2](∂rtup)[2]
+            Md = _down_M(atype(M))
+            ∂Mddown = pullback(vumps_itr, rt[2], Md, alg)[2](∂rtdown)[2]
+            ∂Mdown = pullback(_down_M, atype(M))[2](∂Mddown)[1]
+        end
+        set_device_id!(atype, 1)
+        ∂Mup.data .+= atype(∂Mdown).data
+        return NoTangent(), NoTangent(), ∂Mup, NoTangent()
+    end
+    return leading_boundary(rt, M, alg), back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)

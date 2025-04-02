@@ -71,10 +71,12 @@ function update!(env::VUMPSRuntime, env´::Tuple{VUMPSRuntime, VUMPSRuntime})
     return env
 end
 
-Array(rt::VUMPSRuntime) = VUMPSRuntime(Array.(rt.AL), Array.(rt.AR), Array.(rt.C), Array.(rt.FL), Array.(rt.FR))
+Array(rt::VUMPSRuntime) = VUMPSRuntime(Array(rt.AL), Array(rt.AR), Array(rt.C), Array(rt.FL), Array(rt.FR))
 Array(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = Array.(rt)
-CuArray(rt::VUMPSRuntime) = VUMPSRuntime(CuArray.(rt.AL), CuArray.(rt.AR), CuArray.(rt.C), CuArray.(rt.FL), CuArray.(rt.FR))
+CuArray(rt::VUMPSRuntime) = VUMPSRuntime(CuArray(rt.AL), CuArray(rt.AR), CuArray(rt.C), CuArray(rt.FL), CuArray(rt.FR))
 CuArray(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = CuArray.(rt)
+ROCArray(rt::VUMPSRuntime) = VUMPSRuntime(ROCArray(rt.AL), ROCArray(rt.AR), ROCArray(rt.C), ROCArray(rt.FL), ROCArray(rt.FR))
+ROCArray(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = ROCArray.(rt)
 
 """
 tensor order graph: from left to right, top to bottom.
@@ -211,45 +213,25 @@ function getAL(A, L)
     AL = similar(A)
     Le = similar(L)
     λ = randSA(Array, AL.pattern)
-    Ni, Nj = size(A)
-    processed_indices = Set{Int}()  # Track which pattern values have been processed
-    @inbounds @views for j in 1:Nj, i in 1:Ni
-        p = AL.pattern[i,j]
-        if p ∉ processed_indices  # Only process pattern values that haven't been computed yet
-            Q, R = qrpos!(_to_tail(L[i,j]*_to_front(A[i,j])))
-            AL[i,j] = reshape(Q, size(A[i,j]))
-            λ[i,j] = norm(R)
-            Le[i,j] = rmul!(R, 1/λ[i,j])
-            push!(processed_indices, p)
-            if length(processed_indices) == length(AL.data)
-                break  # Exit when all unique pattern values have been processed
-            end
-        end
+    for i in 1:length(A)
+        Q, R = qrpos!(_to_tail(L[i]*_to_front(A[i])))
+        AL[i] = reshape(Q, size(A[i]))
+        λ[i] = norm(R)
+        Le[i] = rmul!(R, 1/λ[i])
     end
     
     return AL, Le, λ
 end
 
-
 function getLsped(Le, A, AL; kwargs...)
-    Ni,Nj = size(A)
     L = similar(Le)
-    processed_indices = Set{Int}() 
-    @inbounds @views for j in 1:Nj, i in 1:Ni
-        p = Le.pattern[i,j]
-        if p ∉ processed_indices
-            _, Ls1 = simple_eig(X -> ρmap(X,A[i,j],conj(AL[i,j])), Le[i,j]; kwargs...)
-            _, R = qrpos!(Ls1)
-            L[i,j] = R
-            push!(processed_indices, p)
-            if length(processed_indices) == length(Le.data)
-                break
-            end
-        end
+    for i in 1:length(A)
+        _, Ls1 = simple_eig(X -> ρmap(X,A[i],conj(AL[i])), Le[i]; kwargs...)
+        _, R = qrpos!(Ls1)
+        L[i] = R
     end
     return L
 end
-
 
 """
     left_canonical(A,L=cellones(size(A,1),size(A,2),size(A[1,1],1)); tol = 1e-12, maxiter = 100, kwargs...)
@@ -281,19 +263,17 @@ provided.
 function right_canonical(A, L=cellones(A); tol = 1e-12, maxiter = 100, kwargs...)
     Ar = similar(A)
     Lr = similar(L)
-    @inbounds for p in 1:length(A.data)
-        i, j = Tuple(findfirst(==(p), A.pattern))
-        Ar[i,j] = permute_fronttail(A[i,j])
-        Lr[i,j] = permutedims(L[i,j],(2,1))
+    @inbounds for i in 1:length(A)
+        Ar[i] = permute_fronttail(A[i])
+        Lr[i] = permutedims(L[i],(2,1))
     end
 
     AL, L, λ = left_canonical(Ar,Lr; tol = tol, maxiter = maxiter, kwargs...)
     R  = similar(L)
     AR = similar(AL)
-    @inbounds for p in 1:length(AL.data)
-        i, j = Tuple(findfirst(==(p), AL.pattern))
-        R[i,j] = permutedims(L[i,j],(2,1))
-        AR[i,j] = permute_fronttail(AL[i,j])
+    @inbounds for i in 1:length(AL)
+        R[i] = permutedims(L[i],(2,1))
+        AR[i] = permute_fronttail(AL[i])
     end
     return R, AR, λ
 end
@@ -308,9 +288,8 @@ end
 function LRtoC(L, R)
     Rijr = circshift(R, (0,-1))
     C = similar(L)
-    @inbounds for p in 1:length(L.data)
-        i, j = Tuple(findfirst(==(p), L.pattern))
-        C[i,j] = L[i,j] * Rijr[i,j]
+    @inbounds for i in 1:length(L)
+        C[i] = L[i] * Rijr[i]
     end
     return C
 end
@@ -708,12 +687,11 @@ end
 function ACCtoAL(AC, C)
     errL = 0.0
     AL = Zygote.Buffer(AC)
-    @inbounds for p in 1:length(AC.data)
-        i, j = Tuple(findfirst(==(p), AC.pattern))
-        QAC, RAC = qrpos(_to_tail(AC[i,j]))
-         QC, RC  = qrpos(C[i,j])
+    @inbounds for i in 1:length(AC)
+        QAC, RAC = qrpos(_to_tail(AC[i]))
+         QC, RC  = qrpos(C[i])
         errL += norm(RAC-RC)
-        AL[i,j] = reshape(QAC*QC', size(AC[i,j]))
+        AL[i] = reshape(QAC*QC', size(AC[i]))
     end
     return copy(AL), errL
 end
@@ -735,18 +713,16 @@ end
 
 function ALCtoAC(AL::leg3, C)
     AC = Zygote.Buffer(AL)
-    @inbounds for p in 1:length(AL.data)
-        i, j = Tuple(findfirst(==(p), AL.pattern))
-        AC[i,j] = ein"asc,cb -> asb"(AL[i,j], C[i,j])
+    @inbounds for i in 1:length(AL)
+        AC[i] = ein"asc,cb -> asb"(AL[i], C[i])
     end
     return copy(AC)
 end
 
 function ALCtoAC(AL::leg4, C)
     AC = Zygote.Buffer(AL)
-    @inbounds for p in 1:length(AL.data)
-        i, j = Tuple(findfirst(==(p), AL.pattern))
-        AC[i,j] = ein"astc,cb -> astb"(AL[i,j], C[i,j])
+    @inbounds for i in 1:length(AL)
+        AC[i] = ein"astc,cb -> astb"(AL[i], C[i])
     end
     return copy(AC)
 end

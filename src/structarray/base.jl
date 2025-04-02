@@ -37,6 +37,7 @@ end
 # 实现必要的AbstractArray接口
 Base.size(S::StructArray) = size(S.pattern)
 Base.size(S::StructArray, i::Int) = size(S.pattern, i)
+Base.length(S::StructArray) = length(S.data)
 Base.getindex(S::StructArray, i::Int, j::Int) = S.data[S.pattern[i, j]]
 Base.getindex(S::StructArray, i::Int, ::Colon) = S.data[S.pattern[i, :]]
 Base.getindex(S::StructArray, ::Colon, j::Int) = S.data[S.pattern[:, j]]

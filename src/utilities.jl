@@ -1,3 +1,13 @@
+#helper functions to handle array types
+_mattype(::Array) = Matrix
+_mattype(::CuArray) = CuMatrix
+_mattype(::ROCArray) = ROCMatrix
+
+_arraytype(::Array) = Array
+_arraytype(::CuArray) = CuArray
+_arraytype(::ROCArray) = ROCArray
+_arraytype(S::StructArray) = _arraytype(S.data[1])
+
 const leg3 = Union{<:AbstractArray{T, 3}, StructArray{<:Vector{<:AbstractArray{T, 3}}}} where T
 const leg4 = Union{<:AbstractArray{T, 4}, StructArray{<:Vector{<:AbstractArray{T, 4}}}} where T
 const leg5 = Union{<:AbstractArray{T, 5}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
@@ -58,7 +68,6 @@ end
 checkpoint(f, x...; kwargs...) = f(x...; kwargs...) 
 Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...)[2](ȳ)
 
-
 function save_rt(folder, rt)
     p = joinpath(folder, "VUMPS_rt.jld2")
     if rt.AL[1] isa CuArray
@@ -92,3 +101,32 @@ function load_rt(folder, atype)
     end
     return rt
 end
+
+set_device_id!(::Type{ROCArray}, i::Int) = AMDGPU.device_id!(i)
+set_device_id!(::Type{CuArray}, i::Int) = CUDA.device!(i-1)
+set_device_id!(::Type{Array}, i::Int) = nothing
+
+get_device(::Type{ROCArray}) = AMDGPU.device()
+get_device(::Type{CuArray}) = CUDA.device()
+get_device(::Type{Array}) = "CPU thread $(threadid())"
+
+get_device_id(::Array) = 1
+get_device_id(x::ROCArray) = Int(AMDGPU.device(x).device_id)
+get_device_id(x::CuArray) = Int(CUDA.device(x).handle + 1)
+get_device_id(S::StructArray) = get_device_id(S[1]) 
+
+get_device_id(::Type{Array}) = 1
+get_device_id(::Type{ROCArray}) = AMDGPU.device_id()
+get_device_id(::Type{CuArray}) = CUDA.device().handle
+
+function atype_device!(atype, x, i::Int)
+    set_device_id!(atype, i)
+    return atype(x)
+end
+
+function ROCArray(x::NamedTuple)
+    x.data .= map(ROCArray, x.data)
+    return x
+end
+
+Array(x::NamedTuple) = x

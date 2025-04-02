@@ -1,10 +1,10 @@
-@testset "VUMPSRuntime" for M in test_Ms
+@testset "VUMPSRuntime" for M in test_Ms, ifupdown in [true]
     Random.seed!(100)
     χ = 10
-    alg = VUMPS(ifupdown=false)
+    alg = VUMPS(ifupdown=ifupdown, verbosity=3, ifparallelupdown=true)
     rt = VUMPSRuntime(M, χ, alg)
 
-    @test rt isa VUMPSRuntime
+    @test ifupdown ? rt isa Tuple{VUMPSRuntime, VUMPSRuntime} : rt isa VUMPSRuntime
 
     env = VUMPSEnv(rt, M, alg)
     @test env isa VUMPSEnv
@@ -60,9 +60,9 @@ end
 @testset "twoside vumps" for M in test_Ms
     Random.seed!(100)
     χ = 3
-    alg = VUMPS(maxiter=100, verbosity=3, ifupdown=true)
+    alg = VUMPS(maxiter=100, miniter=20, verbosity=3, ifupdown=true, ifparallelupdown=true)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt = @time leading_boundary(rt, M, alg)
     @test rt isa Tuple{VUMPSRuntime, VUMPSRuntime}
 
     env = VUMPSEnv(rt, M, alg)

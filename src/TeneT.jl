@@ -1,6 +1,7 @@
 module TeneT
 
 using AMDGPU
+using Base.Threads
 using CUDA
 using LinearAlgebra
 using KrylovKit
@@ -28,7 +29,6 @@ include("structarray/base.jl")
 include("structarray/initial.jl")
 include("structarray/buffer.jl")
 include("utilities.jl")
-include("patch.jl")
 include("environment.jl")
 include("vumpsruntime.jl")
 include("grassmann.jl")

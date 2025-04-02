@@ -1,32 +1,3 @@
-begin "test utils"
-    function num_grad(f, K; δ::Real=1e-5)
-        if eltype(K) == ComplexF64
-            (f(K + δ / 2) - f(K - δ / 2)) / δ + 
-                (f(K + δ / 2 * 1.0im) - f(K - δ / 2 * 1.0im)) / δ * 1.0im
-        else
-            (f(K + δ / 2) - f(K - δ / 2)) / δ
-        end
-    end
-    
-    function num_grad(f, a::AbstractArray; δ::Real=1e-5)
-        b = Array(copy(a))
-        df = map(CartesianIndices(b)) do i
-            foo = x -> (ac = copy(b); ac[i] = x; f(_arraytype(a)(ac)))
-            num_grad(foo, b[i], δ=δ)
-        end
-        return _arraytype(a)(df)
-    end
-
-    function num_grad(f, a::StructArray; δ::Real=1e-5)
-        b = copy(a)
-        df = map(1:length(b.data)) do i
-            foo = x -> (ac = copy(b); ac[i] = x; f(ac))
-            num_grad(foo, b[i], δ=δ)
-        end
-        return df
-    end
-end
-
 @testset "zygote mutable arrays with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]
     Random.seed!(100)
     function foo(F) 
@@ -64,7 +35,6 @@ end
     function foo(M)
         return norm(M)
     end
-
     @test Zygote.gradient(foo, M)[1].data ≈ num_grad(foo, M) atol = 1e-8
 end
 
@@ -80,6 +50,34 @@ end
 
     # @show Zygote.gradient(foo, M)[1]
     @test Zygote.gradient(foo, M)[1].data ≈ num_grad(foo, M) atol = 1e-8
+end
+
+@testset "difference devices with $atype{$dtype}" for atype in [ROCArray], dtype in [ComplexF64]
+    A = rand(ComplexF64,2,2)
+    gA = TeneT.atype_device!(atype, A, 1)
+
+    function foo(x)
+        xnew = TeneT.atype_device!(atype, x, 2)
+        return norm(xnew)
+    end
+    @test TeneT.get_device_id(Zygote.gradient(foo, gA)[1]) == 1
+end
+
+@testset "@sync for $atype" for atype in [Array]
+    Random.seed!(100)
+    M = atype(rand(ComplexF64,2,2))
+    function foo(M)
+        buff = Zygote.Buffer(M)
+        @sync begin
+            @async buff[1,1] = M[1,1]
+            @async buff[1,2] = M[1,2]
+        end
+            
+        return norm(copy(buff))
+    end
+
+    # @show Zygote.gradient(foo, M)[1]
+    @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
 @testset "QR factorization with $atype{$dtype}" for atype in test_type, dtype in [ComplexF64]

@@ -9,9 +9,10 @@
 
     ifupdown::Bool = true               # if compute two-side up and down environment
     ifdownfromup::Bool = false          # if reuse up environment as the initial of down environment
+    ifparallelupdown::Bool = false      # parallel calculate the up down environment
     ifsimple_eig::Bool = true           # if use the simple power method as eigsolve
     ifcheckpoint::Bool = false          # if checkpoint at every iteration
-    ifgpu_cpu_combo::Bool = false       # if save the environment on the CPU memory but calculate on the GPU 
+    ifgpu_cpu_combo::Bool = false       # if save the environment on the CPU memory but calculate on the GPU # currently not implement
 end
 
 function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
@@ -43,7 +44,7 @@ end
 
 function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
     @unpack AL, AR, C, FL, FR = rtup
-    Ni = size(AL, 1)
+    # Ni = size(AL, 1)
     # index = [Ni + 1 - i for i in 1:Ni]
     ALd = StructArray(AL.data, Md.pattern)
     ARd = StructArray(AR.data, Md.pattern)
@@ -55,6 +56,34 @@ end
 
 function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
     Ni, Nj = size(M)
+
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            if alg.ifdownfromup
+                set_device_id!(atype, 1)
+                rtup = init_VUMPSRuntime(M, χ, alg)
+                alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+                set_device_id!(atype, 2)
+                Md = _down_M(atype_device!(atype, M, 2))
+                rtdown = _down_init_from_up(atype(rtup), Md)
+                alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment"
+            else
+                @async begin
+                    set_device_id!(atype, 1)
+                    rtup = init_VUMPSRuntime(M, χ, alg)
+                    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    Md = _down_M(atype_device!(atype, M, 2))
+                    rtdown = init_VUMPSRuntime(Md, χ, alg)
+                    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
+                end
+            end
+        end
+        return rtup, rtdown
+    end
 
     rtup = init_VUMPSRuntime(M, χ, alg)
     alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
@@ -78,7 +107,8 @@ end
 function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     t = Zygote.@ignore time()
 
-    Zygote.@ignore alg.verbosity >= 2 && @info @sprintf("Start VUMPS iteration without AD...")
+    atype = _arraytype(M)
+    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
     Zygote.@ignore for i in 1:alg.maxiter
         rt, err = vumps_step_power(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
@@ -91,7 +121,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
         end
     end
 
-    Zygote.@ignore alg.verbosity >= 2 && @info @sprintf("Start VUMPS iteration with AD...")
+    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
     for i in 1:alg.maxiter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_power, rt, M, alg) : vumps_step_power(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
@@ -121,6 +151,22 @@ end
 function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                rtup = vumps_itr(rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md = _down_M(atype_device!(atype, M, 2))
+                rtdown = vumps_itr(rtdown, Md, alg)
+            end
+        end
+        return rtup, rtdown
+    end
+
     rtup = vumps_itr(rtup, M, alg)
 
     Md = _down_M(M)
@@ -129,12 +175,15 @@ function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray,
 end
 
 function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg)
+    atype = _arraytype(M)
+    set_device_id!(atype, 1)
     rtup, rtdown = rt
 
     ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR
     ACu = ALCtoAC(ALu, Cu)
 
     ALd, ARd, Cd = rtdown.AL, rtdown.AR, rtdown.C
+    ALd, ARd, Cd = map(x->atype_device!(atype, x, 1), [ALd, ARd, Cd]) # transfer device 2 data to 1
     ACd = ALCtoAC(ALd, Cd)
 
     _, FLo =  leftenv(ALu, conj(ALd), M, FLu; ifobs = true, alg)

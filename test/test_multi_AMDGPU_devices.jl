@@ -157,3 +157,27 @@ end
         end
     end
 end
+
+begin
+    N = 2^12
+    v = [rand(ComplexF64, N),   rand(ComplexF64, N),   rand(ComplexF64, N)  ]
+    M = [rand(ComplexF64, N,N), rand(ComplexF64, N,N), rand(ComplexF64, N,N)]
+    AMDGPU.device_id!(1)
+    rocv = map(ROCArray, v)
+    rocM = map(ROCArray, M)
+    res1 = deepcopy(rocv)
+    t0 = time()
+    AMDGPU.@time begin  
+        # mul!(res1[1], rocM[1], rocv[1])
+        # mul!(res1[2], rocM[2], rocv[2])
+        # mul!(res1[3], rocM[3], rocv[3])
+        res1[1] = rocM[1] * rocv[1]
+        res1[2] = rocM[2] * rocv[2]
+        res1[3] = rocM[3] * rocv[3]
+    end
+    @show (time()-t0)*1000
+    t0 = time()
+    AMDGPU.@time res2 = rocM .* rocv
+    @show (time()-t0)*1000
+    @test res1 ≈ res2
+end
