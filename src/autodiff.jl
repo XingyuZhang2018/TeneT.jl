@@ -95,6 +95,7 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
 end
 
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+    rtold = deepcopy(rt) # without this, it is a mistake when rt is replaced.
     function back((∂rtup, ∂rtdown))
         atype = _arraytype(M)
         ∂Mup = 0
@@ -103,12 +104,12 @@ function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime
             @sync begin
                 @async begin
                     set_device_id!(atype, 1)
-                    ∂Mup = pullback(vumps_itr, rt[1], M, alg)[2](∂rtup)[2]
+                    ∂Mup = pullback(vumps_itr, rtold[1], M, alg)[2](∂rtup)[2]
                 end
                 @async begin
                     set_device_id!(atype, 2)
                     Md = _down_M(atype(M))
-                    ∂Mddown = pullback(vumps_itr, rt[2], Md, alg)[2](∂rtdown)[2]
+                    ∂Mddown = pullback(vumps_itr, rtold[2], Md, alg)[2](∂rtdown)[2]
                     ∂Mdown = pullback(_down_M, atype(M))[2](∂Mddown)[1]
                 end
             end
