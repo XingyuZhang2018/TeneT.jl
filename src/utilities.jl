@@ -115,7 +115,7 @@ get_device_id(x::ROCArray) = Int(AMDGPU.device(x).device_id)
 get_device_id(x::CuArray) = Int(CUDA.device(x).handle + 1)
 get_device_id(S::StructArray) = get_device_id(S[1]) 
 
-get_device_id(::Type{Array}) = 1
+get_device_id(::Type{Array}) = threadid()
 get_device_id(::Type{ROCArray}) = AMDGPU.device_id()
 get_device_id(::Type{CuArray}) = CUDA.device().handle
 
