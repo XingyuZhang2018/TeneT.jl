@@ -95,35 +95,50 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
 end
 
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    rtold = deepcopy(rt) # without this, it is a mistake when rt is replaced.
+    rtup, rtdown = rt
+    atype = _arraytype(M)
+    if alg.ifparallelupdown
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md, _down_M_back = pullback(_down_M, atype(M))
+                rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+            end
+        end
+    else
+        rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+        Md, _down_M_back = pullback(_down_M, M)
+        rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+    end
+
     function back((∂rtup, ∂rtdown))
-        atype = _arraytype(M)
-        ∂Mup = 0
-        ∂Mdown = 0
         if alg.ifparallelupdown
             @sync begin
                 @async begin
                     set_device_id!(atype, 1)
-                    ∂Mup = pullback(vumps_itr, rtold[1], M, alg)[2](∂rtup)[2]
+                    ∂Mup = vumps_itr_back_up(∂rtup)[2]
                 end
                 @async begin
                     set_device_id!(atype, 2)
-                    Md = _down_M(atype(M))
-                    ∂Mddown = pullback(vumps_itr, rtold[2], Md, alg)[2](∂rtdown)[2]
-                    ∂Mdown = pullback(_down_M, atype(M))[2](∂Mddown)[1]
+                    ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
+                    ∂Mdown = _down_M_back(∂Mddown)[1]
                 end
             end
         else
-            ∂Mup = pullback(vumps_itr, rt[1], M, alg)[2](∂rtup)[2]
-            Md = _down_M(atype(M))
-            ∂Mddown = pullback(vumps_itr, rt[2], Md, alg)[2](∂rtdown)[2]
-            ∂Mdown = pullback(_down_M, atype(M))[2](∂Mddown)[1]
+            ∂Mup = vumps_itr_back_up(∂rtup)[2]
+            ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
+            ∂Mdown = _down_M_back(∂Mddown)[1]
         end
+
         set_device_id!(atype, 1)
         ∂Mup.data .+= atype(∂Mdown).data
         return NoTangent(), NoTangent(), ∂Mup, NoTangent()
     end
-    return leading_boundary(rt, M, alg), back
+    return (rtup, rtdown), back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)

@@ -160,7 +160,7 @@ function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray,
             end
             @async begin
                 set_device_id!(atype, 2)
-                Md = _down_M(atype_device!(atype, M, 2))
+                Md = _down_M(atype(M))
                 rtdown = vumps_itr(rtdown, Md, alg)
             end
         end
