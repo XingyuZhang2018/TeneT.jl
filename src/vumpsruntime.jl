@@ -65,7 +65,7 @@ function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
                 rtup = init_VUMPSRuntime(M, χ, alg)
                 alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
                 set_device_id!(atype, 2)
-                Md = _down_M(atype_device!(atype, M, 2))
+                Md = _down_M(atype(M))
                 rtdown = _down_init_from_up(atype(rtup), Md)
                 alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment"
             else
@@ -76,7 +76,7 @@ function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
                 end
                 @async begin
                     set_device_id!(atype, 2)
-                    Md = _down_M(atype_device!(atype, M, 2))
+                    Md = _down_M(atype(M))
                     rtdown = init_VUMPSRuntime(Md, χ, alg)
                     alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
                 end
@@ -150,6 +150,7 @@ function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
 end
 
 function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+    GC.gc()
     rtup, rtdown = rt
     
     if alg.ifupdown && alg.ifparallelupdown
@@ -194,7 +195,7 @@ end
 
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
-    AC = ALCtoAC(AL,C)
+    AC = Zygote.@ignore ALCtoAC(AL,C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
     _,  Cp =  Cenv( C, FL, FR; alg)
     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
@@ -210,7 +211,7 @@ end
 
 function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
-    AC = ALCtoAC(AL,C)
+    AC = Zygote.@ignore ALCtoAC(AL,C)
     _, FL =  leftenv(AL, conj(AL), M, FL; alg)
     _, FR = rightenv(AR, conj(AR), M, FR; alg)
     _, AC = ACenv(AC, FL, M, FR; alg)

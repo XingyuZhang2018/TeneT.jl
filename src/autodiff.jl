@@ -43,9 +43,9 @@ end
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     Q, R = qrpos(A)
     function back((dQ, dR))
-        M = Array(R * dR' - dQ' * Q)
-        dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * _arraytype(Q)(Hermitian(M, :L)))' )'
-        return NoTangent(), _arraytype(Q)(dA)
+        M = R * dR' - dQ' * Q
+        dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * Hermitian(M, :L))' )'
+        return NoTangent(), dA
     end
     return (Q, R), back
 end
@@ -53,9 +53,9 @@ end
 function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     L, Q = lqpos(A)
     function back((dL, dQ))
-        M = Array(L' * dL - dQ * Q')
-        dA = LowerTriangular(L + I * 1e-12)' \ (dQ + _arraytype(Q)(Hermitian(M, :L)) * Q)
-        return NoTangent(), _arraytype(Q)(dA)
+        M = L' * dL - dQ * Q'
+        dA = LowerTriangular(L + I * 1e-12)' \ (dQ + Hermitian(M, :L) * Q)
+        return NoTangent(), dA
     end
     return (L, Q), back
 end
@@ -97,6 +97,7 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
 end
 
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+    GC.gc()
     rtup, rtdown = rt
     atype = _arraytype(M)
     if alg.ifparallelupdown
