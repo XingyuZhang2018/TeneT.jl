@@ -117,7 +117,7 @@ get_device_id(S::StructArray) = get_device_id(S[1])
 
 get_device_id(::Type{Array}) = threadid()
 get_device_id(::Type{ROCArray}) = AMDGPU.device_id()
-get_device_id(::Type{CuArray}) = CUDA.device().handle
+get_device_id(::Type{CuArray}) = Int(CUDA.device().handle) + 1
 
 function atype_device!(atype, x, i::Int)
     set_device_id!(atype, i)
@@ -126,6 +126,11 @@ end
 
 function ROCArray(x::NamedTuple)
     x.data .= map(ROCArray, x.data)
+    return x
+end
+
+function CuArray(x::NamedTuple)
+    x.data .= map(CuArray, x.data)
     return x
 end
 
