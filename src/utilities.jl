@@ -29,18 +29,18 @@ permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
 orth_for_ad(v) = v
-function simple_eig(f, v; max_iter=20, ifvalue=false)
+function simple_eig(f, v; max_iter=10, ifvalue=false)
     λ = 0.0
-    Zygote.@ignore begin
-        for _ in 1:max_iter
-            v = f(v)
-            λ′ = norm(v)
-            v /= λ′
-            abs(λ′ - λ) < 1e-8 && break
-            λ = λ′
-        end
-    end
-    for _ in 1:5
+    # Zygote.@ignore begin # this is not correct when VUMPS does not converge
+    #     for _ in 1:max_iter
+    #         v = f(v)
+    #         λ′ = norm(v)
+    #         v /= λ′
+    #         abs(λ′ - λ) < 1e-8 && break
+    #         λ = λ′
+    #     end
+    # end
+    for _ in 1:max_iter
         v = f(v)
         v /= norm(v)
     end
