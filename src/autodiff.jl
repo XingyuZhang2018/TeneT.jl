@@ -97,7 +97,6 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
 end
 
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    GC.gc()
     rtup, rtdown = rt
     atype = _arraytype(M)
     if alg.ifparallelupdown

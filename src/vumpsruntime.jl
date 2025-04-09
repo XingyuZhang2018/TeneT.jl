@@ -150,7 +150,6 @@ function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
 end
 
 function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    GC.gc()
     rtup, rtdown = rt
     
     if alg.ifupdown && alg.ifparallelupdown
