@@ -70,35 +70,16 @@ Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygo
 
 function save_rt(folder, rt)
     p = joinpath(folder, "VUMPS_rt.jld2")
-    if rt.AL[1] isa CuArray
-        data = []
-        for field in fieldnames(typeof(rt))
-            A = getfield(rt, field)
-            push!(data, Array(A))
-        end
-        rt_save = VUMPSRuntime(data...)
-        println("save a CuArray rt in $p")
-        save(p, "rt", rt_save)
-    else
-        println("save a Array rt in $p")
-        save(p, "rt", rt)
-    end
+    atype = length(rt) == 1 ? _arraytype(rt.AL[1]) : _arraytype(rt[1].AL[1])
+    rt_save = Array(rt)
+    println("save a $atype rt in $p")
+    save(p, "rt", rt_save)
 end
 
 function load_rt(folder, atype)
     p = joinpath(folder, "VUMPS_rt.jld2")
-    rt = load(p, "rt")
-    if atype == CuArray
-        data = []
-        for field in fieldnames(typeof(rt))
-            A = getfield(rt, field)
-            push!(data, CuArray(A))
-        end
-        println("load a CuArray rt in $p")
-        rt = VUMPSRuntime(data...)
-    else
-        println("load a Array rt in $p")
-    end
+    rt = atype(load(p, "rt"))
+    println("load a $atype rt in $p")
     return rt
 end
 
