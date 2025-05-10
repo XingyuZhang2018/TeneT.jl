@@ -3,17 +3,17 @@
 
 return the `type` observable of the `model`. Requires that `type` tensor defined in model_tensor(model, Val(:type)).
 """
-function observable(env, M, pattern::Matrix{Int}, ::Val{:Z}, alg)
+function observable(env, M, ::Val{:Z}, alg)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
     Ni,Nj = size(ACu)
-    l = length(unique(pattern))
+    l = length(unique(M.pattern))
     λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg)  
       λC, _ = rightCenv(ARu, conj(ARu);    ifobs=true)
     return prod(λFLo./λC)^(1/Ni)
 end
 
-function observable(env, model::MT, pattern::Matrix{Int}, type) where {MT <: HamiltonianModel}
+function observable(env, model::MT, pattern::Matrix{Int}, type, alg) where {MT <: HamiltonianModel}
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni,Nj = size(ACu)
     atype = _arraytype(ACu[1])
@@ -22,6 +22,11 @@ function observable(env, model::MT, pattern::Matrix{Int}, type) where {MT <: Ham
     M_obs = StructArray([atype(model_tensor(model, type      )) for _ = 1:l], pattern)
     obs_tol = 0
 
+    # λFLu, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg) 
+    # λFLd, _ =  rightenv(ARd, conj(ARd), M; ifobs=true, alg)   
+    # λFLo, _ =  rightenv(ARu, conj(ARd), M; ifobs=true, alg)  
+    # λC, _ = rightCenv(ARu, conj(ARd);    ifobs=true)
+    # @show λFLu[1] λFLd[1] λFLo[1], λC[1]  λFLo[1]/λC[1]  abs(λC[1])
     for p in 1:l
         i, j = Tuple(findfirst(==(p), M.pattern))
         # for i in 1:Ni, j in 1:Nj

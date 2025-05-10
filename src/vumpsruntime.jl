@@ -143,9 +143,16 @@ function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     return rt
 end
 
-function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
+function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS, Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
+    # perm(x) = ein"abc->cba"(x)
+    # ACd = StructArray([perm(AC.data[1])], AC.pattern)
+    # ALd = StructArray([perm(AR.data[1])], AL.pattern)
+    # ARd = StructArray([perm(AL.data[1])], AR.pattern)
+    # _, FLo =  leftenv(AL, ALd, M, Fo[1]; ifobs = true, alg)
+    # _, FRo = rightenv(AR, ARd, M, Fo[2]; ifobs = true, alg)
+    # return VUMPSEnv(AC, AR, ACd, ARd, FL, FR, FLo, FRo)
     return VUMPSEnv(AC, AR, AC, AR, FL, FR, FL, FR)
 end
 
@@ -175,7 +182,7 @@ function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray,
     return rtup, rtdown
 end
 
-function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg)
+function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg, Fo=[rt[1].FL, rt[1].FR])
     atype = _arraytype(M)
     set_device_id!(atype, 1)
     rtup, rtdown = rt
@@ -187,8 +194,8 @@ function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg)
     ALd, ARd, Cd = map(x->atype_device!(atype, x, 1), [ALd, ARd, Cd]) # transfer device 2 data to 1
     ACd = ALCtoAC(ALd, Cd)
 
-    _, FLo =  leftenv(ALu, conj(ALd), M, FLu; ifobs = true, alg)
-    _, FRo = rightenv(ARu, conj(ARd), M, FRu; ifobs = true, alg)
+    _, FLo =  leftenv(ALu, conj(ALd), M, Fo[1]; ifobs = true, alg)
+    _, FRo = rightenv(ARu, conj(ARd), M, Fo[2]; ifobs = true, alg)
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
 

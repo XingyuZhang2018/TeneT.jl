@@ -518,14 +518,14 @@ function rightCenv(ARu, ARd, R=cellones(ARu);
                    ifobs=false, verbosity=Defaults.verbosity, kwargs...) 
 
     Ni, Nj = size(ARu)
-    λR = Zygote.Buffer(zeros(eltype(ARu[1]), Ni))
+    λR = Zygote.Buffer(randSA(Array, ARu.pattern))
     R′ = Zygote.Buffer(R)
     for i in 1:Ni
         ir = ifobs ? mod1(Ni - i + 2, Ni) : i
-        λRs, R1s, info = eigsolve(R -> Rmap(R, ARu[i,:], ARd[ir,:]), R[i,:], 1, :LM; 
+        λRs, R1s, info = eigsolve(R -> Rmap(R, ARu[i,:], ARd[ir,:]), R[i,:], 2, :LM; 
                                   alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-        λR[i], R′[i,:] = selectpos(λRs, R1s, Nj)
+        λR[i,1], R′[i,1] = λRs[1], R1s[1][1]
     end
     return copy(λR), copy(R′)
 end
