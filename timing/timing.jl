@@ -1,17 +1,16 @@
 using BenchmarkTools
 using KrylovKit
-using CUDA
+using CUDA, AMDGPU
 using Test
 using OMEinsum
 using Random
 using LinearAlgebra
 using TeneT
-using TeneT: left_canonical, right_canonical, leftenv, rightenv, LRtoC, ALCtoAC, ACenv, Cenv, _arraytype, FLmap
+using TeneT: left_canonical, right_canonical, leftenv, rightenv, LRtoC, ALCtoAC, ACenv, Cenv, _arraytype, FLmap, set_device_id!, to_N_device
 using TeneT: simple_eig
-using BenchmarkTools
 using Zygote
-using ProfileView
-CUDA.allowscalar(false)
+# using ProfileView
+# CUDA.allowscalar(false)
 
 # i9-14900KF RTX 4090
 # d = 4 D = 6 χ = 32
@@ -50,6 +49,41 @@ CUDA.allowscalar(false)
     @btime simple_eig(FL -> FLmap(FL, $AL, conj($AL), $M), $FL)
 
     # @test reshape(FL1, χ, D^2, χ) ≈ FL2
+    # @test reshape(FLm1, χ, D^2, χ) ≈ FLm2
+    # @btime simple_eig(FL -> FLmap(FL, $AL, conj($AL), $ipeps), $FL)
+
+end
+
+@testset "OMEinsum with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
+    Random.seed!(100)
+    d, D, χ = 4, 8, 256
+
+    println("d = $(d) D = $(D) χ = $(χ)")
+    set_device_id!(atype, 1)
+    AL = atype(rand(dtype, χ,D,D,χ))
+    ipeps = atype(rand(dtype, D,D,D,D,d))
+    FL = atype(rand(dtype, χ,D,D,χ))
+
+    FL1 = FLmap(FL, AL, AL, ipeps)
+
+    AL = reshape(AL, χ, D^2, χ)
+    M  = reshape(ein"abcde,fghie->afbgchdi"(ipeps, conj(ipeps)), D^2, D^2, D^2, D^2)
+    FL = reshape(FL, χ, D^2, χ)
+
+    XX = AMDGPU.@time AMDGPU.@sync FLmap(FL, AL, AL, M)
+    @btime AMDGPU.@sync FLmap($FL, $AL, $AL, $M)
+
+    FL = to_N_device(FL)
+    AL = to_N_device(AL)
+    M = to_N_device(M)
+    FL22 = AMDGPU.@time FLmap(FL, AL, AL, M)
+    # # _, FLm2 = simple_eig(FL -> FLmap(FL, AL, conj(AL), M), FL)
+    
+    # # @btime CUDA.@sync norm($FL)
+    # # @btime simple_eig(FL -> FLmap(FL, $AL, conj($AL), $M), $FL)
+    set_device_id!(atype, 1)
+    @test reshape(FL1, χ, D^2, χ) ≈ FL22[1]
+    @btime AMDGPU.@sync FLmap($FL, $AL, $AL, $M)
     # @test reshape(FLm1, χ, D^2, χ) ≈ FLm2
     # @btime simple_eig(FL -> FLmap(FL, $AL, conj($AL), $ipeps), $FL)
 

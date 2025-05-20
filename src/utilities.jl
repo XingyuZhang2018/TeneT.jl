@@ -91,6 +91,10 @@ get_device(::Type{ROCArray}) = AMDGPU.device()
 get_device(::Type{CuArray}) = CUDA.device()
 get_device(::Type{Array}) = "CPU thread $(threadid())"
 
+device_count(::Type{ROCArray}) = length(AMDGPU.devices())
+device_count(::Type{CuArray}) = length(CUDA.devices())
+device_count(::Type{Array}) = Threads.nthreads()
+
 get_device_id(::Array) = 1
 get_device_id(x::ROCArray) = Int(AMDGPU.device(x).device_id)
 get_device_id(x::CuArray) = Int(CUDA.device(x).handle + 1)
@@ -116,3 +120,14 @@ function CuArray(x::NamedTuple)
 end
 
 Array(x::NamedTuple) = x
+
+function to_N_device(x)
+    atype = _arraytype(x)
+    N_device = device_count(atype)
+    results = Vector(undef, N_device)
+    for i in 1:N_device
+        set_device_id!(atype, i)
+        results[i] = atype(x)
+    end
+    return results
+end

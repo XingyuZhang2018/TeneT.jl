@@ -96,51 +96,133 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
-function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    rtup, rtdown = rt
-    atype = _arraytype(M)
-    if alg.ifparallelupdown
-        @sync begin
+# function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+#     rtup, rtdown = rt
+#     atype = _arraytype(M)
+#     if alg.ifparallelupdown
+#         @sync begin
+#             @async begin
+#                 set_device_id!(atype, 1)
+#                 rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+#             end
+#             @async begin
+#                 set_device_id!(atype, 2)
+#                 Md, _down_M_back = pullback(_down_M, atype(M))
+#                 rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+#             end
+#         end
+#     else
+#         rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+#         Md, _down_M_back = pullback(_down_M, M)
+#         rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+#     end
+
+#     function back((∂rtup, ∂rtdown))
+#         if alg.ifparallelupdown
+#             @sync begin
+#                 @async begin
+#                     set_device_id!(atype, 1)
+#                     ∂Mup = vumps_itr_back_up(∂rtup)[2]
+#                 end
+#                 @async begin
+#                     set_device_id!(atype, 2)
+#                     ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
+#                     ∂Mdown = _down_M_back(∂Mddown)[1]
+#                 end
+#             end
+#         else
+#             ∂Mup = vumps_itr_back_up(∂rtup)[2]
+#             ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
+#             ∂Mdown = _down_M_back(∂Mddown)[1]
+#         end
+
+#         set_device_id!(atype, 1)
+#         ∂Mup.data .+= atype(∂Mdown).data
+#         return NoTangent(), NoTangent(), ∂Mup, NoTangent()
+#     end
+#     return (rtup, rtdown), back
+# end
+
+function ChainRulesCore.rrule(::typeof(to_N_device), x)
+    return to_N_device(x), dx -> (NoTangent(), dx[1] * 2)
+end
+
+function ChainRulesCore.rrule(::typeof(FLmap), FL, ALu, ALd, M::Vector)
+    atype = _arraytype(FL[1])
+    N_device = device_count(atype)
+    χ = size(FL[1], 1)
+    χ_device = cld(χ, N_device)
+    χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
+    results = Vector{Any}(undef, N_device)
+    FLmap_backs = Vector{Any}(undef, N_device)
+    FLm = copy(FL)
+    @sync begin
+        for i in 1:N_device
             @async begin
-                set_device_id!(atype, 1)
-                rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-            end
-            @async begin
-                set_device_id!(atype, 2)
-                Md, _down_M_back = pullback(_down_M, atype(M))
-                rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+                set_device_id!(atype, i)
+                results[i], FLmap_backs[i] = pullback(FLmap, FL[i], ALu[i], view(ALd[i], :,:,χ_ranges[i]), M[i])
             end
         end
-    else
-        rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-        Md, _down_M_back = pullback(_down_M, M)
-        rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
     end
 
-    function back((∂rtup, ∂rtdown))
-        if alg.ifparallelupdown
-            @sync begin
-                @async begin
-                    set_device_id!(atype, 1)
-                    ∂Mup = vumps_itr_back_up(∂rtup)[2]
-                end
-                @async begin
-                    set_device_id!(atype, 2)
-                    ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
-                    ∂Mdown = _down_M_back(∂Mddown)[1]
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                set_device_id!(atype, i)
+                for j in 1:N_device
+                    FLm[i][:, :, χ_ranges[j]] .= atype(results[j])
                 end
             end
-        else
-            ∂Mup = vumps_itr_back_up(∂rtup)[2]
-            ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
-            ∂Mdown = _down_M_back(∂Mddown)[1]
+        end
+    end
+
+    function back(dFLm)
+        dFL = copy(FL)
+        dALu = copy(ALu)
+        dALd = copy(ALd)
+        dM = copy(M)
+        
+        @sync begin
+            for i in 1:N_device
+                @async begin
+                    set_device_id!(atype, i)
+                    if dFLm[i] isa AbstractZero 
+                        dFLm[i] = atype(dFLm[1])
+                    end
+                    dFL[i], dALu[i], dALd[i][:,:,χ_ranges[i]], dM[i] = FLmap_backs[i](view(dFLm[i], :,:,χ_ranges[i]))
+                end
+            end
         end
 
         set_device_id!(atype, 1)
-        ∂Mup.data .+= atype(∂Mdown).data
-        return NoTangent(), NoTangent(), ∂Mup, NoTangent()
+        for i in 2:N_device
+            dFL[1] .+= atype(dFL[i])
+            dALu[1] .+= atype(dALu[i])
+            dM[1] .+= atype(dM[i])
+        end
+
+        @sync begin
+            for i in 1:N_device
+                @async begin
+                    set_device_id!(atype, i)
+                    for j in 1:N_device
+                        if j != i
+                            dALd[i][:,:,χ_ranges[j]] = atype(dALd[j][:,:,χ_ranges[j]])
+                        end
+                    end
+                    if i != 1
+                        dFL[i] = atype(dFL[1])
+                        dALu[i] = atype(dALu[1])
+                        dM[i] = atype(dM[1])
+                    end
+                end
+            end
+        end
+
+        return NoTangent(), dFL, dALu, dALd, dM
     end
-    return (rtup, rtdown), back
+    
+    return FLm, back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)
