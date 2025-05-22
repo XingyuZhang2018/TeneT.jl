@@ -96,425 +96,227 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
-# function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-#     rtup, rtdown = rt
-#     atype = _arraytype(M)
-#     if alg.ifparallelupdown
-#         @sync begin
-#             @async begin
-#                 set_device_id!(atype, 1)
-#                 rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-#             end
-#             @async begin
-#                 set_device_id!(atype, 2)
-#                 Md, _down_M_back = pullback(_down_M, atype(M))
-#                 rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
-#             end
-#         end
-#     else
-#         rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-#         Md, _down_M_back = pullback(_down_M, M)
-#         rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
-#     end
-
-#     function back((∂rtup, ∂rtdown))
-#         if alg.ifparallelupdown
-#             @sync begin
-#                 @async begin
-#                     set_device_id!(atype, 1)
-#                     ∂Mup = vumps_itr_back_up(∂rtup)[2]
-#                 end
-#                 @async begin
-#                     set_device_id!(atype, 2)
-#                     ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
-#                     ∂Mdown = _down_M_back(∂Mddown)[1]
-#                 end
-#             end
-#         else
-#             ∂Mup = vumps_itr_back_up(∂rtup)[2]
-#             ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
-#             ∂Mdown = _down_M_back(∂Mddown)[1]
-#         end
-
-#         set_device_id!(atype, 1)
-#         ∂Mup.data .+= atype(∂Mdown).data
-#         return NoTangent(), NoTangent(), ∂Mup, NoTangent()
-#     end
-#     return (rtup, rtdown), back
-# end
-
-function ChainRulesCore.rrule(::typeof(to_N_device), x)
-    return to_N_device(x), dx -> (NoTangent(), dx[1] * 2)
+function sum_device!(x)
+    atype = _arraytype(x[1])
+    set_device_id!(atype, 1)
+    N_device = device_count(atype)
+    @sync begin
+        for i in 2:N_device
+            @async begin
+                x[i] = atype(x[i])
+            end
+        end
+    end
+    return sum(x)
 end
 
-function ChainRulesCore.rrule(::typeof(FLmap), FL, ALu, ALd, M::Vector)
-    atype = _arraytype(FL[1])
+function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M)
+    atype = _arraytype(FL)
     N_device = device_count(atype)
-    χ = size(FL[1], 1)
+    χ = size(FL, 1)
     χ_device = cld(χ, N_device)
     χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
     results = Vector{Any}(undef, N_device)
+    cols = fill(:,ndims(FL)-1)
     FLmap_backs = Vector{Any}(undef, N_device)
-    FLm = copy(FL)
+
+    set_device_id!(atype, 1)
+    FLm = similar(FL)
+    FLs = to_N_device(FL)
+    ALus = to_N_device(ALu)
+    ALds = to_N_device(ALd)
+    Ms = to_N_device(M)
+
     @sync begin
         for i in 1:N_device
             @async begin
                 set_device_id!(atype, i)
-                results[i], FLmap_backs[i] = pullback(FLmap, FL[i], ALu[i], view(ALd[i], :,:,χ_ranges[i]), M[i])
+                results[i], FLmap_backs[i] = pullback(FLmap, FLs[i], ALus[i], ALds[i][cols...,χ_ranges[i]], Ms[i])
             end
         end
     end
 
+    set_device_id!(atype, 1)
     @sync begin
         for i in 1:N_device
             @async begin
-                set_device_id!(atype, i)
-                for j in 1:N_device
-                    FLm[i][:, :, χ_ranges[j]] .= atype(results[j])
-                end
+                FLm[cols...,χ_ranges[i]] .= atype(results[i])
             end
         end
     end
 
     function back(dFLm)
-        dFL = copy(FL)
-        dALu = copy(ALu)
-        dALd = copy(ALd)
-        dM = copy(M)
+        dFLms = to_N_device(dFLm)
+        dFLs = Vector{Any}(undef, N_device)
+        dALus = Vector{Any}(undef, N_device)
+        dALds = device_similar(ALds)
+        dMs = Vector{Any}(undef, N_device)
         
         @sync begin
             for i in 1:N_device
                 @async begin
                     set_device_id!(atype, i)
-                    if dFLm[i] isa AbstractZero 
-                        dFLm[i] = atype(dFLm[1])
-                    end
-                    dFL[i], dALu[i], dALd[i][:,:,χ_ranges[i]], dM[i] = FLmap_backs[i](view(dFLm[i], :,:,χ_ranges[i]))
+                    dFLs[i], dALus[i], dALds[i][cols...,χ_ranges[i]], dMs[i] = FLmap_backs[i](dFLms[i][cols...,χ_ranges[i]])
                 end
             end
         end
 
         set_device_id!(atype, 1)
-        for i in 2:N_device
-            dFL[1] .+= atype(dFL[i])
-            dALu[1] .+= atype(dALu[i])
-            dM[1] .+= atype(dM[i])
-        end
 
-        @sync begin
-            for i in 1:N_device
+        local dFL, dALu, dM
+        @sync begin       
+            @async dFL = sum_device!(dFLs)
+            @async dALu = sum_device!(dALus)
+            @async dM = sum_device!(dMs)     
+            for i in 2:N_device
                 @async begin
-                    set_device_id!(atype, i)
-                    for j in 1:N_device
-                        if j != i
-                            dALd[i][:,:,χ_ranges[j]] = atype(dALd[j][:,:,χ_ranges[j]])
-                        end
-                    end
-                    if i != 1
-                        dFL[i] = atype(dFL[1])
-                        dALu[i] = atype(dALu[1])
-                        dM[i] = atype(dM[1])
-                    end
+                    dALds[1][cols...,χ_ranges[i]] .= atype(dALds[i])[cols...,χ_ranges[i]]
                 end
             end
         end
 
-        return NoTangent(), dFL, dALu, dALd, dM
+        return NoTangent(), dFL, dALu, dALds[1], dM
     end
     
     return FLm, back
 end
 
-# function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)
-#     rt = vumps_itr(rt, M, alg)
-#     function back(∂rt)
-#         AL, AR = rt.AL, rt.AR
-#         ∂AL, ∂AR, ∂C, ∂FL, ∂FR = ∂rt.AL, ∂rt.AR, ∂rt.C, ∂rt.FL, ∂rt.FR
-#         ∂AL = project_AL(∂AL, AL)
-#         ∂AR = project_AR(∂AR, AR)
-#         ∂rt0 = [∂AL, ∂AR, ∂C, ∂FL, ∂FR]
+function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M)
+    atype = _arraytype(FR)
+    N_device = device_count(atype)
+    χ = size(FR, 1)
+    χ_device = cld(χ, N_device)
+    χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
+    results = Vector{Any}(undef, N_device)
+    cols = fill(:,ndims(FR)-1)
+    FRmap_backs = Vector{Any}(undef, N_device)
 
-#         _, vumps_itr_vjp = pullback(fix_gauge_vumps_step, rt, M, alg)
-#         # _, vumps_itr_vjp = pullback(vumps_step_Hermitian, rt, M, alg)
-#         function vjp_rt_rt(∂rt)
-#             if length(∂rt) == 2
-#                 ∂AL, ∂AR = ∂rt
-#                 ∂AL = project_AL(∂AL, AL)
-#                 ∂AR = project_AR(∂AR, AR)
-#                 ∂rt = [∂AL, ∂AR, NoTangent(), NoTangent(), NoTangent()]
-#             else
-#                 ∂AL, ∂AR, ∂C, ∂FL, ∂FR = ∂rt
-#                 ∂AL = project_AL(∂AL, AL)
-#                 ∂AR = project_AR(∂AR, AR)
-#                 ∂rt = [∂AL, ∂AR, ∂C, ∂FL, ∂FR]
-#             end
-#             ∂rt = vumps_itr_vjp((∂rt, NoTangent()))[1]
-#             ∂AL = project_AL(∂rt.AL, AL)
-#             ∂AR = project_AR(∂rt.AR, AR)
-#             ∂rt = [∂AL, ∂AR]
-#             return ∂rt
-#         end
+    set_device_id!(atype, 1)
+    FRm = similar(FR)
+    FRs = to_N_device(FR)
+    ARus = to_N_device(ARu)
+    ARds = to_N_device(ARd)
+    Ms = to_N_device(M)
+
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                set_device_id!(atype, i)
+                results[i], FRmap_backs[i] = pullback(FRmap, FRs[i], ARus[i][χ_ranges[i],cols...], ARds[i], Ms[i])
+            end
+        end
+    end
+
+    set_device_id!(atype, 1)
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                FRm[χ_ranges[i],cols...] .= atype(results[i])
+            end
+        end
+    end
+
+    function back(dFRm)
+        dFRms = to_N_device(dFRm)
+        dFRs = Vector{Any}(undef, N_device)
+        dARus = device_similar(ARds)
+        dARds = Vector{Any}(undef, N_device)
+        dMs = Vector{Any}(undef, N_device)
         
-#         ∂rt = vjp_rt_rt(∂rt0)
-#         f_map(∂rt) = ∂rt - vjp_rt_rt(∂rt)
-#         ∂rtsum, info = linsolve(f_map, ∂rt, ∂rt; tol = 1e-10, maxiter = 1) 
-#         alg.verbosity >= 1 && info.converged == 0 && @warn "AD linsolve doesn't converge"
-#         ∂rtsum = [∂rt0[1:2]+∂rtsum..., ∂C, ∂FL, ∂FR]
+        @sync begin
+            for i in 1:N_device
+                @async begin
+                    set_device_id!(atype, i)
+                    dFRs[i], dARus[i][χ_ranges[i],cols...], dARds[i], dMs[i] = FRmap_backs[i](dFRms[i][χ_ranges[i],cols...])
+                end
+            end
+        end
 
-#         # ∂rtsum = deepcopy(∂rt0)
-#         # ∂rt = vjp_rt_rt(∂rt0)
-#         # ∂rtsum += ∂rt
-#         # ϵ = Inf
-#         # for ix in 1:100
-#         #     ∂rt = vjp_rt_rt(∂rt)
-#         #     ∂rtsum += ∂rt
-#         #     ϵ = norm(∂rt)
-#         #     println("INFO vumps_pushback: $(ix) ϵ = ", ϵ)
-#         #     (ϵ < 1e-12) && break 
-#         # end
-#         # ∂rtsum = [∂rtsum..., ∂C, ∂FL, ∂FR]
+        set_device_id!(atype, 1)
+        local dFR, dARd, dM
+        @sync begin
+            @async dFR = sum_device!(dFRs)
+            @async dARd = sum_device!(dARds)
+            @async dM = sum_device!(dMs)
+            for i in 2:N_device
+                @async begin
+                    dARus[1][χ_ranges[i],cols...] .= atype(dARus[i])[χ_ranges[i],cols...]
+                end
+            end
+        end
 
-#         vjp_rt_M(∂rt) = vumps_itr_vjp((∂rt, NoTangent()))[2]
-#         ∂M = vjp_rt_M(∂rtsum)
+        return NoTangent(), dFR, dARus[1], dARd, dM
+    end
+    
+    return FRm, back
+end
 
-#         return NoTangent(), NoTangent(), ∂M, NoTangent()
-#     end
-#     return rt, back
-# end
+function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M)
+    atype = _arraytype(AC)
+    N_device = device_count(atype)
+    χ = size(AC, 1)
+    χ_device = cld(χ, N_device)
+    χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
+    results = Vector{Any}(undef, N_device)
+    cols = fill(:,ndims(AC)-1)
+    ACmap_backs = Vector{Any}(undef, N_device)
 
+    set_device_id!(atype, 1)
+    ACm = similar(FL)
+    ACs = to_N_device(AC)
+    FLs = to_N_device(FL)
+    FRs = to_N_device(FR)
+    Ms = to_N_device(M)
 
-# """
-#     dAMmap!(Au, Ad, M, L, R, i)
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                set_device_id!(atype, i)
+                results[i], ACmap_backs[i] = pullback(ACmap, ACs[i], FLs[i], FRs[i][cols...,χ_ranges[i]], Ms[i])
+            end
+        end
+    end
 
-# ```
-#                ┌──  Auᵢⱼ ──┐ 
-#                │     │     │ 
-# dMᵢⱼ    =  -   L ──     ── R
-#                │     │     │ 
-#                └── Adᵢ₊₁ⱼ──┘ 
+    set_device_id!(atype, 1)
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                ACm[cols...,χ_ranges[i]] .= atype(results[i])
+            end
+        end
+    end
 
-#                ┌──       ──┐ 
-#                │     │     │ 
-# dAuᵢⱼ   =  -   L ── Mᵢⱼ  ──R
-#                │     │     │ 
-#                └── Adᵢ₊₁ⱼ──┘ 
+    function back(dACm)
+        dACms = to_N_device(dACm)
+        dACs = Vector{Any}(undef, N_device)
+        dFLs = Vector{Any}(undef, N_device)
+        dFRs = device_similar(FRs)
+        dMs = Vector{Any}(undef, N_device)
+        
+        @sync begin
+            for i in 1:N_device
+                @async begin
+                    set_device_id!(atype, i)
+                    dACs[i], dFLs[i], dFRs[i][cols...,χ_ranges[i]], dMs[i] = ACmap_backs[i](dACms[i][cols...,χ_ranges[i]])
+                end
+            end
+        end
 
-#                ┌──  Auᵢⱼ ──┐       a ────┬──── c     
-#                │     │     │       │     b     │    
-# dAdᵢ₊₁ⱼ =  -   L ─── Mᵢⱼ ──R       ├─ d ─┼─ e ─┤     
-#                │     │     │       │     g     │  
-#                └──       ──┘       f ────┴──── h  
+        set_device_id!(atype, 1)
+        local dAC, dFL, dM
+        @sync begin
+            @async dAC = sum_device!(dACs)
+            @async dFL = sum_device!(dFLs)
+            @async dM = sum_device!(dMs)
+            for i in 2:N_device
+                @async begin
+                    dFRs[1][cols...,χ_ranges[i]] .= atype(dFRs[i])[cols...,χ_ranges[i]]
+                end
+            end
+        end
 
-# ```
-# """
-# function dAMmap!(dAui, dAdir, dMi, Aui, Adir, Mi, L, R)
-#     Nj = size(dAui, 1)
-#     for j in 1:Nj
-#         dAui[j]  .= -conj!(ein"((adf,fgh),dgeb),ceh -> abc"(L[j], Adir[j], Mi[j],   R[j]))
-#         dAdir[j] .= -conj!(ein"((adf,abc),dgeb),ceh -> fgh"(L[j], Aui[j],  Mi[j],   R[j]))
-#         dMi[j]   .= -conj!(ein"(adf,abc),(fgh,ceh) -> dgeb"(L[j], Aui[j],  Adir[j], R[j]))
-#     end
-# end
-
-# """
-#     ξLm = ξLmap(ARu, ARd, M, FR, i)
-
-# ```
-#     ── ALuᵢⱼ  ──┐          ──┐          a ────┬──── c 
-#         │       │            │          │     b     │ 
-#     ── Mᵢⱼ   ──ξLᵢⱼ₊₁  =   ──ξLᵢⱼ       ├─ d ─┼─ e ─┤ 
-#         │       │            │          │     g     │ 
-#     ── ALdᵢ₊₁ⱼ ─┘          ──┘          f ────┴──── h 
-# ```
-# """
-# function ξLmap(ALui, ALdir, Mi, ξLi)
-#     ξLijr = circshift(ξLi, -1)
-#     return [ein"((ceh,abc),dgeb),fgh -> adf"(ξL,ALu,M,ALd) for (ξL,ALu,M,ALd) in zip(ξLijr,ALui,Mi,ALdir)]
-# end
-
-# function ChainRulesCore.rrule(::typeof(leftenv), ALu, ALd, M, FL; ifobs = false, kwargs...)
-#     λL, FL = leftenv(ALu, ALd, M, FL; ifobs, kwargs...)
-#     Ni = size(M, 1)
-#     function back((dλL, dFL))
-#         dALu = zero(ALu)
-#         dALd = zero(ALd)
-#         dM   = zero(M)
-#         @inbounds for i = 1:Ni
-#             ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-#             dFL[i,:] .-= dot(FL[i,:], dFL[i,:]) * FL[i,:]
-#             ξL, info = linsolve(X -> ξLmap(ALu[i,:], ALd[ir,:], M[i,:], X), conj(dFL[i,:]), -λL[i], 1; maxiter = 1)
-#             info.converged == 0 && @warn "ad's linsolve not converge"
-#             ξL .= circshift(ξL, -1)
-#             dAMmap!(view(dALu,i,:), view(dALd,ir,:), view(dM,i,:), ALu[i,:], ALd[ir,:], M[i,:], FL[i,:], ξL)
-#         end
-#         return NoTangent(), dALu, dALd, dM, NoTangent()
-#     end
-#     return (λL, FL), back
-# end
-
-# """
-#     ξRm = ξRmap(ARu, ARd, M, FL)
-
-# ```
-#   ┌──       ┌──  ARuᵢⱼ  ──                     a ────┬──── c 
-#   │         │     │                            │     b     │ 
-# ξRᵢⱼ   =  ξRᵢⱼ₋₁─ Mᵢⱼ   ──                     ├─ d ─┼─ e ─┤ 
-#   │         │     │                            │     g     │ 
-#   └──       └──  ARdᵢ₊₁ⱼ ─                     f ────┴──── h 
-# ```
-# """
-
-# function ξRmap(ARui, ARdir, Mi, ξRi)
-#     ξRijr = circshift(ξRi, 1)
-#     return [ein"((adf,abc),dgeb),fgh -> ceh"(ξR,ARu,M,ARd) for (ξR,ARu,M,ARd) in zip(ξRijr,ARui,Mi,ARdir)]
-# end
-
-# function ChainRulesCore.rrule(::typeof(rightenv), ARu, ARd, M, FR; ifobs = false, kwargs...)
-#     λR, FR = rightenv(ARu, ARd, M, FR; ifobs, kwargs...)
-#     Ni = size(M, 1)
-#     function back((dλ, dFR))
-#         dARu = zero(ARu)
-#         dARd = zero(ARd)
-#         dM   = zero(M)
-#         @inbounds for i = 1:Ni
-#             ir = ifobs ? Ni+1-i : mod1(i+1, Ni)
-#             dFR[i,:] .-= dot(FR[i,:], dFR[i,:]) * FR[i,:]
-#             ξR, info = linsolve(X -> ξRmap(ARu[i,:], ARd[ir,:], M[i,:], X), conj(dFR[i,:]), -λR[i], 1; maxiter = 1)
-#             info.converged == 0 && @warn "ad's linsolve not converge"
-#             ξR = circshift(ξR, 1)
-#             dAMmap!(view(dARu,i,:), view(dARd,ir,:), view(dM,i,:), ARu[i,:], ARd[ir,:], M[i,:], ξR, FR[i,:])
-#         end
-#         return NoTangent(), dARu, dARd, dM, NoTangent()
-#     end
-#     return (λR, FR), back
-# end
-
-# """
-#     ξACmap(ξAC, FL, FR, M, j)
-
-# ```
-#                                                             a ────┬──── c 
-#                                                             │     b     │
-# │        │         │          │        │         │          ├─ d ─┼─ e ─┤ 
-# └───────ξACᵢⱼ ─────┘    =     FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ       │     g     │ 
-#                               │        │         │          f ────┴──── h     
-#                               └──────ξACᵢ₊₁ⱼ ────┘                                    
-                         
-# ```
-# """
-# function ξACmap(ξACj, FLj, FRj, Mj)
-#     ξACirj = circshift(ξACj, -1)
-#     return [ein"((adf,fgh),dgeb),ceh -> abc"(FL,ξAC,M,FR) for (FL,ξAC,M,FR) in zip(FLj,ξACirj,Mj,FRj)] 
-# end
-
-# """
-#     ACdFMmap(FLj, Mi, FRj, AC, ACd, i, II)
-
-# ```
-
-#                ┌──── ACu  ───┐ 
-#                │      │      │ 
-# dFLᵢⱼ    =          ──Mᵢⱼ ── FRᵢⱼ
-#                │      │      │
-#                └───  ACd ────┘ 
-
-#                ┌──── ACu  ───┐ 
-#                │      │      │ 
-# dMᵢⱼ    =      FLᵢⱼ ─   ─── FRᵢⱼ
-#                │      │      │
-#                └───  ACd ────┘ 
-
-#                ┌──── ACu  ───┐          a ────┬──── c    
-#                │      │      │          │     b     │  
-# dFRᵢⱼ    =     FLᵢⱼ ──Mᵢⱼ ──            ├─ d ─┼─ e ─┤ 
-#                │      │      │          │     g     │  
-#                └───  ACd ────┘          f ────┴──── h   
-# ```
-# """
-# function dFMmap!(dFLj, dMj, dFRj, FLj, Mj, FRj, ACuj, ACdj)
-#     Ni = size(dFLj, 1)
-#     for i in 1:Ni
-#         dFLj[i] .= -conj!(ein"((abc,ceh),dgeb),fgh -> adf"(ACuj[i], FRj[i], Mj[i], ACdj[i]))
-#         dMj[i]  .= -conj!(ein"(abc,adf),(ceh,fgh) -> dgeb"(ACuj[i], FLj[i], FRj[i], ACdj[i]))
-#         dFRj[i] .= -conj!(ein"((abc,adf),dgeb),fgh -> ceh"(ACuj[i], FLj[i], Mj[i], ACdj[i]))
-#     end
-# end
-
-# function ChainRulesCore.rrule(::typeof(ACenv), AC, FL, M, FR; kwargs...)
-#     λAC, AC = ACenv(AC, FL, M, FR; kwargs...)
-#     Nj = size(M, 2)
-#     function back((dλ, dAC))
-#         dFL = zero(FL)
-#         dM  = zero(M)
-#         dFR = zero(FR)
-#         @inbounds for j = 1:Nj
-#             dAC[:,j] .-= dot(AC[:,j], dAC[:,j]) * AC[:,j]
-#             ξAC, info = linsolve(X -> ξACmap(X, FL[:,j], FR[:,j], M[:,j]), conj(dAC[:,j]), -λAC[j], 1; maxiter = 1)
-#             info.converged == 0 && @warn "ad's linsolve not converge"
-#             ξAC = circshift(ξAC, -1)
-#             dFMmap!(view(dFL,:,j), view(dM,:,j), view(dFR,:,j), FL[:,j], M[:,j], FR[:,j], AC[:,j], ξAC)
-#         end
-#         return NoTangent(), NoTangent(), dFL, dM, dFR
-#     end
-#     return (λAC, AC), back
-# end
-
-# """
-#     ξCmap(ξC, FL, FR, j)
-
-# ```               
-#                                                     a ─── b
-#                         │                │          │     │       
-# │                │      FLᵢⱼ₊₁ ───────  FRᵢⱼ        ├─ c ─┤   
-# └────── Cᵢⱼ ─────┘  =   │                │          │     │     
-#                         └───── Cᵢ₊₁ⱼ ────┘          d ─── e  
-# ```
-# """
-# function ξCmap(ξCj, FLjr, FRj)
-#     ξCirj = circshift(ξCj, -1)
-#     return [ein"(acd,de),bce -> ab"(FL,ξC,FR) for (FL,ξC,FR) in zip(FLjr,ξCirj,FRj)]
-# end
-
-# """
-#     CdFMmap(FLj, FRj, C, Cd, i, II)
-
-# ```
-#                ┌──── Cu ────┐ 
-#                │            │ 
-# dFLᵢⱼ₊₁ =  -        ────── FRᵢⱼ
-#                │            │
-#                └──── Cd ────┘ 
-#                ┌──── Cu ────┐          a ─── b   
-#                │            │          │     │  
-# dFRᵢⱼ =    -   FLᵢⱼ₊₁──────            ├─ c ─┤ 
-#                │            │          │     │  
-#                └──── Cd ────┘          d ─── e  
-
-# ```
-# """
-# function dFMmap!(dFLjr, dFRj, FLjr, FRj, Cu, Cd)
-#     Ni = size(dFLjr, 1)
-#     for i in 1:Ni
-#         dFLjr[i] .= -conj!(ein"(ab,bce),de -> acd"(Cu[i], FRj[i],  Cd[i]))
-#         dFRj[i]  .= -conj!(ein"(ab,acd),de -> bce"(Cu[i], FLjr[i], Cd[i]))
-#     end
-# end
-
-# function ChainRulesCore.rrule(::typeof(Cenv), C, FL, FR; kwargs...)
-#     λC, C = Cenv(C, FL, FR; kwargs...)
-#     Nj = size(C, 2)
-#     function back((dλ, dC))
-#         dFL = zero(FL)
-#         dFR = zero(FR)
-#         for j = 1:Nj
-#             jr = mod1(j + 1, Nj)
-#             dC[:,j] .-= dot(C[:,j], dC[:,j]) * C[:,j]
-#             ξC, info = linsolve(X -> ξCmap(X, FL[:,jr], FR[:,j]), conj(dC[:,j]), -λC[j], 1; maxiter = 1)
-#             info.converged == 0 && @warn "ad's linsolve not converge"
-#             ξC = circshift(ξC, -1)
-#             dFMmap!(view(dFL,:,jr), view(dFR,:,j), FL[:,jr], FR[:,j], C[:,j], ξC)
-#         end
-#         return NoTangent(), NoTangent(), dFL, dFR
-#     end
-#     return (λC, C), back
-# end
+        return NoTangent(), dAC, dFL, dFRs[1], dM
+    end
+    
+    return ACm, back
+end

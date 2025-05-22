@@ -8,7 +8,7 @@ function observable(env, M, ::Val{:Z}, alg)
     atype = _arraytype(ACu[1])
     Ni,Nj = size(ACu)
     l = length(unique(M.pattern))
-    λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg)  
+    λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, ifvalue=true, alg)  
       λC, _ = rightCenv(ARu, conj(ARu);    ifobs=true)
     return prod(λFLo./λC)^(1/Ni)
 end

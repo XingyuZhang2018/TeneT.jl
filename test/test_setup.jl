@@ -4,6 +4,7 @@ using TeneT: StructArray, ISA
 using TeneT: qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error
 using TeneT: _to_front, _to_tail, permute_fronttail
 using TeneT: project_AL!, project_AR!, retract!, project_AL, project_AR, permute_fronttail
+using TeneT: set_device_id!, to_N_device, FLmap_parallel, FRmap_parallel, ACmap_parallel
 using Test
 using LinearAlgebra
 using AMDGPU

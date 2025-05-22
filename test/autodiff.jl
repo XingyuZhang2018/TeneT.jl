@@ -101,9 +101,9 @@ end
     @test Zygote.gradient(foo, M)[1] ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "FLmap with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
+@testset "FLmap_parallel with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
     Random.seed!(100)
-    d, D, χ = 2, 2, 15
+    d, D, χ = 2, 2, 16
 
     println("d = $(d) D = $(D) χ = $(χ)")
     set_device_id!(atype, 1)
@@ -111,33 +111,68 @@ end
     ipeps = atype(randn(dtype, D,D,D,D,d))
     FL = atype(randn(dtype, χ,D,D,χ))
 
-    FL1 = FLmap(FL, AL, AL, ipeps)
-
     AL = reshape(AL, χ, D^2, χ)
     M  = reshape(ein"abcde,fghie->afbgchdi"(ipeps, conj(ipeps)), D^2, D^2, D^2, D^2)
     FL = reshape(FL, χ, D^2, χ)
 
-    FL2 = FLmap(FL, AL, AL, M)
-
-    FL_N = to_N_device(FL)
-    AL_N = to_N_device(AL)
-    M_N = to_N_device(M)
-    FL2_N = FLmap(FL_N, AL_N, AL_N, M_N)
-
-    set_device_id!(atype, 1)
-    @test reshape(FL1, χ, D^2, χ) ≈ FL2 ≈ FL2_N[1]
+    foo1(x) = norm(FLmap(FL * x, AL * x, AL * x, M * x))
+    g1 = @time Zygote.gradient(foo1, 0.1)[1]
     
-    function foo1(x) 
-        return norm(FLmap(FL * x, AL * x, AL * x, M * x))
-    end
-    @show foo1(1) Zygote.gradient(foo1, 0.1)[1] num_grad(foo1, 0.1)
+    foo2(x) = norm(FLmap_parallel(FL * x, AL * x, AL * x, M * x))
+    g2 = @time Zygote.gradient(foo2, 0.1)[1]
+    @test g1 ≈ g2
+    # @btime Zygote.gradient($foo1, 0.1)[1]
+    # @btime Zygote.gradient($foo2, 0.1)[1]
+end
 
-    function foo2(x) 
-        F = FLmap(to_N_device(FL * x), to_N_device(AL * x) , to_N_device(AL * x) , to_N_device(M * x))
-        return norm(F[1])
-    end
-    @show foo2(1) Zygote.gradient(foo2, 0.1)[1] num_grad(foo2, 0.1)
-    # @show foo2(1) Zygote.gradient(foo2, 0.1) num_grad(foo2, 0.1)
+@testset "FRmap_parallel with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
+    Random.seed!(100)
+    d, D, χ = 2, 2, 16
+
+    println("d = $(d) D = $(D) χ = $(χ)")
+    set_device_id!(atype, 1)
+    AR = atype(randn(dtype, χ,D,D,χ))
+    ipeps = atype(randn(dtype, D,D,D,D,d))
+    FR = atype(randn(dtype, χ,D,D,χ))
+
+    AR = reshape(AR, χ, D^2, χ)
+    M  = reshape(ein"abcde,fghie->afbgchdi"(ipeps, conj(ipeps)), D^2, D^2, D^2, D^2)
+    FR = reshape(FR, χ, D^2, χ)
+
+    foo1(x) = norm(FRmap(FR * x, AR * x, AR * x, M * x))
+    g1 = @time Zygote.gradient(foo1, 0.1)[1]
+    
+    foo2(x) = norm(FRmap_parallel(FR * x, AR * x, AR * x, M * x))
+    g2 = @time Zygote.gradient(foo2, 0.1)[1]
+    @test g1 ≈ g2
+    # @btime Zygote.gradient($foo1, 0.1)[1]
+    # @btime Zygote.gradient($foo2, 0.1)[1]
+end
+
+@testset "ACmap_parallel with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
+    Random.seed!(100)
+    d, D, χ = 2, 2, 16
+
+    println("d = $(d) D = $(D) χ = $(χ)")
+    set_device_id!(atype, 1)
+    AC = atype(randn(dtype, χ,D,D,χ))
+    FL = atype(randn(dtype, χ,D,D,χ))
+    ipeps = atype(randn(dtype, D,D,D,D,d))
+    FR = atype(randn(dtype, χ,D,D,χ))
+
+    AC = reshape(AC, χ, D^2, χ)
+    FL = reshape(FL, χ, D^2, χ)
+    M  = reshape(ein"abcde,fghie->afbgchdi"(ipeps, conj(ipeps)), D^2, D^2, D^2, D^2)
+    FR = reshape(FR, χ, D^2, χ)
+
+    foo1(x) = norm(ACmap(AC * x, FL * x, FR * x, M * x))
+    g1 = @time Zygote.gradient(foo1, 0.1)[1]
+    
+    foo2(x) = norm(ACmap_parallel(AC * x, FL * x, FR * x, M * x))
+    g2 = @time Zygote.gradient(foo2, 0.1)[1]
+    @test g1 ≈ g2
+    # @btime Zygote.gradient($foo1, 0.1)[1]
+    # @btime Zygote.gradient($foo2, 0.1)[1]
 end
 
 @testset "leftenv and rightenv" for (A, M, S) in zip(test_As, test_Ms, test_S1s), ifobs in [false]

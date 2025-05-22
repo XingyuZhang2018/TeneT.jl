@@ -125,9 +125,28 @@ function to_N_device(x)
     atype = _arraytype(x)
     N_device = device_count(atype)
     results = Vector(undef, N_device)
-    for i in 1:N_device
-        set_device_id!(atype, i)
-        results[i] = atype(x)
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                set_device_id!(atype, i)
+                results[i] = atype(x)
+            end
+        end
+    end
+    return results
+end
+
+function device_similar(x)
+    atype = _arraytype(x[1])
+    N_device = device_count(atype)
+    results = Vector(undef, N_device)
+    @sync begin
+        for i in 1:N_device
+            @async begin
+                set_device_id!(atype, i)
+                results[i] = similar(x[i])
+            end
+        end
     end
     return results
 end

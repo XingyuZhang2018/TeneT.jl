@@ -3,14 +3,13 @@ include("./exampleobs.jl")
 
 using Random
 using Test
-# using AMDGPU
 using Zygote
-using CUDA
+using CUDA, AMDGPU
 
-@testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [Array]
+@testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [ROCArray]
     Random.seed!(100)
-    β = log(1+sqrt(2))/2
-    χ = 10
+    β = 0.5
+    χ = 40
     model = Ising(β)
     l = length(unique(pattern))
     TeneT.set_device_id!(atype, 1)
@@ -24,22 +23,23 @@ using CUDA
     data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
     # data = [atype(M) for _ in 1:l]
     M = StructArray(data, pattern)
-    alg = VUMPS(maxiter=10000, miniter=1, verbosity=3, 
-                ifsimple_eig=false,
-                ifupdown=false, ifdownfromup=true, ifparallelupdown=false)
+    alg = VUMPS(maxiter=1000, miniter=10, verbosity=3, 
+                show_every = 1,
+                ifsimple_eig=true,
+                ifupdown=false, ifdownfromup=true, ifparallel=true)
     
     rt = @time VUMPSRuntime(M, χ, alg)
     rt = @time leading_boundary(rt, M, alg)
     env = VUMPSEnv(rt, M, alg)
 
-    @show  log(observable(env, M, Val(:Z), alg)) - 1.0257928172049902
+    # @show log(observable(env, M, Val(:Z), alg)) - 1.0257928172049902
     # @test observable(env, M, Val(:Z), alg) ≈ 2.789305993957602
     # @test observable(env, model, Val(:mag)   ) ≈ magofβ(model) 
     # @show observable(env, model, pattern, Val(:energy), alg) 
     # @test observable(env, model, pattern, Val(:energy)) ≈ -1.745564581767667
 end
 
-@testset "ising backward with $atype $pattern" for atype = [Array], pattern in [[1;;]]
+@testset "ising backward with $atype $pattern" for atype = [ROCArray], pattern in [[1;;]]
     # [1;;], [1 1; 1 1], [1 2; 2 1], [1 2; 3 4], [1 1; 2 2]
     # [1 3 2 2 3 1; 2 3 1 1 3 2]
     Random.seed!(100)
@@ -50,9 +50,9 @@ end
                 verbosity=2, 
                 ifupdown=false, 
                 ifdownfromup=true, 
-                ifparallelupdown=false,
+                ifparallel=true,
                 ifsimple_eig=false)
-    χ = 20
+    χ = 40
     TeneT.set_device_id!(atype, 1)
 
     function energy(β)
@@ -65,6 +65,7 @@ end
         env = VUMPSEnv(rt′, M, alg)
         return log(real(observable(env, M, Val(:Z), alg)))
     end
-    @show Zygote.gradient(energy, log(1+sqrt(2))/2)[1] - 1.4142137794159737
+    @show energy(0.3)
+    @show Zygote.gradient(energy, 0.3)[1]
     # @test Zygote.gradient(energy, 0.3)[1] ≈ num_grad(energy, 0.3) atol=1e-6
 end

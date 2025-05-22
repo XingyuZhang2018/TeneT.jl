@@ -6,7 +6,7 @@ using OMEinsum
 using Random
 using LinearAlgebra
 using TeneT
-using TeneT: left_canonical, right_canonical, leftenv, rightenv, LRtoC, ALCtoAC, ACenv, Cenv, _arraytype, FLmap, set_device_id!, to_N_device
+using TeneT: left_canonical, right_canonical, leftenv, rightenv, LRtoC, ALCtoAC, ACenv, Cenv, _arraytype, FLmap, set_device_id!, to_N_device, FLmap_parallel
 using TeneT: simple_eig
 using Zygote
 # using ProfileView
@@ -54,6 +54,34 @@ using Zygote
 
 end
 
+@testset "copy with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
+    d, D, χ = 4, 12, 256
+    set_device_id!(atype, 1)
+    A = atype(rand(dtype, χ,D,D,χ))
+    function multi_copy(A)
+        local B,C
+        @sync begin
+            @async begin
+                set_device_id!(atype, 2)
+                B = atype(A)
+            end
+            @async begin
+                set_device_id!(atype, 3)
+                C = atype(A)
+            end
+        end
+
+        return B, C
+    end
+    @btime AMDGPU.@sync $multi_copy($A)
+    # @btime AMDGPU.@sync copyto!($B, $A)
+    # set_device_id!(atype, 2)
+    # B = atype(rand(dtype, χ,D,D,χ))
+    # copyto!(B, A)
+    # @btime AMDGPU.@sync copyto!($B, $A)
+    # @btime AMDGPU.@sync B = $atype($A)
+end
+
 @testset "OMEinsum with $atype{$dtype} " for atype in [ROCArray], dtype in [ComplexF64]
     Random.seed!(100)
     d, D, χ = 4, 8, 256
@@ -71,19 +99,15 @@ end
     FL = reshape(FL, χ, D^2, χ)
 
     XX = AMDGPU.@time AMDGPU.@sync FLmap(FL, AL, AL, M)
-    @btime AMDGPU.@sync FLmap($FL, $AL, $AL, $M)
+    # @btime AMDGPU.@sync FLmap($FL, $AL, $AL, $M)
 
-    FL = to_N_device(FL)
-    AL = to_N_device(AL)
-    M = to_N_device(M)
-    FL22 = AMDGPU.@time FLmap(FL, AL, AL, M)
+    FL22 = AMDGPU.@time FLmap_parallel(FL, AL, AL, M)
     # # _, FLm2 = simple_eig(FL -> FLmap(FL, AL, conj(AL), M), FL)
     
-    # # @btime CUDA.@sync norm($FL)
     # # @btime simple_eig(FL -> FLmap(FL, $AL, conj($AL), $M), $FL)
-    set_device_id!(atype, 1)
-    @test reshape(FL1, χ, D^2, χ) ≈ FL22[1]
-    @btime AMDGPU.@sync FLmap($FL, $AL, $AL, $M)
+    # set_device_id!(atype, 1)
+    @test reshape(FL1, χ, D^2, χ) ≈ FL22
+    @btime AMDGPU.@sync FLmap_parallel($FL, $AL, $AL, $M)
     # @test reshape(FLm1, χ, D^2, χ) ≈ FLm2
     # @btime simple_eig(FL -> FLmap(FL, $AL, conj($AL), $ipeps), $FL)
 
