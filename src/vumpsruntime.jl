@@ -4,6 +4,7 @@
     miniter::Int = 1                    # miniter iteration of VUMPS without AD
     maxiter_ad::Int = 10                # maxiter iteration of VUMPS with AD
     miniter_ad::Int = 3                 # miniter iteration of VUMPS with AD
+    forloop_iter::Int = 1               # the iteration of the for-loop contraction, when > 1, automatically use checkpoint
     show_every::Int = 10                # show the iteration result at every n iterations
     verbosity::Int = Defaults.verbosity # verbosity control the output message
 

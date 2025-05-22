@@ -310,14 +310,31 @@ FLmap(FL, ALu, ALd, M::leg4) = ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu)
 FLmap(FL, ALu, ALd, M::leg5) = ein"(((aefi,ijkl),ejgbp),fkhcp),abcd -> dghl"(FL, ALd, M, conj(M), ALu)
 FLmap(FL, ALu, ALd, M::leg8) = ein"((aefi,ijkl),efjkghbc),abcd -> dghl"(FL, ALd, M, ALu)
 
-function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false)
+function FLmap_forloop(FL, ALu, ALd, M; forloop_iter=1)
+    if forloop_iter == 1
+        return FLmap(FL, ALu, ALd, M)
+    else
+        FLm = Zygote.Buffer(ALd)
+        χ = size(FLm, 3)
+        χ_loop = cld(χ, forloop_iter)
+        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
+        cols = fill(:,ndims(FL)-1)
+        for i in χ_ranges
+            FLm[cols...,i] = checkpoint(FLmap, FL, ALu, ALd[cols...,i], M)
+        end
+        return copy(FLm)
+    end
+end
+
+function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false, forloop_iter=1)
     Nj = length(ALui)
     for j in J:(J + Nj - 1)
         jr = mod1(j, Nj)
-        FLij = ifcheckpoint ? checkpoint(FLmap, FLij, ALui[jr], ALdir[jr], Mi[jr]) : FLmap(FLij, ALui[jr], ALdir[jr], Mi[jr])
+        FLij = ifcheckpoint ? checkpoint(FLmap_forloop, FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter) : FLmap_forloop(FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter)
     end
     return FLij
 end
+
 """
     FRm = FRmap(ARu, ARd, M, FR, i)
 
@@ -333,11 +350,27 @@ FRmap(FR, ARu, ARd, M::leg4) = ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd)
 FRmap(FR, ARu, ARd, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M, conj(M), ARd)
 FRmap(FR, ARu, ARd, M::leg8) = ein"((abcd,dghl),efjkghbc),ijkl -> aefi"(ARu, FR, M, ARd)
 
-function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint=false)
+function FRmap_forloop(FR, ARu, ARd, M; forloop_iter=1) 
+    if forloop_iter == 1
+        return FRmap(FR, ARu, ARd, M)
+    else
+        FRm = Zygote.Buffer(ARu)
+        χ = size(FRm, 1)
+        χ_loop = cld(χ, forloop_iter)
+        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
+        cols = fill(:,ndims(FR)-1)
+        for i in χ_ranges
+            FRm[i,cols...] = checkpoint(FRmap, FR, ARu[i,cols...], ARd, M)
+        end
+        return copy(FRm)
+    end
+end
+
+function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint=false, forloop_iter=1)
     Nj = length(ARui)
     for j in J:-1:(J - Nj + 1)
         jr = mod1(j, Nj)
-        FRij = ifcheckpoint ? checkpoint(FRmap, FRij, ARui[jr], ARdir[jr], Mi[jr]) : FRmap(FRij, ARui[jr], ARdir[jr], Mi[jr])
+        FRij = ifcheckpoint ? checkpoint(FRmap_forloop, FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter) : FRmap_forloop(FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter)
     end
     return FRij
 end
@@ -396,12 +429,13 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         if p ∉ processed_indices
             if alg.ifsimple_eig
                 if alg.ifcheckpoint
-                    λL[i,1], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint=alg.ifcheckpoint), FL[i,1]; ifvalue=ifvalue)
+                    λL[i,1], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint=true, forloop_iter=alg.forloop_iter), FL[i,1]; ifvalue=ifvalue)
                 else
-                    λL[i,1], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]), FL[i,1]; ifvalue=ifvalue)
+                    λL[i,1], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; forloop_iter=alg.forloop_iter), FL[i,1]; ifvalue=ifvalue)
                 end
             else
-                λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint=alg.ifcheckpoint), 
+                λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; 
+                                                          ifcheckpoint=alg.ifcheckpoint, forloop_iter=alg.forloop_iter), 
                                             FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
                 λL[i,1], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
@@ -414,7 +448,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         for j in 2:Nj
             p = FL.pattern[i,j]
             if p ∉ processed_indices
-                FL′[i,j] = FLmap(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1])
+                FL′[i,j] = FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter=alg.forloop_iter)
                 λL[i,j] = λL[i,1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -451,12 +485,13 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
         if p ∉ processed_indices
             if alg.ifsimple_eig
                 if alg.ifcheckpoint
-                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint=alg.ifcheckpoint), FR[i,Nj]; ifvalue=ifvalue)
+                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint=true, forloop_iter=alg.forloop_iter), FR[i,Nj]; ifvalue=ifvalue)
                 else
-                    λR[i,Nj], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]), FR[i,Nj]; ifvalue=ifvalue)
+                    λR[i,Nj], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; forloop_iter=alg.forloop_iter), FR[i,Nj]; ifvalue=ifvalue)
                 end
             else
-                λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint=alg.ifcheckpoint), 
+                λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; 
+                                                          ifcheckpoint=alg.ifcheckpoint, forloop_iter=alg.forloop_iter), 
                                         FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
                 λR[i,Nj], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
@@ -469,7 +504,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
         for j in Nj-1:-1:1
             p = FR.pattern[i,j]
             if p ∉ processed_indices
-                FR′[i,j] = FRmap(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1])
+                FR′[i,j] = FRmap_forloop(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter=alg.forloop_iter)
                 λR[i,j] = λR[i,Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -546,11 +581,27 @@ ACmap(AC, FL, FR, M::leg4) = ein"((abc,ceh),dgeb),adf -> fgh"(AC,FR,M,FL)
 ACmap(AC, FL, FR, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),aefi -> ijkl"(AC,FR,M,conj(M),FL)
 ACmap(AC, FL, FR, M::leg8) = ein"((abcd,dghl),efjkghbc),aefi -> ijkl"(AC,FR,M,FL)
 
-function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false)
+function ACmap_forloop(AC, FL, FR, M; forloop_iter=1) 
+    if forloop_iter == 1
+        return ACmap(AC, FL, FR, M)
+    else
+        ACm = Zygote.Buffer(FR)
+        χ = size(ACm, 3)
+        χ_loop = cld(χ, forloop_iter)
+        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
+        cols = fill(:,ndims(AC)-1)
+        for i in χ_ranges
+            ACm[cols...,i] = checkpoint(ACmap, AC,FL,FR[cols...,i],M)
+        end
+        return copy(ACm)
+    end
+end
+
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false, forloop_iter=1)
     Ni = length(FLj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
-        ACij = ifcheckpoint ? checkpoint(ACmap, ACij, FLj[ir], FRj[ir], Mj[ir]) : ACmap(ACij, FLj[ir], FRj[ir], Mj[ir])
+        ACij = ifcheckpoint ? checkpoint(ACmap_forloop, ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter) : ACmap_forloop(ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter)
     end
     return ACij
 end
@@ -599,12 +650,13 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         if p ∉ processed_indices
             if alg.ifsimple_eig
                 if alg.ifcheckpoint
-                    λAC[1,j], AC′[1,j] = checkpoint(simple_eig, AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint=alg.ifcheckpoint), AC[1,j]; ifvalue=ifvalue)
+                    λAC[1,j], AC′[1,j] = checkpoint(simple_eig, AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint=true, forloop_iter=alg.forloop_iter), AC[1,j]; ifvalue=ifvalue)
                 else
-                    λAC[1,j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]), AC[1,j]; ifvalue=ifvalue)
+                    λAC[1,j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; forloop_iter=alg.forloop_iter), AC[1,j]; ifvalue=ifvalue)
                 end
             else
-                λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint=alg.ifcheckpoint), 
+                λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; 
+                                                         ifcheckpoint=alg.ifcheckpoint, forloop_iter=alg.forloop_iter), 
                                         AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
                 λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
@@ -617,7 +669,7 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j])
+                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter=alg.forloop_iter)
                 AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
