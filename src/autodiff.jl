@@ -219,7 +219,7 @@ function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M)
     function back(dFRm)
         dFRms = to_N_device(dFRm)
         dFRs = Vector{Any}(undef, N_device)
-        dARus = device_similar(ARds)
+        dARus = device_similar(ARus)
         dARds = Vector{Any}(undef, N_device)
         dMs = Vector{Any}(undef, N_device)
         
