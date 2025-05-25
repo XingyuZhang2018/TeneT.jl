@@ -152,7 +152,7 @@ end
 
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
-    AC = Zygote.@ignore ALCtoAC(AL,C)
+    AC = ALCtoAC(AL,C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
     _,  Cp =  Cenv( C, FL, FR; alg)
     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
@@ -168,7 +168,7 @@ end
 
 function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
-    AC = Zygote.@ignore ALCtoAC(AL,C)
+    AC = ALCtoAC(AL,C)
     _, FL =  leftenv(AL, conj(AL), M, FL; alg)
     _, FR = rightenv(AR, conj(AR), M, FR; alg)
     _, AC = ACenv(AC, FL, M, FR; alg)

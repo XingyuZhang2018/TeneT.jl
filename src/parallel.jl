@@ -82,7 +82,14 @@ function ACmap_parallel(AC, FL, FR, M)
     results = Vector{Any}(undef, N_device)
 
     set_device_id!(atype, 1)
-    ACm = similar(AC)
+    if ndims(M) == 4
+        D = size(M,2)
+        ACm = similar(AC, χ, D, χ)
+    else
+        D = size(M,3)
+        ACm = similar(AC, χ, D, D, χ)
+    end
+    
     ACs = to_N_device(AC)
     FLs = to_N_device(FL)
     FRs = to_N_device(FR)
