@@ -314,8 +314,14 @@ function FLmap_forloop(FL, ALu, ALd, M; forloop_iter=1)
     if forloop_iter == 1
         return FLmap(FL, ALu, ALd, M)
     else
-        FLm = Zygote.Buffer(FL)
-        χ = size(FLm)[end]
+        χ = size(FL, 1)
+        if ndims(M) == 4
+            D = size(M, 3)
+            FLm = Zygote.Buffer(FL, χ,D,χ)
+        else
+            D = size(M, 5)
+            FLm = Zygote.Buffer(FL, χ,D,D,χ)
+        end
         χ_loop = cld(χ, forloop_iter)
         χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
         cols = fill(:,ndims(FL)-1)
@@ -354,8 +360,14 @@ function FRmap_forloop(FR, ARu, ARd, M; forloop_iter=1)
     if forloop_iter == 1
         return FRmap(FR, ARu, ARd, M)
     else
-        FRm = Zygote.Buffer(FR)
-        χ = size(FRm, 1)
+        χ = size(FR, 1)
+        if ndims(M) == 4
+            D = size(M, 1)
+            FRm = Zygote.Buffer(FR, χ,D,χ)
+        else
+            D = size(M, 1)
+            FRm = Zygote.Buffer(FR, χ,D,D,χ)
+        end
         χ_loop = cld(χ, forloop_iter)
         χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
         cols = fill(:,ndims(FR)-1)
@@ -586,8 +598,13 @@ function ACmap_forloop(AC, FL, FR, M; forloop_iter=1)
         return ACmap(AC, FL, FR, M)
     else
         χ = size(AC)[end]
-        D = size(M, 2) # to do: general case
-        ACm = Zygote.Buffer(AC, χ,D,χ)
+        if ndims(M) == 4
+            D = size(M, 2)
+            ACm = Zygote.Buffer(AC, χ,D,χ)
+        else
+            D = size(M, 3)
+            ACm = Zygote.Buffer(AC, χ,D,D,χ)
+        end
         χ_loop = cld(χ, forloop_iter)
         χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
         cols = fill(:,ndims(AC)-1)
