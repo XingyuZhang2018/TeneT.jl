@@ -65,8 +65,8 @@ function mcform(M)
 end    
 
 # See Zygote Checkpointing https://fluxml.ai/Zygote.jl/latest/adjoints/#Checkpointing-1
-checkpoint(f, x...; kwargs...) = f(x...; kwargs...) 
-Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...)[2](ȳ)
+checkpoint(f, args...; kwargs...) = f(args...; kwargs...) 
+Zygote.@adjoint checkpoint(f, args...; kwargs...) = f(args...; kwargs...), ȳ -> Zygote._pullback((args...) -> f(args...; kwargs...), args...)[2](ȳ)
 
 function save_rt(folder, rt)
     p = joinpath(folder, "VUMPS_rt.jld2")
