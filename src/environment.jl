@@ -226,7 +226,7 @@ end
 function getLsped(Le, A, AL; kwargs...)
     L = similar(Le)
     for i in 1:length(A)
-        _, Ls1 = simple_eig(X -> ρmap(X,A[i],conj(AL[i])), Le[i]; kwargs...)
+        _, Ls1 = simple_eig(X -> ρmap(X,A[i],conj(AL[i])), Le[i]; power_iter=5, kwargs...)
         _, R = qrpos!(Ls1)
         L[i] = R
     end
@@ -435,19 +435,22 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
     FL′ = Zygote.Buffer(FL)
     Ni, Nj = size(M)
     processed_indices = Set{Int}()
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    forloop_iter = alg.forloop_iter
+    ifcheckpoint = alg.ifcheckpoint
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i,1]
         if p ∉ processed_indices
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λL[i,1], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint=true, forloop_iter=alg.forloop_iter), FL[i,1]; ifvalue=ifvalue)
+                if ifcheckpoint
+                    λL[i,1], FL′[i,1] = checkpoint(simple_eig, FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint, forloop_iter), FL[i,1]; ifvalue, power_iter)
                 else
-                    λL[i,1], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; forloop_iter=alg.forloop_iter), FL[i,1]; ifvalue=ifvalue)
+                    λL[i,1], FL′[i,1] = simple_eig(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; forloop_iter), FL[i,1]; ifvalue, power_iter)
                 end
             else
                 λLs, FLi1s, info = eigsolve(FLij -> FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; 
-                                                          ifcheckpoint=alg.ifcheckpoint, forloop_iter=alg.forloop_iter), 
+                                                          ifcheckpoint, forloop_iter), 
                                             FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
                 λL[i,1], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
@@ -460,7 +463,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         for j in 2:Nj
             p = FL.pattern[i,j]
             if p ∉ processed_indices
-                FL′[i,j] = FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter=alg.forloop_iter)
+                FL′[i,j] = FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter)
                 λL[i,j] = λL[i,1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -491,19 +494,22 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
     λR = Zygote.Buffer(randSA(Array, M.pattern))
     FR′ = Zygote.Buffer(FR)
     processed_indices = Set{Int}()
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    forloop_iter = alg.forloop_iter
+    ifcheckpoint = alg.ifcheckpoint
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i,Nj]
         if p ∉ processed_indices
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint=true, forloop_iter=alg.forloop_iter), FR[i,Nj]; ifvalue=ifvalue)
+                if ifcheckpoint
+                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint, forloop_iter), FR[i,Nj]; ifvalue, power_iter)
                 else
-                    λR[i,Nj], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; forloop_iter=alg.forloop_iter), FR[i,Nj]; ifvalue=ifvalue)
+                    λR[i,Nj], FR′[i,Nj] = simple_eig(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; forloop_iter), FR[i,Nj]; ifvalue, power_iter)
                 end
             else
                 λRs, FR1s, info = eigsolve(FRiNj -> FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; 
-                                                          ifcheckpoint=alg.ifcheckpoint, forloop_iter=alg.forloop_iter), 
+                                                          ifcheckpoint, forloop_iter), 
                                         FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
                 λR[i,Nj], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
@@ -516,7 +522,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
         for j in Nj-1:-1:1
             p = FR.pattern[i,j]
             if p ∉ processed_indices
-                FR′[i,j] = FRmap_forloop(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter=alg.forloop_iter)
+                FR′[i,j] = FRmap_forloop(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter)
                 λR[i,j] = λR[i,Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -663,18 +669,21 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
     processed_indices = Set{Int}()
+    power_iter = alg.power_iter
+    forloop_iter = alg.forloop_iter
+    ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         p = AC.pattern[1,j]
         if p ∉ processed_indices
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λAC[1,j], AC′[1,j] = checkpoint(simple_eig, AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint=true, forloop_iter=alg.forloop_iter), AC[1,j]; ifvalue=ifvalue)
+                if ifcheckpoint
+                    λAC[1,j], AC′[1,j] = checkpoint(simple_eig, AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint, forloop_iter), AC[1,j]; ifvalue, power_iter)
                 else
-                    λAC[1,j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; forloop_iter=alg.forloop_iter), AC[1,j]; ifvalue=ifvalue)
+                    λAC[1,j], AC′[1,j] = simple_eig(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; forloop_iter), AC[1,j]; ifvalue, power_iter)
                 end
             else
                 λACs, ACs, info = eigsolve(AC1j -> ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; 
-                                                         ifcheckpoint=alg.ifcheckpoint, forloop_iter=alg.forloop_iter), 
+                                                         ifcheckpoint, forloop_iter), 
                                         AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
                 λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
@@ -687,7 +696,7 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter=alg.forloop_iter)
+                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter)
                 AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
@@ -717,15 +726,17 @@ function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
+    power_iter = alg.power_iter
+    ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
         p = C.pattern[1,j]
         if p ∉ processed_indices
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue=ifvalue)
+                if ifcheckpoint
+                    λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
                 else
-                    λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue=ifvalue)
+                    λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
                 end
             else
                 λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 

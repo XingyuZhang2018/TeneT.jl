@@ -5,6 +5,8 @@
     maxiter_ad::Int = 10                # maxiter iteration of VUMPS with AD
     miniter_ad::Int = 3                 # miniter iteration of VUMPS with AD
     forloop_iter::Int = 1               # the iteration of the for-loop contraction, when > 1, automatically use checkpoint
+    power_iter::Int = 5                 # the iteration of the power method, only works when `ifsimple_eig = true`
+    power_iter_obs::Int = 20            # the iteration of the power method for the up and down observation environment, only works when `ifsimple_eig = true`
     show_every::Int = 10                # show the iteration result at every n iterations
     verbosity::Int = Defaults.verbosity # verbosity control the output message
 
