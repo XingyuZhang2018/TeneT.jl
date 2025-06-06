@@ -112,6 +112,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
 
     atype = _arraytype(M)
     id = get_device_id(atype)
+    local err
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
     Zygote.@ignore for i in 1:alg.maxiter
         rt, err = vumps_step_power(rt, M, alg)
@@ -138,12 +139,12 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
         end
     end
 
-    return rt
+    return rt, err
 end
 
 function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
-    rt = vumps_itr(rt, M, alg)
-    return rt
+    rt, err = vumps_itr(rt, M, alg)
+    return rt, err
 end
 
 function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS, Fo=[rt.FL, rt.FR])
@@ -167,22 +168,22 @@ function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray,
         @sync begin
             @async begin
                 set_device_id!(atype, 1)
-                rtup = vumps_itr(rtup, M, alg)
+                rtup, errup = vumps_itr(rtup, M, alg)
             end
             @async begin
                 set_device_id!(atype, 2)
                 Md = _down_M(atype(M))
-                rtdown = vumps_itr(rtdown, Md, alg)
+                rtdown, errdown = vumps_itr(rtdown, Md, alg)
             end
         end
-        return rtup, rtdown
+        return (rtup, rtdown), (errup, errdown)
     end
 
-    rtup = vumps_itr(rtup, M, alg)
+    rtup, errup = vumps_itr(rtup, M, alg)
 
     Md = _down_M(M)
-    rtdown = vumps_itr(rtdown, Md, alg)
-    return rtup, rtdown
+    rtdown, errdown = vumps_itr(rtdown, Md, alg)
+    return (rtup, rtdown), (errup, errdown)
 end
 
 function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg, Fo=[rt[1].FL, rt[1].FR])

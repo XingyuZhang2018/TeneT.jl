@@ -123,44 +123,43 @@ function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime
         @sync begin
             @async begin
                 set_device_id!(atype, 1)
-                rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+                (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
             end
             @async begin
                 set_device_id!(atype, 2)
                 Md, _down_M_back = pullback(_down_M, atype(M))
-                rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+                (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
             end
         end
     else
-        rtup, vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+        (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
         Md, _down_M_back = pullback(_down_M, M)
-        rtdown, vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+        (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
     end
-
-    function back((∂rtup, ∂rtdown))
+    function back(((∂rtup, ∂rtdown), ∂err))
         if alg.ifparallelupdown
             @sync begin
                 @async begin
                     set_device_id!(atype, 1)
-                    ∂Mup = vumps_itr_back_up(∂rtup)[2]
+                    ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
                 end
                 @async begin
                     set_device_id!(atype, 2)
-                    ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
+                    ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
                     ∂Mdown = _down_M_back(∂Mddown)[1]
                 end
             end
         else
-            ∂Mup = vumps_itr_back_up(∂rtup)[2]
-            ∂Mddown = vumps_itr_back_down(∂rtdown)[2]
+            ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
+            ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
             ∂Mdown = _down_M_back(∂Mddown)[1]
         end
-
+        
         set_device_id!(atype, 1)
         ∂Mup.data .+= atype(∂Mdown).data
         return NoTangent(), NoTangent(), ∂Mup, NoTangent()
     end
-    return (rtup, rtdown), back
+    return ((rtup, rtdown), (errup, errdown)), back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)
