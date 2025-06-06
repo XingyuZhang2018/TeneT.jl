@@ -69,17 +69,16 @@ checkpoint(f, args...; kwargs...) = f(args...; kwargs...)
 Zygote.@adjoint checkpoint(f, args...; kwargs...) = f(args...; kwargs...), ȳ -> Zygote._pullback((args...) -> f(args...; kwargs...), args...)[2](ȳ)
 
 function save_rt(folder, rt)
-    p = joinpath(folder, "VUMPS_rt.jld2")
-    atype = length(rt) == 1 ? _arraytype(rt.AL[1]) : _arraytype(rt[1].AL[1])
+    p = joinpath(folder, "VUMPS_rt_env.jld2")
     rt_save = Array(rt)
-    println("save a $atype rt in $p")
+    @info "save a VUMPS runtime environment to $p"
     save(p, "rt", rt_save)
 end
 
 function load_rt(folder, atype)
-    p = joinpath(folder, "VUMPS_rt.jld2")
+    p = joinpath(folder, "VUMPS_rt_env.jld2")
     rt = atype(load(p, "rt"))
-    println("load a $atype rt in $p")
+    @info "load a VUMPS runtime environment from $p"
     return rt
 end
 
