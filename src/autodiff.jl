@@ -68,6 +68,26 @@ function ChainRulesCore.rrule(::typeof(orth_for_ad), v)
     return v, back
 end
 
+orth_for_AL(v) = v
+function ChainRulesCore.rrule(::typeof(orth_for_AL), v)
+    function back(dv)
+        project_AL!(dv, v)
+        # @show norm(ein"abc,abg->cg"(dv, conj(v)))
+        return NoTangent(), dv
+    end
+    return v, back
+end
+
+orth_for_AR(v) = v
+function ChainRulesCore.rrule(::typeof(orth_for_AR), v)
+    function back(dv)
+        project_AR!(dv, v)
+        # @show norm(ein"abc,gbc->ag"(dv, conj(v)))
+        return NoTangent(), dv
+    end
+    return v, back
+end
+
 function ChainRulesCore.rrule(::Type{<:VUMPSRuntime}, AL, AR, C, FL, FR)
     rt = VUMPSRuntime(AL, AR, C, FL, FR)
     function back(∂rt)
