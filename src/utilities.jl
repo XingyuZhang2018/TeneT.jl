@@ -23,9 +23,9 @@ permute_fronttail(t::leg4) = permute(t, ((4,2,3), (1,)))
 permute_fronttail(t::AbstractZero) = t
 
 orth_for_ad(v) = v
-function simple_eig(f, v; max_iter=20, ifvalue=false)
+function simple_eig(f, v; max_iter=5, ifvalue=false)
     λ = 0.0
-    Zygote.@ignore begin
+    # Zygote.@ignore begin
         for _ in 1:max_iter
             v = f(v)
             λ′ = norm(v)
@@ -33,11 +33,11 @@ function simple_eig(f, v; max_iter=20, ifvalue=false)
             abs(λ′ - λ) < 1e-8 && break
             λ = λ′
         end
-    end
-    for _ in 1:5
-        v = f(v)
-        v /= norm(v)
-    end
+    # end
+    # for _ in 1:max_iter
+    #     v = f(v)
+    #     v /= norm(v)
+    # end
 
     v = orth_for_ad(v)
     if ifvalue

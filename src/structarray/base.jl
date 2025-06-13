@@ -60,6 +60,7 @@ LinearAlgebra.adjoint(S::StructArray) = StructArray(adjoint.(S.data), S.pattern)
 LinearAlgebra.dot(x::StructArray, y::StructArray) = dot(x.data, y.data)
 LinearAlgebra.rmul!(v::StructArray, α::Number) = (v.data .*= α; v)
 +(x::StructArray, y::StructArray) = StructArray(x.data + y.data, x.pattern)
+-(x::StructArray, y::StructArray) = StructArray(x.data - y.data, x.pattern)
 LinearAlgebra.axpy!(a::Number, x::StructArray, y::StructArray) = (y.data .+= a * x.data; y)
 
 function Base.show(io::IO, S::StructArray)
