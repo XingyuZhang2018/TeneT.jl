@@ -135,7 +135,7 @@ Select the max positive one of λs and corresponding Fs.
 function selectpos(λs, Fs, N)
     if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
         # @show "selectpos: λs are degeneracy"
-        N = min(N, length(λs))
+        N = max(N, length(λs))
         p = argmax(real(λs[1:N]))  
         # @show λs p abs.(λs)
         return λs[1:N][p], Fs[1:N][p]
@@ -569,6 +569,88 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
 end
 
 """
+    ```
+    ┌── ALuᵢⱼ  ──      ┌──        a──────┬──────c
+    Lᵢⱼ   |        =   Lᵢⱼ₊₁      │      │      │
+    └── ALdᵢᵣⱼ ──      └──        │      b      │
+                                  │      │      │ 
+                                  d──────┴──────e               
+    ```
+"""
+Lmap(Lij, ALuij::leg3, ALdirj::leg3) = ein"(ad,dbe),abc -> ce"(Lij, ALdirj, ALuij)
+
+function Lmap(J::Int, Lij, ALui, ALdir)
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        Lij = Lmap(Lij, ALui[jr], ALdir[jr])
+    end
+    return Lij
+end
+
+"""
+        leftCenv(ALu::Matrix{<:AbstractTensorMap}, 
+                    ALd::Matrix{<:AbstractTensorMap}, 
+                    L::Matrix{<:AbstractTensorMap} = cellones(ALu); 
+                    ifobs=false, verbosity = Defaults.verbosity, kwargs...) 
+
+Compute the left environment tensor for MPS A, by finding the left fixed point
+of ALu - ALd contracted along the physical dimension.
+```
+   ┌── ALuᵢⱼ  ──          ┌──  
+   Lᵢⱼ   |        = λLᵢⱼ  Lᵢⱼ₊₁
+   └── ALdᵢᵣⱼ ──          └──  
+```
+"""
+function leftCenv(ALu::StructArray, 
+                  ALd::StructArray, 
+                  L::StructArray = cellones(ALu); 
+                  ifobs=false, ifvalue=false, alg, kwargs...) 
+
+    Ni, Nj = size(L)
+    λL = Zygote.Buffer(randSA(Array, ALu.pattern))
+    L′ = Zygote.Buffer(L)
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    processed_indices = Set{Int}()
+    for i in 1:Ni
+        ir = ifobs ? Ni + 2 - i : i
+        p = L.pattern[i,1]
+        if p ∉ processed_indices
+            f(Lij) = Lmap(1, Lij, ALu[i,:], ALd[ir,:])
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λL[i,1], L′[i,1] = checkpoint(simple_eig, f, L[i,1]; ifvalue, power_iter)
+                else
+                    λL[i,1], L′[i,1] = simple_eig(f, L[i,1]; ifvalue, power_iter)
+                end
+            else
+                λLs, Li1s, info = eigsolve(f, L[i,1], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
+                λL[i,1], L′[i,1] = selectpos(λLs, Li1s, Nj)
+            end
+            push!(processed_indices, p)
+            if length(processed_indices) == length(L.data)
+                break
+            end
+        end
+        for j in 2:Nj
+            p = L.pattern[i,j]
+            if p ∉ processed_indices
+                Lij = Lmap(L′[i,j-1], ALu[i,j-1], ALd[ir,j-1])
+                L′[i,j] = Lij / norm(Lij)
+                λL[i,j] = λL[i,1]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(L.data)
+                    break
+                end
+            end
+        end
+    end
+
+    return copy(λL), copy(L′)
+end
+
+"""
     Rm = Rmap(FRi::Vector{<:AbstractTensorMap}, 
                 ARui::Vector{<:AbstractTensorMap}, 
                 ARdir::Vector{<:AbstractTensorMap}, 
@@ -582,38 +664,74 @@ end
                                          d──────┴──────e   
 ```
 """
-function Rmap(Ri, ARui, ARdir)
-    Rm = [ein"(abc,ce),dbe->ad"(ARu, R, ARd) for (R, ARu, ARd) in zip(Ri, ARui, ARdir)]
-    return circshift(Rm, -1)
+Rmap(Ri, ARui::leg3, ARdir::leg3) = ein"(abc,ce),dbe->ad"(ARui, Ri, ARdir)
+function Rmap(J::Int, Rij, ARui, ARdir)
+    Nj = length(ARui)
+    for j in J:-1:(J - Nj + 1)
+        jr = mod1(j, Nj)
+        Rij = Rmap(Rij, ARui[jr], ARdir[jr])
+    end
+    return Rij
 end
 
 """
-    λR, FR = rightCenv(ARu::Matrix{<:AbstractTensorMap}, 
-                       ARd::Matrix{<:AbstractTensorMap}, 
-                       R::Matrix{<:AbstractTensorMap} = initial_C(ARu); 
-                       kwargs...) 
+        rightCenv(ARu::Matrix{<:AbstractTensorMap}, 
+                    ARd::Matrix{<:AbstractTensorMap}, 
+                    L::Matrix{<:AbstractTensorMap} = cellones(ARu); 
+                    ifobs=false, verbosity = Defaults.verbosity, kwargs...) 
 
-Compute the right environment tensor for MPS A by finding the left fixed point
-of AR - conj(AR) contracted along the physical dimension.
+Compute the left environment tensor for MPS A, by finding the left fixed point
+of ARu - ARd contracted along the physical dimension.
 ```
-    ── ARuᵢⱼ  ──┐          ──┐   
-        |       Rᵢⱼ  = λRᵢⱼ  Rᵢⱼ₋₁
-    ── ARdᵢᵣⱼ ──┘          ──┘  
+    ── ARuᵢⱼ  ──┐          ──┐    
+        │       Rᵢⱼ  =       Rᵢⱼ₋₁ 
+    ── ARdᵢᵣⱼ ──┘          ──┘     
 ```
 """
-function rightCenv(ARu, ARd, R=cellones(ARu); 
-                   ifobs=false, verbosity=Defaults.verbosity, kwargs...) 
+function rightCenv(ARu::StructArray, 
+                  ARd::StructArray, 
+                  R::StructArray = cellones(ARu); 
+                  ifobs=false, ifvalue=false, alg, kwargs...) 
 
-    Ni, Nj = size(ARu)
     λR = Zygote.Buffer(randSA(Array, ARu.pattern))
     R′ = Zygote.Buffer(R)
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    processed_indices = Set{Int}()
     for i in 1:Ni
-        ir = ifobs ? mod1(Ni - i + 2, Ni) : i
-        λRs, R1s, info = eigsolve(R -> Rmap(R, ARu[i,:], ARd[ir,:]), R[i,:], 2, :LM; 
-                                  alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-        verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-        λR[i,1], R′[i,1] = λRs[1], R1s[1][1]
+        ir = ifobs ? Ni + 2 - i : i
+        p = R.pattern[i,Nj]
+        if p ∉ processed_indices
+            f(RiNj) = Rmap(Ni, RiNj, ARu[i,:], ARd[ir,:])
+            if alg.ifsimple_eig
+                if alg.ifcheckpoint
+                    λR[i,Nj], R′[i,Nj] = checkpoint(simple_eig, f, R[i,Nj]; ifvalue, power_iter)
+                else
+                    λR[i,Nj], R′[i,Nj] = simple_eig(f, R[i,Nj]; ifvalue, power_iter)
+                end
+            else
+                λLs, Li1s, info = eigsolve(f, R[i,Nj], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
+                alg.verbosity >= Nj && info.converged == 0 && @warn "leftenv not converged"
+                λR[i,Nj], R′[i,Nj] = selectpos(λLs, Li1s, Nj)
+            end
+            push!(processed_indices, p)
+            if length(processed_indices) == length(R.data)
+                break
+            end
+        end
+        for j in Nj-1:-1:1
+            p = R.pattern[i,j]
+            if p ∉ processed_indices
+                Rij = Rmap(R′[i,j+1], ARu[i,j+1], ARd[ir,j+1])
+                R′[i,j] = Rij / norm(Rij)
+                λR[i,j] = λR[i,Nj]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(R.data)
+                    break
+                end
+            end
+        end
     end
+
     return copy(λR), copy(R′)
 end
 

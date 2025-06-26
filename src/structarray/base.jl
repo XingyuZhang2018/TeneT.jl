@@ -46,6 +46,7 @@ Base.setindex!(S::StructArray, value, i::Int, j::Int) = (S.data[S.pattern[i, j]]
 Base.setindex!(S::StructArray, value, i::Int) = (S.data[S.pattern[i]] = value)
 Base.vec(S::StructArray) = S
 Base.similar(S::StructArray) = StructArray(similar(S.data), S.pattern)
+Base.zero(S::StructArray) = StructArray(zero(S.data), S.pattern)
 Base.Array(S::StructArray) = StructArray(Array.(S.data), S.pattern)
 Base.copy(S::StructArray) = StructArray(copy(S.data), S.pattern)
 CUDA.CuArray(S::StructArray) = StructArray(CUDA.CuArray.(S.data), S.pattern)
