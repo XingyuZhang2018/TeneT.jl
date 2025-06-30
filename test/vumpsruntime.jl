@@ -38,7 +38,7 @@ end
     Random.seed!(100)
     χ = 3
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4), (3,5,1,6), (7,4,8,2), (8,6,7,5)])
-    alg = VUMPS(maxiter=100, verbosity=3, show_every=10, ifupdown=false)
+    alg = VUMPS(maxiter=100, verbosity=3, show_interval=10, ifupdown=false)
     rt = VUMPSRuntime(M, χ, alg)
     rt = leading_boundary(rt, M, alg)
     @test rt isa VUMPSRuntime
@@ -48,7 +48,7 @@ end
 
     d = 1
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4, d), (3,5,1,6, d), (7,4,8,2, d), (8,6,7,5, d)])
-    alg = VUMPS(maxiter=100, verbosity=3, show_every=10, ifupdown=false)
+    alg = VUMPS(maxiter=100, verbosity=3, show_interval=10, ifupdown=false)
     rt = VUMPSRuntime(M, χ, alg)
     rt = leading_boundary(rt, M, alg)
     @test rt isa VUMPSRuntime
