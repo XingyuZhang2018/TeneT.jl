@@ -7,7 +7,7 @@
     forloop_iter::Int = 1               # the iteration of the for-loop contraction, when > 1, automatically use checkpoint
     power_iter::Int = 5                 # the iteration of the power method, only works when `ifsimple_eig = true`
     power_iter_obs::Int = 20            # the iteration of the power method for the up and down observation environment, only works when `ifsimple_eig = true`
-    show_interval::Int = 10                # show the iteration result at every n iterations
+    show_every::Int = 10                # show the iteration result at every n iterations
     verbosity::Int = Defaults.verbosity # verbosity control the output message
 
     ifupdown::Bool = true               # if compute two-side up and down environment
@@ -116,7 +116,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
     Zygote.@ignore for i in 1:alg.maxiter
         rt, err = vumps_step_power(rt, M, alg)
-        alg.verbosity >= 3 && i % alg.show_interval == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
             break
@@ -129,7 +129,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
     for i in 1:alg.maxiter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_power, rt, M, alg) : vumps_step_power(rt, M, alg)
-        alg.verbosity >= 3 && i % alg.show_interval == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
             break
