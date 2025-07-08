@@ -791,7 +791,7 @@ function ACmap_forloop(AC, FL, FR, M1, M2; forloop_iter=1)
 end
 
 function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false, forloop_iter=1)
-    Ni = length(FLj)
+    Ni = length(Mj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
         ACij = ifcheckpoint ? checkpoint(ACmap_forloop, ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter) : ACmap_forloop(ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter)
