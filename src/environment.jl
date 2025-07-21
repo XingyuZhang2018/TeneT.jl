@@ -144,35 +144,6 @@ function selectpos(λs, Fs, N)
     end
 end
 
-function cellones(A)
-    χ = size(A[1], 1)
-    return ISA(A, [(χ,χ) for _ = 1:length(A.data)])
-end
-
-function initial_A(M::leg4, χ::Int)
-    return randSA(M, [(D = size(m, 4); (χ, D, χ)) for m in M.data])
-end
-
-function initial_A(M::leg5, χ::Int)
-    return randSA(M, [(D = size(m, 4); (χ, D, D, χ)) for m in M.data])
-end
-
-function initial_A(M::leg8, χ::Int)
-    return randSA(M, [(D = size(m, 7); (χ, D, D, χ)) for m in M.data])
-end
-
-ρmap(ρ, Au::leg3, Ad::leg3) = ein"(dc,csb),dsa -> ab"(ρ,Au,Ad)
-ρmap(ρ, Au::leg4, Ad::leg4) = ein"(dc,cstb),dsta -> ab"(ρ,Au,Ad)
-
-function ρmap(ρ, Ai, J::Int)
-    Nj = size(Ai,1)
-    for j = 1:Nj
-        jr = mod1(J+j-1, Nj)
-        ρ = ρmap(ρ,Ai[jr],conj(Ai[jr]))
-    end
-    return ρ
-end
-
 """
     getL!(A,L; kwargs...)
 
@@ -295,163 +266,6 @@ function LRtoC(L, R)
 end
 
 """
-    FLm = FLmap(ALu, ALd, M, FL)
-
-```
-  ┌──       ┌──  ALuᵢⱼ  ──                     a ────┬──── c 
-  │         │     │                            │     b     │ 
-FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d ─┼─ e ─┤ 
-  │         │     │                            │     g     │ 
-  └──       └──  ALdᵢᵣⱼ  ─                     f ────┴──── h 
-```
-"""
-
-FLmap(FL, ALu, ALd, M::leg4) = ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu)
-FLmap(FL, ALu, ALd, M::leg5) = ein"(((aefi,ijkl),ejgbp),fkhcp),abcd -> dghl"(FL, ALd, M, conj(M), ALu)
-FLmap(FL, ALu, ALd, M1::leg5, M2::leg5) = ein"(((aefi,ijkl),ejgbp),fkhcp),abcd -> dghl"(FL, ALd, M1, M2, ALu)
-FLmap(FL, ALu, ALd, M::leg8) = ein"((aefi,ijkl),efjkghbc),abcd -> dghl"(FL, ALd, M, ALu)
-
-function FLmap_forloop(FL, ALu, ALd, M; forloop_iter=1)
-    if forloop_iter == 1
-        return FLmap(FL, ALu, ALd, M)
-    else
-        χ = size(FL, 1)
-        D = size(M, 3)
-        if ndims(M) == 4
-            FLm = Zygote.Buffer(FL, χ,D,χ)
-        else
-            FLm = Zygote.Buffer(FL, χ,D,D,χ)
-        end
-        χ_loop = cld(χ, forloop_iter)
-        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
-        cols = fill(:,ndims(FL)-1)
-        for i in χ_ranges
-            FLm[cols...,i] = checkpoint(FLmap, FL, ALu, ALd[cols...,i], M)
-        end
-        return copy(FLm)
-    end
-end
-
-function FLmap_forloop(FL, ALu, ALd, M1, M2; forloop_iter=1)
-    if forloop_iter == 1
-        return FLmap(FL, ALu, ALd, M1, M2)
-    else
-        χ = size(FL, 1)
-        D = size(M1, 3)
-        FLm = Zygote.Buffer(FL, χ,D,D,χ)
-        χ_loop = cld(χ, forloop_iter)
-        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
-        cols = fill(:,ndims(FL)-1)
-        for i in χ_ranges
-            FLm[cols...,i] = checkpoint(FLmap, FL, ALu, ALd[cols...,i], M1, M2)
-        end
-        return copy(FLm)
-    end
-end
-
-function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false, forloop_iter=1)
-    Nj = length(ALui)
-    for j in J:(J + Nj - 1)
-        jr = mod1(j, Nj)
-        FLij = ifcheckpoint ? checkpoint(FLmap_forloop, FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter) : FLmap_forloop(FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter)
-    end
-    return FLij
-end
-
-"""
-    FRm = FRmap(ARu, ARd, M, FR, i)
-
-```
-    ── ARuᵢⱼ  ──┐          ──┐          a ────┬──── c 
-        │       │            │          │     b     │ 
-    ── Mᵢⱼ   ──FRᵢⱼ  =    ──FRᵢⱼ₋₁      ├─ d ─┼─ e ─┤ 
-        │       │            │          │     g     │ 
-    ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h 
-```
-"""
-FRmap(FR, ARu, ARd, M::leg4) = ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd)
-FRmap(FR, ARu, ARd, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M, conj(M), ARd)
-FRmap(FR, ARu, ARd, M1::leg5, M2::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M1, M2, ARd)
-FRmap(FR, ARu, ARd, M::leg8) = ein"((abcd,dghl),efjkghbc),ijkl -> aefi"(ARu, FR, M, ARd)
-
-function FRmap_forloop(FR, ARu, ARd, M; forloop_iter=1) 
-    if forloop_iter == 1
-        return FRmap(FR, ARu, ARd, M)
-    else
-        χ = size(FR, 1)
-        D = size(M, 1)
-        if ndims(M) == 4  
-            FRm = Zygote.Buffer(FR, χ,D,χ)
-        else
-            FRm = Zygote.Buffer(FR, χ,D,D,χ)
-        end
-        χ_loop = cld(χ, forloop_iter)
-        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
-        cols = fill(:,ndims(FR)-1)
-        for i in χ_ranges
-            FRm[i,cols...] = checkpoint(FRmap, FR, ARu[i,cols...], ARd, M)
-        end
-        return copy(FRm)
-    end
-end
-
-function FRmap_forloop(FR, ARu, ARd, M1, M2; forloop_iter=1) 
-    if forloop_iter == 1
-        return FRmap(FR, ARu, ARd, M1, M2)
-    else
-        χ = size(FR, 1)
-        D = size(M1, 1)
-        FRm = Zygote.Buffer(FR, χ,D,D,χ)
-        χ_loop = cld(χ, forloop_iter)
-        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
-        cols = fill(:,ndims(FR)-1)
-        for i in χ_ranges
-            FRm[i,cols...] = checkpoint(FRmap, FR, ARu[i,cols...], ARd, M1, M2)
-        end
-        return copy(FRm)
-    end
-end
-
-function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint=false, forloop_iter=1)
-    Nj = length(ARui)
-    for j in J:-1:(J - Nj + 1)
-        jr = mod1(j, Nj)
-        FRij = ifcheckpoint ? checkpoint(FRmap_forloop, FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter) : FRmap_forloop(FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter)
-    end
-    return FRij
-end
-
-function FLint(AL, M::leg4)
-    χ = size(AL[1], 1)
-    return randSA(M, [(D = size(m, 1); (χ, D, χ)) for m in M.data])
-end
-
-function FLint(AL, M::leg5)
-    χ = size(AL[1], 1)
-    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
-end
-
-function FLint(AL, M::leg8)
-    χ = size(AL[1], 1)
-    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
-end
-
-function FRint(AR, M::leg4)
-    χ = size(AR[1], 1)  
-    return randSA(M, [(D = size(m, 3); (χ, D, χ)) for m in M.data])
-end
-
-function FRint(AR, M::leg5)
-    χ = size(AR[1], 1)
-    return randSA(M, [(D = size(m, 3); (χ, D, D, χ)) for m in M.data])
-end
-
-function FRint(AR, M::leg8)
-    χ = size(AR[1], 1)
-    return randSA(M, [(D = size(m, 5); (χ, D, D, χ)) for m in M.data])
-end
-
-"""
     λL, FL = leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...)
 
 Compute the left environment tensor for MPS A and MPO M, by finding the left fixed point
@@ -568,25 +382,6 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
     return copy(λR), copy(FR′)
 end
 
-"""
-    ```
-    ┌── ALuᵢⱼ  ──      ┌──        a──────┬──────c
-    Lᵢⱼ   |        =   Lᵢⱼ₊₁      │      │      │
-    └── ALdᵢᵣⱼ ──      └──        │      b      │
-                                  │      │      │ 
-                                  d──────┴──────e               
-    ```
-"""
-Lmap(Lij, ALuij::leg3, ALdirj::leg3) = ein"(ad,dbe),abc -> ce"(Lij, ALdirj, ALuij)
-
-function Lmap(J::Int, Lij, ALui, ALdir)
-    Nj = length(ALui)
-    for j in J:(J + Nj - 1)
-        jr = mod1(j, Nj)
-        Lij = Lmap(Lij, ALui[jr], ALdir[jr])
-    end
-    return Lij
-end
 
 """
         leftCenv(ALu::Matrix{<:AbstractTensorMap}, 
@@ -651,30 +446,6 @@ function leftCenv(ALu::StructArray,
 end
 
 """
-    Rm = Rmap(FRi::Vector{<:AbstractTensorMap}, 
-                ARui::Vector{<:AbstractTensorMap}, 
-                ARdir::Vector{<:AbstractTensorMap}, 
-                )
-
-```
-    ── ARuᵢⱼ  ──┐          ──┐           a──────┬──────c    
-        │       Rᵢⱼ  =       Rᵢⱼ₋₁       │      │      │ 
-    ── ARdᵢᵣⱼ ──┘          ──┘           │      b      │    
-                                         │      │      │      
-                                         d──────┴──────e   
-```
-"""
-Rmap(Ri, ARui::leg3, ARdir::leg3) = ein"(abc,ce),dbe->ad"(ARui, Ri, ARdir)
-function Rmap(J::Int, Rij, ARui, ARdir)
-    Nj = length(ARui)
-    for j in J:-1:(J - Nj + 1)
-        jr = mod1(j, Nj)
-        Rij = Rmap(Rij, ARui[jr], ARdir[jr])
-    end
-    return Rij
-end
-
-"""
         rightCenv(ARu::Matrix{<:AbstractTensorMap}, 
                     ARd::Matrix{<:AbstractTensorMap}, 
                     L::Matrix{<:AbstractTensorMap} = cellones(ARu); 
@@ -735,91 +506,6 @@ function rightCenv(ARu::StructArray,
     return copy(λR), copy(R′)
 end
 
-"""
-    ACm = ACmap(ACij, FLj, FRj, Mj, II)
-
-```
-                                ┌─────── ACᵢⱼ ─────┐              a ────┬──── c  
-┌───── ACᵢ₊₁ⱼ ─────┐            │        │         │              │     b     │ 
-│        │         │      =     FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ           ├─ d ─┼─ e ─┤ 
-                                │        │         │              │     g     │ 
-                                                                  f ────┴──── h 
-                                                               
-```
-"""
-ACmap(AC, FL, FR, M::leg4) = ein"((abc,ceh),dgeb),adf -> fgh"(AC,FR,M,FL)
-ACmap(AC, FL, FR, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),aefi -> ijkl"(AC,FR,M,conj(M),FL)
-ACmap(AC, FL, FR, M1::leg5, M2::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),aefi -> ijkl"(AC,FR,M1,M2,FL)
-ACmap(AC, FL, FR, M::leg8) = ein"((abcd,dghl),efjkghbc),aefi -> ijkl"(AC,FR,M,FL)
-
-function ACmap_forloop(AC, FL, FR, M; forloop_iter=1) 
-    if forloop_iter == 1
-        return ACmap(AC, FL, FR, M)
-    else
-        χ = size(AC)[end]
-        D = size(M, 2)
-        if ndims(M) == 4
-            ACm = Zygote.Buffer(AC, χ,D,χ)
-        else
-            ACm = Zygote.Buffer(AC, χ,D,D,χ)
-        end
-        χ_loop = cld(χ, forloop_iter)
-        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
-        cols = fill(:,ndims(AC)-1)
-        for i in χ_ranges
-            ACm[cols...,i] = checkpoint(ACmap, AC,FL,FR[cols...,i],M)
-        end
-        return copy(ACm)
-    end
-end
-
-function ACmap_forloop(AC, FL, FR, M1, M2; forloop_iter=1) 
-    if forloop_iter == 1
-        return ACmap(AC, FL, FR, M1, M2)
-    else
-        χ = size(AC)[end]
-        D = size(M1, 2)
-        ACm = Zygote.Buffer(AC, χ,D,D,χ)
-        χ_loop = cld(χ, forloop_iter)
-        χ_ranges = [range(1 + (i-1)*χ_loop, min(i*χ_loop, χ)) for i in 1:forloop_iter]
-        cols = fill(:,ndims(AC)-1)
-        for i in χ_ranges
-            ACm[cols...,i] = checkpoint(ACmap, AC,FL,FR[cols...,i],M1,M2)
-        end
-        return copy(ACm)
-    end
-end
-
-function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false, forloop_iter=1)
-    Ni = length(Mj)
-    for i in I:(I + Ni - 1)
-        ir = mod1(i, Ni)
-        ACij = ifcheckpoint ? checkpoint(ACmap_forloop, ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter) : ACmap_forloop(ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter)
-    end
-    return ACij
-end
-"""
-    Cmap(Cij, FLjp, FRj, II)
-
-```
-                    ┌────Cᵢⱼ ───┐            a ─── b
-┌── Cᵢ₊₁ⱼ ──┐       │           │            │     │
-│           │  =   FLᵢⱼ₊₁ ──── FRᵢⱼ          ├─ c ─┤
-                    │           │            │     │
-                                             d ─── e                                    
-```
-"""
-Cmap(C, FL::leg3, FR) = ein"acd,(ab,bce) -> de"(FL,C,FR)
-Cmap(C, FL::leg4, FR) = ein"acde,(ab,bcdf) -> ef"(FL,C,FR)
-
-function Cmap(I, Cij, FLjr, FRj)
-    Ni = length(FLjr)
-    for i in I:(I + Ni - 1)
-        ir = mod1(i, Ni)
-        Cij = Cmap(Cij, FLjr[ir], FRj[ir])
-    end
-    return Cij
-end
 
 """
     ACenv(AC, FL, M, FR;kwargs...)
