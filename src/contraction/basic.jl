@@ -21,12 +21,10 @@ FLᵢⱼ₊₁ =   FLᵢⱼ ─ Mᵢⱼ   ──                     ├─ d �
   └──       └──  ALdᵢᵣⱼ  ─                     f ────┴──── h 
 ```
 """
-
 FLmap(FL, ALu, ALd, M::leg4) = ein"((adf,fgh),dgeb),abc -> ceh"(FL, ALd, M, ALu)
 FLmap(FL, ALu, ALd, M::leg5) = ein"(((aefi,ijkl),ejgbp),fkhcp),abcd -> dghl"(FL, ALd, M, conj(M), ALu)
 FLmap(FL, ALu, ALd, M1::leg5, M2::leg5) = ein"(((aefi,ijkl),ejgbp),fkhcp),abcd -> dghl"(FL, ALd, M1, M2, ALu)
 FLmap(FL, ALu, ALd, M::leg8) = ein"((aefi,ijkl),efjkghbc),abcd -> dghl"(FL, ALd, M, ALu)
-
 
 function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false, forloop_iter=1)
     Nj = length(ALui)
@@ -52,7 +50,6 @@ FRmap(FR, ARu, ARd, M::leg4) = ein"((abc,ceh),dgeb),fgh -> adf"(ARu, FR, M, ARd)
 FRmap(FR, ARu, ARd, M::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M, conj(M), ARd)
 FRmap(FR, ARu, ARd, M1::leg5, M2::leg5) = ein"(((abcd,dghl),ejgbp),fkhcp),ijkl -> aefi"(ARu, FR, M1, M2, ARd)
 FRmap(FR, ARu, ARd, M::leg8) = ein"((abcd,dghl),efjkghbc),ijkl -> aefi"(ARu, FR, M, ARd)
-
 
 function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint=false, forloop_iter=1)
     Nj = length(ARui)
