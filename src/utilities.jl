@@ -29,7 +29,7 @@ permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
 orth_for_ad(v) = v
-function simple_eig(f, v; max_iter=5, ifvalue=false)
+function simple_eig(f, v; power_iter, ifvalue=false)
     λ = 0.0
     # Zygote.@ignore begin # this is not correct when VUMPS does not converge
     #     for _ in 1:max_iter
@@ -40,14 +40,14 @@ function simple_eig(f, v; max_iter=5, ifvalue=false)
     #         λ = λ′
     #     end
     # end
-    for _ in 1:max_iter
+    for _ in 1:power_iter
         v = f(v)
         v /= norm(v)
     end
 
     v = orth_for_ad(v)
     if ifvalue
-        CUDA.@allowscalar λ = f(v)[1] ./ v[1]
+        λ = dot(v, f(v))
     end
     return λ, v
 end
@@ -66,20 +66,19 @@ end
 
 # See Zygote Checkpointing https://fluxml.ai/Zygote.jl/latest/adjoints/#Checkpointing-1
 checkpoint(f, x...; kwargs...) = f(x...; kwargs...) 
-Zygote.@adjoint checkpoint(f, x...; kwargs...) = f(x...; kwargs...), ȳ -> Zygote._pullback(f, x...)[2](ȳ)
+Zygote.@adjoint checkpoint(f, args...; kwargs...) = f(args...; kwargs...), ȳ -> Zygote._pullback((args...) -> f(args...; kwargs...), args...)[2](ȳ)
 
-function save_rt(folder, rt)
-    p = joinpath(folder, "VUMPS_rt.jld2")
-    atype = length(rt) == 1 ? _arraytype(rt.AL[1]) : _arraytype(rt[1].AL[1])
+function save_rt(folder, rt; file::String="VUMPS_rt_env.jld2")
+    p = joinpath(folder, file)
     rt_save = Array(rt)
-    println("save a $atype rt in $p")
+    @info "save a VUMPS runtime environment to $p"
     save(p, "rt", rt_save)
 end
 
-function load_rt(folder, atype)
-    p = joinpath(folder, "VUMPS_rt.jld2")
+function load_rt(folder, atype; file::String="VUMPS_rt_env.jld2")
+    p = joinpath(folder, file)
     rt = atype(load(p, "rt"))
-    println("load a $atype rt in $p")
+    @info "load a VUMPS runtime environment from $p"
     return rt
 end
 
@@ -121,32 +120,17 @@ end
 
 Array(x::NamedTuple) = x
 
-function to_N_device(x)
-    atype = _arraytype(x)
+function gc(atype)
     N_device = device_count(atype)
-    results = Vector(undef, N_device)
-    @sync begin
+    # @sync begin
+        println("GC!")
         for i in 1:N_device
-            @async begin
+            # @async begin
                 set_device_id!(atype, i)
-                results[i] = atype(x)
-            end
+                GC.gc()
+                CUDA.reclaim()
+            # end
         end
-    end
-    return results
-end
-
-function device_similar(x)
-    atype = _arraytype(x[1])
-    N_device = device_count(atype)
-    results = Vector(undef, N_device)
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                set_device_id!(atype, i)
-                results[i] = similar(x[i])
-            end
-        end
-    end
-    return results
+    # end
+    return nothing
 end

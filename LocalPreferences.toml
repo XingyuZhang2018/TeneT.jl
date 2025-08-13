@@ -1,0 +1,16 @@
+[MPIPreferences]
+__clear__ = ["preloads"]
+_format = "1.1"
+abi = "MPICH"
+binary = "system"
+cclibs = ["amdhip64", "sci_gnu_mpi", "sci_gnu", "dl", "dsmml", "xpmem"]
+libmpi = "libmpi_gnu_123.so"
+mpiexec = "srun"
+preloads = [
+    "libamdhip64.so",        # HIP 运行时基础库
+    "librocm_smi64.so",      # ROCm 系统管理接口
+    "librocblas.so",         # BLAS 库 (可选但推荐)
+    "libhipblas.so",         # HIP BLAS 库
+    "libmpi_gtl_hsa.so"      # MPI GPU 传输层 (最关键!)
+]
+preloads_env_switch = "MPICH_GPU_SUPPORT_ENABLED"
