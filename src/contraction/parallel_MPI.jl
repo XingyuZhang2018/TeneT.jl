@@ -10,12 +10,8 @@ function FLmap_parallel(FL, ALu, ALd, M; forloop_iter, ifparallel)
         FLm = zero(FL)
 
         FLm[cols..., χ_ranges[rank+1]] .= FLmap_forloop(FL, ALu, ALd[cols..., χ_ranges[rank+1]], M; forloop_iter)
-        if FL isa CuArray
-            CUDA.synchronize()
-        elseif FL isa ROCArray
-            AMDGPU.synchronize()
-        end
-        
+        synchronize(FL)
+
         element_size = prod(size(FL)[1:end-1])
         counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
         MPI.Allgatherv!(VBuffer(FLm, counts), comm)
@@ -46,11 +42,7 @@ function FRmap_parallel(FR, ARu, ARd, M; forloop_iter, ifparallel)
         FRm = zero(FR)
 
         FRm[cols..., χ_ranges[rank+1]] .= FRmap_forloop(FR, ARu, ARd[χ_ranges[rank+1], cols...], M; forloop_iter)
-        if FR isa CuArray
-            CUDA.synchronize()
-        elseif FR isa ROCArray
-            AMDGPU.synchronize()
-        end
+        synchronize(FR)
 
         element_size = prod(size(FR)[1:end-1])
         counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
@@ -75,11 +67,7 @@ function ACmap_parallel(AC, FL, FR, M; forloop_iter, ifparallel)
         ACm = zero(AC)
 
         ACm[cols..., χ_ranges[rank+1]] .= ACmap_forloop(AC, FL, FR[cols...,χ_ranges[rank+1]], M; forloop_iter)
-        if AC isa CuArray
-            CUDA.synchronize()
-        elseif AC isa ROCArray
-            AMDGPU.synchronize()
-        end
+        synchronize(AC)
 
         element_size = prod(size(AC)[1:end-1])
         counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]

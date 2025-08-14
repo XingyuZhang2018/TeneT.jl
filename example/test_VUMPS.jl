@@ -7,47 +7,51 @@ using Zygote
 using CUDA, AMDGPU
 using MPI
 
-MPI.Init()
-comm = MPI.COMM_WORLD
-rank = MPI.Comm_rank(comm)
-size = MPI.Comm_size(comm)
-# select device
-comm_l = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, rank)
-rank_l = MPI.Comm_rank(comm_l)
+# MPI.Init()
+# comm = MPI.COMM_WORLD
+# rank = MPI.Comm_rank(comm)
+# size = MPI.Comm_size(comm)
+# # select device
+# comm_l = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, rank)
+# rank_l = MPI.Comm_rank(comm_l)
 
-println("Hostname: ", gethostname())
-println("in rankl $rank_l")
+# println("Hostname: ", gethostname())
+# println("in rankl $rank_l")
 
-# @testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [Array]
+# @testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [ROCArray]
 #     Random.seed!(100)
 #     β = 0.5
-#     χ = 10
+#     χ = 512
+#     D = 12
+#     d = 2
 #     model = Ising(β)
 #     l = length(unique(pattern))
-#     # TeneT.set_device_id!(atype, rank_l+1)
-#     TeneT.set_device_id!(atype, 1)
+#     TeneT.set_device_id!(atype, rank_l+1)
+#     # TeneT.set_device_id!(atype, 1)
 #     # M = zeros(ComplexF64, (2,2,2,2))
+#     A = rand(ComplexF64, D,D,D,D,d)
 #     # M[2,1,1,1]=1.0
 #     # M[1,2,1,1]=1.0
 #     # M[2,2,1,1]=1.0
 #     # M[1,2,2,2]=1.0
 #     # M[2,1,2,2]=1.0
 #     # M[1,1,2,2]=1.0
-#     data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
+#     # data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
+#     data = [atype(A) for _ in 1:l]
 #     # data = [atype(M) for _ in 1:l]
 #     M = StructArray(data, pattern)
-#     # verbosity = rank == 0 ? 3 : 0
+#     verbosity = rank == 0 ? 3 : 0
 #     alg = VUMPS(maxiter = 1000, 
 #                 miniter = 10, 
-#                 verbosity = 3, 
+#                 verbosity = verbosity, 
 #                 show_every = 1,
-#                 forloop_iter = 1,
+#                 forloop_iter = 4,
 #                 power_iter = 5,
 #                 power_iter_obs = 80,
 #                 ifsimple_eig=true,
 #                 ifupdown=false, 
 #                 ifdownfromup=false, 
-#                 ifparallel=false
+#                 ifparallel=true
 #     )
     
 #     rt = @time VUMPSRuntime(M, χ, alg)
@@ -62,7 +66,7 @@ println("in rankl $rank_l")
 #     # @test observable(env, model, pattern, Val(:energy)) ≈ -1.745564581767667
 # end
 
-@testset "ising backward with $atype $pattern" for atype = [ROCArray], pattern in [[1;;]]
+@testset "ising backward with $atype $pattern" for atype = [Array], pattern in [[1;;]]
     # [1;;], [1 1; 1 1], [1 2; 2 1], [1 2; 3 4], [1 1; 2 2]
     # [1 3 2 2 3 1; 2 3 1 1 3 2]
     Random.seed!(100)
@@ -76,18 +80,21 @@ println("in rankl $rank_l")
                 ifsimple_eig=true,
                 ifupdown=false, 
                 ifdownfromup=false, 
-                ifparallel=true,
+                ifparallel=false,
                 ifcheckpoint=false
     )
 
-    χ = 10
-    # TeneT.set_device_id!(atype, 1)
-    TeneT.set_device_id!(atype, rank_l+1)
+    χ = 20
+    TeneT.set_device_id!(atype, 1)
+
+    D, d = 2, 1
+    A = rand(ComplexF64, D,D,D,D,d)
 
     function energy(β)
         model = Ising(β)
         l = length(unique(pattern))
-        data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
+        # data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
+        data =[atype(A) for _ in 1:l]
         M = StructArray(data, pattern)
         rt = VUMPSRuntime(M, χ, alg)
         rt′ = leading_boundary(rt, M, alg)

@@ -1,5 +1,3 @@
-export num_grad
-
 @non_differentiable VUMPSRuntime(M, χ::Int)
 @non_differentiable VUMPSRuntime(M, χ::Int, alg::VUMPS)
 @non_differentiable randSA(kwargs...)
@@ -96,233 +94,135 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
-function sum_device!(x)
-    atype = _arraytype(x[1])
-    set_device_id!(atype, 1)
-    N_device = device_count(atype)
-    @sync begin
-        for i in 2:N_device
-            @async begin
-                x[i] = atype(x[i])
-            end
+function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M; forloop_iter, ifparallel)
+    closure(FL, ALu, ALd, M) = FLmap_forloop(FL, ALu, ALd, M; forloop_iter)
+    if ifparallel
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        nprocs = MPI.Comm_size(comm)
+        χ = size(FL, 1)
+        χ_device = cld(χ, nprocs)
+        χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:nprocs]
+        cols = fill(:, ndims(FL)-1)
+        FLm = zero(FL)
+
+        FLm[cols..., χ_ranges[rank+1]], FLmap_back = pullback(closure, FL, ALu, ALd[cols...,χ_ranges[rank+1]], M)
+        synchronize(FL)
+
+        element_size = prod(size(FL)[1:end-1])
+        counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
+        MPI.Allgatherv!(VBuffer(FLm, counts), comm)
+
+        function back(dFLm)  
+            dALd = zero(ALd)
+            dFL, dALu, dALd[cols...,χ_ranges[rank+1]], dM = FLmap_back(dFLm[cols...,χ_ranges[rank+1]])
+            synchronize(dFLm)
+
+            MPI.Allgatherv!(VBuffer(dALd, counts), comm)
+            MPI.Allreduce!(dFL, +, comm)
+            MPI.Allreduce!(dALu, +, comm)
+            MPI.Allreduce!(dM, +, comm)
+
+            return NoTangent(), dFL, dALu, dALd, dM, NoTangent(), NoTangent()
         end
-    end
-    return sum(x)
-end
-
-function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M)
-    atype = _arraytype(FL)
-    N_device = device_count(atype)
-    χ = size(FL, 1)
-    χ_device = cld(χ, N_device)
-    χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
-    results = Vector{Any}(undef, N_device)
-    cols = fill(:,ndims(FL)-1)
-    FLmap_backs = Vector{Any}(undef, N_device)
-
-    set_device_id!(atype, 1)
-    FLm = similar(FL)
-    FLs = to_N_device(FL)
-    ALus = to_N_device(ALu)
-    ALds = to_N_device(ALd)
-    Ms = to_N_device(M)
-
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                set_device_id!(atype, i)
-                results[i], FLmap_backs[i] = pullback(FLmap, FLs[i], ALus[i], ALds[i][cols...,χ_ranges[i]], Ms[i])
-            end
-        end
-    end
-
-    set_device_id!(atype, 1)
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                FLm[cols...,χ_ranges[i]] .= atype(results[i])
-            end
-        end
-    end
-
-    function back(dFLm)
-        dFLms = to_N_device(dFLm)
-        dFLs = Vector{Any}(undef, N_device)
-        dALus = Vector{Any}(undef, N_device)
-        dALds = device_similar(ALds)
-        dMs = Vector{Any}(undef, N_device)
-        
-        @sync begin
-            for i in 1:N_device
-                @async begin
-                    set_device_id!(atype, i)
-                    dFLs[i], dALus[i], dALds[i][cols...,χ_ranges[i]], dMs[i] = FLmap_backs[i](dFLms[i][cols...,χ_ranges[i]])
-                end
-            end
-        end
-
-        set_device_id!(atype, 1)
-
-        local dFL, dALu, dM
-        @sync begin       
-            @async dFL = sum_device!(dFLs)
-            @async dALu = sum_device!(dALus)
-            @async dM = sum_device!(dMs)     
-            for i in 2:N_device
-                @async begin
-                    dALds[1][cols...,χ_ranges[i]] .= atype(dALds[i])[cols...,χ_ranges[i]]
-                end
-            end
-        end
-
-        return NoTangent(), dFL, dALu, dALds[1], dM
-    end
-    
-    return FLm, back
-end
-
-function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M)
-    atype = _arraytype(FR)
-    N_device = device_count(atype)
-    χ = size(FR, 1)
-    χ_device = cld(χ, N_device)
-    χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
-    results = Vector{Any}(undef, N_device)
-    cols = fill(:,ndims(FR)-1)
-    FRmap_backs = Vector{Any}(undef, N_device)
-
-    set_device_id!(atype, 1)
-    FRm = similar(FR)
-    FRs = to_N_device(FR)
-    ARus = to_N_device(ARu)
-    ARds = to_N_device(ARd)
-    Ms = to_N_device(M)
-
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                set_device_id!(atype, i)
-                results[i], FRmap_backs[i] = pullback(FRmap, FRs[i], ARus[i][χ_ranges[i],cols...], ARds[i], Ms[i])
-            end
-        end
-    end
-
-    set_device_id!(atype, 1)
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                FRm[χ_ranges[i],cols...] .= atype(results[i])
-            end
-        end
-    end
-
-    function back(dFRm)
-        dFRms = to_N_device(dFRm)
-        dFRs = Vector{Any}(undef, N_device)
-        dARus = device_similar(ARus)
-        dARds = Vector{Any}(undef, N_device)
-        dMs = Vector{Any}(undef, N_device)
-        
-        @sync begin
-            for i in 1:N_device
-                @async begin
-                    set_device_id!(atype, i)
-                    dFRs[i], dARus[i][χ_ranges[i],cols...], dARds[i], dMs[i] = FRmap_backs[i](dFRms[i][χ_ranges[i],cols...])
-                end
-            end
-        end
-
-        set_device_id!(atype, 1)
-        local dFR, dARd, dM
-        @sync begin
-            @async dFR = sum_device!(dFRs)
-            @async dARd = sum_device!(dARds)
-            @async dM = sum_device!(dMs)
-            for i in 2:N_device
-                @async begin
-                    dARus[1][χ_ranges[i],cols...] .= atype(dARus[i])[χ_ranges[i],cols...]
-                end
-            end
-        end
-
-        return NoTangent(), dFR, dARus[1], dARd, dM
-    end
-    
-    return FRm, back
-end
-
-function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M)
-    atype = _arraytype(AC)
-    N_device = device_count(atype)
-    χ = size(AC, 1)
-    χ_device = cld(χ, N_device)
-    χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:N_device]
-    results = Vector{Any}(undef, N_device)
-    cols = fill(:,ndims(AC)-1)
-    ACmap_backs = Vector{Any}(undef, N_device)
-
-    set_device_id!(atype, 1)
-    if ndims(M) == 4
-        D = size(M,2)
-        ACm = similar(AC, χ, D, χ)
+        return FLm, back
     else
-        D = size(M,3)
-        ACm = similar(AC, χ, D, D, χ)
-    end
-    ACs = to_N_device(AC)
-    FLs = to_N_device(FL)
-    FRs = to_N_device(FR)
-    Ms = to_N_device(M)
+        FLm, FLmap_back = pullback(closure, FL, ALu, ALd, M)
 
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                set_device_id!(atype, i)
-                results[i], ACmap_backs[i] = pullback(ACmap, ACs[i], FLs[i], FRs[i][cols...,χ_ranges[i]], Ms[i])
-            end
+        function back2(dFLm)
+            dFL, dALu, dALd, dM = FLmap_back(dFLm)
+            return NoTangent(), dFL, dALu, dALd, dM, NoTangent(), NoTangent()
         end
+        return FLm, back2
     end
+end
 
-    set_device_id!(atype, 1)
-    @sync begin
-        for i in 1:N_device
-            @async begin
-                ACm[cols...,χ_ranges[i]] .= atype(results[i])
-            end
-        end
-    end
-
-    function back(dACm)
-        dACms = to_N_device(dACm)
-        dACs = Vector{Any}(undef, N_device)
-        dFLs = Vector{Any}(undef, N_device)
-        dFRs = device_similar(FRs)
-        dMs = Vector{Any}(undef, N_device)
+function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M; forloop_iter, ifparallel)
+    closure(FR, ARu, ARd, M) = FRmap_forloop(FR, ARu, ARd, M; forloop_iter)
+    if ifparallel
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        nprocs = MPI.Comm_size(comm)
         
-        @sync begin
-            for i in 1:N_device
-                @async begin
-                    set_device_id!(atype, i)
-                    dACs[i], dFLs[i], dFRs[i][cols...,χ_ranges[i]], dMs[i] = ACmap_backs[i](dACms[i][cols...,χ_ranges[i]])
-                end
-            end
-        end
+        χ = size(FR, 1)
+        χ_device = cld(χ, nprocs)
+        χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:nprocs]
+        cols = fill(:, ndims(FR)-1)
+        FRm = zero(FR)
 
-        set_device_id!(atype, 1)
-        local dAC, dFL, dM
-        @sync begin
-            @async dAC = sum_device!(dACs)
-            @async dFL = sum_device!(dFLs)
-            @async dM = sum_device!(dMs)
-            for i in 2:N_device
-                @async begin
-                    dFRs[1][cols...,χ_ranges[i]] .= atype(dFRs[i])[cols...,χ_ranges[i]]
-                end
-            end
-        end
+        FRm[cols..., χ_ranges[rank+1]], FRmap_back = pullback(closure, FR, ARu, ARd[χ_ranges[rank+1], cols...], M)
+        synchronize(FR)
 
-        return NoTangent(), dAC, dFL, dFRs[1], dM
+        element_size = prod(size(FR)[1:end-1])
+        counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
+        MPI.Allgatherv!(VBuffer(FRm, counts), comm)
+
+        function back(dFRm)
+            s = size(ARd)
+            dARd = similar(ARd, s[2:end]..., s[1])
+            dFR, dARu, dARd[cols..., χ_ranges[rank+1]], dM = FRmap_back(dFRm[cols..., χ_ranges[rank+1]])
+            synchronize(dFRm)
+
+            MPI.Allgatherv!(VBuffer(dARd, counts), comm)
+            MPI.Allreduce!(dFR, +, comm)
+            MPI.Allreduce!(dARu, +, comm)
+            MPI.Allreduce!(dM, +, comm)
+
+            N = ndims(dARd)
+            return NoTangent(), dFR, dARu, permutedims(dARd, (N, 1:N-1...)), dM, NoTangent(), NoTangent()
+        end
+        return FRm, back
+    else
+        FRm, FRmap_back = pullback(closure, FR, ARu, ARd, M)
+
+        function back2(dFRm)
+            dFR, dARu, dARd, dM = FRmap_back(dFRm)
+            return NoTangent(), dFR, dARu, dARd, dM, NoTangent(), NoTangent()
+        end
+        return FRm, back2
     end
-    
-    return ACm, back
+end
+
+function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M; forloop_iter, ifparallel)
+    closure(AC, FL, FR, M) = ACmap_forloop(AC, FL, FR, M; forloop_iter)
+    if ifparallel
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        nprocs = MPI.Comm_size(comm)
+        
+        χ = size(AC, 1)
+        χ_device = cld(χ, nprocs)
+        χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:nprocs]
+        cols = fill(:, ndims(AC)-1)
+        ACm = zero(AC)
+
+        ACm[cols..., χ_ranges[rank+1]], ACmap_back = pullback(closure, AC, FL, FR[cols..., χ_ranges[rank+1]], M)
+        synchronize(AC)
+
+        element_size = prod(size(AC)[1:end-1])
+        counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
+        MPI.Allgatherv!(VBuffer(ACm, counts), comm)
+
+        function back(dACm)
+            dFR = zero(FR)
+            dAC, dFL, dFR[cols..., χ_ranges[rank+1]], dM = ACmap_back(dACm[cols..., χ_ranges[rank+1]])
+            synchronize(dACm)
+            
+            MPI.Allgatherv!(VBuffer(dFR, counts), comm)
+            MPI.Allreduce!(dAC, +, comm)
+            MPI.Allreduce!(dFL, +, comm)
+            MPI.Allreduce!(dM, +, comm)
+
+            return NoTangent(), dAC, dFL, dFR, dM, NoTangent(), NoTangent()
+        end
+        return ACm, back
+    else
+        ACm, ACmap_back = pullback(closure, AC, FL, FR, M)
+
+        function back2(dACm)
+            dAC, dFL, dFR, dM = ACmap_back(dACm)
+            return NoTangent(), dAC, dFL, dFR, dM, NoTangent(), NoTangent()
+        end
+        return ACm, back2
+    end
 end

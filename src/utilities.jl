@@ -134,3 +134,11 @@ function gc(atype)
     # end
     return nothing
 end
+
+function synchronize(x::AbstractArray)
+    if x isa CuArray
+        CUDA.synchronize()
+    elseif x isa ROCArray
+        AMDGPU.synchronize()
+    end
+end
