@@ -39,8 +39,8 @@ function FLmap_forloop(FL, ALu, ALd, M; forloop_iter)
             D2 = size(M[2], 3)
             FLm = Zygote.Buffer(FL, χ1,D1,D2,χ2)
         elseif ndims(M) == 5
-            D1 = D2 = size(M, 3)
-            FLm = Zygote.Buffer(FL, χ1,D1,D2,χ2)
+            D = size(M, 3)
+            FLm = Zygote.Buffer(FL, χ1,D,D,χ2)
         else
             D = size(M, 3)
             FLm = Zygote.Buffer(FL, χ1,D,χ2)
@@ -66,8 +66,8 @@ function FRmap_forloop(FR, ARu, ARd, M; forloop_iter)
             D2 = size(M[2], 1)
             FRm = Zygote.Buffer(FR, χ2,D1,D2,χ1)
         elseif ndims(M) == 5
-            D1 = D2 = size(M, 1)
-            FRm = Zygote.Buffer(FR, χ2,D1,D2,χ1)
+            D = size(M, 1)
+            FRm = Zygote.Buffer(FR, χ2,D,D,χ1)
         else
             D = size(M, 1)
             FRm = Zygote.Buffer(FR, χ2,D,χ1)
@@ -93,8 +93,8 @@ function ACmap_forloop(AC, FL, FR, M; forloop_iter)
             D2 = size(M[2], 2)
             ACm = Zygote.Buffer(AC, χ1,D1,D2,χ2)
         elseif ndims(M) == 5
-            D1 = D2 = size(M, 2)
-            ACm = Zygote.Buffer(AC, χ1,D1,D2,χ2)
+            D = size(M, 2)
+            ACm = Zygote.Buffer(AC, χ1,D,D,χ2)
         else
             D = size(M, 2)
             ACm = Zygote.Buffer(AC, χ1,D,χ2)

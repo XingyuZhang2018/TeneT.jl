@@ -104,12 +104,22 @@ function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M; forloop
         χ_device = cld(χ, nprocs)
         χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:nprocs]
         cols = fill(:, ndims(FL)-1)
-        FLm = zero(FL)
+        if length(M) == 2
+            D1 = size(M[1], 3)
+            D2 = size(M[2], 3)
+            FLm = similar(FL, χ,D1,D2,χ)
+        elseif ndims(M) == 5
+            D = size(M, 3)
+            FLm = similar(FL, χ,D,D,χ)
+        else
+            D = size(M, 3)
+            FLm = similar(FL, χ,D,χ)
+        end
 
         FLm[cols..., χ_ranges[rank+1]], FLmap_back = pullback(closure, FL, ALu, ALd[cols...,χ_ranges[rank+1]], M)
         synchronize(FL)
 
-        element_size = prod(size(FL)[1:end-1])
+        element_size = prod(size(FLm)[1:end-1])
         counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
         MPI.Allgatherv!(VBuffer(FLm, counts), comm)
 
@@ -118,7 +128,10 @@ function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M; forloop
             dFL, dALu, dALd[cols...,χ_ranges[rank+1]], dM = FLmap_back(dFLm[cols...,χ_ranges[rank+1]])
             synchronize(dFLm)
 
+            element_size = prod(size(dALd)[1:end-1])
+            counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
             MPI.Allgatherv!(VBuffer(dALd, counts), comm)
+
             MPI.Allreduce!(dFL, +, comm)
             MPI.Allreduce!(dALu, +, comm)
             if dM isa Tuple
@@ -153,12 +166,23 @@ function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M; forloop
         χ_device = cld(χ, nprocs)
         χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:nprocs]
         cols = fill(:, ndims(FR)-1)
-        FRm = zero(FR)
+
+        if length(M) == 2
+            D1 = size(M[1], 1)
+            D2 = size(M[2], 1)
+            FRm = similar(FR, χ,D1,D2,χ)
+        elseif ndims(M) == 5
+            D = size(M, 1)
+            FRm = similar(FR, χ,D,D,χ)
+        else
+            D = size(M, 1)
+            FRm = similar(FR, χ,D,χ)
+        end
 
         FRm[cols..., χ_ranges[rank+1]], FRmap_back = pullback(closure, FR, ARu, ARd[χ_ranges[rank+1], cols...], M)
         synchronize(FR)
 
-        element_size = prod(size(FR)[1:end-1])
+        element_size = prod(size(FRm)[1:end-1])
         counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
         MPI.Allgatherv!(VBuffer(FRm, counts), comm)
 
@@ -169,7 +193,10 @@ function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M; forloop
             dARd = permutedims(dARd, (2:N..., 1))
             synchronize(dFRm)
 
+            element_size = prod(size(dARd)[1:end-1])
+            counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
             MPI.Allgatherv!(VBuffer(dARd, counts), comm)
+
             MPI.Allreduce!(dFR, +, comm)
             MPI.Allreduce!(dARu, +, comm)
             if dM isa Tuple
@@ -204,12 +231,23 @@ function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M; forloop_i
         χ_device = cld(χ, nprocs)
         χ_ranges = [range(1 + (i-1)*χ_device, min(i*χ_device, χ)) for i in 1:nprocs]
         cols = fill(:, ndims(AC)-1)
-        ACm = zero(AC)
+
+        if length(M) == 2
+            D1 = size(M[1], 2)
+            D2 = size(M[2], 2)
+            ACm = similar(AC, χ,D1,D2,χ)
+        elseif ndims(M) == 5
+            D = size(M, 2)
+            ACm = similar(AC, χ,D,D,χ)
+        else
+            D = size(M, 2)
+            ACm = similar(AC, χ,D,χ)
+        end
 
         ACm[cols..., χ_ranges[rank+1]], ACmap_back = pullback(closure, AC, FL, FR[cols..., χ_ranges[rank+1]], M)
         synchronize(AC)
 
-        element_size = prod(size(AC)[1:end-1])
+        element_size = prod(size(ACm)[1:end-1])
         counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
         MPI.Allgatherv!(VBuffer(ACm, counts), comm)
 
@@ -218,7 +256,10 @@ function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M; forloop_i
             dAC, dFL, dFR[cols..., χ_ranges[rank+1]], dM = ACmap_back(dACm[cols..., χ_ranges[rank+1]])
             synchronize(dACm)
             
+            element_size = prod(size(dFR)[1:end-1])
+            counts = Cint[length(χ_ranges[i]) * element_size for i in 1:nprocs]
             MPI.Allgatherv!(VBuffer(dFR, counts), comm)
+
             MPI.Allreduce!(dAC, +, comm)
             MPI.Allreduce!(dFL, +, comm)
             if dM isa Tuple
