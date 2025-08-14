@@ -71,14 +71,12 @@ Zygote.@adjoint checkpoint(f, args...; kwargs...) = f(args...; kwargs...), ȳ -
 function save_rt(folder, rt; file::String="VUMPS_rt_env.jld2")
     p = joinpath(folder, file)
     rt_save = Array(rt)
-    @info "save a VUMPS runtime environment to $p"
     save(p, "rt", rt_save)
 end
 
 function load_rt(folder, atype; file::String="VUMPS_rt_env.jld2")
     p = joinpath(folder, file)
     rt = atype(load(p, "rt"))
-    @info "load a VUMPS runtime environment from $p"
     return rt
 end
 
