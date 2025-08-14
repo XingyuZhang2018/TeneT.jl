@@ -24,13 +24,11 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 [compat]
 AMDGPU = "1.2.7"
 CUDA = "5.8.2"
-KrylovKit = "0.8.2"
 MPI = "0.20.23"
 MPIPreferences = "0.1.11"
 OMEinsum = "0.7.6"
 Parameters = "0.12.3"
 Printf = "1.11.0"
-VectorInterface = "0.4.9"
 Zygote = "0.6.73"
 
 [extras]

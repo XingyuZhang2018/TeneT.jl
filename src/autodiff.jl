@@ -121,7 +121,12 @@ function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M; forloop
             MPI.Allgatherv!(VBuffer(dALd, counts), comm)
             MPI.Allreduce!(dFL, +, comm)
             MPI.Allreduce!(dALu, +, comm)
-            MPI.Allreduce!(dM, +, comm)
+            if dM isa Tuple
+                MPI.Allreduce!(dM[1], +, comm)
+                MPI.Allreduce!(dM[2], +, comm)
+            else
+                MPI.Allreduce!(dM, +, comm)
+            end
 
             return NoTangent(), dFL, dALu, dALd, dM, NoTangent(), NoTangent()
         end
@@ -158,17 +163,22 @@ function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M; forloop
         MPI.Allgatherv!(VBuffer(FRm, counts), comm)
 
         function back(dFRm)
-            s = size(ARd)
-            dARd = similar(ARd, s[2:end]..., s[1])
-            dFR, dARu, dARd[cols..., χ_ranges[rank+1]], dM = FRmap_back(dFRm[cols..., χ_ranges[rank+1]])
+            dARd = zero(ARd)
+            dFR, dARu, dARd[χ_ranges[rank+1], cols...], dM = FRmap_back(dFRm[cols..., χ_ranges[rank+1]])
+            N = ndims(dARd)
+            dARd = permutedims(dARd, (2:N..., 1))
             synchronize(dFRm)
 
             MPI.Allgatherv!(VBuffer(dARd, counts), comm)
             MPI.Allreduce!(dFR, +, comm)
             MPI.Allreduce!(dARu, +, comm)
-            MPI.Allreduce!(dM, +, comm)
+            if dM isa Tuple
+                MPI.Allreduce!(dM[1], +, comm)
+                MPI.Allreduce!(dM[2], +, comm)
+            else
+                MPI.Allreduce!(dM, +, comm)
+            end
 
-            N = ndims(dARd)
             return NoTangent(), dFR, dARu, permutedims(dARd, (N, 1:N-1...)), dM, NoTangent(), NoTangent()
         end
         return FRm, back
@@ -211,7 +221,12 @@ function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M; forloop_i
             MPI.Allgatherv!(VBuffer(dFR, counts), comm)
             MPI.Allreduce!(dAC, +, comm)
             MPI.Allreduce!(dFL, +, comm)
-            MPI.Allreduce!(dM, +, comm)
+            if dM isa Tuple
+                MPI.Allreduce!(dM[1], +, comm)
+                MPI.Allreduce!(dM[2], +, comm)
+            else
+                MPI.Allreduce!(dM, +, comm)
+            end
 
             return NoTangent(), dAC, dFL, dFR, dM, NoTangent(), NoTangent()
         end

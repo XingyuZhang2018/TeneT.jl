@@ -10,7 +10,6 @@ using MPI
 MPI.Init()
 comm = MPI.COMM_WORLD
 rank = MPI.Comm_rank(comm)
-size = MPI.Comm_size(comm)
 # select device
 comm_l = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, rank)
 rank_l = MPI.Comm_rank(comm_l)
