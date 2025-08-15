@@ -189,6 +189,7 @@ function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M; forloop
         function back(dFRm)
             dARd = zero(ARd)
             dFR, dARu, dARd[χ_ranges[rank+1], cols...], dM = FRmap_back(dFRm[cols..., χ_ranges[rank+1]])
+            synchronize(dFRm)
             N = ndims(dARd)
             dARd = permutedims(dARd, (2:N..., 1))
             synchronize(dFRm)
