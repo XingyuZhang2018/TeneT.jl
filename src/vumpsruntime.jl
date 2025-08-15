@@ -23,9 +23,14 @@ function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
+    C = LRtoC(L, R)
+    if alg.ifparallel
+        AL = MPI.bcast(AL, 0, MPI.COMM_WORLD)
+        AR = MPI.bcast(AR, 0, MPI.COMM_WORLD)
+        C = MPI.bcast(C, 0, MPI.COMM_WORLD)
+    end
     _, FL = leftenv(AL, conj(AL), M; alg)
     _, FR = rightenv(AR, conj(AR), M; alg)
-    C = LRtoC(L, R)
     return VUMPSRuntime(AL, AR, C, FL, FR)
 end
 
