@@ -19,7 +19,7 @@ function FLmap_parallel(FL, ALu, ALd, M; forloop_iter, ifparallel)
             FLm = similar(FL, χ,D,χ)
         end
 
-        FLm[cols..., χ_ranges[rank+1]] .= FLmap_forloop(FL, ALu, ALd[cols..., χ_ranges[rank+1]], M; forloop_iter)
+        FLm[cols..., χ_ranges[rank+1]] = FLmap_forloop(FL, ALu, ALd[cols..., χ_ranges[rank+1]], M; forloop_iter)
         synchronize(FL)
 
         element_size = prod(size(FLm)[1:end-1])
@@ -61,7 +61,7 @@ function FRmap_parallel(FR, ARu, ARd, M; forloop_iter, ifparallel)
             FRm = similar(FR, χ,D,χ)
         end
 
-        FRm[cols..., χ_ranges[rank+1]] .= FRmap_forloop(FR, ARu, ARd[χ_ranges[rank+1], cols...], M; forloop_iter)
+        FRm[cols..., χ_ranges[rank+1]] = FRmap_forloop(FR, ARu, ARd[χ_ranges[rank+1], cols...], M; forloop_iter)
         synchronize(FR)
 
         element_size = prod(size(FRm)[1:end-1])
@@ -97,7 +97,7 @@ function ACmap_parallel(AC, FL, FR, M; forloop_iter, ifparallel)
             ACm = similar(AC, χ,D,χ)
         end
 
-        ACm[cols..., χ_ranges[rank+1]] .= ACmap_forloop(AC, FL, FR[cols...,χ_ranges[rank+1]], M; forloop_iter)
+        ACm[cols..., χ_ranges[rank+1]] = ACmap_forloop(AC, FL, FR[cols...,χ_ranges[rank+1]], M; forloop_iter)
         synchronize(AC)
 
         element_size = prod(size(ACm)[1:end-1])
