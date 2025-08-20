@@ -172,6 +172,7 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    Cp = for_gc(Cp)
     return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
 end
 
