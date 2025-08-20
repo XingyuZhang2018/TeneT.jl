@@ -144,6 +144,15 @@ function selectpos(λs, Fs, N)
     end
 end
 
+function ρmap(ρ, Ai, J::Int)
+    Nj = size(Ai,1)
+    for j = 1:Nj
+        jr = mod1(J+j-1, Nj)
+        ρ = ρmap(ρ,Ai[jr],conj(Ai[jr]))
+    end
+    return ρ
+end
+
 """
     getL!(A,L; kwargs...)
 
@@ -265,6 +274,15 @@ function LRtoC(L, R)
     return C
 end
 
+function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false, forloop_iter=1)
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        FLij = ifcheckpoint ? checkpoint(FLmap_forloop, FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter) : FLmap_forloop(FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter)
+    end
+    return FLij
+end
+
 """
     λL, FL = leftenv(ALu, ALd, M, FL = FLint(ALu,M); kwargs...)
 
@@ -322,6 +340,15 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
     end
     
     return copy(λL), copy(FL′)
+end
+
+function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint=false, forloop_iter=1)
+    Nj = length(ARui)
+    for j in J:-1:(J - Nj + 1)
+        jr = mod1(j, Nj)
+        FRij = ifcheckpoint ? checkpoint(FRmap_forloop, FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter) : FRmap_forloop(FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter)
+    end
+    return FRij
 end
 
 """
@@ -382,6 +409,14 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
     return copy(λR), copy(FR′)
 end
 
+function Lmap(J::Int, Lij, ALui, ALdir)
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        Lij = Lmap(Lij, ALui[jr], ALdir[jr])
+    end
+    return Lij
+end
 
 """
         leftCenv(ALu::Matrix{<:AbstractTensorMap}, 
@@ -445,6 +480,14 @@ function leftCenv(ALu::StructArray,
     return copy(λL), copy(L′)
 end
 
+function Rmap(J::Int, Rij, ARui, ARdir)
+    Nj = length(ARui)
+    for j in J:-1:(J - Nj + 1)
+        jr = mod1(j, Nj)
+        Rij = Rmap(Rij, ARui[jr], ARdir[jr])
+    end
+    return Rij
+end
 """
         rightCenv(ARu::Matrix{<:AbstractTensorMap}, 
                     ARd::Matrix{<:AbstractTensorMap}, 
@@ -506,6 +549,14 @@ function rightCenv(ARu::StructArray,
     return copy(λR), copy(R′)
 end
 
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false, forloop_iter=1)
+    Ni = length(Mj)
+    for i in I:(I + Ni - 1)
+        ir = mod1(i, Ni)
+        ACij = ifcheckpoint ? checkpoint(ACmap_forloop, ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter) : ACmap_forloop(ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter)
+    end
+    return ACij
+end
 
 """
     ACenv(AC, FL, M, FR;kwargs...)
@@ -562,6 +613,15 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         end
     end
     return copy(λAC), copy(AC′)
+end
+
+function Cmap(I, Cij, FLjr, FRj)
+    Ni = length(FLjr)
+    for i in I:(I + Ni - 1)
+        ir = mod1(i, Ni)
+        Cij = Cmap(Cij, FLjr[ir], FRj[ir])
+    end
+    return Cij
 end
 
 """

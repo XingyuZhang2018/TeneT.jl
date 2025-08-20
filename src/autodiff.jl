@@ -44,6 +44,7 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     Q, R = qrpos(A)
     function back((dQ, dR))
         M = R * dR' - dQ' * Q
+        # dA, _ = linsolve(x->x * (R + I * 1e-12)', dQ + Q * Hermitian(M, :L); verbosity=0, maxiter = 1)
         dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * Hermitian(M, :L))' )'
         return NoTangent(), dA
     end
@@ -54,6 +55,7 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     L, Q = lqpos(A)
     function back((dL, dQ))
         M = L' * dL - dQ * Q'
+        # dA, _ = linsolve(x->(L + I * 1e-12)' * x, dQ + Hermitian(M, :L) * Q; verbosity=0, maxiter = 1)
         dA = LowerTriangular(L + I * 1e-12)' \ (dQ + Hermitian(M, :L) * Q)
         return NoTangent(), dA
     end
@@ -114,6 +116,72 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
         return NoTangent(), StructArray(data_grad, S.pattern)
     end
     return y, back
+end
+
+function ChainRulesCore.rrule(::typeof(FLmap_forloop), FL, ALu, ALd, M; forloop_iter)
+    function back(dFLm)
+        dFLm = conj(dFLm)
+        dFL = conj!(FRmap_forloop(dFLm, ALu, ALd, M; forloop_iter))
+        dALu = conj!(ACdmap_forloop(ALd, FL, dFLm, M; forloop_iter))
+        dALd = conj!(ACmap_forloop(ALu, FL, dFLm, M; forloop_iter))
+        if M isa Tuple
+            dMu = Mdmap_forloop(ALu, ALd, FL, dFLm, M[2]; forloop_iter)
+            dMd = Mumap_forloop(ALu, ALd, FL, dFLm, M[1]; forloop_iter)
+            dM = (conj!(dMu), conj!(dMd))
+        elseif ndims(M) == 5
+            dMu = Mdmap_forloop(ALu, ALd, FL, dFLm, conj(M); forloop_iter)
+            dMd = Mumap_forloop(ALu, ALd, FL, dFLm, M; forloop_iter)
+            dM = conj!(dMu) + dMd
+        else
+            dM = conj!(Mmap_forloop(ALu, ALd, FL, dFLm; forloop_iter))
+        end
+        return NoTangent(), dFL, dALu, dALd, dM
+    end
+    return FLmap_forloop(FL, ALu, ALd, M; forloop_iter), back
+end
+
+function ChainRulesCore.rrule(::typeof(FRmap_forloop), FR, ARu, ARd, M; forloop_iter)
+    function back(dFRm)
+        dFRm = conj(dFRm)
+        dFR = conj!(FLmap_forloop(dFRm, ARu, ARd, M; forloop_iter))
+        dARu = conj!(ACdmap_forloop(ARd, dFRm, FR, M; forloop_iter))
+        dARd = conj!(ACmap_forloop(ARu, dFRm, FR, M; forloop_iter))
+        if M isa Tuple
+            dMu = Mdmap_forloop(ARu, ARd, dFRm, FR, M[2]; forloop_iter)
+            dMd = Mumap_forloop(ARu, ARd, dFRm, FR, M[1]; forloop_iter)
+            dM = (conj!(dMu), conj!(dMd))
+        elseif ndims(M) == 5
+            dMu = Mdmap_forloop(ARu, ARd, dFRm, FR, conj(M); forloop_iter)
+            dMd = Mumap_forloop(ARu, ARd, dFRm, FR, M; forloop_iter)
+            dM = conj!(dMu) + dMd
+        else
+            dM = conj!(Mmap_forloop(ARu, ARd, dFRm, FR; forloop_iter))
+        end
+        return NoTangent(), dFR, dARu, dARd, dM
+    end
+    return FRmap_forloop(FR, ARu, ARd, M; forloop_iter), back
+end
+
+function ChainRulesCore.rrule(::typeof(ACmap_forloop), AC, FL, FR, M; forloop_iter)
+    function back(dACm)
+        dACm = conj(dACm)
+        dAC = conj!(ACdmap_forloop(dACm, FL, FR, M; forloop_iter))
+        dFL = conj!(FRmap_forloop(FR, AC, dACm, M; forloop_iter))
+        dFR = conj!(FLmap_forloop(FL, AC, dACm, M; forloop_iter))
+        if M isa Tuple
+            dMu = Mdmap_forloop(AC, dACm, FL, FR, M[2]; forloop_iter)
+            dMd = Mumap_forloop(AC, dACm, FL, FR, M[1]; forloop_iter)
+            dM = (conj!(dMu), conj!(dMd))
+        elseif ndims(M) == 5
+            dMu = Mdmap_forloop(AC, dACm, FL, FR, conj(M); forloop_iter)
+            dMd = Mumap_forloop(AC, dACm, FL, FR, M; forloop_iter)
+            dM = conj!(dMu) + dMd
+        else
+            dM = conj!(Mmap_forloop(AC, dACm, FL, FR; forloop_iter))
+        end
+        return NoTangent(), dAC, dFL, dFR, dM
+    end
+    return ACmap_forloop(AC, FL, FR, M; forloop_iter), back
 end
 
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
