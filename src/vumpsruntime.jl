@@ -220,6 +220,7 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     # ARp = StructArray(orth_for_AR.(ARp.data), ARp.pattern)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    Cp = for_gc(Cp)
     return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
 end
 

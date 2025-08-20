@@ -115,3 +115,21 @@ function CuArray(x::NamedTuple)
 end
 
 Array(x::NamedTuple) = x
+
+function reclaim(x::AbstractArray) 
+    GC.gc()
+    if x isa CuArray
+        CUDA.reclaim()
+    elseif x isa ROCArray
+        AMDGPU.HIP.reclaim()
+    end
+end
+
+for_gc(x) = x
+function ChainRulesCore.rrule(::typeof(for_gc), x)
+    function back(dx)
+        reclaim(x[1])
+        return NoTangent, dx
+    end
+    return x, back
+end
