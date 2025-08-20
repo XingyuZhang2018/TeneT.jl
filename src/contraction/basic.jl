@@ -1,15 +1,6 @@
 ρmap(ρ, Au::leg3, Ad::leg3) = ein"(dc,csb),dsa -> ab"(ρ,Au,Ad)
 ρmap(ρ, Au::leg4, Ad::leg4) = ein"(dc,cstb),dsta -> ab"(ρ,Au,Ad)
 
-function ρmap(ρ, Ai, J::Int)
-    Nj = size(Ai,1)
-    for j = 1:Nj
-        jr = mod1(J+j-1, Nj)
-        ρ = ρmap(ρ,Ai[jr],conj(Ai[jr]))
-    end
-    return ρ
-end
-
 """
     FLm = FLmap(ALu, ALd, M, FL)
 
@@ -105,3 +96,20 @@ ACmap(AC, FL, FR, M::Tuple{leg5,leg5}) = ACmap(AC, FL, FR, M[1], M[2])
 """
 Cmap(C, FL::leg3, FR) = ein"acd,(ab,bce) -> de"(FL,C,FR)
 Cmap(C, FL::leg4, FR) = ein"acde,(ab,bcdf) -> ef"(FL,C,FR)
+
+"""
+    a ────┬──── c 
+    │     b     │ 
+    ├─ d ─┼─ e ─┤ 
+    │     g     │ 
+    f ────┴──── h 
+"""
+ACdmap(ACd, FL, FR, M::leg4) = ein"((fgh,ceh),dgeb),adf -> abc"(ACd,FR,M,FL)
+ACdmap(ACd, FL, FR, M1::leg5, M2::leg5) = ein"(((ijkl,dghl),ejgbp),fkhcp),aefi -> abcd"(ACd,FR,M1,M2,FL)
+
+ACdmap(ACd, FL, FR, M::leg5) = ACdmap(ACd, FL, FR, M, conj(M))
+ACdmap(ACd, FL, FR, M::Tuple{leg5,leg5}) = ACdmap(ACd, FL, FR, M[1], M[2])
+
+Mmap(AC, ACd, FL, FR) = ein"(abc,ceh),(adf,fgh) -> dgeb"(AC,FR,FL,ACd)
+Mumap(AC, ACd, FL, FR, Mu) = ein"(abcd,dghl),((aefi,ijkl),ejgbp)-> fkhcp"(AC,FR,FL,ACd,Mu)
+Mdmap(AC, ACd, FL, FR, Md) = ein"(abcd,dghl),((aefi,ijkl),fkhcp)-> ejgbp"(AC,FR,FL,ACd,Md)

@@ -3,6 +3,7 @@ module TeneT
 using AMDGPU
 using Base.Threads
 using CUDA
+# using GPUArrays
 using LinearAlgebra
 using KrylovKit
 using Zygote
@@ -31,8 +32,7 @@ include("structarray/initial.jl")
 include("structarray/buffer.jl")
 include("utilities.jl")
 include("contraction/basic.jl")
-include("contraction/for_loop.jl")
-include("contraction/parallel_MPI.jl")
+include("contraction/forloop_parallel_MPI.jl")
 include("initial_env.jl")
 include("environment.jl")
 include("vumpsruntime.jl")

@@ -269,7 +269,7 @@ function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint, ifparallel, forloop_
     Nj = length(ALui)
     for j in J:(J + Nj - 1)
         jr = mod1(j, Nj)
-        FLij = FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifcheckpoint, ifparallel, forloop_iter)
+        FLij = ifcheckpoint ? checkpoint(FLmap_parallel, FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter) : FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter)
     end
     return FLij
 end
@@ -321,7 +321,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         for j in 2:Nj
             p = FL.pattern[i,j]
             if p ∉ processed_indices
-                FL′[i,j] = FLmap_parallel(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; ifcheckpoint, ifparallel, forloop_iter)
+                FL′[i,j] = ifcheckpoint ? checkpoint(FLmap_parallel, FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; ifparallel, forloop_iter) : FLmap_parallel(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; ifparallel, forloop_iter)
                 λL[i,j] = λL[i,1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -338,7 +338,7 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint, ifparallel, forloop_
     Nj = length(ARui)
     for j in J:-1:(J - Nj + 1)
         jr = mod1(j, Nj)
-        FRij = FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifcheckpoint, ifparallel, forloop_iter)
+        FRij = ifcheckpoint ? checkpoint(FRmap_parallel, FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter) : FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter)
     end
     return FRij
 end
@@ -390,7 +390,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
         for j in Nj-1:-1:1
             p = FR.pattern[i,j]
             if p ∉ processed_indices
-                FR′[i,j] = FRmap_parallel(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; ifcheckpoint, ifparallel, forloop_iter)
+                FR′[i,j] = ifcheckpoint ? checkpoint(FRmap_parallel, FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; ifparallel, forloop_iter) : FRmap_parallel(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; ifparallel, forloop_iter)
                 λR[i,j] = λR[i,Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -548,7 +548,7 @@ function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint, ifparallel, forloop_ite
     Ni = length(FLj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
-        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifcheckpoint, ifparallel, forloop_iter)
+        ACij = ifcheckpoint ? checkpoint(ACmap_parallel, ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter) : ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter)
     end
     return ACij
 end
@@ -598,7 +598,7 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; ifcheckpoint, ifparallel, forloop_iter)
+                ACij = ifcheckpoint ? checkpoint(ACmap_parallel, AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; ifparallel, forloop_iter) : ACmap_parallel(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; ifparallel, forloop_iter)
                 AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
