@@ -28,7 +28,7 @@ MPIPreferences = "0.1.11"
 OMEinsum = "=0.7.6"
 Parameters = "0.12.3"
 Printf = "1.11.0"
-Zygote = "0.6.73"
+Zygote = "=0.6.73"
 
 [extras]
 CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
