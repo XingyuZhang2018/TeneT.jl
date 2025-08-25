@@ -88,6 +88,7 @@ end
 function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     t = Zygote.@ignore time()
 
+    err = Inf
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration without AD..."
     Zygote.@ignore for i in 1:alg.maxiter
         rt, err = vumps_step_power(rt, M, alg)
@@ -114,12 +115,12 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
         end
     end
 
-    return rt
+    return rt, err
 end
 
 function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
-    rt = vumps_itr(rt, M, alg)
-    return rt
+    rt, err = vumps_itr(rt, M, alg)
+    return rt, err
 end
 
 function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS, Fo=[rt.FL, rt.FR])
@@ -138,11 +139,11 @@ end
 function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     
-    rtup = vumps_itr(rtup, M, alg)
+    rtup, errup = vumps_itr(rtup, M, alg)
 
     Md = _down_M(M)
-    rtdown = vumps_itr(rtdown, Md, alg)
-    return rtup, rtdown
+    rtdown, errdown = vumps_itr(rtdown, Md, alg)
+    return (rtup, rtdown), (errup, errdown)
 end
 
 function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg, Fo=[rt[1].FL, rt[1].FR])
