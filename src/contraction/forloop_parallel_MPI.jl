@@ -1,11 +1,31 @@
+"""
+    split_count(N::Integer, n::Integer)
+
+Return a vector of `n` integers which are approximately equally sized and sum to `N`.
+"""
+function split_count(N::Integer, n::Integer)
+    q,r = divrem(N, n)
+    return [i <= r ? q+1 : q for i = 1:n]
+end
+
+function split_ranges(counts::Vector)
+    nprocs = length(counts)
+    cumulative = cumsum([0; counts])
+    return [cumulative[i] + 1 : cumulative[i+1] for i in 1:nprocs]
+end
+
+function split_ranges(N::Integer, n::Integer)
+    counts = split_count(N, n)
+    return split_ranges(counts)
+end
+
 function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
     if forloop_iter == 1
         return f(args...)
     else
         D_split = size(args[N_in[1]])[N_in[2]]
         result = similar(args[1], size_out)
-        D_split_loop = cld(D_split, forloop_iter)
-        D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
+        D_split_ranges = split_ranges(D_split, forloop_iter)
 
         # GPUArrays.@cached GPUArrays.AllocCache() begin
             for range in D_split_ranges
@@ -26,8 +46,7 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
 
     D_split = size(args[N_in[1]])[N_in[2]]
     result = similar(args[1], size_out)
-    D_split_loop = cld(D_split, nprocs*forloop_iter)
-    D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:nprocs*forloop_iter]
+    D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
 
     # GPUArrays.@cached GPUArrays.AllocCache() begin
         for i in 1:forloop_iter
@@ -42,14 +61,23 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
         element_size = prod(size_out) ÷ D_split
         counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
         MPI.Allgatherv!(VBuffer(result, counts), comm)
+
+        # count = prod(size_out) ÷ nprocs
+        # MPI.Allgather!(UBuffer(result, count), comm)
     # end
 
+    # element_size = prod(size_out) ÷ D_split
+    # counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) for i in 1:nprocs]
+    # D_split_ranges = split_ranges(counts)
+    # cols = ((:) for _ in 1:ndims(result)-1)
+    # # @show counts,D_split_ranges
     # for root in 0:(nprocs-1)
     #     if root == rank
-    #         MPI.Gatherv!(MPI.IN_PLACE, VBuffer(result, counts), comm; root=root)
+    #         MPI.Gatherv!(MPI.IN_PLACE, VBuffer(result, counts * element_size), comm; root=root)
     #     else
     #         MPI.Gatherv!(result[cols..., D_split_ranges[rank+1]], nothing, comm; root=root)
     #     end
+    #     synchronize(args[1])
     #     MPI.Barrier(comm)
     # end
     return result
@@ -63,8 +91,7 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         D_split = size(args[N_in1[1]])[N_in1[2]]
         result = similar(args[1], size_out)
         result .= 0
-        D_split_loop = cld(D_split, forloop_iter)
-        D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
+        D_split_ranges = split_ranges(D_split, forloop_iter)
 
         # GPUArrays.@cached GPUArrays.AllocCache() begin
             for range in D_split_ranges
@@ -87,8 +114,7 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
     D_split = size(args[N_in1[1]])[N_in1[2]]
     result = similar(args[1], size_out)
     result .= 0
-    D_split_loop = cld(D_split, nprocs*forloop_iter)
-    D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:nprocs*forloop_iter]
+    D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
 
     # GPUArrays.@cached GPUArrays.AllocCache() begin
         for i in 1:forloop_iter
