@@ -9,7 +9,7 @@ function ChainRulesCore.rrule(config::RuleConfig, ::typeof(simple_eig_linear_ad)
     howmany = 1
     which = :LM
     alg_primal = Arnoldi(verbosity=0)
-    alg_rrule = GMRES(verbosity=0)
+    alg_rrule = GMRES(verbosity=0, maxiter=1)
 
     fᴴ = let pb = rrule_via_ad(config, f, zerovector(x₀, complex(scalartype(x₀))))[2]
         v -> unthunk(pb(v)[2])
