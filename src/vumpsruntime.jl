@@ -17,6 +17,7 @@
     ifsimple_eig::Bool = true           # if use the simple power method as eigsolve
     ifcheckpoint::Bool = false          # if checkpoint at every iteration
     ifgpu_cpu_combo::Bool = false       # if save the environment on the CPU memory but calculate on the GPU # currently not implement
+    iflinear_ad::Bool = false          # if use the linearsolve for simple_eig with autodiff 
 end
 
 function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
@@ -102,6 +103,11 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
         end
     end
 
+    if err < 1e-7
+        alg.iflinear_ad = true
+    else
+        alg.iflinear_ad = false
+    end
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration with AD..."
     for i in 1:alg.maxiter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_power, rt, M, alg) : vumps_step_power(rt, M, alg)
@@ -194,7 +200,7 @@ function fix_gauge_vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     rt′, err = vumps_step_Hermitian(rt, M, alg)
     ALu, ARu, Cu, FLu, FRu = rt.AL, rt.AR, rt.C, rt.FL, rt.FR
     ALd, ARd, Cd, FLd, FRd = rt′.AL, rt′.AR, rt′.C, rt′.FL, rt′.FR
-
+    pattern = ALu.pattern
     # _, σ = rightCenv(ARu, conj.(ARd); ifobs=false, verbosity=alg.verbosity) 
     # U, _ = Zygote.@ignore qrpos(σ[1])
     # AL_gauged = [ein"(ba,bcd),ed -> ace"(U, ALd, U') for ALd in ALd]
@@ -214,10 +220,10 @@ function fix_gauge_vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     λ4 = Zygote.@ignore [FLu ./ FL_gauged  for (FL_gauged, FLu) in zip(FL_gauged, FLu)]
     λ5 = Zygote.@ignore [FRu ./ FR_gauged  for (FR_gauged, FRu) in zip(FR_gauged, FRu)]
 
-    AL_gauged = [AL_gauged .* λ1 for (AL_gauged,λ1) in zip(AL_gauged,λ1)]
-    AR_gauged = [AR_gauged .* λ2 for (AR_gauged,λ2) in zip(AR_gauged,λ2)]
-    C_gauged = [C_gauged .* λ3 for (C_gauged,λ3) in zip(C_gauged,λ3)]
-    FL_gauged = [FL_gauged .* λ4 for (FL_gauged,λ4) in zip(FL_gauged,λ4)]
-    FR_gauged = [FR_gauged .* λ5 for (FR_gauged,λ5) in zip(FR_gauged,λ5)]
+    # AL_gauged = StructArray(vec([AL_gauged .* λ1 for (AL_gauged,λ1) in zip(AL_gauged,λ1)]), pattern)
+    # AR_gauged = StructArray(vec([AR_gauged .* λ2 for (AR_gauged,λ2) in zip(AR_gauged,λ2)]), pattern)
+    # C_gauged = StructArray(vec([C_gauged .* λ3 for (C_gauged,λ3) in zip(C_gauged,λ3)]), pattern)
+    # FL_gauged = StructArray(vec([FL_gauged .* λ4 for (FL_gauged,λ4) in zip(FL_gauged,λ4)]), pattern)
+    # FR_gauged = StructArray(vec([FR_gauged .* λ5 for (FR_gauged,λ5) in zip(FR_gauged,λ5)]), pattern)
     return VUMPSRuntime(AL_gauged, AR_gauged, C_gauged, FL_gauged, FR_gauged), err
 end

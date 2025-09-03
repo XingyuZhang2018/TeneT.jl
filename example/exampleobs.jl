@@ -14,10 +14,11 @@ function observable(env, M, ::Val{:Z}, alg)
     return prod(λFLo./λC)
 end
 
-function observable(env, model::MT, pattern::Matrix{Int}, type, alg) where {MT <: HamiltonianModel}
+function observable(env, model::MT, type) where {MT <: HamiltonianModel}
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni,Nj = size(ACu)
     atype = _arraytype(ACu[1])
+    pattern = ACu.pattern
     l = length(unique(pattern))
     M     = StructArray([atype(model_tensor(model, Val(:bulk))) for _ = 1:l], pattern)
     M_obs = StructArray([atype(model_tensor(model, type      )) for _ = 1:l], pattern)

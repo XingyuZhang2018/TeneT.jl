@@ -8,10 +8,10 @@ _arraytype(::CuArray) = CuArray
 _arraytype(::ROCArray) = ROCArray
 _arraytype(S::StructArray) = _arraytype(S.data[1])
 
-const leg3 = Union{<:AbstractArray{T, 3}, StructArray{<:Vector{<:AbstractArray{T, 3}}}} where T
-const leg4 = Union{<:AbstractArray{T, 4}, StructArray{<:Vector{<:AbstractArray{T, 4}}}} where T
-const leg5 = Union{<:AbstractArray{T, 5}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
-const leg8 = Union{<:AbstractArray{T, 8}, StructArray{<:Vector{<:AbstractArray{T, 8}}}} where T
+const leg3 = Union{<:AbstractArray{T, 3}, Vector{<:AbstractArray{T, 3}}, StructArray{<:Vector{<:AbstractArray{T, 3}}}} where T
+const leg4 = Union{<:AbstractArray{T, 4}, Vector{<:AbstractArray{T, 4}}, StructArray{<:Vector{<:AbstractArray{T, 4}}}} where T
+const leg5 = Union{<:AbstractArray{T, 5}, Vector{<:AbstractArray{T, 5}}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
+const leg8 = Union{<:AbstractArray{T, 8}, Vector{<:AbstractArray{T, 8}}, StructArray{<:Vector{<:AbstractArray{T, 8}}}} where T
 
 function _to_front(t)
     χ = size(t)[end]
@@ -29,27 +29,32 @@ permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
 orth_for_ad(v) = v
+simple_eig_linear_ad(f, v; kwargs...) = simple_eig(f, v; kwargs...)
 function simple_eig(f, v; power_iter, ifvalue=false)
-    λ = 0.0
+    # λ = 1.0 + 1.0im
     # Zygote.@ignore begin # this is not correct when VUMPS does not converge
-    #     for _ in 1:max_iter
-    #         v = f(v)
-    #         λ′ = norm(v)
-    #         v /= λ′
-    #         abs(λ′ - λ) < 1e-8 && break
-    #         λ = λ′
-    #     end
+        # for _ in 1:power_iter
+        #     v = f(v)
+        #     λ′ = norm(v)
+        #     v /= λ′
+        #     abs(λ′ - λ) < 1e-8 && break
+        #     λ = λ′
+        # end
     # end
-    for _ in 1:power_iter
+    for _ in 1:power_iter-1
         v = f(v)
         v /= norm(v)
     end
 
-    v = orth_for_ad(v)
-    if ifvalue
-        λ = dot(v, f(v))
-    end
-    return λ, v
+    v1 = f(v)
+    λ = dot(v, v1)
+    v1 /= norm(v1)
+    # v = orth_for_ad(v)
+    # λ = 0.0 + 0.0im
+    # if ifvalue
+        # λ = dot(v, f(v))
+    # end
+    return [λ], [v1]
 end
 
 function mcform(M)

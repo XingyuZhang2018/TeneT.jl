@@ -38,5 +38,6 @@ include("environment.jl")
 include("vumpsruntime.jl")
 include("grassmann.jl")
 include("autodiff.jl")
+include("simple_eig_ad.jl")
 
 end

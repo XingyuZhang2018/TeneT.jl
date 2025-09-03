@@ -53,6 +53,7 @@ Base.copy(S::StructArray) = StructArray(copy(S.data), S.pattern)
 CUDA.CuArray(S::StructArray) = StructArray(CUDA.CuArray.(S.data), S.pattern)
 AMDGPU.ROCArray(S::StructArray) = StructArray(AMDGPU.ROCArray.(S.data), S.pattern)
 LinearAlgebra.norm(S::StructArray) = norm(S.data)
+LinearAlgebra.norm(a::Nothing) = 0
 LinearAlgebra.conj(S::StructArray) = StructArray(conj(S.data), S.pattern)
 Base.isapprox(S::StructArray, T::StructArray; atol=1e-12) = ==(S.pattern, T.pattern) && isapprox(S.data, T.data; atol=atol)
 Base.:+(A::StructArray, B::StructArray) = StructArray(A.data + B.data, A.pattern)
@@ -61,6 +62,10 @@ Base.:/(S::StructArray, x::Number) = StructArray(S.data / x, S.pattern)
 LinearAlgebra.rmul!(S::StructArray, x::Number) = (StructArray(rmul!(S.data,x), S.pattern); S)
 LinearAlgebra.axpy!(α::Number, A::StructArray, B::StructArray) = (StructArray(axpy!(α, A.data, B.data), A.pattern); B)
 Base.:+(a::NamedTuple, b::StructArray) = StructArray(a.data + b.data, b.pattern)
+Base.:+(a::StructArray, b::NamedTuple) = StructArray(a.data + b.data, a.pattern)
+Base.:+(a::Nothing, b::AbstractArray) = b
+Base.:+(a::AbstractArray, b::Nothing) = a
+Base.:+(a::Nothing, b::Nothing) = a
 
 function Base.show(io::IO, S::StructArray)
     println(io, "StructArray with pattern:")

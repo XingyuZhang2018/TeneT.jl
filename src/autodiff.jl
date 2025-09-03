@@ -161,3 +161,73 @@ function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M; kwarg...)
     end
     return ACmap_parallel(AC, FL, FR, M; kwarg...), back
 end
+
+# function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)
+#     rt, err = vumps_itr(rt, M, alg)
+#     pattern = rt.AL.pattern
+#     function back((∂rt, ∂err))
+#         AL, AR = rt.AL, rt.AR
+#         ∂AL, ∂AR, ∂C, ∂FL, ∂FR = ∂rt
+#         # ∂AL = project_AL(∂AL.data, AL.data)
+#         # ∂AR = project_AR(∂AR.data, AR.data)
+#         ∂AL isa AbstractZero || project_AL!(∂AL.data, AL.data)
+#         ∂AR isa AbstractZero || project_AR!(∂AR.data, AR.data)
+#         # ∂rt0 = [∂AL, ∂AR, ∂C, ∂FL, ∂FR]
+
+#         ∂rt0 = [∂AL isa AbstractZero ? ∂AL : StructArray(∂AL.data, pattern), 
+#                 ∂AR isa AbstractZero ? ∂AR : StructArray(∂AR.data, pattern), 
+#                  ∂C isa AbstractZero ? ∂C : StructArray(∂C.data, pattern), 
+#                 ∂FL isa AbstractZero ? ∂FL : StructArray(∂FL.data, pattern), 
+#                 ∂FR isa AbstractZero ? ∂FR : StructArray(∂FR.data, pattern)]
+
+#         # _, vumps_itr_vjp = pullback(fix_gauge_vumps_step, rt, M, alg)
+#         _, vumps_itr_vjp = pullback(vumps_step_Hermitian, rt, M, alg)
+#         function vjp_rt_rt(∂rt)
+#             ∂AL, ∂AR, ∂C, ∂FL, ∂FR = ∂rt
+#             ∂AL isa AbstractZero || project_AL!(∂AL.data, AL.data)
+#             ∂AR isa AbstractZero || project_AR!(∂AR.data, AR.data)
+#             ∂rt = [∂AL isa AbstractZero ? ∂AL : StructArray(∂AL.data, pattern), 
+#                    ∂AR isa AbstractZero ? ∂AR : StructArray(∂AR.data, pattern), 
+#                     ∂C isa AbstractZero ? ∂C : StructArray(∂C.data, pattern), 
+#                    ∂FL isa AbstractZero ? ∂FL : StructArray(∂FL.data, pattern), 
+#                    ∂FR isa AbstractZero ? ∂FR : StructArray(∂FR.data, pattern)]
+    
+#             ∂rt = vumps_itr_vjp((∂rt, NoTangent()))[1]
+
+#             ∂AL, ∂AR, ∂C, ∂FL, ∂FR = ∂rt
+#             ∂AL isa AbstractZero || project_AL!(∂AL.data, AL.data)
+#             ∂AR isa AbstractZero || project_AR!(∂AR.data, AR.data)
+#             ∂rt = [∂AL isa AbstractZero ? ∂AL : StructArray(∂AL.data, pattern), 
+#                    ∂AR isa AbstractZero ? ∂AR : StructArray(∂AR.data, pattern), 
+#                     ∂C isa AbstractZero ? ∂C : StructArray(∂C.data, pattern), 
+#                    ∂FL isa AbstractZero ? ∂FL : StructArray(∂FL.data, pattern), 
+#                    ∂FR isa AbstractZero ? ∂FR : StructArray(∂FR.data, pattern)]
+
+#             return ∂rt
+#         end
+        
+#         # ∂rt = vjp_rt_rt(∂rt0)
+#         # f_map(∂rt) = ∂rt - vjp_rt_rt(∂rt)
+#         # ∂rtsum, info = linsolve(f_map, ∂rt, ∂rt; tol = 1e-10, maxiter = 1) 
+#         # alg.verbosity >= 1 && info.converged == 0 && @warn "AD linsolve doesn't converge"
+#         # ∂rtsum = [∂rt0[1:2]+∂rtsum..., ∂C, ∂FL, ∂FR]
+
+#         ∂rtsum = deepcopy(∂rt0)
+#         ∂rt = vjp_rt_rt(∂rt0)
+#         ∂rtsum += ∂rt
+#         ϵ = Inf
+#         for ix in 1:5
+#             ∂rt = vjp_rt_rt(∂rt)
+#             ∂rtsum += ∂rt
+#             ϵ = norm(∂rt)
+#             println("INFO vumps_pushback: $(ix) ϵ = ", ϵ)
+#             (ϵ < 1e-12) && break 
+#         end
+
+#         vjp_rt_M(∂rt) = vumps_itr_vjp((∂rt, NoTangent()))[2]
+#         ∂M = vjp_rt_M(∂rtsum)
+
+#         return NoTangent(), NoTangent(), ∂M, NoTangent()
+#     end
+#     return (rt, err), back
+# end

@@ -198,7 +198,7 @@ function getLsped(Le, A, AL; kwargs...)
     L = similar(Le)
     for i in 1:length(A)
         _, Ls1 = simple_eig(X -> ρmap(X,A[i],conj(AL[i])), Le[i]; power_iter=5, kwargs...)
-        _, R = qrpos!(Ls1)
+        _, R = qrpos!(Ls1[1])
         L[i] = R
     end
     return L
@@ -302,16 +302,25 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         if p ∉ processed_indices
             f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint, ifparallel, forloop_iter) : FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint, ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λL[i,1], FL′[i,1] = checkpoint(simple_eig, f, FL[i,1]; ifvalue, power_iter)
+                if alg.iflinear_ad
+                    if ifcheckpoint
+                        λLs, FLi1s = checkpoint(simple_eig_linear_ad, f, FL[i,1]; ifvalue, power_iter)
+                    else
+                        λLs, FLi1s = simple_eig_linear_ad(f, FL[i,1]; ifvalue, power_iter)
+                    end
                 else
-                    λL[i,1], FL′[i,1] = simple_eig(f, FL[i,1]; ifvalue, power_iter)
+                    if ifcheckpoint
+                        λLs, FLi1s = checkpoint(simple_eig, f, FL[i,1]; ifvalue, power_iter)
+                    else
+                        λLs, FLi1s = simple_eig(f, FL[i,1]; ifvalue, power_iter)
+                    end
                 end
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i,1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
-                λL[i,1], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
             end
+            λL[i,1], FL′[i,1] = selectpos(λLs, FLi1s, Nj)
+            
             push!(processed_indices, p)
             if length(processed_indices) == length(FL.data)
                 break
@@ -370,16 +379,25 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
         if p ∉ processed_indices
             f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint, ifparallel, forloop_iter) : FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint, ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, f, FR[i,Nj]; ifvalue, power_iter)
+                if alg.iflinear_ad
+                    if ifcheckpoint
+                        λRs, FR1s = checkpoint(simple_eig_linear_ad, f, FR[i,Nj]; ifvalue, power_iter)
+                    else
+                        λRs, FR1s = simple_eig_linear_ad(f, FR[i,Nj]; ifvalue, power_iter)
+                    end
                 else
-                    λR[i,Nj], FR′[i,Nj] = simple_eig(f, FR[i,Nj]; ifvalue, power_iter)
+                    if ifcheckpoint
+                        λRs, FR1s = checkpoint(simple_eig, f, FR[i,Nj]; ifvalue, power_iter)
+                    else
+                        λRs, FR1s = simple_eig(f, FR[i,Nj]; ifvalue, power_iter)
+                    end
                 end
             else
                 λRs, FR1s, info = eigsolve(f, FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-                λR[i,Nj], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
             end
+            λR[i,Nj], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
+            
             push!(processed_indices, p)
             if length(processed_indices) == length(FR.data)
                 break
@@ -440,15 +458,16 @@ function leftCenv(ALu::StructArray,
             f(Lij) = Lmap(1, Lij, ALu[i,:], ALd[ir,:])
             if alg.ifsimple_eig
                 if alg.ifcheckpoint
-                    λL[i,1], L′[i,1] = checkpoint(simple_eig, f, L[i,1]; ifvalue, power_iter)
+                    λLs, Li1s = checkpoint(simple_eig, f, L[i,1]; ifvalue, power_iter)
                 else
-                    λL[i,1], L′[i,1] = simple_eig(f, L[i,1]; ifvalue, power_iter)
+                    λLs, Li1s = simple_eig(f, L[i,1]; ifvalue, power_iter)
                 end
             else
                 λLs, Li1s, info = eigsolve(f, L[i,1], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
-                λL[i,1], L′[i,1] = selectpos(λLs, Li1s, Nj)
             end
+            λL[i,1], L′[i,1] = selectpos(λLs, Li1s, Nj)
+            
             push!(processed_indices, p)
             if length(processed_indices) == length(L.data)
                 break
@@ -511,15 +530,16 @@ function rightCenv(ARu::StructArray,
             f(RiNj) = Rmap(Ni, RiNj, ARu[i,:], ARd[ir,:])
             if alg.ifsimple_eig
                 if alg.ifcheckpoint
-                    λR[i,Nj], R′[i,Nj] = checkpoint(simple_eig, f, R[i,Nj]; ifvalue, power_iter)
+                    λLs, Li1s = checkpoint(simple_eig, f, R[i,Nj]; ifvalue, power_iter)
                 else
-                    λR[i,Nj], R′[i,Nj] = simple_eig(f, R[i,Nj]; ifvalue, power_iter)
+                    λLs, Li1s = simple_eig(f, R[i,Nj]; ifvalue, power_iter)
                 end
             else
                 λLs, Li1s, info = eigsolve(f, R[i,Nj], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= Nj && info.converged == 0 && @warn "leftenv not converged"
-                λR[i,Nj], R′[i,Nj] = selectpos(λLs, Li1s, Nj)
             end
+            λR[i,Nj], R′[i,Nj] = selectpos(λLs, Li1s, Nj)
+            
             push!(processed_indices, p)
             if length(processed_indices) == length(R.data)
                 break
@@ -577,16 +597,25 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         if p ∉ processed_indices
             f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint, ifparallel, forloop_iter) : ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint, ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λAC[1,j], AC′[1,j] = checkpoint(simple_eig, f, AC[1,j]; ifvalue, power_iter)
+                if alg.iflinear_ad
+                    if ifcheckpoint
+                        λACs, ACs = checkpoint(simple_eig_linear_ad, f, AC[1,j]; ifvalue, power_iter)
+                    else
+                        λACs, ACs = simple_eig_linear_ad(f, AC[1,j]; ifvalue, power_iter)
+                    end
                 else
-                    λAC[1,j], AC′[1,j] = simple_eig(f, AC[1,j]; ifvalue, power_iter)
+                    if ifcheckpoint
+                        λACs, ACs = checkpoint(simple_eig, f, AC[1,j]; ifvalue, power_iter)
+                    else
+                        λACs, ACs = simple_eig(f, AC[1,j]; ifvalue, power_iter)
+                    end
                 end
             else
                 λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
-                λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
             end
+            λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
+            
             push!(processed_indices, p)
             if length(processed_indices) == length(AC.data)
                 break
@@ -640,18 +669,27 @@ function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
         jr = mod1(j + 1, Nj)
         p = C.pattern[1,j]
         if p ∉ processed_indices
+            f(C1j) = Cmap(1, C1j, FL[:,jr], FR[:,j])
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
+                if alg.iflinear_ad
+                    if ifcheckpoint
+                        λCs, Cs = checkpoint(simple_eig_linear_ad, f, C[1,j]; ifvalue, power_iter)
+                    else
+                        λCs, Cs = simple_eig_linear_ad(f, C[1,j]; ifvalue, power_iter)
+                    end
                 else
-                    λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
+                    if ifcheckpoint
+                        λCs, Cs = checkpoint(simple_eig, f, C[1,j]; ifvalue, power_iter)
+                    else
+                        λCs, Cs = simple_eig(f, C[1,j]; ifvalue, power_iter)
+                    end
                 end
             else
-                λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
-                                        C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
+                λCs, Cs, info = eigsolve(f, C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
-                λC[1,j], C′[1,j] = selectpos(λCs, Cs, Ni)
             end
+            λC[1,j], C′[1,j] = selectpos(λCs, Cs, Ni)
+            
             push!(processed_indices, p)
             if length(processed_indices) == length(C.data)
                 break
