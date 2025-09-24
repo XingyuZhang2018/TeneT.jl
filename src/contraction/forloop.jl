@@ -3,39 +3,18 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
         return f(args...)
     else
         D_split = size(args[N_in[1]])[N_in[2]]
-        result = similar(args[1], size_out)
+        result = Zygote.Buffer(similar(args[1], size_out))
         D_split_loop = cld(D_split, forloop_iter)
         D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
 
         for range in D_split_ranges
-            cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
-            cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
-            split_args = (j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-            result[cols_out...] = f(split_args...)
+            cols_in = Zygote.@ignore (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
+            cols_out = Zygote.@ignore (j == N_out ? range : (:) for j in 1: ndims(result))
+            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            result[cols_out...] = checkpoint(f, split_args...)
         end
 
-        return result
-    end
-end
-
-function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
-    if forloop_iter == 1
-        return f(args...)
-    else
-        D_split = size(args[N_in1[1]])[N_in1[2]]
-        result = similar(args[1], size_out)
-        result .= 0
-        D_split_loop = cld(D_split, forloop_iter)
-        D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
-
-        for range in D_split_ranges
-            cols_in1 = (j == N_in1[2] ? range : (:) for j in 1:ndims(args[N_in1[1]]))
-            cols_in2 = (j == N_in2[2] ? range : (:) for j in 1:ndims(args[N_in2[1]]))
-            split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-            result += f(split_args...)
-        end
-        
-        return result
+        return copy(result)
     end
 end
 
@@ -111,17 +90,6 @@ function ACdmap_forloop(ACd, FL, FR, M; forloop_iter)
     return forloop(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
 end
 
-function Mmap_forloop(AC, ACd, FL, FR; forloop_iter)
-    N_in1 = (2, 3)
-    N_in2 = (4, 3)
-    D1 = size(FL, 2)
-    D2 = size(ACd, 2)
-    D3 = size(FR, 2)
-    D4 = size(AC, 2)
-    size_out = (D1,D2,D3,D4)
-    return forloop_sum(Mmap, AC, ACd, FL, FR; forloop_iter, N_in1, N_in2, size_out)
-end
-
 function Mumap_forloop(AC, ACd, FL, FR, Mu; forloop_iter)
     N_in1 = (2, 4)
     N_in2 = (4, 4)
@@ -133,16 +101,4 @@ function Mumap_forloop(AC, ACd, FL, FR, Mu; forloop_iter)
     d = size(Mu, 5)
     size_out = (D1,D2,D3,D4,d)
     return forloop_sum(Mumap, AC, ACd, FL, FR, Mu; forloop_iter, N_in1, N_in2, size_out)
-end
-
-function Mdmap_forloop(AC, ACd, FL, FR, Md; forloop_iter)
-    N_in1 = (2, 4)
-    N_in2 = (4, 4)
-    D1 = size(FL, 2)
-    D2 = size(ACd, 2)
-    D3 = size(FR, 2)
-    D4 = size(AC, 2)
-    d = size(Md, 5)
-    size_out = (D1,D2,D3,D4,d)
-    return forloop_sum(Mdmap, AC, ACd, FL, FR, Md; forloop_iter, N_in1, N_in2, size_out)
 end
