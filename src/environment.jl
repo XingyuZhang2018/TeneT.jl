@@ -328,7 +328,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         for j in 2:Nj
             p = FL.pattern[i,j]
             if p ∉ processed_indices
-                FL′[i,j] = FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter)
+                FL′[i,j] = ifcheckpoint ? checkpoint(FLmap_forloop, FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter) : FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter)
                 λL[i,j] = λL[i,1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -395,7 +395,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg,
         for j in Nj-1:-1:1
             p = FR.pattern[i,j]
             if p ∉ processed_indices
-                FR′[i,j] = FRmap_forloop(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter)
+                FR′[i,j] = ifcheckpoint ? checkpoint(FRmap_forloop, FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter) : FRmap_forloop(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter)
                 λR[i,j] = λR[i,Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -446,11 +446,11 @@ function leftCenv(ALu::StructArray,
         if p ∉ processed_indices
             f(Lij) = Lmap(1, Lij, ALu[i,:], ALd[ir,:])
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λL[i,1], L′[i,1] = checkpoint(simple_eig, f, L[i,1]; ifvalue, power_iter)
-                else
+                # if alg.ifcheckpoint
+                #     λL[i,1], L′[i,1] = checkpoint(simple_eig, f, L[i,1]; ifvalue, power_iter)
+                # else
                     λL[i,1], L′[i,1] = simple_eig(f, L[i,1]; ifvalue, power_iter)
-                end
+                # end
             else
                 λLs, Li1s, info = eigsolve(f, L[i,1], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
@@ -515,11 +515,11 @@ function rightCenv(ARu::StructArray,
         if p ∉ processed_indices
             f(RiNj) = Rmap(Ni, RiNj, ARu[i,:], ARd[ir,:])
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λR[i,Nj], R′[i,Nj] = checkpoint(simple_eig, f, R[i,Nj]; ifvalue, power_iter)
-                else
+                # if alg.ifcheckpoint
+                #     λR[i,Nj], R′[i,Nj] = checkpoint(simple_eig, f, R[i,Nj]; ifvalue, power_iter)
+                # else
                     λR[i,Nj], R′[i,Nj] = simple_eig(f, R[i,Nj]; ifvalue, power_iter)
-                end
+                # end
             else
                 λLs, Li1s, info = eigsolve(f, R[i,Nj], 1, :LM; maxiter=100, ishermitian = false, kwargs...)
                 alg.verbosity >= Nj && info.converged == 0 && @warn "leftenv not converged"
@@ -599,7 +599,7 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter)
+                ACij = ifcheckpoint ? checkpoint(ACmap_forloop, AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter) : ACmap_forloop(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter)
                 AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
@@ -645,11 +645,11 @@ function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
         p = C.pattern[1,j]
         if p ∉ processed_indices
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
-                else
+                # if ifcheckpoint
+                #     λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
+                # else
                     λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
-                end
+                # end
             else
                 λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
                                         C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)

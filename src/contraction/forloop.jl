@@ -3,7 +3,7 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
         return f(args...)
     else
         D_split = size(args[N_in[1]])[N_in[2]]
-        result = Zygote.Buffer(similar(args[1], size_out))
+        result = Zygote.Buffer(args[1], size_out)
         D_split_loop = cld(D_split, forloop_iter)
         D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
 
