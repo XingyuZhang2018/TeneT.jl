@@ -117,10 +117,11 @@ end
 Array(x::NamedTuple) = x
 
 function reclaim(x::AbstractArray) 
-    GC.gc()
     if x isa CuArray
+        GC.gc()
         CUDA.reclaim()
     elseif x isa ROCArray
+        GC.gc()
         AMDGPU.HIP.reclaim()
     end
 end
