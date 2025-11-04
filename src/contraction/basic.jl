@@ -47,6 +47,7 @@ FRmap(FR, ARu, ARd, M::Tuple{leg5,leg5}) = FRmap(FR, ARu, ARd, M[1], M[2])
     ```
 """
 Lmap(Lij, ALuij::leg3, ALdirj::leg3) = ein"(ad,dbe),abc -> ce"(Lij, ALdirj, ALuij)
+Lmap(Lij, ALuij::leg4, ALdirj::leg4) = ein"(ad,dbfe),abfc -> ce"(Lij, ALdirj, ALuij)
 
 """
     Rm = Rmap(FRi::Vector{<:AbstractTensorMap}, 
@@ -63,6 +64,7 @@ Lmap(Lij, ALuij::leg3, ALdirj::leg3) = ein"(ad,dbe),abc -> ce"(Lij, ALdirj, ALui
 ```
 """
 Rmap(Ri, ARui::leg3, ARdir::leg3) = ein"(abc,ce),dbe->ad"(ARui, Ri, ARdir)
+Rmap(Ri, ARui::leg4, ARdir::leg4) = ein"(abfc,ce),dbfe->ad"(ARui, Ri, ARdir)
 
 """
     ACm = ACmap(ACij, FLj, FRj, Mj, II)
