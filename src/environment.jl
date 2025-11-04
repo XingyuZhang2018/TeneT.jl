@@ -16,14 +16,10 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 - `Ro`: The right mixed environment tensor.
 """
 struct VUMPSEnv
-    ACu::StructArray
-    ARu::StructArray
-    ACd::StructArray
-    ARd::StructArray
+    AL::StructArray
+    C::StructArray
     FLu::StructArray
-    FRu::StructArray
     FLo::StructArray
-    FRo::StructArray
 end
 
 """
@@ -44,19 +40,15 @@ For a `Ni` x `Nj` unitcell, each is a Matrix, containing
 """
 struct VUMPSRuntime             
     AL::StructArray
-    AR::StructArray
     C::StructArray
     FL::StructArray
-    FR::StructArray
 end
 
 # In-place update of environment
 function update!(env::VUMPSRuntime, env´::VUMPSRuntime) 
     env.AL.data .= env´.AL.data
-    env.AR.data .= env´.AR.data
     env.C.data .= env´.C.data
     env.FL.data .= env´.FL.data
-    env.FR.data .= env´.FR.data
     return env
 end
 
@@ -71,12 +63,9 @@ function update!(env::VUMPSRuntime, env´::Tuple{VUMPSRuntime, VUMPSRuntime})
     return env
 end
 
-Array(rt::VUMPSRuntime) = VUMPSRuntime(Array(rt.AL), Array(rt.AR), Array(rt.C), Array(rt.FL), Array(rt.FR))
-Array(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = Array.(rt)
-CuArray(rt::VUMPSRuntime) = VUMPSRuntime(CuArray(rt.AL), CuArray(rt.AR), CuArray(rt.C), CuArray(rt.FL), CuArray(rt.FR))
-CuArray(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = CuArray.(rt)
-ROCArray(rt::VUMPSRuntime) = VUMPSRuntime(ROCArray(rt.AL), ROCArray(rt.AR), ROCArray(rt.C), ROCArray(rt.FL), ROCArray(rt.FR))
-ROCArray(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = ROCArray.(rt)
+Array(rt::VUMPSRuntime) = VUMPSRuntime(Array(rt.AL), Array(rt.C), Array(rt.FL))
+CuArray(rt::VUMPSRuntime) = VUMPSRuntime(CuArray(rt.AL), CuArray(rt.C), CuArray(rt.FL))
+ROCArray(rt::VUMPSRuntime) = VUMPSRuntime(ROCArray(rt.AL), ROCArray(rt.C), ROCArray(rt.FL))
 
 """
 tensor order graph: from left to right, top to bottom.
@@ -328,7 +317,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         for j in 2:Nj
             p = FL.pattern[i,j]
             if p ∉ processed_indices
-                FL′[i,j] = ifcheckpoint ? checkpoint(FLmap_forloop, FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter) : FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter)
+                FL′[i,j] = FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter)
                 λL[i,j] = λL[i,1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -339,72 +328,6 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
     end
     
     return copy(λL), copy(FL′)
-end
-
-function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint=false, forloop_iter=1)
-    Nj = length(ARui)
-    for j in J:-1:(J - Nj + 1)
-        jr = mod1(j, Nj)
-        FRij = FRmap_forloop(FRij, ARui[jr], ARdir[jr], Mi[jr]; forloop_iter)
-    end
-    return FRij
-end
-
-"""
-    λR, FR = rightenv(ARu, ARd, M, FR = FRint(ARu,M); kwargs...)
-
-Compute the right environment tensor for MPS A and MPO M, by finding the left fixed point
-of AR - M - conj(AR) contracted along the physical dimension.
-```
-    ── ARuᵢⱼ  ──┐          ──┐   
-        │       │            │  
-    ── Mᵢⱼ   ──FRᵢⱼ  = λRᵢⱼ──FRᵢⱼ₋₁
-        │       │            │  
-    ── ARdᵢᵣⱼ ──┘          ──┘  
-```
-"""
-function rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, ifvalue=false, alg, kwargs...) 
-    Ni,Nj = size(M)
-    λR = Zygote.Buffer(randSA(Array, M.pattern))
-    FR′ = Zygote.Buffer(FR)
-    processed_indices = Set{Int}()
-    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
-    forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
-    for i in 1:Ni
-        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
-        p = FR.pattern[i,Nj]
-        if p ∉ processed_indices
-            f(FRiNj) = FRmap(Nj, FRiNj, ARu[i,:], ARd[ir,:], M[i,:]; ifcheckpoint, forloop_iter)
-            if alg.ifsimple_eig
-                if ifcheckpoint
-                    λR[i,Nj], FR′[i,Nj] = checkpoint(simple_eig, f, FR[i,Nj]; ifvalue, power_iter)
-                else
-                    λR[i,Nj], FR′[i,Nj] = simple_eig(f, FR[i,Nj]; ifvalue, power_iter)
-                end
-            else
-                λRs, FR1s, info = eigsolve(f, FR[i,Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian = false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
-                λR[i,Nj], FR′[i,Nj] = selectpos(λRs, FR1s, Nj)
-            end
-            push!(processed_indices, p)
-            if length(processed_indices) == length(FR.data)
-                break
-            end
-        end
-        for j in Nj-1:-1:1
-            p = FR.pattern[i,j]
-            if p ∉ processed_indices
-                FR′[i,j] = FRmap_forloop(FR′[i,j+1], ARu[i,j+1], ARd[ir,j+1], M[i,j+1]; forloop_iter)
-                λR[i,j] = λR[i,Nj]
-                push!(processed_indices, p)
-                if length(processed_indices) == length(FR.data)
-                    break
-                end
-            end
-        end
-    end
-    return copy(λR), copy(FR′)
 end
 
 function Lmap(J::Int, Lij, ALui, ALdir)
@@ -568,7 +491,7 @@ FLᵢⱼ ─── Mᵢⱼ ───── FRᵢⱼ               │      │  
 │        │         │   
 ```
 """
-function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
+function ACenv(AC, FL, M; ifvalue=false, alg, kwargs...)
     Ni, Nj = size(M)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
@@ -578,8 +501,9 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
     ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         p = AC.pattern[1,j]
+        jr = mod1(j + 1, Nj)
         if p ∉ processed_indices
-            f(AC1j) = ACmap(1, AC1j, FL[:,j], FR[:,j], M[:,j]; ifcheckpoint, forloop_iter)
+            f(AC1j) = ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifcheckpoint, forloop_iter)
             if alg.ifsimple_eig
                 if ifcheckpoint
                     λAC[1,j], AC′[1,j] = checkpoint(simple_eig, f, AC[1,j]; ifvalue, power_iter)
@@ -599,7 +523,7 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FR[i-1,j], M[i-1,j]; forloop_iter)
+                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; forloop_iter)
                 AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
@@ -633,7 +557,7 @@ FLᵢⱼ₊₁ ──── FRᵢⱼ            │       │
 │           │   
 ```
 """
-function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
+function Cenv(C, FL; alg, ifvalue=false, kwargs...)
     Ni, Nj = size(C)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
@@ -648,7 +572,7 @@ function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
                 # if ifcheckpoint
                 #     λC[1,j], C′[1,j] = checkpoint(simple_eig, C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
                 # else
-                    λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), C[1,j]; ifvalue, power_iter)
+                    λC[1,j], C′[1,j] = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FL[:,jr]), C[1,j]; ifvalue, power_iter)
                 # end
             else
                 λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FR[:,j]), 
@@ -664,7 +588,7 @@ function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
         for i in 2:Ni
             p = C.pattern[i,j]
             if p ∉ processed_indices
-                Cij = Cmap(C′[i-1,j], FL[i-1,jr], FR[i-1,j])
+                Cij = Cmap(C′[i-1,j], FL[i-1,jr], FL[i-1,jr])
                 C′[i,j] = Cij/norm(Cij)
                 λC[i,j] = λC[1,j]
                 push!(processed_indices, p)
