@@ -7,9 +7,9 @@ using Test
 using Zygote
 using CUDA
 
-@testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [Array]
+@testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [CuArray]
     Random.seed!(100)
-    β = log(1+sqrt(2))/2
+    β = 0.5
     χ = 10
     model = Ising(β)
     l = length(unique(pattern))
@@ -25,11 +25,12 @@ using CUDA
     # data = [atype(M) for _ in 1:l]
     M = StructArray(data, pattern)
     alg = VUMPS(maxiter=10000, miniter=1, verbosity=3, 
-                ifsimple_eig=false,
-                ifupdown=false, ifdownfromup=true, ifparallelupdown=false)
+                ifsimple_eig=true,
+                power_iter=100,
+                ifupdown=true, ifdownfromup=true, ifparallelupdown=false)
     
     rt = @time VUMPSRuntime(M, χ, alg)
-    rt = @time leading_boundary(rt, M, alg)
+    rt, _ = @time leading_boundary(rt, M, alg)
     env = VUMPSEnv(rt, M, alg)
 
     @show  log(observable(env, M, Val(:Z), alg)) - 1.0257928172049902

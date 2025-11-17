@@ -8,12 +8,12 @@ function observable(env, M, ::Val{:Z}, alg)
     atype = _arraytype(ACu[1])
     Ni,Nj = size(ACu)
     l = length(unique(M.pattern))
-    λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg)  
-      λC, _ = rightCenv(ARu, conj(ARu);    ifobs=true)
+    λFLo, _ =  rightenv(ARu, ARu, M; ifobs=true, alg, ifvalue=true)  
+      λC, _ = rightCenv(ARu, ARu;    ifobs=true, alg, ifvalue=true)
     return prod(λFLo./λC)^(1/Ni)
 end
 
-function observable(env, model::MT, pattern::Matrix{Int}, type, alg) where {MT <: HamiltonianModel}
+function observable(env, model::MT, pattern::Matrix{Int}, type) where {MT <: HamiltonianModel}
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni,Nj = size(ACu)
     atype = _arraytype(ACu[1])
@@ -35,8 +35,8 @@ function observable(env, model::MT, pattern::Matrix{Int}, type, alg) where {MT <
         else
             ir = Ni + 1 - i
         end
-        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],conj(ACd[ir,j]),FRo[i,j])
-          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],conj(ACd[ir,j]),FRo[i,j])
+        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],ACd[ir,j],FRo[i,j])
+          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],ACd[ir,j],FRo[i,j])
         obs_tol += Array(obs)[]/Array(λ)[]
     end
     if type == Val(:mag)

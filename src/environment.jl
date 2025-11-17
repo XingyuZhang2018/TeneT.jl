@@ -441,7 +441,7 @@ function leftCenv(ALu::StructArray,
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
     processed_indices = Set{Int}()
     for i in 1:Ni
-        ir = ifobs ? Ni + 2 - i : i
+        ir = ifobs ? mod1(Ni + 2 - i, Ni) : i
         p = L.pattern[i,1]
         if p ∉ processed_indices
             f(Lij) = Lmap(1, Lij, ALu[i,:], ALd[ir,:])
@@ -509,8 +509,9 @@ function rightCenv(ARu::StructArray,
     R′ = Zygote.Buffer(R)
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
     processed_indices = Set{Int}()
+    Ni, Nj = size(R)
     for i in 1:Ni
-        ir = ifobs ? Ni + 2 - i : i
+        ir = ifobs ? mod1(Ni + 2 - i, Ni) : i
         p = R.pattern[i,Nj]
         if p ∉ processed_indices
             f(RiNj) = Rmap(Ni, RiNj, ARu[i,:], ARd[ir,:])
@@ -704,18 +705,10 @@ function ACCtoAR(AC, C)
     return copy(AR), errR
 end
 
-function ALCtoAC(AL::leg3, C)
+function ALCtoAC(AL, C)
     AC = Zygote.Buffer(AL)
     @inbounds for i in 1:length(AL)
-        AC[i] = ein"asc,cb -> asb"(AL[i], C[i])
-    end
-    return copy(AC)
-end
-
-function ALCtoAC(AL::leg4, C)
-    AC = Zygote.Buffer(AL)
-    @inbounds for i in 1:length(AL)
-        AC[i] = ein"astc,cb -> astb"(AL[i], C[i])
+        AC[i] = ALCtoACmap(AL[i], C[i])
     end
     return copy(AC)
 end

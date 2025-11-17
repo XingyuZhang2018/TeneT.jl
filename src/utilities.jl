@@ -52,17 +52,17 @@ function simple_eig(f, v; power_iter, ifvalue=false)
     return λ, v
 end
 
-function mcform(M)
-    aM = Array(M)
-    x = ein"ijil->jl"(aM)
-    _, vh = Zygote.@ignore eigen(x)
-    aM = ein"aj,(ijkl,lb)->iakb"(inv(vh),aM,vh)
-    y = ein"ijkj->ik"(aM)
-    _, vv = Zygote.@ignore eigen(y)
-    aM = ein"(ai,ijkl),kb->ajbl"(inv(vv),aM,vv)
-    aM = typeof(M)(aM)
-    return vh, vv, aM
-end    
+# function mcform(M)
+#     aM = Array(M)
+#     x = ein"ijil->jl"(aM)
+#     _, vh = Zygote.@ignore eigen(x)
+#     aM = ein"aj,(ijkl,lb)->iakb"(inv(vh),aM,vh)
+#     y = ein"ijkj->ik"(aM)
+#     _, vv = Zygote.@ignore eigen(y)
+#     aM = ein"(ai,ijkl),kb->ajbl"(inv(vv),aM,vv)
+#     aM = typeof(M)(aM)
+#     return vh, vv, aM
+# end    
 
 # See Zygote Checkpointing https://fluxml.ai/Zygote.jl/latest/adjoints/#Checkpointing-1
 checkpoint(f, args...; kwargs...) = f(args...; kwargs...) 

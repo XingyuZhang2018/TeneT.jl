@@ -5,7 +5,9 @@
 """
 project_AL(∂AL, AL) = project_AL!(deepcopy(∂AL), AL)
 function project_AL!(∂AL, AL)
-    ∂AL .-= ein"deg,(abc,abg)->dec"(AL, ∂AL, conj.(AL))
+    # ∂AL .-= ein"deg,(abc,abg)->dec"(AL, ∂AL, conj.(AL))
+    @tensoropt out[d,e,c] := AL[a,b,c] * ∂AL[a,b,g] * conj(AL[d,e,g])
+    ∂AL .-= out
     return ∂AL
 end
 
