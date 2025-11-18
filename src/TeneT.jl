@@ -6,7 +6,9 @@ using CUDA
 using LinearAlgebra
 using KrylovKit
 using Zygote
-using OMEinsum
+# using OMEinsum
+using TensorOperations
+using cuTENSOR
 using Printf
 using Parameters
 using ChainRulesCore

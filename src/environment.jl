@@ -628,18 +628,10 @@ function ACCtoAR(AC, C)
     return copy(AR), errR
 end
 
-function ALCtoAC(AL::leg3, C)
+function ALCtoAC(AL, C)
     AC = Zygote.Buffer(AL)
     @inbounds for i in 1:length(AL)
-        AC[i] = ein"asc,cb -> asb"(AL[i], C[i])
-    end
-    return copy(AC)
-end
-
-function ALCtoAC(AL::leg4, C)
-    AC = Zygote.Buffer(AL)
-    @inbounds for i in 1:length(AL)
-        AC[i] = ein"astc,cb -> astb"(AL[i], C[i])
+        AC[i] = ALCtoACmap(AL[i], C[i])
     end
     return copy(AC)
 end
