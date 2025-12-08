@@ -170,7 +170,7 @@ end
 
 function ACdmap(ACd, FL, FR, M1::leg5, M2::leg5)
     # ein"(((ijkl,dghl),ejgbp),fkhcp),aefi -> abcd"(ACd,FR,M1,M2,FL)
-    @tensor out[a,b,c,d] := ACd[i,j,k,l] * FR[g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
+    @tensor out[a,b,c,d] := ACd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
     return out
 end
 
