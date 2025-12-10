@@ -28,16 +28,16 @@ end
     @test AR[2,1] == AR[1,2]
     for p in 1:length(AL)
         i, j = Tuple(findfirst(==(p), AL.pattern))
-        @test Array(_to_tail(AL[i,j])' * _to_tail(AL[i,j])) ≈ I(χ)
+        @test Array(_to_front(AL[i,j])' * _to_front(AL[i,j])) ≈ I(χ)
 
-        LA = _to_tail(L[i,j] * _to_front(A[i,j]))
-        ALL = _to_tail(AL[i,j]) * L[i,j] * λ[i,j]
+        LA = _to_front(L[i,j] * _to_tail(A[i,j]))
+        ALL = _to_front(AL[i,j]) * L[i,j] * λ[i,j]
         @test (Array(ALL) ≈ Array(LA))
 
-        @test Array(_to_front(AR[i,j]) * _to_front(AR[i,j])') ≈ I(χ)
+        @test Array(_to_tail(AR[i,j]) * _to_tail(AR[i,j])') ≈ I(χ)
 
-        AxR = _to_front(_to_tail(A[i,j]) * R[i,j])
-        RAR = R[i,j] * _to_front(AR[i,j]) * λ[i,j]
+        AxR = _to_tail(_to_front(A[i,j]) * R[i,j])
+        RAR = R[i,j] * _to_tail(AR[i,j]) * λ[i,j]
         @test (Array(RAR) ≈ Array(AxR))
     end
 end

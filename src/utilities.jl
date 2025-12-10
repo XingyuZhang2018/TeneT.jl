@@ -13,12 +13,12 @@ const leg4 = Union{<:AbstractArray{T, 4}, StructArray{<:Vector{<:AbstractArray{T
 const leg5 = Union{<:AbstractArray{T, 5}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
 const leg8 = Union{<:AbstractArray{T, 8}, StructArray{<:Vector{<:AbstractArray{T, 8}}}} where T
 
-function _to_front(t)
+function _to_tail(t)
     χ = size(t)[end]
     return reshape(t, χ, Int(prod(size(t))/χ))
 end
 
-function _to_tail(t)
+function _to_front(t)
     χ = size(t, 1)
     return reshape(t, Int(prod(size(t))/χ), χ)
 end
@@ -133,7 +133,7 @@ end
 Array(x::NamedTuple) = x
 
 function reclaim(x::AbstractArray) 
-    if x isa CuArray
+    if x isa CuArray && CUDA.available_memory() / CUDA.total_memory() < 0.1
         GC.gc(true)
         CUDA.reclaim()
     elseif x isa ROCArray

@@ -54,8 +54,7 @@ end
 
 function FRmap(FR, ARu, ARd, M1::leg5, M2::leg5)
     # ein"(((ijkl,dghl),ejgbp),fkhcp),abcd -> aefi"(ARd, FR, M1, M2, ARu)
-    @tensor out[a,e,f,i] :=
-        ARd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ARu[a,b,c,d]
+    @tensor out[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ARu[a,b,c,d]
     return out
 end
 
