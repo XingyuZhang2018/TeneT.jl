@@ -45,7 +45,7 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     function back((dQ, dR))
         M = R * dR' - dQ' * Q
         # dA, _ = linsolve(x->x * (R + I * 1e-12)', dQ + Q * Hermitian(M, :L); verbosity=0, maxiter = 1)
-        dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * Hermitian(M, :L))' )'
+        dA = (dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)'
         return NoTangent(), dA
     end
     return (Q, R), back
