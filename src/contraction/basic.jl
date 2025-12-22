@@ -178,18 +178,18 @@ ACdmap(ACd, FL, FR, M::Tuple{leg5,leg5}) = ACdmap(ACd, FL, FR, M[1], M[2])
 
 function Mmap(AC, ACd, FL, FR)
     # ein"(abc,ceh),(adf,fgh) -> dgeb"(AC,FR,FL,ACd)
-    @tensor out[d,g,e,b] := AC[a,b,c] * FR[c,e,h] * FL[a,d,f] * ACd[f,g,h]
+    @tensor out[d,g,e,b] := (AC[a,b,c] * FR[c,e,h]) * (FL[a,d,f] * ACd[f,g,h])
     return out
 end
 
 function Mumap(AC, ACd, FL, FR, Mu)
     # ein"(abcd,dghl),((aefi,ijkl),ejgbp)-> fkhcp"(AC,FR,FL,ACd,Mu)
-    @tensor out[f,k,h,c,p] := AC[a,b,c,d] * FR[d,g,h,l] * FL[a,e,f,i] * ACd[i,j,k,l] * Mu[e,j,g,b,p]
+    @tensor out[f,k,h,c,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Mu[e,j,g,b,p])
     return out
 end
 
 function Mdmap(AC, ACd, FL, FR, Md)
     # ein"(abcd,dghl),((aefi,ijkl),fkhcp)-> ejgbp"(AC,FR,FL,ACd,Md)
-    @tensor out[e,j,g,b,p] := AC[a,b,c,d] * FR[d,g,h,l] * FL[a,e,f,i] * ACd[i,j,k,l] * Md[f,k,h,c,p]
+    @tensor out[e,j,g,b,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Md[f,k,h,c,p])
     return out
 end
