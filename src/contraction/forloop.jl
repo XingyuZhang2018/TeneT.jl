@@ -3,18 +3,18 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
         return f(args...)
     else
         D_split = size(args[N_in[1]])[N_in[2]]
-        result = Zygote.Buffer(args[1], size_out)
+        result = similar(args[1], size_out)
         D_split_loop = cld(D_split, forloop_iter)
         D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
 
         for range in D_split_ranges
-            cols_in = Zygote.@ignore (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
-            cols_out = Zygote.@ignore (j == N_out ? range : (:) for j in 1: ndims(result))
+            cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
+            cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
             split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-            result[cols_out...] = checkpoint(f, split_args...)
+            result[cols_out...] = f(split_args...)
         end
 
-        return copy(result)
+        return result
     end
 end
 

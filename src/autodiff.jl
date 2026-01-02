@@ -118,6 +118,56 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
+function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in, N_out, size_out)
+    if forloop_iter == 1
+        result, back = pullback(f, args...)
+        function realback(dresult)
+            dargs = back(dresult)
+            return NoTangent(), NoTangent(), dargs...
+        end
+        return result, realback
+    else
+        D_split = size(args[N_in[1]])[N_in[2]]
+        result = similar(args[1], size_out)
+        D_split_loop = cld(D_split, forloop_iter)
+        D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
+
+        for range in D_split_ranges
+            cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
+            cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
+            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            result[cols_out...] = f(split_args...)
+        end
+
+        function back(dresult)
+            dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+            # dargs = map(ChainRulesCore.zero_tangent, args)
+            for range in D_split_ranges
+                cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
+                cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
+                split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+                dargs_range = pullback(f, split_args...)[2](dresult[cols_out...])
+                for i in 1:length(args)
+                    if i == N_in[1]
+                        dargs[i][cols_in...] .= dargs_range[i]
+                    else
+                        if dargs_range[i] isa Tuple
+                            for j in 1:length(dargs_range[i])
+                                dargs[i][j] .+= dargs_range[i][j]
+                            end
+                        else
+                            dargs[i] .+= dargs_range[i]
+                        end
+                    end
+                end
+            end
+            return NoTangent(), NoTangent(), dargs...
+        end
+
+        return result, back
+    end
+end
+
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     atype = _arraytype(M)
