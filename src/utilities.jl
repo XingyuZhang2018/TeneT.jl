@@ -8,6 +8,7 @@ _arraytype(::CuArray) = CuArray
 _arraytype(::ROCArray) = ROCArray
 _arraytype(S::StructArray) = _arraytype(S.data[1])
 
+const leg2 = Union{<:AbstractArray{T, 2}, StructArray{<:Vector{<:AbstractArray{T, 2}}}} where T
 const leg3 = Union{<:AbstractArray{T, 3}, StructArray{<:Vector{<:AbstractArray{T, 3}}}} where T
 const leg4 = Union{<:AbstractArray{T, 4}, StructArray{<:Vector{<:AbstractArray{T, 4}}}} where T
 const leg5 = Union{<:AbstractArray{T, 5}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
@@ -150,3 +151,79 @@ function ChainRulesCore.rrule(::typeof(for_gc), x)
     end
     return x, back
 end
+
+function Z2_transform_matrix_χ(χ)
+    sqrtχ = ceil(Int,sqrt(χ))
+    U = zeros(Float64, sqrtχ, sqrtχ, sqrtχ, sqrtχ)
+    c = 1/sqrt(2)
+
+    @inbounds for i in 1:sqrtχ
+        U[i,i,i,i] = 1
+        for j in i+1:sqrtχ
+            U[i,j,i,j] = c
+            U[i,j,j,i] = c
+            U[j,i,i,j] = c
+            U[j,i,j,i] = -c
+        end
+    end
+
+    return reshape(U, sqrtχ^2,sqrtχ^2)[1:χ, 1:χ]
+end
+
+function Z2_transform_matrix_D(D)
+    U = zeros(Float64, D, D, D, D)
+    c = 1/sqrt(2)
+
+    @inbounds for i in 1:D
+        U[i,i,i,i] = 1
+        for j in i+1:D
+            U[i,j,i,j] = c
+            U[i,j,j,i] = c
+            U[j,i,i,j] = c
+            U[j,i,j,i] = -c
+        end
+    end
+
+    return U
+end
+
+function convert_bilayer_Z2(M::AbstractArray{Float64, 2})
+    χ = size(M, 1)
+    U = _arraytype(M)(Z2_transform_matrix_χ(χ))
+    @tensor M[1,2] = M[3,4] * U[3,1] * U[4,2]
+    return M
+end
+
+function convert_bilayer_Z2(M::AbstractArray{Float64, 4})
+    χ, D = size(M)[[1,2]]
+    Uχ = _arraytype(M)(Z2_transform_matrix_χ(χ))
+    UD = _arraytype(M)(Z2_transform_matrix_D(D))
+    @tensor M[1,2,3,4] = M[5,6,7,8] * Uχ[5,1] * Uχ[8,4] * UD[6,7,2,3]
+    return M
+end
+
+function convert_bilayer_Z2(M::AbstractArray{ComplexF64, N}) where {N}
+    M_real = convert_bilayer_Z2(real(M))
+    M_imag = convert_bilayer_Z2(imag(M))
+    return M_real + 1im * M_imag
+end
+
+to_Z2(T::StructArray) = StructArray(to_Z2.(T.data), T.pattern)
+
+function to_Z2(T::AbstractArray{Type, 2}) where {Type}
+    χ = size(T, 1)
+    sqrtχ = Int(sqrt(χ))
+    T = reshape(T, sqrtχ, sqrtχ, sqrtχ, sqrtχ)
+    T += conj(permutedims(T, (2,1,4,3)))
+    T = reshape(T, χ, χ) / 2
+    return T
+end   
+
+function to_Z2(T::AbstractArray{Type, 4}) where {Type}
+    χ, D = size(T)[[1,2]]
+    sqrtχ = Int(sqrt(χ))
+    T = reshape(T, sqrtχ, sqrtχ, D, D, sqrtχ, sqrtχ)
+    T += conj(permutedims(T, (2,1,4,3,6,5)))
+    T = reshape(T, χ, D, D, χ) / 2
+    return T
+end   

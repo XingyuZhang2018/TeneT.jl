@@ -115,7 +115,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     local err
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
     Zygote.@ignore for i in 1:alg.maxiter
-        rt, err = vumps_step_power(rt, M, alg)
+        rt, err = vumps_step_Hermitian(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
@@ -128,7 +128,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
 
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_power, rt, M, alg) : vumps_step_power(rt, M, alg)
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_Hermitian, rt, M, alg) : vumps_step_Hermitian(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
@@ -205,6 +205,7 @@ end
 
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
+    # AL, AR, C, FL, FR = to_Z2(AL), to_Z2(AR), to_Z2(C), to_Z2(FL), to_Z2(FR)
     AC = ALCtoAC(AL,C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
     _,  Cp =  Cenv( C, FL, FR; alg)

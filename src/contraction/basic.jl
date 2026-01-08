@@ -154,6 +154,18 @@ function ALCtoACmap(AL::leg4, C)
     return out
 end
 
+function CARtoACmap(C, AR::leg3)
+    # ein"ab,bst -> ast"(C, AR)
+    @tensor out[a,s,t] := C[a,b] * AR[b,s,t]
+    return out
+end
+
+function CARtoACmap(C, AR::leg4)
+    # ein"ab,bstu -> astu"(C, AR)
+    @tensor out[a,s,t,u] := C[a,b] * AR[b,s,t,u]
+    return out
+end
+
 """ 
 a ────┬──── c 
 │     b     │ 
