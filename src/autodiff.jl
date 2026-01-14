@@ -40,6 +40,7 @@ end
 
 # adjoint for QR factorization
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
+# NOTE: `I * 1e-12` regularization is necessary because R can become near-singular.
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     Q, R = qrpos(A)
     function back((dQ, dR))
