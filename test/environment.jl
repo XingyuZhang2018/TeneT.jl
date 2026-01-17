@@ -47,7 +47,7 @@ end
     χ, D = 3, 2
 
     AL,    =  left_canonical(A)
-    alg = VUMPS(ifsimple_eig = true)
+    alg = VUMPS(ifsimple_eig = true, power_iter=20)
     λL,FL  =  leftenv(AL, conj(AL), M; ifobs=ifobs, ifvalue=true, alg=alg)
 
     _, AR, = right_canonical(A)
@@ -69,7 +69,7 @@ end
 
     AL,  L, _ =  left_canonical(A)
      R, AR, _ = right_canonical(A)
-    alg = VUMPS(ifsimple_eig = true)
+    alg = VUMPS(ifsimple_eig = true, power_iter=20)
     λL, FL    =  leftenv(AL, conj(AL), M; ifobs=ifobs, ifvalue=true, alg=alg)
     λR, FR    = rightenv(AR, conj(AR), M; ifobs=ifobs, ifvalue=true, alg=alg)
 

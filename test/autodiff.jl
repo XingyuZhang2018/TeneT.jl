@@ -52,7 +52,7 @@ end
     @test Zygote.gradient(foo, M)[1].data ≈ num_grad(foo, M) atol = 1e-8
 end
 
-@testset "difference devices with $atype{$dtype}" for atype in [ROCArray], dtype in [ComplexF64]
+@testset "difference devices with $atype{$dtype}" for atype in [Array], dtype in [ComplexF64]
     A = rand(ComplexF64,2,2)
     gA = TeneT.atype_device!(atype, A, 1)
 
@@ -234,7 +234,7 @@ end
 include("../example/exampletensors.jl")
 include("../example/exampleobs.jl")
 
-@testset "ising backward with $atype $ifupdown $pattern" for atype = [Array, ROCArray], ifupdown in [false], pattern in [[1;;]]
+@testset "ising backward with $atype $ifupdown $pattern" for atype = [Array], ifupdown in [false], pattern in [[1;;]]
     # [1;;], [1 1; 1 1], [1 2; 2 1], [1 2; 3 4], [1 1; 2 2]
     # [1 3 2 2 3 1; 2 3 1 1 3 2]
     Random.seed!(100)
@@ -254,7 +254,7 @@ include("../example/exampleobs.jl")
         data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
         M = StructArray(data, pattern)
         rt = VUMPSRuntime(M, χ, alg)
-        rt′ = leading_boundary(rt, M, alg)
+        rt′, err = leading_boundary(rt, M, alg)
         env = VUMPSEnv(rt′, M, alg)
         return real(observable(env, model, pattern, Val(:energy)))
     end

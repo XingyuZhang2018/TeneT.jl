@@ -27,7 +27,7 @@ end
     χ = 3
     alg = VUMPS(maxiter=100, verbosity=2, ifupdown=false)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt, err = leading_boundary(rt, M, alg)
     @test rt isa VUMPSRuntime
 
     env = VUMPSEnv(rt, M, alg)
@@ -40,7 +40,7 @@ end
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4), (3,5,1,6), (7,4,8,2), (8,6,7,5)])
     alg = VUMPS(maxiter=100, verbosity=3, show_every=10, ifupdown=false)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt, err = leading_boundary(rt, M, alg)
     @test rt isa VUMPSRuntime
 
     env = VUMPSEnv(rt, M, alg)
@@ -50,7 +50,7 @@ end
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4, d), (3,5,1,6, d), (7,4,8,2, d), (8,6,7,5, d)])
     alg = VUMPS(maxiter=100, verbosity=3, show_every=10, ifupdown=false)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt, err = leading_boundary(rt, M, alg)
     @test rt isa VUMPSRuntime
 
     env = VUMPSEnv(rt, M, alg)
@@ -62,7 +62,7 @@ end
     χ = 3
     alg = VUMPS(maxiter=100, miniter=20, verbosity=3, ifupdown=true, ifparallelupdown=true)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = @time leading_boundary(rt, M, alg)
+    rt, err = @time leading_boundary(rt, M, alg)
     @test rt isa Tuple{VUMPSRuntime, VUMPSRuntime}
 
     env = VUMPSEnv(rt, M, alg)
@@ -75,7 +75,7 @@ end
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4), (3,5,1,6), (7,4,8,2), (8,6,7,5)])
     alg = VUMPS(maxiter=100, verbosity=2, ifupdown=true)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt, err = leading_boundary(rt, M, alg)
     @test rt isa Tuple{VUMPSRuntime, VUMPSRuntime}
 
     env = VUMPSEnv(rt, M, alg)
@@ -85,7 +85,7 @@ end
     M = randSA(atype, [1 2; 3 4], [(1,2,3,4, d), (3,5,1,6, d), (7,4,8,2, d), (8,6,7,5, d)])
     alg = VUMPS(maxiter=100, verbosity=2, ifupdown=true)
     rt = VUMPSRuntime(M, χ, alg)
-    rt = leading_boundary(rt, M, alg)
+    rt, err = leading_boundary(rt, M, alg)
     @test rt isa Tuple{VUMPSRuntime, VUMPSRuntime}
 
     env = VUMPSEnv(rt, M, alg)
