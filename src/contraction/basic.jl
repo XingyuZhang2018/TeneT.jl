@@ -205,3 +205,23 @@ function Mdmap(AC, ACd, FL, FR, Md)
     @tensor out[e,j,g,b,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Md[f,k,h,c,p])
     return out
 end
+
+function Cmap_enlarge(C, Ta, Tb, Mau::leg4, Mad, Mbu, Mbd)
+    @tensoropt out[13,1,6,16,4,9] := Ta[13,3,8,14] * C[14,15] * Tb[15,5,10,16] * Mau[1,2,4,11] * Mad[6,7,8,11] * Mbu[2,4,5,12] * Mbd[7,9,10,12]
+    return out
+end
+
+Cmap_enlarge(C, Ta, Tb, Ma, Mb) = Cmap_enlarge(C, Ta, Tb, Ma, conj(Ma), Mb, conj(Mb))
+Cmap_enlarge(C, Ta, Tb, M) = Cmap_enlarge(C, Ta, Tb, M[1], M[2])
+
+function Tmap(T1, T2, Mu::leg4, Md)
+    @tensoropt out[8,1,4,10] := T1[8,3,6,9] * T2[9,2,5,10] * Mau[1,2,3,7] * Mad[4,5,6,7]
+    return out
+end
+
+Tmap(T1, T2, M) = Tmap(T1, T2, M, conj(M))
+
+function Cmap_ctmrg(C, Ta, Tb)
+    @tensoropt out[1,6] := Tb[1,2,3,4] * C[4,5] * Ta[5,2,3,6]
+    return out
+end

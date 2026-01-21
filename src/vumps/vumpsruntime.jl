@@ -57,7 +57,7 @@ function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
     return VUMPSRuntime(ALd, ARd, Cd, FLd, FRd)
 end
 
-function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
+function init_Runtime(M::StructArray, χ::Int, alg::VUMPS)
     Ni, Nj = size(M)
 
     if alg.ifupdown && alg.ifparallelupdown
@@ -235,6 +235,7 @@ function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    C = for_gc(C)
     return VUMPSRuntime(AL, AR, C, FL, FR), err
 end
 
