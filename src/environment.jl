@@ -263,11 +263,11 @@ function LRtoC(L, R)
     return C
 end
 
-function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false, forloop_iter=1)
+function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint=false, ifparallel, forloop_iter)
     Nj = length(ALui)
     for j in J:(J + Nj - 1)
         jr = mod1(j, Nj)
-        FLij = FLmap_forloop(FLij, ALui[jr], ALdir[jr], Mi[jr]; forloop_iter)
+        FLij = FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter)
     end
     return FLij
 end
@@ -292,12 +292,13 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
     processed_indices = Set{Int}()
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
     forloop_iter = alg.forloop_iter
+    ifparallel = alg.ifparallel
     ifcheckpoint = alg.ifcheckpoint
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i,1]
         if p ∉ processed_indices
-            f(FLij) = FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint, forloop_iter)
+            f(FLij) = FLmap(1, FLij, ALu[i,:], ALd[ir,:], M[i, :]; ifcheckpoint, ifparallel, forloop_iter)
             if alg.ifsimple_eig
                 if ifcheckpoint
                     λL[i,1], FL′[i,1] = checkpoint(simple_eig, f, FL[i,1]; ifvalue, power_iter)
@@ -317,7 +318,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, ifvalue=false, alg, 
         for j in 2:Nj
             p = FL.pattern[i,j]
             if p ∉ processed_indices
-                FL′[i,j] = FLmap_forloop(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; forloop_iter)
+                FL′[i,j] = FLmap_parallel(FL′[i,j-1], ALu[i,j-1], ALd[ir,j-1],  M[i,j-1]; ifparallel, forloop_iter)
                 λL[i,j] = λL[i,1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -470,11 +471,11 @@ function rightCenv(ARu::StructArray,
     return copy(λR), copy(R′)
 end
 
-function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false, forloop_iter=1)
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint=false, ifparallel, forloop_iter)
     Ni = length(Mj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
-        ACij = ACmap_forloop(ACij, FLj[ir], FRj[ir], Mj[ir]; forloop_iter)
+        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter)
     end
     return ACij
 end
@@ -497,13 +498,14 @@ function ACenv(AC, FL, M; ifvalue=false, alg, kwargs...)
     AC′ = Zygote.Buffer(AC)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
+    ifparallel = alg.ifparallel
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         p = AC.pattern[1,j]
         jr = mod1(j + 1, Nj)
         if p ∉ processed_indices
-            f(AC1j) = ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifcheckpoint, forloop_iter)
+            f(AC1j) = ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifcheckpoint, ifparallel, forloop_iter)
             if alg.ifsimple_eig
                 if ifcheckpoint
                     λAC[1,j], AC′[1,j] = checkpoint(simple_eig, f, AC[1,j]; ifvalue, power_iter)
@@ -523,7 +525,7 @@ function ACenv(AC, FL, M; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_forloop(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; forloop_iter)
+                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; ifparallel, forloop_iter)
                 AC′[i,j] = ACij/norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)

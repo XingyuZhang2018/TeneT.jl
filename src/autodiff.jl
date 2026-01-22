@@ -127,29 +127,40 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
         end
         return result, realback
     else
-        D_split = size(args[N_in[1]])[N_in[2]]
-        result = similar(args[1], size_out)
-        D_split_loop = cld(D_split, forloop_iter)
-        D_split_ranges = [range(1 + (i-1)*D_split_loop, min(i*D_split_loop, D_split)) for i in 1:forloop_iter]
+        Ain = args[N_in[1]]
+        split_dim = N_in[2]
+        D_split = size(Ain, split_dim)
 
-        for range in D_split_ranges
-            cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
-            cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
-            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-            result[cols_out...] = f(split_args...)
+        result = similar(args[1], size_out)
+
+        in_idx  = ntuple(_ -> (:), ndims(Ain))
+        out_idx = ntuple(_ -> (:), ndims(result))
+
+        ranges = split_ranges(D_split, forloop_iter)
+
+        @views for r in ranges
+            in_idx_r  = Base.setindex(in_idx,  r, split_dim)
+            out_idx_r = Base.setindex(out_idx, r, N_out)
+            split_args = ntuple(length(args)) do j
+                j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+            end
+
+            result[out_idx_r...] .= f(split_args...)
         end
 
         function back(dresult)
             dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
-            # dargs = map(ChainRulesCore.zero_tangent, args)
-            for range in D_split_ranges
-                cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
-                cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
-                split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-                dargs_range = pullback(f, split_args...)[2](dresult[cols_out...])
+            @views for r in ranges
+                in_idx_r  = Base.setindex(in_idx,  r, split_dim)
+                out_idx_r = Base.setindex(out_idx, r, N_out)
+                split_args = ntuple(length(args)) do j
+                    j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+                end    
+                _, bp = pullback(f, split_args...)
+                dargs_range = bp(view(dresult, out_idx_r...))
                 for i in 1:length(args)
                     if i == N_in[1]
-                        dargs[i][cols_in...] .= dargs_range[i]
+                        dargs[i][in_idx_r...] .= dargs_range[i]
                     else
                         if dargs_range[i] isa Tuple
                             for j in 1:length(dargs_range[i])
@@ -168,50 +179,74 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     end
 end
 
-function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    rtup, rtdown = rt
-    atype = _arraytype(M)
-    if alg.ifparallelupdown
-        @sync begin
-            @async begin
-                set_device_id!(atype, 1)
-                (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-            end
-            @async begin
-                set_device_id!(atype, 2)
-                Md, _down_M_back = pullback(_down_M, atype(M))
-                (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)
+
+    D_split = size(args[N_in[1]])[N_in[2]]
+    result = similar(args[1], size_out)
+    D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
+
+    for i in 1:forloop_iter
+        ind = forloop_iter * rank + i
+        cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+        cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1:ndims(result))
+        split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+        result[cols_out...] = f(split_args...)
+        synchronize(args[1])
+    end
+
+    element_size = prod(size_out) ÷ D_split
+    counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+    MPI.Allgatherv!(VBuffer(result, counts), comm)
+
+    function back(dresult)
+        dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+        for i in 1:forloop_iter
+            ind = forloop_iter * rank + i
+            cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+            cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1: ndims(result))
+            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            _, bp = pullback(f, split_args...)
+            split_dargs = bp(dresult[cols_out...])
+            for j in 1:length(args)
+                if j == N_in[1] 
+                    dargs[j][cols_in...] = split_dargs[j]
+                else
+                    if dargs[j] isa Tuple
+                        for k in 1:length(dargs[j])
+                            dargs[j][k] .+= split_dargs[j][k]
+                        end
+                    else
+                        dargs[j] .+= split_dargs[j]
+                    end
+                end
             end
         end
-    else
-        (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-        Md, _down_M_back = pullback(_down_M, M)
-        (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
-    end
-    function back(((∂rtup, ∂rtdown), ∂err))
-        if alg.ifparallelupdown
-            @sync begin
-                @async begin
-                    set_device_id!(atype, 1)
-                    ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
-                end
-                @async begin
-                    set_device_id!(atype, 2)
-                    ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
-                    ∂Mdown = _down_M_back(∂Mddown)[1]
+
+        synchronize(args[1])
+
+        for j in 1:length(args)
+            if j == N_in[1] 
+                element_size = prod(size(dargs[j])) ÷ D_split
+                counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+                MPI.Allgatherv!(VBuffer(dargs[j], counts), comm)
+            else
+                if dargs[j] isa Tuple
+                    for k in 1:length(dargs[j])
+                        MPI.Allreduce!(dargs[j][k], +, comm)
+                    end
+                else
+                    MPI.Allreduce!(dargs[j], +, comm)
                 end
             end
-        else
-            ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
-            ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
-            ∂Mdown = _down_M_back(∂Mddown)[1]
         end
         
-        set_device_id!(atype, 1)
-        ∂Mup.data .+= atype(∂Mdown).data
-        return NoTangent(), NoTangent(), ∂Mup, NoTangent()
+        return NoTangent(), NoTangent(), dargs...
     end
-    return ((rtup, rtdown), (errup, errdown)), back
+
+    return result, back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)

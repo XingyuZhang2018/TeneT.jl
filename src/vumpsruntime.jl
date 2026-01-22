@@ -4,6 +4,7 @@
     miniter::Int = 1                    # miniter iteration of VUMPS without AD
     maxiter_ad::Int = 10                # maxiter iteration of VUMPS with AD
     miniter_ad::Int = 3                 # miniter iteration of VUMPS with AD
+    ifparallel::Bool = false            # if use parallel for-loop contraction
     forloop_iter::Int = 1               # the iteration of the for-loop contraction, when > 1, automatically use checkpoint
     power_iter::Int = 5                 # the iteration of the power method, only works when `ifsimple_eig = true`
     power_iter_obs::Int = 20            # the iteration of the power method for the up and down observation environment, only works when `ifsimple_eig = true`

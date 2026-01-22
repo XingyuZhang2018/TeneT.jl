@@ -13,6 +13,7 @@ using Printf
 using Parameters
 using ChainRulesCore
 using FileIO
+using MPI
 
 import Base: +, -, *, getindex, Array
 import LinearAlgebra: norm,  mul!
