@@ -19,13 +19,29 @@
 end
 
 function init_VUMPSRuntime(M, χ::Int, alg::VUMPS)
-    A = initial_A(M, χ)
+    A = initial_Au(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
     _, FL = leftenv(AL, conj(AL), M; alg)
     _, FR = rightenv(AR, conj(AR), M; alg)
     C = LRtoC(L, R)
     return VUMPSRuntime(AL, AR, C, FL, FR)
+end
+
+function init_VUMPSBiRuntime(M, χ::Int, alg::VUMPS)
+    Au = initial_Au(M, χ)
+    ALu, Lu, _ = left_canonical(Au)
+    Ru, ARu, _ = right_canonical(ALu)
+    Cu = LRtoC(Lu, Ru)
+
+    Ad = initial_Ad(M, χ)
+    ALd, Ld, _ = left_canonical(Ad)
+    Rd, ARd, _ = right_canonical(ALd)
+    Cd = LRtoC(Ld, Rd)
+
+    _, FL = leftenv(ALu, ALd, M; ifobs=true, alg)
+    _, FR = rightenv(ARu, ARd, M; ifobs=true, alg)
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FL, FR)
 end
 
 _down_m(m::leg4) = permutedims(m, (1,4,3,2))
@@ -107,7 +123,14 @@ function VUMPSRuntime(M::StructArray, χ::Int, alg::VUMPS)
     end
 end
 
-function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
+function VUMPSBiRuntime(M::StructArray, χ::Int, alg::VUMPS)
+    Ni, Nj = size(M)
+    rt = init_VUMPSBiRuntime(M, χ, alg)
+    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init bisides: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+    return rt
+end
+
+function vumps_itr(rt, M::StructArray, alg::VUMPS)
     t = Zygote.@ignore time()
 
     atype = _arraytype(M)
@@ -115,7 +138,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     local err
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
     Zygote.@ignore for i in 1:alg.maxiter
-        rt, err = vumps_step_Hermitian(rt, M, alg)
+        rt, err = vumps_step_bisides(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
@@ -128,7 +151,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
 
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_Hermitian, rt, M, alg) : vumps_step_Hermitian(rt, M, alg)
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_bisides, rt, M, alg) : vumps_step_bisides(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
@@ -142,7 +165,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     return rt, err
 end
 
-function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
+function leading_boundary(rt::Union{VUMPSRuntime,VUMPSBiRuntime}, M::StructArray, alg::VUMPS)
     rt, err = vumps_itr(rt, M, alg)
     return rt, err
 end
@@ -203,6 +226,22 @@ function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg, Fo
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
 
+function VUMPSEnv(rt::VUMPSBiRuntime, M::StructArray, alg)
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = rt
+
+    ACu = ALCtoAC(ALu, Cu)
+    ACd = ALCtoAC(ALd, Cd)
+
+    power_iter_ori = alg.power_iter
+    alg.power_iter = alg.power_iter_obs
+    _, FLu =  leftenv(ALu, conj(ALu), M, FL; ifobs = false, alg)
+    _, FRu = rightenv(ARu, conj(ARu), M, FR; ifobs = false, alg)
+    _, FLo =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
+    _, FRo = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
+    alg.power_iter = power_iter_ori
+    return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
+end
+
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
     # AL, AR, C, FL, FR = to_Z2(AL), to_Z2(AR), to_Z2(C), to_Z2(FL), to_Z2(FR)
@@ -228,14 +267,72 @@ end
 function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL,C)
-    _, FL =  leftenv(AL, conj(AL), M, FL; alg)
-    _, FR = rightenv(AR, conj(AR), M, FR; alg)
     _, AC = ACenv(AC, FL, M, FR; alg)
     _,  C =  Cenv( C, FL, FR; alg)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    _, FL =  leftenv(AL, conj(AL), M, FL; alg)
+    _, FR = rightenv(AR, conj(AR), M, FR; alg)
     return VUMPSRuntime(AL, AR, C, FL, FR), err
+end
+
+function vumps_step_bisides(rt::VUMPSBiRuntime, M, alg::VUMPS)
+    err = 0.0
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = rt
+    ACu = ALCtoAC(ALu, Cu)
+    ACd = ALCtoAC(ALd, Cd)
+
+
+    # # alg.power_iter = 20
+    # _, FL =  leftenv(ALu, conj(ALu), M, FL; ifobs = false, alg)
+    # _, FR = rightenv(ARu, conj(ARu), M, FR; ifobs = false, alg)
+    # # alg.power_iter = 1
+    # _, ACu = ACenv(ACu, FL, M, FR; alg)
+    # _,  Cu =  Cenv( Cu, FL, FR; alg)
+    # ALu, ARu, errL, errR = ACCtoALAR(ACu, Cu)
+    # err += errL + errR
+
+    # ALu, ALd = biALuALd(ALu, ALd, alg)
+    # ARu, ARd = biARuARd(ARu, ARd, alg)
+    _, FL =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
+    _, FR = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
+    _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
+    _, R = rightCenv(ARu, ARd; ifobs = true, alg)
+    # FL, FR = absorb_invCtoEu(L, R, FL, FR)
+
+    _, ACu = ACenv(ACu, FL, M, FR; alg)
+    _,  Cu =  Cenv( Cu, FL, FR; alg)
+    ACu, Cu = absorb_invLRtoACCu(L, R, ACu, Cu)
+    ALu, ARu, errL, errR = ACCtoALAR(ACu, Cu)
+    err += errL + errR
+    
+
+    # alg.power_iter = 20
+    # _, FL =  leftenv(conj(ALd), ALd, M, FL; ifobs = false, ifdown=true, alg)
+    # _, FR = rightenv(conj(ARd), ARd, M, FR; ifobs = false, ifdown=true, alg)
+    # # alg.power_iter = 1
+    # _, ACd = ACdenv(ACd, FL, M, FR; alg)
+    # _,  Cd =  Cdenv( Cd, FL, FR; alg)
+    # ALd, ARd, errL, errR = ACCtoALAR(ACd, Cd)
+    # err += errL + errR
+
+    
+    # ALu, ALd = biALuALd(ALu, ALd, alg)
+    # ARu, ARd = biARuARd(ARu, ARd, alg)
+    _, FL =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
+    _, FR = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
+    _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
+    _, R = rightCenv(ARu, ARd; ifobs = true, alg)
+    # FL, FR = absorb_invCtoEd(L, R, FL, FR)
+
+    _, ACd = ACdenv(ACd, FL, M, FR; alg)
+    _,  Cd =  Cdenv( Cd, FL, FR; alg)
+    ACd, Cd = absorb_invLRtoACCd(L, R, ACd, Cd)
+    ALd, ARd, errL, errR = ACCtoALAR(ACd, Cd)
+    err += errL + errR
+
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FL, FR), err
 end
 
 function fix_gauge_vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)

@@ -5,16 +5,33 @@ return the `type` observable of the `model`. Requires that `type` tensor defined
 """
 function observable(env, M, ::Val{:Z}, alg)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    # @unpack ALu, ARu, ARd = env
     atype = _arraytype(ACu[1])
     Ni,Nj = size(ACu)
     l = length(unique(M.pattern))
-    λFLo, _ =  rightenv(ARu, ARu, M; ifobs=true, alg, ifvalue=true)  
-      λC, _ = rightCenv(ARu, ARu;    ifobs=true, alg, ifvalue=true)
+    alg.ifsimple_eig = false
+    λFLo, _ =  rightenv(ARd, conj(ARd), M; ifobs=true, alg, ifvalue=true)  
+      λC, _ = rightCenv(ARd, conj(ARd);    ifobs=true, alg, ifvalue=true)
+    # return prod(λFLo./λC)^(1/Ni)
+    @show log(prod(λFLo./λC)^(1/Ni)) - 1.0257928172049902
+ 
+    λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg, ifvalue=true)  
+    λC, _ = rightCenv(ARu, conj(ARu);    ifobs=true, alg, ifvalue=true)
+    @show log(prod(λFLo./λC)^(1/Ni)) - 1.0257928172049902
+
+    λFLo, _ =  rightenv(ARu, ARd, M; ifobs=true, alg, ifvalue=true)  
+    λC, _ = rightCenv(ARu, ARd;    ifobs=true, alg, ifvalue=true)
+    @show log(prod(λFLo./λC)^(1/Ni)) - 1.0257928172049902
+
     return prod(λFLo./λC)^(1/Ni)
 end
 
 function observable(env, model::MT, pattern::Matrix{Int}, type) where {MT <: HamiltonianModel}
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    # @unpack ACu, ARu, ACd, ARd, FLo, FRo = env
+    # @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = env
+    # ACu = TeneT.ALCtoAC(ALu, Cu)
+    # ACd = TeneT.ALCtoAC(ALd, Cd)
     Ni,Nj = size(ACu)
     atype = _arraytype(ACu[1])
     l = length(unique(pattern))
@@ -30,13 +47,13 @@ function observable(env, model::MT, pattern::Matrix{Int}, type) where {MT <: Ham
     for p in 1:l
         i, j = Tuple(findfirst(==(p), M.pattern))
         # for i in 1:Ni, j in 1:Nj
-        if ACu.pattern == ACd.pattern
-            ir = mod1(i + 1, Ni)
-        else
-            ir = Ni + 1 - i
-        end
-        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],ACd[ir,j],FRo[i,j])
-          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],ACd[ir,j],FRo[i,j])
+        # if ACu.pattern == ACd.pattern
+        #     ir = mod1(i + 1, Ni)
+        # else
+        #     ir = Ni + 1 - i
+        # end
+        obs = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],M_obs[i,j],ACd[i,j],FRo[i,j])
+          λ = ein"(((adf,abc),dgeb),fgh),ceh -> "(FLo[i,j],ACu[i,j],    M[i,j],ACd[i,j],FRo[i,j])
         obs_tol += Array(obs)[]/Array(λ)[]
     end
     if type == Val(:mag)

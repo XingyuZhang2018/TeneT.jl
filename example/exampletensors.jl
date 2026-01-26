@@ -25,6 +25,9 @@ function model_tensor(model::Ising, ::Val{:bulk})
     wsq = sqrt(w)
 
     m = ein"ia,ib,ic,id -> abcd"(wsq, wsq, wsq, wsq)
+    U = rand(ComplexF64, 2,2)
+    Uinv = inv(U)
+    m = ein"abcd,ia,bj,ck,ld ->ijkl"(m,U,Uinv,Uinv,U)
     return m
 end
 

@@ -94,6 +94,18 @@ function Rmap(Ri, ARui::leg3, ARdir::leg3)
     return out
 end
 
+function Lmap(Lij, ALuij::leg4, ALdirj::leg4)
+    # ein"(ad,dbe),abc -> ce"(Lij, ALdirj, ALuij)
+    @tensor out[c,e] := Lij[a,d] * ALdirj[d,b,f,e] * ALuij[a,b,f,c]
+    return out
+end
+
+function Rmap(Ri, ARui::leg4, ARdir::leg4)
+    # ein"(abc,ce),dbe->ad"(ARui, Ri, ARdir)
+    @tensor out[a,d] := ARui[a,b,f,c] * Ri[c,e] * ARdir[d,b,f,e]
+    return out
+end
+
 """ 
                                 ┌─────── ACᵢⱼ ─────┐              a ────┬──── c  
 ┌───── ACᵢ₊₁ⱼ ─────┐            │        │         │              │     b     │ 
@@ -142,6 +154,18 @@ function Cmap(C, FL::leg4, FR)
     return out
 end
 
+function Cdmap(C, FL::leg3, FR)
+    # ein"acd,(ab,bce) -> de"(FL,C,FR)
+    @tensor out[a,b] := FL[a,c,d] * C[d,e] * FR[b,c,e]
+    return out
+end
+
+function Cdmap(C, FL::leg4, FR)
+    # ein"acde,(ab,bcdf) -> ef"(FL,C,FR)
+    @tensor out[a,b] := FL[a,c,d,e] * C[e,f] * FR[b,c,d,f]
+    return out
+end
+
 function ALCtoACmap(AL::leg3, C)
     # ein"astc,cb -> asb"(AL, C)
     @tensor out[a,s,b] := AL[a,s,c] * C[c,b]
@@ -163,6 +187,61 @@ end
 function CARtoACmap(C, AR::leg4)
     # ein"ab,bstu -> astu"(C, AR)
     @tensor out[a,s,t,u] := C[a,b] * AR[b,s,t,u]
+    return out
+end
+
+function absorb_invLtoFLu(invL, FL::leg3)
+    @tensor out[a,b,d] := FL[a,b,c] * invL[c,d]
+    return out
+end
+
+function absorb_invLtoFLu(invL, FL::leg4)
+    @tensor out[a,b,c,e] := FL[a,b,c,d] * invL[d,e]
+    return out
+end
+
+function absorb_invRtoFRu(invR, FR::leg3)
+    @tensor out[a,b,d] := FR[a,b,c] * invR[c,d]
+    return out
+end
+
+function absorb_invRtoFRu(invR, FR::leg4)
+    @tensor out[a,b,c,e] := FR[a,b,c,d] * invR[d,e]
+    return out
+end
+
+function absorb_invLtoFLd(invL, FL::leg3)
+    @tensor out[d,b,c] := FL[a,b,c] * invL[d,a]
+    return out
+end
+
+function absorb_invLtoFLd(invL, FL::leg4)
+    @tensor out[d,b,e,c] := FL[a,b,e,c] * invL[d,a]
+    return out
+end
+
+function absorb_invRtoFRd(invR, FR::leg3)
+    @tensor out[d,b,c] := FR[a,b,c] * invR[d,a]
+    return out
+end
+
+function absorb_invRtoFRd(invR, FR::leg4)
+    @tensor out[d,b,e,c] := FR[a,b,e,c] * invR[d,a]
+    return out
+end
+
+function absorb_invLRtoAC(invL, invR, AC::leg3)
+    @tensor out[a,c,f] := invL[b,a] * AC[b,c,e] * invR[e,f]
+    return out
+end
+
+function absorb_invLRtoAC(invL, invR, AC::leg4)
+    @tensor out[a,c,d,f] := invL[b,a] * AC[b,c,d,e] * invR[e,f]
+    return out
+end
+
+function absorb_invLRtoC(invL, invR, C)
+    @tensor out[a,f] := invL[b,a] * C[b,e] * invR[e,f]
     return out
 end
 

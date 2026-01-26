@@ -3,17 +3,30 @@ function cellones(A)
     return ISA(A, [(χ,χ) for _ = 1:length(A.data)])
 end
 
-function initial_A(M::leg4, χ::Int)
+function initial_Au(M::leg4, χ::Int)
     return randSA(M, [(D = size(m, 4); (χ, D, χ)) for m in M.data])
 end
 
-function initial_A(M::leg5, χ::Int)
+function initial_Au(M::leg5, χ::Int)
     return randSA(M, [(D = size(m, 4); (χ, D, D, χ)) for m in M.data])
 end
 
-function initial_A(M::leg8, χ::Int)
+function initial_Au(M::leg8, χ::Int)
     return randSA(M, [(D = size(m, 7); (χ, D, D, χ)) for m in M.data])
 end
+
+function initial_Ad(M::leg4, χ::Int)
+    return randSA(M, [(D = size(m, 2); (χ, D, χ)) for m in M.data])
+end
+
+function initial_Ad(M::leg5, χ::Int)
+    return randSA(M, [(D = size(m, 2); (χ, D, D, χ)) for m in M.data])
+end
+
+function initial_Ad(M::leg8, χ::Int)
+    return randSA(M, [(D = size(m, 2); (χ, D, D, χ)) for m in M.data])
+end
+
 
 function FLint(AL, M::leg4)
     χ = size(AL[1], 1)

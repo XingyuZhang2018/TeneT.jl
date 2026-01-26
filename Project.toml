@@ -21,6 +21,7 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 cuTENSOR = "011b41b2-24ef-40a8-b3eb-fa098493e9e1"
 
 [compat]
+CUDA = "5.8.2"
 OMEinsum = "0.8.1"
 Parameters = "0.12.3"
 Printf = "1.11.0"

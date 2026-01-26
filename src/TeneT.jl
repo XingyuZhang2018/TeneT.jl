@@ -19,7 +19,7 @@ import VectorInterface: inner, scale, scale!!, scalartype, zerovector, add!!
 import CUDA: CuArray
 # import KrylovKit RealVec
 export StructArray, randSA
-export VUMPS, VUMPSRuntime, VUMPSEnv
+export VUMPS, VUMPSRuntime, VUMPSBiRuntime, VUMPSEnv
 export leading_boundary
 export save_rt, load_rt
 

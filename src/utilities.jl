@@ -33,22 +33,23 @@ orth_for_ad(v) = v
 function simple_eig(f, v; power_iter, ifvalue=false)
     λ = 0.0
     # Zygote.@ignore begin # this is not correct when VUMPS does not converge
-    #     for _ in 1:power_iter
-    #         v = f(v)
-    #         λ′ = norm(v)
-    #         v /= λ′
-    #         abs(λ′ - λ) < 1e-8 && break
-    #         λ = λ′
-    #     end
+        for _ in 1:power_iter
+            v = f(v)
+            λ′ = norm(v)
+            v /= λ′
+            abs(λ′ - λ) < 1e-12 && break
+            λ = λ′
+        end
     # end
-    for _ in 1:power_iter
-        v = f(v)
-        v /= norm(v)
-    end
+    # for _ in 1:power_iter
+    #     v = f(v)
+    #     v /= norm(v)
+    # end
 
     v = orth_for_ad(v)
     if ifvalue
-        CUDA.@allowscalar λ = f(v)[1] ./ v[1]
+        # CUDA.@allowscalar λ = f(v)[1] ./ v[1]
+        λ = dot(v, f(v))
     end
     return λ, v
 end
