@@ -5,7 +5,8 @@
     maxiter_ad::Int = 10                # maxiter iteration of VUMPS with AD
     miniter_ad::Int = 3                 # miniter iteration of VUMPS with AD
     forloop_iter::Int = 1               # the iteration of the for-loop contraction, when > 1, automatically use checkpoint
-    power_iter::Int = 5                 # the iteration of the power method, only works when `ifsimple_eig = true`
+    power_iter::Int = 1                 # the iteration of the power method, only works when `ifsimple_eig = true`
+    power_iter_ad::Int = 5              # the iteration of the power method with AD, only works when `ifsimple_eig = true`
     power_iter_obs::Int = 20            # the iteration of the power method for the up and down observation environment, only works when `ifsimple_eig = true`
     show_every::Int = 10                # show the iteration result at every n iterations
     verbosity::Int = Defaults.verbosity # verbosity control the output message
@@ -128,7 +129,10 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
 
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
     for i in 1:alg.maxiter_ad
+        power_iter_backup = alg.power_iter
+        alg.power_iter = alg.power_iter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_Hermitian, rt, M, alg) : vumps_step_Hermitian(rt, M, alg)
+        alg.power_iter = power_iter_backup
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
