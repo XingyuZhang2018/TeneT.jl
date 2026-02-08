@@ -39,9 +39,17 @@ function init_VUMPSBiRuntime(M, χ::Int, alg::VUMPS)
     Rd, ARd, _ = right_canonical(ALd)
     Cd = LRtoC(Ld, Rd)
 
-    _, FL = leftenv(ALu, ALd, M; ifobs=true, alg)
-    _, FR = rightenv(ARu, ARd, M; ifobs=true, alg)
-    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FL, FR)
+    alg.ifsimple_eig = false
+    _, FLu =  leftenv(ALu, conj(ALu), M; ifobs=true, alg)
+    _, FRu = rightenv(ARu, conj(ARu), M; ifobs=true, alg)
+    _, FLd =  leftenv(conj(ALd), ALd, M; ifobs=true, alg)
+    _, FRd = rightenv(conj(ARd), ARd, M; ifobs=true, alg)
+    _, FLo =  leftenv(ALu, ALd, M; ifobs=true, alg)
+    _, FRo = rightenv(ARu, ARd, M; ifobs=true, alg)
+    _, L =   leftCenv(ALu, ALd; ifobs=true, alg)
+    _, R =  rightCenv(ARu, ARd; ifobs=true, alg)
+    alg.ifsimple_eig = true
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R)
 end
 
 _down_m(m::leg4) = permutedims(m, (1,4,3,2))
@@ -137,8 +145,69 @@ function vumps_itr(rt, M::StructArray, alg::VUMPS)
     id = get_device_id(atype)
     local err
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
+    # Zygote.@ignore for i in 1:alg.maxiter
+    #     rt, err = vumps_step_preup(rt, M, alg)
+    #     alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     if err < alg.tol && i >= alg.miniter
+    #         alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("preup VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #         break
+    #     end
+    #     if i == alg.maxiter
+    #         alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("preup VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     end
+    # end
+    # Zygote.@ignore for i in 1:alg.maxiter
+    #     rt, err = vumps_step_predown(rt, M, alg)
+    #     alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     if err < alg.tol && i >= alg.miniter
+    #         alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("predown VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #         break
+    #     end
+    #     if i == alg.maxiter
+    #         alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("predown VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     end
+    # end
+    # @unpack ALu, ALd = rt
+    # alg.ifsimple_eig = false
+    # overlap, _ = leftCenv(ALu, ALd; ifobs = true, alg)
+    # alg.ifsimple_eig = true
+    # @show overlap norm(overlap)
+    # Zygote.@ignore for i in 1:alg.maxiter
+    #     rt, err = vumps_step_up(rt, M, alg)
+    #     alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     if err < alg.tol && i >= alg.miniter
+    #         alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("up VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #         break
+    #     end
+    #     if i == alg.maxiter
+    #         alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("up VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     end
+    # end
+    # Zygote.@ignore for i in 1:alg.maxiter
+    #     rt, err = vumps_step_down(rt, M, alg)
+    #     alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     if err < alg.tol && i >= alg.miniter
+    #         alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("down VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #         break
+    #     end
+    #     if i == alg.maxiter
+    #         alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("down VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     end
+    # end
+    # @unpack ALu, ALd = rt
+    # alg.ifsimple_eig = false
+    # overlap, _ = leftCenv(ALu, ALd; ifobs = true, alg)
+    # alg.ifsimple_eig = true
+    # @show overlap norm(overlap)
     Zygote.@ignore for i in 1:alg.maxiter
-        rt, err = vumps_step_bisides(rt, M, alg)
+        rt, err = vumps_step_preup(rt, M, alg)
+        rt, err = vumps_step_predown(rt, M, alg)
+        # rt, err = vumps_step(rt, M, alg)
+        # if err < 1e-6
+        #     alg.ifsimple_eig = false
+        # else
+        #     alg.ifsimple_eig = true
+        # end
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
@@ -151,7 +220,14 @@ function vumps_itr(rt, M::StructArray, alg::VUMPS)
 
     Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_bisides, rt, M, alg) : vumps_step_bisides(rt, M, alg)
+        # if err < 1e-6
+        #     alg.ifsimple_eig = false
+        # else
+        #     alg.ifsimple_eig = true
+        # end
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_preup, rt, M, alg) : vumps_step_preup(rt, M, alg)
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step_predown, rt, M, alg) : vumps_step_predown(rt, M, alg)
+        # rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
@@ -161,6 +237,33 @@ function vumps_itr(rt, M::StructArray, alg::VUMPS)
             alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
         end
     end
+    # Zygote.@ignore for i in 1:alg.maxiter
+    #     rt, err = vumps_step_preup(rt, M, alg)
+    #     alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     if err < alg.tol && i >= alg.miniter
+    #         alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("preup VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #         break
+    #     end
+    #     if i == alg.maxiter
+    #         alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("preup VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     end
+    # end
+    # Zygote.@ignore for i in 1:alg.maxiter
+    #     rt, err = vumps_step_predown(rt, M, alg)
+    #     alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     if err < alg.tol && i >= alg.miniter
+    #         alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("predown VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #         break
+    #     end
+    #     if i == alg.maxiter
+    #         alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("predown VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+    #     end
+    # end
+    # @unpack ALu, ALd = rt
+    # alg.ifsimple_eig = false
+    # overlap, _ = leftCenv(ALu, ALd; ifobs = true, alg)
+    # alg.ifsimple_eig = true
+    # @show overlap norm(overlap)
 
     return rt, err
 end
@@ -221,24 +324,50 @@ function VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg, Fo
     ALd, ARd, Cd = map(x->atype_device!(atype, x, 1), [ALd, ARd, Cd]) # transfer device 2 data to 1
     ACd = ALCtoAC(ALd, Cd)
 
+    alg.ifsimple_eig = false
     _, FLo =  leftenv(ALu, ALd, M, Fo[1]; ifobs = true, alg)
     _, FRo = rightenv(ARu, ARd, M, Fo[2]; ifobs = true, alg)
+    λ, _ = leftCenv(ALu, ALd; ifobs = true, alg)
+    @show norm(λ)
+    alg.ifsimple_eig = true
+
+    Cint = TeneT.cellones(ARu)[1]
+    λu,  = eigsolve(C->TeneT.Cmap(1,C,ARu[1,:],conj(ARu[1,:])), Cint, 3, :LM; maxiter=100, ishermitian = false)
+    λd,  = eigsolve(C->TeneT.Cmap(1,C,conj(ARd[1,:]),ARd[1,:]), Cint, 3, :LM; maxiter=100, ishermitian = false)
+    λud,  = eigsolve(C->TeneT.Cmap(1,C,ARu[1,:],ARd[1,:]), Cint, 3, :LM; maxiter=100, ishermitian = false)
+    @show -1/log(abs(λu[2]/λu[1]))
+    @show -1/log(abs(λd[2]/λd[1]))
+    @show -1/log(abs(λud[2]/λud[1]))
+    
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
 
 function VUMPSEnv(rt::VUMPSBiRuntime, M::StructArray, alg)
-    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = rt
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo = rt
 
     ACu = ALCtoAC(ALu, Cu)
     ACd = ALCtoAC(ALd, Cd)
 
     power_iter_ori = alg.power_iter
     alg.power_iter = alg.power_iter_obs
-    _, FLu =  leftenv(ALu, conj(ALu), M, FL; ifobs = false, alg)
-    _, FRu = rightenv(ARu, conj(ARu), M, FR; ifobs = false, alg)
-    _, FLo =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
-    _, FRo = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
+    _, FLu =  leftenv(ALu, conj(ALu), M, FLu; ifobs = false, alg)
+    _, FRu = rightenv(ARu, conj(ARu), M, FRu; ifobs = false, alg)
+    _, FLo =  leftenv(ALu, ALd, M, FLo; ifobs = true, alg)
+    _, FRo = rightenv(ARu, ARd, M, FRo; ifobs = true, alg)
     alg.power_iter = power_iter_ori
+    alg.ifsimple_eig = false
+    λ, L  = leftCenv(ALu, ALd; ifobs = true, alg)
+    alg.ifsimple_eig = true
+    @show λ norm(λ)
+
+    Cint = TeneT.cellones(ARu)[1]
+    λu,  = eigsolve(C->TeneT.Cmap(1,C,ARu[1,:],conj(ARu[1,:])), Cint, 3, :LM; maxiter=100, ishermitian = false)
+    λd,  = eigsolve(C->TeneT.Cmap(1,C,ARd[1,:],conj(ARd[1,:])), Cint, 3, :LM; maxiter=100, ishermitian = false)
+    λud,  = eigsolve(C->TeneT.Cmap(1,C,ARu[1,:],ARd[1,:]), Cint, 3, :LM; maxiter=100, ishermitian = false)
+    @show -1/log(abs(λu[2]/λu[1]))
+    @show -1/log(abs(λd[2]/λd[1]))
+    @show -1/log(abs(λud[2]/λud[1]))
+
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
 
@@ -264,7 +393,7 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
 end
 
-function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
+function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL,C)
     _, AC = ACenv(AC, FL, M, FR; alg)
@@ -277,12 +406,92 @@ function vumps_step_Hermitian(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
     return VUMPSRuntime(AL, AR, C, FL, FR), err
 end
 
-function vumps_step_bisides(rt::VUMPSBiRuntime, M, alg::VUMPS)
+function vumps_step_preup(rt::VUMPSBiRuntime, M, alg::VUMPS)
+    err = 0.0
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R = rt
+    ACu = ALCtoAC(ALu, Cu)
+
+    _, FLu =  leftenv(ALu, conj(ALu), M, FLu; ifobs = false, alg)
+    _, FRu = rightenv(ARu, conj(ARu), M, FRu; ifobs = false, alg)
+
+    _, ACu = ACenv(ACu, FLu, M, FRu; alg)
+    _,  Cu =  Cenv( Cu, FLu, FRu; alg)
+    # ACu, Cu = absorb_invLRtoACCu(L, R, ACu, Cu)
+    ALu, ARu, errL, errR = ACCtoALAR(ACu, Cu)
+    err += errL + errR
+
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R), err
+end
+
+function vumps_step_predown(rt::VUMPSBiRuntime, M, alg::VUMPS)
+    err = 0.0
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R = rt
+    ACd = ALCtoAC(ALd, Cd)
+
+    _, FLd =  leftenv(conj(ALd), ALd, M, FLd; ifobs = false, alg)
+    _, FRd = rightenv(conj(ARd), ARd, M, FRd; ifobs = false, alg)
+
+    _, ACd = ACdenv(ACd, FLd, M, FRd; alg)
+    _,  Cd =  Cdenv( Cd, FLd, FRd; alg)
+    # ACd, Cd = absorb_invLRtoACCd(L, R, ACd, Cd)
+    ALd, ARd, errL, errR = ACCtoALAR(ACd, Cd)
+    err += errL + errR
+
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R), err
+end
+
+function vumps_step_up(rt::VUMPSBiRuntime, M, alg::VUMPS)
     err = 0.0
     @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = rt
     ACu = ALCtoAC(ALu, Cu)
+
+    alg.ifsimple_eig = false
+    _, FL =  leftenv(ALu, ALd, M, FL; ifobs = false, alg)
+    _, FR = rightenv(ARu, ARd, M, FR; ifobs = false, alg)
+
+    _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
+    _, R = rightCenv(ARu, ARd; ifobs = true, alg)
+    alg.ifsimple_eig = true
+
+    FL, FR = absorb_invCtoEu(L, R, FL, FR)
+
+    _, ACu = ACenv(ACu, FL, M, FR; alg)
+    _,  Cu =  Cenv( Cu, FL, FR; alg)
+    # ACu, Cu = absorb_invLRtoACCu(L, R, ACu, Cu)
+    ALu, ARu, errL, errR = ACCtoALAR(ACu, Cu)
+    err += errL + errR
+
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FL, FR), err
+end
+
+function vumps_step_down(rt::VUMPSBiRuntime, M, alg::VUMPS)
+    err = 0.0
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = rt
     ACd = ALCtoAC(ALd, Cd)
 
+    alg.ifsimple_eig = false
+    _, FL =  leftenv(ALu, ALd, M, FL; ifobs = false, alg)
+    _, FR = rightenv(ARu, ARd, M, FR; ifobs = false, alg)
+
+    _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
+    _, R = rightCenv(ARu, ARd; ifobs = true, alg)
+    alg.ifsimple_eig = true
+    FL, FR = absorb_invCtoEd(L, R, FL, FR)
+
+    _, ACd = ACdenv(ACd, FL, M, FR; alg)
+    _,  Cd =  Cdenv( Cd, FL, FR; alg)
+    # ACd, Cd = absorb_invLRtoACCd(L, R, ACd, Cd)
+    ALd, ARd, errL, errR = ACCtoALAR(ACd, Cd)
+    err += errL + errR
+
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FL, FR), err
+end
+
+function vumps_step(rt::VUMPSBiRuntime, M, alg::VUMPS)
+    err = 0.0
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R = rt
+    ACu = ALCtoAC(ALu, Cu)
+    ACd = ALCtoAC(ALd, Cd)
 
     # # alg.power_iter = 20
     # _, FL =  leftenv(ALu, conj(ALu), M, FL; ifobs = false, alg)
@@ -295,16 +504,22 @@ function vumps_step_bisides(rt::VUMPSBiRuntime, M, alg::VUMPS)
 
     # ALu, ALd = biALuALd(ALu, ALd, alg)
     # ARu, ARd = biARuARd(ARu, ARd, alg)
-    _, FL =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
-    _, FR = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
-    _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
-    _, R = rightCenv(ARu, ARd; ifobs = true, alg)
-    # FL, FR = absorb_invCtoEu(L, R, FL, FR)
+    # alg.ifsimple_eig = false
+    _, FLo =  leftenv(ALu, ALd, M, FLo; ifobs = false, alg)
+    _, FRo = rightenv(ARu, ARd, M, FRo; ifobs = false, alg)
+    # alg.ifsimple_eig = false
+    _, L  = leftCenv(ALu, ALd, L; ifobs = false, alg)
+    _, R = rightCenv(ARu, ARd, R; ifobs = false, alg)
+    # alg.ifsimple_eig = true  
+    # @show λ
 
-    _, ACu = ACenv(ACu, FL, M, FR; alg)
-    _,  Cu =  Cenv( Cu, FL, FR; alg)
-    ACu, Cu = absorb_invLRtoACCu(L, R, ACu, Cu)
+    FLu, FRu = absorb_invCtoEu(L, R, FLo, FRo)
+
+    _, ACu = ACenv(ACu, FLu, M, FRu; alg)
+    _,  Cu =  Cenv( Cu, FLu, FRu; alg)
+    # ACu, Cu = absorb_invLRtoACCu(L, R, ACu, Cu)
     ALu, ARu, errL, errR = ACCtoALAR(ACu, Cu)
+    # @show errL + errR
     err += errL + errR
     
 
@@ -320,15 +535,55 @@ function vumps_step_bisides(rt::VUMPSBiRuntime, M, alg::VUMPS)
     
     # ALu, ALd = biALuALd(ALu, ALd, alg)
     # ARu, ARd = biARuARd(ARu, ARd, alg)
+    # alg.ifsimple_eig = false
+    # _, FLo =  leftenv(ALu, ALd, M, FLo; ifobs = false, alg)
+    # _, FRo = rightenv(ARu, ARd, M, FRo; ifobs = false, alg)
+
+    # _, L  = leftCenv(ALu, ALd, L; ifobs = false, alg)
+    # _, R = rightCenv(ARu, ARd, R; ifobs = false, alg)
+    # # alg.ifsimple_eig = true
+    FLd, FRd = absorb_invCtoEd(L, R, FLo, FRo)
+
+    _, ACd = ACdenv(ACd, FLd, M, FRd; alg)
+    _,  Cd =  Cdenv( Cd, FLd, FRd; alg)
+    # ACd, Cd = absorb_invLRtoACCd(L, R, ACd, Cd)
+
+    ALd, ARd, errL, errR = ACCtoALAR(ACd, Cd)
+    # @show errL + errR
+    err += errL + errR
+
+    return VUMPSBiRuntime(ALu, ARu, Cu, ALd, ARd, Cd, FLu, FRu, FLd, FRd, FLo, FRo, L, R), err
+end
+
+function vumps_step_power(rt::VUMPSBiRuntime, M, alg::VUMPS)
+    err = 0.0
+    @unpack ALu, ARu, Cu, ALd, ARd, Cd, FL, FR = rt
+    ACu = ALCtoAC(ALu, Cu)
+    ACd = ALCtoAC(ALd, Cd)
+
     _, FL =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
     _, FR = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
+    
     _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
     _, R = rightCenv(ARu, ARd; ifobs = true, alg)
-    # FL, FR = absorb_invCtoEd(L, R, FL, FR)
 
-    _, ACd = ACdenv(ACd, FL, M, FR; alg)
-    _,  Cd =  Cdenv( Cd, FL, FR; alg)
-    ACd, Cd = absorb_invLRtoACCd(L, R, ACd, Cd)
+    FLu, FRu = absorb_invCtoEu(L, R, FL, FR)
+
+    _, ACu = ACenv(ACu, FLu, M, FRu; alg)
+    _,  Cu =  Cenv( Cu, FLu, FRu; alg)
+    ALu, ARu, errL, errR = ACCtoALAR(ACu, Cu)
+    err += errL + errR
+    
+    _, FL =  leftenv(ALu, ALd, M, FL; ifobs = true, alg)
+    _, FR = rightenv(ARu, ARd, M, FR; ifobs = true, alg)
+
+    _, L  = leftCenv(ALu, ALd; ifobs = true, alg)
+    _, R = rightCenv(ARu, ARd; ifobs = true, alg)
+
+    FLd, FRd = absorb_invCtoEd(L, R, FL, FR)
+
+    _, ACd = ACdenv(ACd, FLd, M, FRd; alg)
+    _,  Cd =  Cdenv( Cd, FLd, FRd; alg)
     ALd, ARd, errL, errR = ACCtoALAR(ACd, Cd)
     err += errL + errR
 

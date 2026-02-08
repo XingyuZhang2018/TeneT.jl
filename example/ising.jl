@@ -9,8 +9,8 @@ using CUDA
 
 @testset "pattern $pattern ising forward with $atype" for pattern in [[1;;]], atype = [Array]
     Random.seed!(100)
-    β = 0.5
-    χ = 10
+    β = 0.4
+    χ = 50
     model = Ising(β)
     l = length(unique(pattern))
     TeneT.set_device_id!(atype, 1)
@@ -21,21 +21,24 @@ using CUDA
     # M[1,2,2,2]=1.0
     # M[2,1,2,2]=1.0
     # M[1,1,2,2]=1.0
+    # @show model_tensor(model, Val(:bulk))
     data =[atype(model_tensor(model, Val(:bulk))) for _ in 1:l]
     # data = [rand(ComplexF64, 2,2,2,2) for _ in 1:l]
     M = StructArray(data, pattern)
+    Random.seed!(12213120)
     alg = VUMPS(maxiter=1000, miniter=1, verbosity=3, 
                 tol=1e-10,
+                show_every=100,
                 ifsimple_eig=true,
                 power_iter=1,
-                power_iter_obs=100,
-                ifupdown=true, ifdownfromup=true, ifparallelupdown=false)
+                power_iter_obs=1,
+                ifupdown=true, ifdownfromup=false, ifparallelupdown=false)
     
     rt = @time VUMPSBiRuntime(M, χ, alg)
     rt, _ = @time leading_boundary(rt, M, alg)
     env = VUMPSEnv(rt, M, alg)
 
-    @show  log(observable(env, M, Val(:Z), alg)) - 1.0257928172049902
+    @show log(observable(env, M, Val(:Z), alg)) - 0.879363820774940
     # # @test observable(env, M, Val(:Z), alg) ≈ 2.789305993957602
     # # @test observable(env, model, Val(:mag)   ) ≈ magofβ(model) 
     # # @show observable(env, model, pattern, Val(:energy), alg) 

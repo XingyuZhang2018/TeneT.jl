@@ -7,6 +7,7 @@ using LinearAlgebra
 using KrylovKit
 using Zygote
 using TensorOperations
+using OMEinsum
 using cuTENSOR
 using Printf
 using Parameters

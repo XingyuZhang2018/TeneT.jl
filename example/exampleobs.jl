@@ -10,18 +10,18 @@ function observable(env, M, ::Val{:Z}, alg)
     Ni,Nj = size(ACu)
     l = length(unique(M.pattern))
     alg.ifsimple_eig = false
-    λFLo, _ =  rightenv(ARd, conj(ARd), M; ifobs=true, alg, ifvalue=true)  
-      λC, _ = rightCenv(ARd, conj(ARd);    ifobs=true, alg, ifvalue=true)
+    λFLo, _ =  rightenv(conj(ARd), ARd, M; ifobs=true, alg, ifvalue=true)  
+      λC, _ = rightCenv(conj(ARd), ARd;    ifobs=true, alg, ifvalue=true)
     # return prod(λFLo./λC)^(1/Ni)
-    @show log(prod(λFLo./λC)^(1/Ni)) - 1.0257928172049902
+    @show log(prod(λFLo./λC)^(1/Ni)) - 0.879363820774940
  
     λFLo, _ =  rightenv(ARu, conj(ARu), M; ifobs=true, alg, ifvalue=true)  
     λC, _ = rightCenv(ARu, conj(ARu);    ifobs=true, alg, ifvalue=true)
-    @show log(prod(λFLo./λC)^(1/Ni)) - 1.0257928172049902
+    @show log(prod(λFLo./λC)^(1/Ni)) - 0.879363820774940
 
     λFLo, _ =  rightenv(ARu, ARd, M; ifobs=true, alg, ifvalue=true)  
     λC, _ = rightCenv(ARu, ARd;    ifobs=true, alg, ifvalue=true)
-    @show log(prod(λFLo./λC)^(1/Ni)) - 1.0257928172049902
+    @show log(prod(λFLo./λC)^(1/Ni)) - 0.879363820774940
 
     return prod(λFLo./λC)^(1/Ni)
 end

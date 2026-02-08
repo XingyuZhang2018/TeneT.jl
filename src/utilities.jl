@@ -33,11 +33,14 @@ orth_for_ad(v) = v
 function simple_eig(f, v; power_iter, ifvalue=false)
     λ = 0.0
     # Zygote.@ignore begin # this is not correct when VUMPS does not converge
-        for _ in 1:power_iter
+        for i in 1:power_iter
             v = f(v)
             λ′ = norm(v)
             v /= λ′
-            abs(λ′ - λ) < 1e-12 && break
+            # if abs(λ′ - λ) < 1e-12
+            #     # @show i abs(λ′ - λ)
+            #     break
+            # end
             λ = λ′
         end
     # end

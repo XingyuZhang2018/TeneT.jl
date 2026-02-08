@@ -57,8 +57,14 @@ struct VUMPSBiRuntime
     ALd::StructArray
     ARd::StructArray
     Cd::StructArray
-    FL::StructArray
-    FR::StructArray
+    FLu::StructArray
+    FRu::StructArray
+    FLd::StructArray
+    FRd::StructArray
+    FLo::StructArray
+    FRo::StructArray
+    L::StructArray
+    R::StructArray
 end
 
 # In-place update of environment
@@ -78,8 +84,14 @@ function update!(env::VUMPSBiRuntime, env´::VUMPSBiRuntime)
     env.ALd.data .= env´.ALd.data
     env.ARd.data .= env´.ARd.data
     env.Cd.data .= env´.Cd.data
-    env.FL.data .= env´.FL.data
-    env.FR.data .= env´.FR.data
+    env.FLu.data .= env´.FLu.data
+    env.FRu.data .= env´.FRu.data
+    env.FLd.data .= env´.FLd.data
+    env.FRd.data .= env´.FRd.data
+    env.FLo.data .= env´.FLo.data
+    env.FRo.data .= env´.FRo.data
+    env.L.data .= env´.L.data
+    env.R.data .= env´.R.data
     return env
 end
 
@@ -101,9 +113,9 @@ CuArray(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = CuArray.(rt)
 ROCArray(rt::VUMPSRuntime) = VUMPSRuntime(ROCArray(rt.AL), ROCArray(rt.AR), ROCArray(rt.C), ROCArray(rt.FL), ROCArray(rt.FR))
 ROCArray(rt::Tuple{VUMPSRuntime, VUMPSRuntime}) = ROCArray.(rt)
 
-Array(rt::VUMPSBiRuntime) = VUMPSBiRuntime(Array(rt.ALu), Array(rt.ARu), Array(rt.Cu), Array(rt.ALd), Array(rt.ARd), Array(rt.Cd), Array(rt.FL), Array(rt.FR))
-CuArray(rt::VUMPSBiRuntime) = VUMPSBiRuntime(CuArray(rt.ALu), CuArray(rt.ARu), CuArray(rt.Cu), CuArray(rt.ALd), CuArray(rt.ARd), CuArray(rt.Cd), CuArray(rt.FL), CuArray(rt.FR))
-ROCArray(rt::VUMPSBiRuntime) = VUMPSBiRuntime(ROCArray(rt.ALu), ROCArray(rt.ARu), ROCArray(rt.Cu), ROCArray(rt.ALd), ROCArray(rt.ARd), ROCArray(rt.Cd), ROCArray(rt.FL), ROCArray(rt.FR))
+Array(rt::VUMPSBiRuntime) = VUMPSBiRuntime(Array(rt.ALu), Array(rt.ARu), Array(rt.Cu), Array(rt.ALd), Array(rt.ARd), Array(rt.Cd), Array(rt.FLu), Array(rt.FRu), Array(rt.FLd), Array(rt.FRd), Array(rt.FLo), Array(rt.FRo), Array(rt.L), Array(rt.R))
+CuArray(rt::VUMPSBiRuntime) = VUMPSBiRuntime(CuArray(rt.ALu), CuArray(rt.ARu), CuArray(rt.Cu), CuArray(rt.ALd), CuArray(rt.ARd), CuArray(rt.Cd), CuArray(rt.FLu), CuArray(rt.FRu), CuArray(rt.FLd), CuArray(rt.FRd), CuArray(rt.FLo), CuArray(rt.FRo), CuArray(rt.L), CuArray(rt.R))
+ROCArray(rt::VUMPSBiRuntime) = VUMPSBiRuntime(ROCArray(rt.ALu), ROCArray(rt.ARu), ROCArray(rt.Cu), ROCArray(rt.ALd), ROCArray(rt.ARd), ROCArray(rt.Cd), ROCArray(rt.FLu), ROCArray(rt.FRu), ROCArray(rt.FLd), ROCArray(rt.FRd), ROCArray(rt.FLo), ROCArray(rt.FRo), ROCArray(rt.L), ROCArray(rt.R))
 
 """
 tensor order graph: from left to right, top to bottom.
@@ -913,8 +925,8 @@ function absorb_invCtoEu(L, R, FL, FR)
     FL′ = Zygote.Buffer(FL)
     FR′ = Zygote.Buffer(FR)
     @inbounds for i in 1:length(FL)
-        FL′[i] = absorb_invLtoFLu(inv(L[i]), FL[i])
-        FR′[i] = absorb_invRtoFRu(inv(R[i]), FR[i])
+        FL′[i] = absorb_invLtoFLu(inv(L[i] + 0*I), FL[i])
+        FR′[i] = absorb_invRtoFRu(inv(R[i] + 0*I), FR[i])
         FL′[i] /= norm(FL′[i])
         FR′[i] /= norm(FR′[i])
     end
@@ -926,8 +938,8 @@ function absorb_invCtoEd(L, R, FL, FR)
     FL′ = Zygote.Buffer(FL)
     FR′ = Zygote.Buffer(FR)
     @inbounds for i in 1:length(FL)
-        FL′[i] = absorb_invLtoFLd(inv(L[i]), FL[i])
-        FR′[i] = absorb_invRtoFRd(inv(R[i]), FR[i])
+        FL′[i] = absorb_invLtoFLd(inv(L[i] + 0*I), FL[i])
+        FR′[i] = absorb_invRtoFRd(inv(R[i] + 0*I), FR[i])
         FL′[i] /= norm(FL′[i])
         FR′[i] /= norm(FR′[i])
     end
@@ -941,9 +953,9 @@ function absorb_invLRtoACCu(L, R, AC, C)
     @inbounds for p in 1:length(AC)
         i, j = Tuple(findfirst(==(p), AC.pattern))
         jr = mod1(j + 1, Nj)
-        invL = inv(L[i,j])
-        invLjr = inv(L[i,jr])
-        invR = inv(R[i,j])
+        invL = inv(L[i,j] + 1e-12*I)
+        invLjr = inv(L[i,jr] + 1e-12*I)
+        invR = inv(R[i,j] + 1e-12*I)
         AC′[i,j] = absorb_invLRtoAC(invL, invR, AC[i,j])
         C′[i,j] = absorb_invLRtoC(invLjr, invR, C[i,j])
         AC′[i,j] /= norm(AC′[i,j])
@@ -959,9 +971,9 @@ function absorb_invLRtoACCd(L, R, AC, C)
     @inbounds for p in 1:length(AC)
         i, j = Tuple(findfirst(==(p), AC.pattern))
         jr = mod1(j + 1, Nj)
-        invL = transpose(inv(L[i,j]))
-        invLjr = transpose(inv(L[i,jr]))
-        invR = transpose(inv(R[i,j]))
+        invL = transpose(inv(L[i,j] + 1e-12*I))
+        invLjr = transpose(inv(L[i,jr] + 1e-12*I))
+        invR = transpose(inv(R[i,j] + 1e-12*I))
         AC′[i,j] = absorb_invLRtoAC(invL, invR, AC[i,j])
         C′[i,j] = absorb_invLRtoC(invLjr, invR, C[i,j])
         AC′[i,j] /= norm(AC′[i,j])
