@@ -1,8 +1,8 @@
 using TeneT
 using TeneT: _arraytype, set_device_id!
 using TeneT: StructArray, ISA
-using TeneT: qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,ACdmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, Mmap, Mumap, Mdmap
-using TeneT: FLmap_forloop, FRmap_forloop, ACmap_forloop, ACdmap_forloop, Mmap_forloop, Mumap_forloop, Mdmap_forloop
+using TeneT: qrpos,lqpos,left_canonical,right_canonical,leftenv,FLmap,rightenv,FRmap,ACenv,ACmap,ACdmap,Cenv,Cmap,LRtoC,ALCtoAC,ACCtoALAR,error, Mumap
+using TeneT: FLmap_parallel, FRmap_parallel, ACmap_parallel, ACdmap_parallel, Mumap_parallel
 using TeneT: _to_front, _to_tail, permute_fronttail
 using TeneT: project_AL!, project_AR!, retract!, project_AL, project_AR, permute_fronttail
 using Test
