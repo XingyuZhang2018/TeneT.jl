@@ -27,7 +27,6 @@ permute_fronttail(t::AbstractZero) = t
 # ─── Simple eigenvalue solver ────────────────────────────────────────────────
 
 orth_for_ad(v) = v
-simple_eig_linear_ad(f, v; kwargs...) = simple_eig(f, v; kwargs...)
 function simple_eig(f, v; power_iter, ifvalue=false)
     # λ = 1.0 + 1.0im
     # Zygote.@ignore begin # this is not correct when VUMPS does not converge

@@ -96,70 +96,138 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
-function ChainRulesCore.rrule(::typeof(FLmap_parallel), FL, ALu, ALd, M; kwarg...)
-    function back(dFLm)
-        dFLm = conj(dFLm)
-        dFL = conj!(FRmap_parallel(dFLm, ALu, ALd, M; kwarg...))
-        dALu = conj!(ACdmap_parallel(ALd, FL, dFLm, M; kwarg...))
-        dALd = conj!(ACmap_parallel(ALu, FL, dFLm, M; kwarg...))
-        if M isa Tuple
-            dMu = Mdmap_parallel(ALu, ALd, FL, dFLm, M[2]; kwarg...)
-            dMd = Mumap_parallel(ALu, ALd, FL, dFLm, M[1]; kwarg...)
-            dM = (conj!(dMu), conj!(dMd))
-        elseif ndims(M) == 5
-            dMu = Mdmap_parallel(ALu, ALd, FL, dFLm, conj(M); kwarg...)
-            dMd = Mumap_parallel(ALu, ALd, FL, dFLm, M; kwarg...)
-            dM = conj!(dMu) + dMd
-        else
-            dM = conj!(Mmap_parallel(ALu, ALd, FL, dFLm; kwarg...))
+# ─── AD rules for forloop / parallel (from ADC4PEPS) ─────────────────────────
+# These provide chunked backprop through loop iterations and MPI-aware gradient
+# accumulation, rather than hand-written per-map adjoints.
+
+function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in, N_out, size_out)
+    if forloop_iter == 1
+        result, back = pullback(f, args...)
+        function realback(dresult)
+            dargs = back(dresult)
+            return NoTangent(), NoTangent(), dargs...
         end
-        return NoTangent(), dFL, dALu, dALd, dM
+        return result, realback
+    else
+        Ain = args[N_in[1]]
+        split_dim = N_in[2]
+        D_split = size(Ain, split_dim)
+
+        result = similar(args[1], size_out)
+
+        in_idx  = ntuple(_ -> (:), ndims(Ain))
+        out_idx = ntuple(_ -> (:), ndims(result))
+
+        ranges = split_ranges(D_split, forloop_iter)
+
+        @views for r in ranges
+            in_idx_r  = Base.setindex(in_idx,  r, split_dim)
+            out_idx_r = Base.setindex(out_idx, r, N_out)
+            split_args = ntuple(length(args)) do j
+                j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+            end
+            result[out_idx_r...] .= f(split_args...)
+        end
+
+        function back(dresult)
+            dargs = ntuple(i -> args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+            @views for r in ranges
+                in_idx_r  = Base.setindex(in_idx,  r, split_dim)
+                out_idx_r = Base.setindex(out_idx, r, N_out)
+                split_args = ntuple(length(args)) do j
+                    j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+                end
+                _, bp = pullback(f, split_args...)
+                dargs_range = bp(view(dresult, out_idx_r...))
+                for i in 1:length(args)
+                    if i == N_in[1]
+                        dargs[i][in_idx_r...] .= dargs_range[i]
+                    else
+                        if dargs_range[i] isa Tuple
+                            for j in 1:length(dargs_range[i])
+                                dargs[i][j] .+= dargs_range[i][j]
+                            end
+                        else
+                            dargs[i] .+= dargs_range[i]
+                        end
+                    end
+                end
+            end
+            return NoTangent(), NoTangent(), dargs...
+        end
+
+        return result, back
     end
-    return FLmap_parallel(FL, ALu, ALd, M; kwarg...), back
 end
 
-function ChainRulesCore.rrule(::typeof(FRmap_parallel), FR, ARu, ARd, M; kwarg...)
-    function back(dFRm)
-        dFRm = conj(dFRm)
-        dFR = conj!(FLmap_parallel(dFRm, ARu, ARd, M; kwarg...))
-        dARu = conj!(ACdmap_parallel(ARd, dFRm, FR, M; kwarg...))
-        dARd = conj!(ACmap_parallel(ARu, dFRm, FR, M; kwarg...))
-        if M isa Tuple
-            dMu = Mdmap_parallel(ARu, ARd, dFRm, FR, M[2]; kwarg...)
-            dMd = Mumap_parallel(ARu, ARd, dFRm, FR, M[1]; kwarg...)
-            dM = (conj!(dMu), conj!(dMd))
-        elseif ndims(M) == 5
-            dMu = Mdmap_parallel(ARu, ARd, dFRm, FR, conj(M); kwarg...)
-            dMd = Mumap_parallel(ARu, ARd, dFRm, FR, M; kwarg...)
-            dM = conj!(dMu) + dMd
-        else
-            dM = conj!(Mmap_parallel(ARu, ARd, dFRm, FR; kwarg...))
-        end
-        return NoTangent(), dFR, dARu, dARd, dM
-    end
-    return FRmap_parallel(FR, ARu, ARd, M; kwarg...), back
-end
+function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)
 
-function ChainRulesCore.rrule(::typeof(ACmap_parallel), AC, FL, FR, M; kwarg...)
-    function back(dACm)
-        dACm = conj(dACm)
-        dAC = conj!(ACdmap_parallel(dACm, FL, FR, M; kwarg...))
-        dFL = conj!(FRmap_parallel(FR, AC, dACm, M; kwarg...))
-        dFR = conj!(FLmap_parallel(FL, AC, dACm, M; kwarg...))
-        if M isa Tuple
-            dMu = Mdmap_parallel(AC, dACm, FL, FR, M[2]; kwarg...)
-            dMd = Mumap_parallel(AC, dACm, FL, FR, M[1]; kwarg...)
-            dM = (conj!(dMu), conj!(dMd))
-        elseif ndims(M) == 5
-            dMu = Mdmap_parallel(AC, dACm, FL, FR, conj(M); kwarg...)
-            dMd = Mumap_parallel(AC, dACm, FL, FR, M; kwarg...)
-            dM = conj!(dMu) + dMd
-        else
-            dM = conj!(Mmap_parallel(AC, dACm, FL, FR; kwarg...))
-        end
-        return NoTangent(), dAC, dFL, dFR, dM
+    D_split = size(args[N_in[1]])[N_in[2]]
+    result = similar(args[1], size_out)
+    D_split_ranges = split_ranges(D_split, nprocs * forloop_iter)
+
+    for i in 1:forloop_iter
+        ind = forloop_iter * rank + i
+        cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+        cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1:ndims(result))
+        split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+        result[cols_out...] = f(split_args...)
+        synchronize(args[1])
     end
-    return ACmap_parallel(AC, FL, FR, M; kwarg...), back
+
+    element_size = prod(size_out) ÷ D_split
+    counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+    MPI.Allgatherv!(VBuffer(result, counts), comm)
+
+    function back(dresult)
+        dargs = ntuple(i -> args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+        for i in 1:forloop_iter
+            ind = forloop_iter * rank + i
+            cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+            cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1:ndims(result))
+            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            _, bp = pullback(f, split_args...)
+            split_dargs = bp(dresult[cols_out...])
+            for j in 1:length(args)
+                if j == N_in[1]
+                    dargs[j][cols_in...] = split_dargs[j]
+                else
+                    if dargs[j] isa Tuple
+                        for k in 1:length(dargs[j])
+                            dargs[j][k] .+= split_dargs[j][k]
+                        end
+                    else
+                        dargs[j] .+= split_dargs[j]
+                    end
+                end
+            end
+        end
+
+        synchronize(args[1])
+
+        for j in 1:length(args)
+            if j == N_in[1]
+                element_size = prod(size(dargs[j])) ÷ D_split
+                counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
+                MPI.Allgatherv!(VBuffer(dargs[j], counts), comm)
+            else
+                if dargs[j] isa Tuple
+                    for k in 1:length(dargs[j])
+                        MPI.Allreduce!(dargs[j][k], +, comm)
+                    end
+                else
+                    MPI.Allreduce!(dargs[j], +, comm)
+                end
+            end
+        end
+
+        return NoTangent(), NoTangent(), dargs...
+    end
+
+    return result, back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)
