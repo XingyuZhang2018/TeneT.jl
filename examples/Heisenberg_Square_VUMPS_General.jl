@@ -3,9 +3,7 @@ using Random
 using CUDA
 using OptimKit
 using LinearAlgebra
-using TensorOperations
-using ProfileView
-# using Zygote
+using Zygote
 
 seed = 42
 Random.seed!(seed)

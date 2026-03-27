@@ -3,15 +3,13 @@ using Random
 using CUDA
 using OptimKit
 using LinearAlgebra
-using TensorOperations
-using ProfileView
 using Zygote
 
-seed = 72
+seed = 42
 Random.seed!(seed)
-atype = Array
+atype = CuArray
 etype = Float64
-D, χ, χshift = 2, 20, 0
+D, χ, χshift = 3, 64, 0
 pattern = [1;;]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
 No = 0
@@ -20,7 +18,7 @@ boundary_alg = VUMPS{:C4v}(ifsimple_eig=true,
                            ifparallel=false,
                            ifcheckpoint=false,
                            forloop_iter=1,
-                           maxiter=30, 
+                           maxiter=3, 
                            miniter=0, 
                            maxiter_ad=4,
                            miniter_ad=4,
@@ -34,7 +32,7 @@ boundary_alg = VUMPS{:C4v}(ifsimple_eig=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=200, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=1,

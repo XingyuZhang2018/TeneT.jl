@@ -18,8 +18,7 @@ end
 function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
     As = Base.sqrt(A)
     function back(dAs)
-        dA =  As' \ dAs ./2
-        return NoTangent(), dA
+        return NoTangent(), @thunk(As' \ unthunk(dAs) ./ 2)
     end
     return As, back
 end
@@ -27,11 +26,12 @@ end
 function ChainRulesCore.rrule(::typeof(atype_device!), atype, x, i::Int)
     id_old = get_device_id(atype)
     function back(dx)
+        _dx = unthunk(dx)
         f = pullback(atype, x)[2]
         set_device_id!(atype, get_device_id(x))
-        dx = atype(f(dx)[1])
+        _dx = atype(f(_dx)[1])
         set_device_id!(atype, id_old)
-        return NoTangent(), NoTangent(), dx, NoTangent()
+        return NoTangent(), NoTangent(), _dx, NoTangent()
     end
     return atype_device!(atype, x, i), back
 end
@@ -41,9 +41,13 @@ end
 function ChainRulesCore.rrule(::typeof(qr_for_ad), A::AbstractArray{T,2}) where {T}
     Q, R = qr_for_ad(A)
     function back((dQ, dR))
-        M = R * dR' - dQ' * Q
-        dA = (dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)'
-        return NoTangent(), _arraytype(A)(dA)
+        dA = @thunk begin
+            _dQ = unthunk(dQ)
+            _dR = unthunk(dR)
+            M = R * _dR' - _dQ' * Q
+            _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)')
+        end
+        return NoTangent(), dA
     end
     return (Q, R), back
 end
@@ -51,10 +55,13 @@ end
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     Q, R = qrpos(A)
     function back((dQ, dR))
-        M = R * dR' - dQ' * Q
-        # dA, _ = linsolve(x->x * (R + I * 1e-12)', dQ + Q * Hermitian(M, :L); verbosity=0, maxiter = 1)
-        dA = (dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)'
-        return NoTangent(), _arraytype(A)(dA)
+        dA = @thunk begin
+            _dQ = unthunk(dQ)
+            _dR = unthunk(dR)
+            M = R * _dR' - _dQ' * Q
+            _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)')
+        end
+        return NoTangent(), dA
     end
     return (Q, R), back
 end
@@ -62,10 +69,13 @@ end
 function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     L, Q = lqpos(A)
     function back((dL, dQ))
-        M = L' * dL - dQ * Q'
-        # dA, _ = linsolve(x->(L + I * 1e-12)' * x, dQ + Hermitian(M, :L) * Q; verbosity=0, maxiter = 1)
-        dA = LowerTriangular(L + I * 1e-12)' \ (dQ + Hermitian(M, :L) * Q)
-        return NoTangent(), _arraytype(A)(dA)
+        dA = @thunk begin
+            _dL = unthunk(dL)
+            _dQ = unthunk(dQ)
+            M = L' * _dL - _dQ * Q'
+            _arraytype(A)(LowerTriangular(L + I * 1e-12)' \ (_dQ + Hermitian(M, :L) * Q))
+        end
+        return NoTangent(), dA
     end
     return (L, Q), back
 end
@@ -73,8 +83,10 @@ end
 orth_for_ad(v) = v
 function ChainRulesCore.rrule(::typeof(orth_for_ad), v)
     function back(dv)
-        dv -= dot(v, dv) * v
-        return NoTangent(), dv
+        return NoTangent(), @thunk begin
+            _dv = unthunk(dv)
+            _dv - dot(v, _dv) * v
+        end
     end
     return v, back
 end
@@ -83,8 +95,6 @@ function ChainRulesCore.rrule(::Type{<:VUMPSRuntime}, AL, AR, C, FL, FR)
     rt = VUMPSRuntime(AL, AR, C, FL, FR)
     function back(∂rt)
         ∂AL, ∂AR, ∂C, ∂FL, ∂FR = ∂rt
-        # project_AL!(∂AL, AL)
-        # project_AR!(∂AR, AR)
         return NoTangent(), ∂AL, ∂AR, ∂C, ∂FL, ∂FR
     end
     return rt, back
@@ -119,8 +129,11 @@ end
 function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     y = norm(S)
     function back(dy)
-        data_grad = pullback(norm, S.data)[2](dy)[1]
-        return NoTangent(), StructArray(data_grad, S.pattern)
+        return NoTangent(), @thunk begin
+            _dy = unthunk(dy)
+            data_grad = pullback(norm, S.data)[2](_dy)[1]
+            StructArray(data_grad, S.pattern)
+        end
     end
     return y, back
 end
@@ -133,7 +146,7 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     if forloop_iter == 1
         result, back = pullback(f, args...)
         function realback(dresult)
-            dargs = back(dresult)
+            dargs = back(unthunk(dresult))
             return NoTangent(), NoTangent(), dargs...
         end
         return result, realback
@@ -160,15 +173,16 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
         end
 
         function back(dresult)
+            _dresult = unthunk(dresult)
             dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
             @views for r in ranges
                 in_idx_r  = Base.setindex(in_idx,  r, split_dim)
                 out_idx_r = Base.setindex(out_idx, r, N_out)
                 split_args = ntuple(length(args)) do j
                     j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
-                end    
+                end
                 _, bp = pullback(f, split_args...)
-                dargs_range = bp(view(dresult, out_idx_r...))
+                dargs_range = bp(view(_dresult, out_idx_r...))
                 for i in 1:length(args)
                     if i == N_in[1]
                         dargs[i][in_idx_r...] .= dargs_range[i]
@@ -213,6 +227,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     MPI.Allgatherv!(VBuffer(result, counts), comm)
 
     function back(dresult)
+        _dresult = unthunk(dresult)
         dargs = ntuple(i -> args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
         for i in 1:forloop_iter
             ind = forloop_iter * rank + i
@@ -220,7 +235,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1:ndims(result))
             split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
             _, bp = pullback(f, split_args...)
-            split_dargs = bp(dresult[cols_out...])
+            split_dargs = bp(_dresult[cols_out...])
             for j in 1:length(args)
                 if j == N_in[1] 
                     dargs[j][cols_in...] = split_dargs[j]
@@ -430,10 +445,18 @@ function svd_back(U::AbstractArray, S::AbstractArray{T}, V, dU, dS, dV; η::Real
     res
 end
 
-Zygote.@adjoint function LinearAlgebra.svd(A)
+function ChainRulesCore.rrule(::typeof(LinearAlgebra.svd), A::AbstractMatrix)
     res = LinearAlgebra.svd(A)
-    res, function (dy)
+    function back(dy)
         dU, dS, dVt = dy
-        return (svd_back(res.U, res.S, res.V, dU, dS, dVt === nothing ? nothing : dVt'),)
+        dA = @thunk begin
+            _dVt = dVt isa AbstractZero ? nothing : unthunk(dVt)
+            svd_back(res.U, res.S, res.V,
+                     dU isa AbstractZero ? nothing : unthunk(dU),
+                     dS isa AbstractZero ? nothing : unthunk(dS),
+                     _dVt === nothing ? nothing : _dVt')
+        end
+        return NoTangent(), dA
     end
+    return res, back
 end

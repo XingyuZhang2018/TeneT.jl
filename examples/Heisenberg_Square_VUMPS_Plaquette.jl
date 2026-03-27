@@ -3,15 +3,13 @@ using Random
 using CUDA
 using OptimKit
 using LinearAlgebra
-using TensorOperations
-using ProfileView
 using Zygote
 
-seed = 72
+seed = 42
 Random.seed!(seed)
 atype = Array
 etype = ComplexF64
-D, χ, χshift = 2, 20, 0
+D, χ, χshift = 2, 16, 0
 pattern = [1 3;
            2 4]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)

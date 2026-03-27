@@ -2,13 +2,14 @@ using TeneT
 using Random
 using CUDA
 using OptimKit
+using LinearAlgebra
 using Zygote
 
 seed = 42
 Random.seed!(seed)
-atype = Array
+atype = CuArray
 etype = Float64
-D, χ, χshift = 2, 10, 0
+D, χ, χshift = 3, 64, 0
 pattern = [1;;]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
 No = 0
