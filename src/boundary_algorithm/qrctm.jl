@@ -8,6 +8,8 @@
 
 function init_env(M::StructArray, χ::Int, alg::QRCTM)
     M = M[1][:,:,:,:,:,1]
+    eltype(M) <: Complex && throw(ArgumentError("QRCTM only supports real-valued tensors for now."))
+
     D = size(M, 1)  
     if M isa leg4
         T = rand!(similar(M,χ,D,χ))
@@ -23,7 +25,7 @@ function init_env(M::StructArray, χ::Int, alg::QRCTM)
 end
 
 """
-    leftmove(M, env::CTMEnv, alg::QRCTM)
+    qrctm_step(env::CTMEnv, M::StructArray, alg::QRCTM)
 
 One CTM left-move step for the QRCTM algorithm.
 """
@@ -33,13 +35,11 @@ function qrctm_step(env::CTMEnv, M::StructArray, alg::QRCTM)
     T = env.T
 
     CT = _to_front(CTtoT(C, T))
-    U, R = qrpos(CT)
+    U, R = qr_for_ad(CT)
     U = reshape(U, size(T))
 
-    T = FLmap_parallel(T, U, conj(U), M;
-                       ifparallel=alg.ifparallel,
-                       forloop_iter=alg.forloop_iter)
-    C_new = Cmap(R, T, conj(U))
+    T = FLmap_parallel(T, U, U, M; ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter)
+    C_new = Cmap(R, T, U)
 
     T /= Zygote.@ignore norm(T)
     C_new /= Zygote.@ignore norm(C_new)
@@ -48,9 +48,9 @@ function qrctm_step(env::CTMEnv, M::StructArray, alg::QRCTM)
     return CTMEnv(C_new, T), err
 end
 
-# ── Plaquette iteration + boundary ───────────────────────────────────
+# ── iteration + boundary ───────────────────────────────────
 
-function qrctm_itr(env::CTMEnv, M::StructArray, alg::QRCTM)
+function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
     t = Zygote.@ignore time()
     local err
 
@@ -82,10 +82,6 @@ function qrctm_itr(env::CTMEnv, M::StructArray, alg::QRCTM)
         end
     end
     return env, err
-end
-
-function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
-    return qrctm_itr(env, M, alg)
 end
 
 ObsEnv(env::CTMEnv, M::StructArray, ::QRCTM) = env

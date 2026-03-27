@@ -38,6 +38,16 @@ end
 
 # adjoint for QR factorization
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
+function ChainRulesCore.rrule(::typeof(qr_for_ad), A::AbstractArray{T,2}) where {T}
+    Q, R = qr_for_ad(A)
+    function back((dQ, dR))
+        M = R * dR' - dQ' * Q
+        dA = (dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)'
+        return NoTangent(), _arraytype(A)(dA)
+    end
+    return (Q, R), back
+end
+
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     Q, R = qrpos(A)
     function back((dQ, dR))
@@ -127,17 +137,18 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
             split_args = ntuple(length(args)) do j
                 j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
             end
+
             result[out_idx_r...] .= f(split_args...)
         end
 
         function back(dresult)
-            dargs = ntuple(i -> args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+            dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
             @views for r in ranges
                 in_idx_r  = Base.setindex(in_idx,  r, split_dim)
                 out_idx_r = Base.setindex(out_idx, r, N_out)
                 split_args = ntuple(length(args)) do j
                     j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
-                end
+                end    
                 _, bp = pullback(f, split_args...)
                 dargs_range = bp(view(dresult, out_idx_r...))
                 for i in 1:length(args)
@@ -180,7 +191,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     end
 
     element_size = prod(size_out) ÷ D_split
-    counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+    counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
     MPI.Allgatherv!(VBuffer(result, counts), comm)
 
     function back(dresult)
@@ -193,7 +204,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             _, bp = pullback(f, split_args...)
             split_dargs = bp(dresult[cols_out...])
             for j in 1:length(args)
-                if j == N_in[1]
+                if j == N_in[1] 
                     dargs[j][cols_in...] = split_dargs[j]
                 else
                     if dargs[j] isa Tuple
@@ -210,9 +221,9 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
         synchronize(args[1])
 
         for j in 1:length(args)
-            if j == N_in[1]
+            if j == N_in[1] 
                 element_size = prod(size(dargs[j])) ÷ D_split
-                counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
+                counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
                 MPI.Allgatherv!(VBuffer(dargs[j], counts), comm)
             else
                 if dargs[j] isa Tuple
@@ -224,7 +235,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
                 end
             end
         end
-
+        
         return NoTangent(), NoTangent(), dargs...
     end
 

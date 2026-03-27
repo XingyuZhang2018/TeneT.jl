@@ -11,7 +11,7 @@ seed = 72
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift = 2, 20, 0
+D, χ, χshift = 2, 64, 0
 pattern = [1;;]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
 No = 0
@@ -19,10 +19,10 @@ folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTM/seed$seed/")
 boundary_alg = QRCTM(ifparallel=false,
                      ifcheckpoint=false,
                      forloop_iter=1,
-                     maxiter=30, 
+                     maxiter=3, 
                      miniter=0, 
-                     maxiter_ad=4,
-                     miniter_ad=4,
+                     maxiter_ad=10,
+                     miniter_ad=10,
                      show_every=10,
                      tol=1e-10,
                      verbosity=3,
@@ -38,7 +38,7 @@ params = GradientOptimize(model=model,
                           folder=folder,
                           ifSU=false,
                           SUτ=0,
-                          ifprecondition=true,
+                          ifprecondition=false,
                           ifMCF=false,
                           iter_precond=0,
                           reuse_env=true, 

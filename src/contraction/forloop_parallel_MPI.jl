@@ -27,14 +27,13 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
         result = similar(args[1], size_out)
         D_split_ranges = split_ranges(D_split, forloop_iter)
 
-        # GPUArrays.@cached GPUArrays.AllocCache() begin
-            for range in D_split_ranges
-                cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
-                cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
-                split_args = (j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-                result[cols_out...] = f(split_args...)
-            end
-        # end
+        for range in D_split_ranges
+            cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
+            cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
+            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            result[cols_out...] = f(split_args...)
+        end
+
         return result
     end
 end
@@ -48,38 +47,19 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
     result = similar(args[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
 
-    # GPUArrays.@cached GPUArrays.AllocCache() begin
-        for i in 1:forloop_iter
-            ind = forloop_iter * rank + i
-            cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
-            cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1: ndims(result))
-            split_args = (j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-            result[cols_out...] = f(split_args...)
-            synchronize(args[1])
-        end
+    for i in 1:forloop_iter
+        ind = forloop_iter * rank + i
+        cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+        cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1: ndims(result))
+        split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+        result[cols_out...] = f(split_args...)
+        synchronize(args[1])
+    end
 
-        element_size = prod(size_out) ÷ D_split
-        counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
-        MPI.Allgatherv!(VBuffer(result, counts), comm)
+    element_size = prod(size_out) ÷ D_split
+    counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+    MPI.Allgatherv!(VBuffer(result, counts), comm)
 
-        # count = prod(size_out) ÷ nprocs
-        # MPI.Allgather!(UBuffer(result, count), comm)
-    # end
-
-    # element_size = prod(size_out) ÷ D_split
-    # counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) for i in 1:nprocs]
-    # D_split_ranges = split_ranges(counts)
-    # cols = ((:) for _ in 1:ndims(result)-1)
-    # # @show counts,D_split_ranges
-    # for root in 0:(nprocs-1)
-    #     if root == rank
-    #         MPI.Gatherv!(MPI.IN_PLACE, VBuffer(result, counts * element_size), comm; root=root)
-    #     else
-    #         MPI.Gatherv!(result[cols..., D_split_ranges[rank+1]], nothing, comm; root=root)
-    #     end
-    #     synchronize(args[1])
-    #     MPI.Barrier(comm)
-    # end
     return result
 end
 
@@ -93,14 +73,12 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         result .= 0
         D_split_ranges = split_ranges(D_split, forloop_iter)
 
-        # GPUArrays.@cached GPUArrays.AllocCache() begin
-            for range in D_split_ranges
-                cols_in1 = (j == N_in1[2] ? range : (:) for j in 1:ndims(args[N_in1[1]]))
-                cols_in2 = (j == N_in2[2] ? range : (:) for j in 1:ndims(args[N_in2[1]]))
-                split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-                result += f(split_args...)
-            end
-        # end
+        for range in D_split_ranges
+            cols_in1 = (j == N_in1[2] ? range : (:) for j in 1:ndims(args[N_in1[1]]))
+            cols_in2 = (j == N_in2[2] ? range : (:) for j in 1:ndims(args[N_in2[1]]))
+            split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
+            result += f(split_args...)
+        end
 
         return result
     end
@@ -116,18 +94,16 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
     result .= 0
     D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
 
-    # GPUArrays.@cached GPUArrays.AllocCache() begin
-        for i in 1:forloop_iter
-            ind = forloop_iter * rank + i
-            cols_in1 = (j == N_in1[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in1[1]]))
-            cols_in2 = (j == N_in2[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in2[1]]))
-            split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-            result += f(split_args...)
-            synchronize(args[1])
-        end
+    for i in 1:forloop_iter
+        ind = forloop_iter * rank + i
+        cols_in1 = (j == N_in1[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in1[1]]))
+        cols_in2 = (j == N_in2[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in2[1]]))
+        split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
+        result += f(split_args...)
+        synchronize(args[1])
+    end
 
-        MPI.Allreduce!(result, +, comm)
-    # end
+    MPI.Allreduce!(result, +, comm)
 
     return result
 end

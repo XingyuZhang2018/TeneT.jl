@@ -62,7 +62,7 @@ include("contraction/observable.jl")
 # Boundary algorithms (environment structs, then algorithm implementations)
 # ============================================================================
 
-include("boundary_algorithm/algorithm.jl")
+include("boundary_algorithm/interface.jl")
 include("boundary_algorithm/environment.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")

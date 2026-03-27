@@ -109,3 +109,16 @@ function lqpos!(A)
     L .= L * Diagonal(conj!(phases))
     return L, Q
 end
+
+"""
+    qr_for_ad(A)
+
+AD-friendly QR decomposition that returns a concrete Q matrix (not a `QRCompactWYQ`).
+Unlike `qrpos`, does NOT enforce positive diagonal on R, which is important for
+complex-valued tensors and AD stability.
+"""
+function qr_for_ad(A::AbstractMatrix{T}) where {T}
+    Q, R = qr(A)
+    Q = _arraytype(A)(Q)
+    return Q, R
+end
