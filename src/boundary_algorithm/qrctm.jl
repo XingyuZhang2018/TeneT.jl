@@ -6,12 +6,17 @@
 
 # ── initialization ─────────────────────────────────────────
 
+# function init_env(M::StructArray, χ::Int, alg::QRCTM)
+#     M = M[1][:,:,:,:,:,1]
+#     return init_env(M, χ, alg)
+# end
+
 function init_env(M::StructArray, χ::Int, alg::QRCTM)
-    M = M[1][:,:,:,:,:,1]
+    M = M[1]
     eltype(M) <: Complex && throw(ArgumentError("QRCTM only supports real-valued tensors for now."))
 
-    D = size(M, 1)  
-    if M isa leg4
+    D = size(M, 1)
+    if ndims(M) == 4
         T = rand!(similar(M,χ,D,χ))
         T += conj(permutedims(T, (3,2,1)))
     else
@@ -25,12 +30,11 @@ function init_env(M::StructArray, χ::Int, alg::QRCTM)
 end
 
 """
-    qrctm_step(env::CTMEnv, M::StructArray, alg::QRCTM)
+    qrctm_step(env::CTMEnv, M::AbstractArray, alg::QRCTM)
 
 One CTM left-move step for the QRCTM algorithm.
 """
-function qrctm_step(env::CTMEnv, M::StructArray, alg::QRCTM)
-    M = M[1][:,:,:,:,:,1]
+function qrctm_step(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     C = env.C
     T = env.T
 
@@ -50,7 +54,9 @@ end
 
 # ── iteration + boundary ───────────────────────────────────
 
+# Core implementation operating on plain tensors (avoids StructArray overhead in AD)
 function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
+    M = M[1]
     t = Zygote.@ignore time()
     local err
 

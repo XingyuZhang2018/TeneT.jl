@@ -79,11 +79,12 @@ function energy_value(model::Heisenberg{Square}, A, env::C4vVUMPSEnv, params::iP
         "Horizontal_energy" => Dict{String, Any}(),
     )
 
-    O1, O2 = Zygote.@ignore _arraytype(A).(hamiltonian_trunc(model))
+    A1 = A[1]
+    O1, O2 = Zygote.@ignore _arraytype(A1).(hamiltonian_trunc(model))
     AC = ALCtoAC_map(AL,C)
 
-    e = contract_o2_H(FL, AL, A[1], conj(AL), FL, AC, A[1], conj(AC), O1, O2; ifparallel, forloop_iter)
-    n = contract_n2_H(FL, AL, A[1], conj(AL), FL, AC, A[1], conj(AC); ifparallel, forloop_iter)
+    e = contract_o2_H(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC), O1, O2; ifparallel, forloop_iter)
+    n = contract_n2_H(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC); ifparallel, forloop_iter)
     params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
     etol = e/n
     e_dict["Horizontal_energy"]["1,1"] = e/n
@@ -99,11 +100,13 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
         "Horizontal_energy" => Dict{String, Any}(),
     )
 
-    O1, O2 = Zygote.@ignore _arraytype(A).(hamiltonian_trunc(model))
+    # Extract site tensor once to avoid repeated StructArray indexing in AD
+    A1 = A[1]
+    O1, O2 = Zygote.@ignore _arraytype(A1).(hamiltonian_trunc(model))
 
     To = CTCtoT(C, T)
-    e = contract_o2_H(To, T, A[1], T, To, T, A[1], T, O1, O2; ifparallel, forloop_iter)
-    n = contract_n2_H(To, T, A[1], T, To, T, A[1], T; ifparallel, forloop_iter)
+    e = contract_o2_H(To, T, A1, T, To, T, A1, T, O1, O2; ifparallel, forloop_iter)
+    n = contract_n2_H(To, T, A1, T, To, T, A1, T; ifparallel, forloop_iter)
     params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
     etol = e/n
     e_dict["Horizontal_energy"]["1,1"] = e/n

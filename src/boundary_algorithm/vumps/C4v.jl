@@ -70,8 +70,7 @@ end
 One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
-function vumps_step(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
-    M = M[1][:,:,:,:,:,1]
+function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{:C4v})
     @unpack AL, C, FL = rt
     AC = ALCtoAC_map(AL, C)
     _, FL = leftenv_c4v(AL, conj(AL), M, FL; alg)
@@ -88,10 +87,9 @@ end
 
 # ── Plaquette iteration + boundary ───────────────────────────────────
 
-function vumps_itr(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
+function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
     t = Zygote.@ignore time()
-    atype = _arraytype(M)
-    id = get_device_id(atype)
+    M = M[1]
     local err
 
     Zygote.@ignore alg.verbosity >= 2 && @info "Start C4v VUMPS iteration without AD..."
@@ -125,10 +123,6 @@ function vumps_itr(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
         end
     end
     return rt, err
-end
-
-function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
-    return vumps_itr(rt, M, alg)
 end
 
 ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{:C4v}) = rt

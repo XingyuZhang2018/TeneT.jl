@@ -125,17 +125,18 @@ function magnetization_value(model, A, env::C4vVUMPSEnv, params)
     AC = ALCtoAC_map(AL, C)
     atype = _arraytype(AC)
     etype = eltype(AC)
+    A1 = A[1]
 
     S = model.S
     Sx = atype(const_Sx(S))
     Sy = atype(const_Sy(S))
     Sz = atype(const_Sz(S))
 
-    Mx = contract_o1(FL,AC,A[1],AC,FL, Sx; ifparallel, forloop_iter)
-    My = etype == Float64 ? 0.0 : contract_o1(FL,AC,A[1],AC,FL, Sy; ifparallel, forloop_iter)
-    Mz =contract_o1(FL,AC,A[1],AC,FL, Sz; ifparallel, forloop_iter)
+    Mx = contract_o1(FL,AC,A1,AC,FL, Sx; ifparallel, forloop_iter)
+    My = etype == Float64 ? 0.0 : contract_o1(FL,AC,A1,AC,FL, Sy; ifparallel, forloop_iter)
+    Mz =contract_o1(FL,AC,A1,AC,FL, Sz; ifparallel, forloop_iter)
 
-    n = contract_n1(FL,AC,A[1],AC,FL; ifparallel, forloop_iter)
+    n = contract_n1(FL,AC,A1,AC,FL; ifparallel, forloop_iter)
     Mag = [Mx/n, My/n, Mz/n]
     Mnorm = norm(Mag)
     params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -151,17 +152,18 @@ function magnetization_value(model, A, env::CTMEnv, params)
     To = CTCtoT(C, T)
     atype = _arraytype(To)
     etype = eltype(To)
-
+    A1 = A[1]
+    
     S = model.S
     Sx = atype(const_Sx(S))
     Sy = atype(const_Sy(S))
     Sz = atype(const_Sz(S))
 
-    Mx = contract_o1(To,T,A[1],T,To, Sx; ifparallel, forloop_iter)
-    My = etype == Float64 ? 0.0 : contract_o1(To,T,A[1],T,To, Sy; ifparallel, forloop_iter)
-    Mz =contract_o1(To,T,A[1],T,To, Sz; ifparallel, forloop_iter)
+    Mx = contract_o1(To,T,A1,T,To, Sx; ifparallel, forloop_iter)
+    My = etype == Float64 ? 0.0 : contract_o1(To,T,A1,T,To, Sy; ifparallel, forloop_iter)
+    Mz =contract_o1(To,T,A1,T,To, Sz; ifparallel, forloop_iter)
 
-    n = contract_n1(To,T,A[1],T,To; ifparallel, forloop_iter)
+    n = contract_n1(To,T,A1,T,To; ifparallel, forloop_iter)
     Mag = [Mx/n, My/n, Mz/n]
     Mnorm = norm(Mag)
     params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")

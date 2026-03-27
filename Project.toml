@@ -40,7 +40,7 @@ OMEinsum = "0.8"
 OptimKit = "0.4"
 Parameters = "0.12"
 TensorOperations = "5"
-Zygote = "0.6"
+Zygote = "0.7"
 cuTENSOR = "2"
 
 [extras]

@@ -90,10 +90,28 @@ function ChainRulesCore.rrule(::Type{<:VUMPSRuntime}, AL, AR, C, FL, FR)
     return rt, back
 end
 
+function ChainRulesCore.rrule(::Type{<:CTMEnv}, C, T)
+    env = CTMEnv(C, T)
+    function back(∂env)
+        ∂C, ∂T = ∂env
+        return NoTangent(), ∂C, ∂T
+    end
+    return env, back
+end
+
+function ChainRulesCore.rrule(::Type{<:C4vVUMPSEnv}, AL, C, FL)
+    env = C4vVUMPSEnv(AL, C, FL)
+    function back(∂env)
+        ∂AL, ∂C, ∂FL = ∂env
+        return NoTangent(), ∂AL, ∂C, ∂FL
+    end
+    return env, back
+end
+
 function ChainRulesCore.rrule(::Type{StructArray}, data, pattern)
     S = StructArray(data, pattern)
     function back(dS)
-        return NoTangent(), dS.data, dS.pattern
+        return NoTangent(), dS.data, NoTangent()
     end
     return S, back
 end

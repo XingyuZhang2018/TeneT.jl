@@ -2,16 +2,13 @@ using TeneT
 using Random
 using CUDA
 using OptimKit
-using LinearAlgebra
-using TensorOperations
-using ProfileView
 using Zygote
 
-seed = 72
+seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift = 2, 64, 0
+D, χ, χshift = 2, 10, 0
 pattern = [1;;]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
 No = 0
@@ -21,8 +18,8 @@ boundary_alg = QRCTM(ifparallel=false,
                      forloop_iter=1,
                      maxiter=3, 
                      miniter=0, 
-                     maxiter_ad=10,
-                     miniter_ad=10,
+                     maxiter_ad=20,
+                     miniter_ad=20,
                      show_every=10,
                      tol=1e-10,
                      verbosity=3,
@@ -30,7 +27,7 @@ boundary_alg = QRCTM(ifparallel=false,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=200, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=1,
@@ -38,7 +35,7 @@ params = GradientOptimize(model=model,
                           folder=folder,
                           ifSU=false,
                           SUτ=0,
-                          ifprecondition=false,
+                          ifprecondition=true,
                           ifMCF=false,
                           iter_precond=0,
                           reuse_env=true, 

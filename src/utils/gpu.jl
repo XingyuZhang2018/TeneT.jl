@@ -71,8 +71,10 @@ end
 
 function reclaim(x::AbstractArray)
     if x isa CuArray
-        GC.gc(true)
-        CUDA.reclaim()
+        if CUDA.available_memory() / CUDA.total_memory() < 0.1
+            GC.gc(true)
+            CUDA.reclaim()
+        end
     elseif x isa ROCArray
         GC.gc(true)
         AMDGPU.HIP.reclaim()
