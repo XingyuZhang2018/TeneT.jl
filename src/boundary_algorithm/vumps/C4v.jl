@@ -1,8 +1,5 @@
 function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
-    power_iter = alg.power_iter
-    ifparallel = alg.ifparallel
-    forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
+    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint = alg
     f(FL) = FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter)
     if alg.ifsimple_eig
         if ifcheckpoint
@@ -19,10 +16,7 @@ function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
 end
 
 function ACenv_c4v(AC, FL, M; alg, kwargs...)
-    power_iter = alg.power_iter
-    ifparallel = alg.ifparallel
-    forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
+    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint = alg
     f(AC) = ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter)
     if alg.ifsimple_eig
         if ifcheckpoint
@@ -39,14 +33,12 @@ function ACenv_c4v(AC, FL, M; alg, kwargs...)
 end
 
 function Cenv_c4v(C, FL; alg, kwargs...)
-    power_iter = alg.power_iter
-    ifcheckpoint = alg.ifcheckpoint
-
+    @unpack power_iter = alg
+    f(C) = Cmap(C, FL, FL)
     if alg.ifsimple_eig
-        λCs, Cs = simple_eig(C1j -> Cmap(1, C1j, FL[:,jr], FL[:,jr]), power_iter)
+        λCs, Cs = simple_eig(f, C; power_iter)
     else
-        λCs, Cs, info = eigsolve(C1j -> Cmap(1, C1j, FL[:,jr], FL[:,jr]),C[1,j], 1, :LM;
-            alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
+        λCs, Cs, info = eigsolve(f,C, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
         alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv_plaq not converged"
     end
         
@@ -56,7 +48,8 @@ end
 
 # ── initialization ─────────────────────────────────────────
 
-function init_C4vVUMPSEnv(M, χ::Int, alg::VUMPS{:C4v})
+function init_env(M::StructArray, χ::Int, alg::VUMPS{:C4v})
+    M = M[1][:,:,:,:,:,1]
     D = size(M, 1)  
     if M isa leg4
         FL = rand!(similar(M,χ,D,χ))
@@ -78,6 +71,7 @@ One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
 function vumps_step(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
+    M = M[1][:,:,:,:,:,1]
     @unpack AL, C, FL = rt
     AC = ALCtoAC_map(AL, C)
     _, FL = leftenv_c4v(AL, conj(AL), M, FL; alg)
@@ -136,3 +130,5 @@ end
 function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
     return vumps_itr(rt, M, alg)
 end
+
+ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{:C4v}) = rt

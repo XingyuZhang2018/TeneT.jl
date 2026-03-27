@@ -1,7 +1,7 @@
 function save_rt(folder, rt; file::String="VUMPS_rt_env.jld2")
     p = joinpath(folder, file)
     rt_save = Array(rt)
-    @info "save a VUMPS runtime environment to $p"
+    @info "save a $(typeof(rt)) environment to $p"
     save(p, "rt", rt_save)
 end
 
@@ -24,7 +24,7 @@ function load_rt(folder, atype, ifparallelupdown; file::String="VUMPS_rt_env.jld
     else
         rt = atype(rt)
     end
-    @info "load a VUMPS runtime environment from $p"
+    @info "load a $(typeof(rt)) runtime environment from $p"
     return rt
 end
 

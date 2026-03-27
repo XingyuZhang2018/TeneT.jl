@@ -1,5 +1,9 @@
 ALCtoAC_map(AL::leg3, C) = @tensor result[a,b,d] := AL[a,b,c] * C[c,d]
 ALCtoAC_map(AL::leg4, C) = @tensor result[a,b,c,e] := AL[a,b,c,d] * C[d,e]
+CTtoT(C, T::leg3) = @tensor T[a,c,d] := C[a,b] * T[b,c,d]
+CTtoT(C, T::leg4) = @tensor T[a,c,d,e] := C[a,b] * T[b,c,d,e]
+CTCtoT(C, T::leg3) = @tensor T[a,c,e] := C[a,b] * T[b,c,d] * C[d,e]
+CTCtoT(C, T::leg4) = @tensor T[a,c,d,f] := C[a,b] * T[b,c,d,e] * C[e,f]
 
 """
     FLm = FLmap(ALu, ALd, M, FL)

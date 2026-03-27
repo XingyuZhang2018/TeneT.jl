@@ -19,7 +19,7 @@ pattern = [1;;]
 #            2 4]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
 No = 0
-folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/seed$seed/")
+folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
@@ -58,7 +58,6 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-# read_last_log(params, D)
 A = init_ipeps(;atype, etype, No, d=2, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 

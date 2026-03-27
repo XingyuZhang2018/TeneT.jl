@@ -12,7 +12,7 @@ Unpack the raw parameter array `A` (dimensions `D x D x D x D x d x Nsites`)
 into a `StructArray` according to `params.pattern`, apply lattice-dependent
 mapping, and optionally apply SU parameterization.
 """
-function build_A(A, params::iPEPSOptimize)
+function build_A(A::AbstractArray{T, 6}, params::iPEPSOptimize) where T
     Ar = StructArray([A[:,:,:,:,:,i] for i in 1:length(unique(params.pattern))], params.pattern)
     Ar = _lattice_map(Ar, params.model.lattice, params.pattern)
     if hasproperty(params, :ifSU) && params.ifSU

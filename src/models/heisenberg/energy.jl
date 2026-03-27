@@ -71,3 +71,43 @@ function energy_value(model::Heisenberg{Square}, A, env::PlaquetteVUMPSEnv, para
     params.verbosity >= 4 && println("energy = $(etol/len)")
     return etol/len, e_dict
 end
+
+function energy_value(model::Heisenberg{Square}, A, env::C4vVUMPSEnv, params::iPEPSOptimize)
+    @unpack AL, C, FL = env
+    @unpack ifparallel, forloop_iter = params.boundary_alg
+    e_dict = Dict{String, Dict{String, Any}}(
+        "Horizontal_energy" => Dict{String, Any}(),
+    )
+
+    O1, O2 = Zygote.@ignore _arraytype(A).(hamiltonian_trunc(model))
+    AC = ALCtoAC_map(AL,C)
+
+    e = contract_o2_H(FL, AL, A[1], conj(AL), FL, AC, A[1], conj(AC), O1, O2; ifparallel, forloop_iter)
+    n = contract_n2_H(FL, AL, A[1], conj(AL), FL, AC, A[1], conj(AC); ifparallel, forloop_iter)
+    params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
+    etol = e/n
+    e_dict["Horizontal_energy"]["1,1"] = e/n
+
+    params.verbosity >= 3 && println("energy = $(etol*2)")
+    return etol*2, e_dict
+end
+
+function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOptimize)
+    @unpack C, T = env
+    @unpack ifparallel, forloop_iter = params.boundary_alg
+    e_dict = Dict{String, Dict{String, Any}}(
+        "Horizontal_energy" => Dict{String, Any}(),
+    )
+
+    O1, O2 = Zygote.@ignore _arraytype(A).(hamiltonian_trunc(model))
+
+    To = CTCtoT(C, T)
+    e = contract_o2_H(To, T, A[1], T, To, T, A[1], T, O1, O2; ifparallel, forloop_iter)
+    n = contract_n2_H(To, T, A[1], T, To, T, A[1], T; ifparallel, forloop_iter)
+    params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
+    etol = e/n
+    e_dict["Horizontal_energy"]["1,1"] = e/n
+
+    params.verbosity >= 3 && println("energy = $(etol*2)")
+    return etol*2, e_dict
+end

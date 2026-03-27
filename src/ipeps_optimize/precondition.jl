@@ -83,29 +83,50 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
     return gradnew
 end
 
-"""
-    precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond)
-
-Precondition the gradient using the CTM environment (norm-only).
-"""
-function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond)
-    t0 = time()
+function precondition_invese_single_envir(A, grad, env::C4vVUMPSEnv, params, restriction_ipeps, fδEi, iter_precond)
     if fδEi[3] <= iter_precond
         return grad
     end
     δ = fδEi[2]
-    A = restriction_ipeps(A)
+
+    @unpack AL, C, FL = env
+    AC = ALCtoAC_map(AL, C)
+
+    gradnew = deepcopy(grad)
+
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+
+    gradnew, _ = linsolve(
+        x -> δ * x + Mumap_parallel(AC, AC, FL, FL, x; forloop_iter, ifparallel),
+        grad[:,:,:,:,:,1];
+        isposdef=true, maxiter=1, verbosity=0
+    )
+
+    return reshape(gradnew, size(grad))
+end
+
+function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond)
+    if fδEi[3] <= iter_precond
+        return grad
+    end
+    δ = fδEi[2]
 
     @unpack C, T = env
-    @unpack forloop_iter, ifparallel = params.boundary_alg
     To = CTCtoT(C, T)
 
-    gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        return δ * x + Mumap_parallel(T, T, To, To, x; forloop_iter, ifparallel)
-    end
+    gradnew = deepcopy(grad)
 
-    params.verbosity >= 2 && printstyled("precondition calculation took $(round(time() - t0, digits=2)) s\n"; bold=true, color=:green)
-    return gradnew
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+
+    gradnew, _ = linsolve(
+        x -> δ * x + Mumap_parallel(T, T, To, To, x; forloop_iter, ifparallel),
+        grad[:,:,:,:,:,1];
+        isposdef=true, maxiter=1, verbosity=0
+    )
+
+    return reshape(gradnew, size(grad))
 end
 
 """

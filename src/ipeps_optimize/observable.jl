@@ -80,7 +80,7 @@ function magnetization_value(model, A, env::VUMPSEnv, params)
 end
 
 function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
-    @unpack AL, C, FLo = env
+    @unpack AL, C, FLu, FLo = env
     AC = ALCtoAC(AL, C)
     atype = _arraytype(AC[1])
     S = model.S
@@ -90,42 +90,78 @@ function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
 
     Ni, Nj = size(AC)
     len = length(AC.data)
+    Ni,Nj = size(AC)
+    ifparallel = params.boundary_alg.ifparallel
     forloop_iter = params.forloop_iter
     m_dict = Dict{String, Any}()
-    Mnorm = zeros(ComplexF64, Ni, Nj)
+    etype = eltype(AC[1,1])
+    Mnorm = zeros(etype, Ni, Nj)
     for p in 1:len
         i, j = Tuple(findfirst(==(p), AC.pattern))
+        params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        Mx = contract_o1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], Sx; forloop_iter)
-        My = contract_o1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], Sy; forloop_iter)
-        Mz = contract_o1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], Sz; forloop_iter)
-        n  = contract_n1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; forloop_iter)
+        Mx = contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sx; ifparallel, forloop_iter)
+        My = etype == Float64 ? 0.0 : contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sy; ifparallel, forloop_iter)
+        Mz = contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter)
+        
+        n = contract_n1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
         Mag = [Mx/n, My/n, Mz/n]
         Mnorm[i,j] = norm(Mag)
+        params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
+
         m_dict["$(i),$(j)"] = Dict("Mx" => Mag[1], "My" => Mag[2], "Mz" => Mag[3], "|M|" => Mnorm[i,j])
     end
+
     M_mean = sum(Mnorm)/len
+    params.verbosity >= 4 && println("|M|_mean = $(M_mean)")
     return M_mean, m_dict
+end
+
+function magnetization_value(model, A, env::C4vVUMPSEnv, params)
+    @unpack AL, C, FL = env
+    @unpack ifparallel, forloop_iter = params.boundary_alg
+    m_dict = Dict{String, Any}()
+    AC = ALCtoAC_map(AL, C)
+    atype = _arraytype(AC)
+    etype = eltype(AC)
+
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
+
+    Mx = contract_o1(FL,AC,A[1],AC,FL, Sx; ifparallel, forloop_iter)
+    My = etype == Float64 ? 0.0 : contract_o1(FL,AC,A[1],AC,FL, Sy; ifparallel, forloop_iter)
+    Mz =contract_o1(FL,AC,A[1],AC,FL, Sz; ifparallel, forloop_iter)
+
+    n = contract_n1(FL,AC,A[1],AC,FL; ifparallel, forloop_iter)
+    Mag = [Mx/n, My/n, Mz/n]
+    Mnorm = norm(Mag)
+    params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
+    m_dict["1,1"] = Dict("Mx" => Mag[1], "My" => Mag[2], "Mz" => Mag[3], "|M|" => Mnorm)
+
+    return Mnorm, m_dict
 end
 
 function magnetization_value(model, A, env::CTMEnv, params)
     @unpack C, T = env
-    @unpack forloop_iter = params
+    @unpack ifparallel, forloop_iter = params.boundary_alg
     m_dict = Dict{String, Any}()
-    etype = eltype(A)
-    atype = _arraytype(A)
-
     To = CTCtoT(C, T)
-    Sx = atype(const_Sx(model.S))
-    Sy = atype(const_Sy(model.S))
-    Sz = atype(const_Sz(model.S))
+    atype = _arraytype(To)
+    etype = eltype(To)
 
-    Mx = contract_o1(To, T, A, Sx; forloop_iter)
-    My = etype == Float64 ? 0.0 : contract_o1(To, T, A, Sy; forloop_iter)
-    Mz = contract_o1(To, T, A, Sz; forloop_iter)
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
 
-    n = contract_n1(To, T, A; forloop_iter)
+    Mx = contract_o1(To,T,A[1],T,To, Sx; ifparallel, forloop_iter)
+    My = etype == Float64 ? 0.0 : contract_o1(To,T,A[1],T,To, Sy; ifparallel, forloop_iter)
+    Mz =contract_o1(To,T,A[1],T,To, Sz; ifparallel, forloop_iter)
+
+    n = contract_n1(To,T,A[1],T,To; ifparallel, forloop_iter)
     Mag = [Mx/n, My/n, Mz/n]
     Mnorm = norm(Mag)
     params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -238,8 +274,9 @@ end
 function cor_len_value(env::PlaquetteVUMPSEnv, params)
     @unpack AL, C, FLu, FLo = env
     Cint = cellones(AL)[1]
-    λcs, _, info = eigsolve(Cv -> Cmap(Cv, AL[1,:], conj(AL[1,:]), 1), Cint, 10, :LM; maxiter=100, ishermitian=false)
+    λcs, _, info = eigsolve(C -> Rmap(1, C, AL[1,:], conj(AL[1,:])), Cint, 10, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len not converged"
+    @show λcs
     λ2 = 0
     for i in 2:length(λcs)
         if !(norm(λcs[i]) ≈ norm(λcs[1]))
@@ -252,6 +289,25 @@ function cor_len_value(env::PlaquetteVUMPSEnv, params)
     return ξ
 end
 
+function cor_len_value(env::C4vVUMPSEnv, params)
+    @unpack AL, C = env
+
+    λcs, _, info = eigsolve(C->Lmap(C, AL, conj(AL)), C, 10, :LM; maxiter=100, ishermitian = false)
+    info.converged == 0 && @warn "cor_len not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+        
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ = $(ξ)")
+
+    return ξ
+end
+
 """
     cor_len_value(env::CTMEnv, params)
 
@@ -260,9 +316,8 @@ Compute the correlation length from the CTM corner transfer matrix.
 function cor_len_value(env::CTMEnv, params)
     @unpack C, T = env
 
-    λcs, _, info = eigsolve(C->Lmap(C, T, conj(T)), C, 10, :LM; maxiter=100, ishermitian=false)
+    λcs, _, info = eigsolve(C->Lmap(C, T, T), C, 10, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len not converged"
-    @show λcs λcs[2]/λcs[1]
     λ2 = 0
     for i in 2:length(λcs)
         if !(norm(λcs[i]) ≈ norm(λcs[1]))
@@ -272,7 +327,6 @@ function cor_len_value(env::CTMEnv, params)
     end
 
     ξ = -1/log(abs(λ2/λcs[1]))
-    @show ξ
     params.verbosity >= 4 && println("ξ = $(ξ)")
     return ξ
 end

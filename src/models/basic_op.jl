@@ -3,7 +3,7 @@
 function const_Sx(S::Real)
     dims = Int(2*S + 1)
     ms = [-S+i-1 for i in 1:dims]
-    Sx = zeros(ComplexF64, dims, dims)
+    Sx = zeros(Float64, dims, dims)
     for j in 1:dims, i in 1:dims
         if abs(i-j) == 1
             Sx[i,j] = 1/2 * sqrt(S*(S+1)-ms[i]*ms[j])
@@ -29,7 +29,7 @@ end
 function const_Sz(S::Real)
     dims = Int(2*S + 1)
     ms = [S-i+1 for i in 1:dims]
-    Sz = zeros(ComplexF64, dims, dims)
+    Sz = zeros(Float64, dims, dims)
     for i in 1:dims
         Sz[i,i] = ms[i]
     end

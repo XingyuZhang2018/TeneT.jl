@@ -37,10 +37,8 @@ function ACenv_plaq(AC, FL, M; alg, kwargs...)
                     λACs, ACs = simple_eig(f, AC[1,j]; power_iter)
                 end
             else
-                λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM;
-                    alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 &&
-                    @warn "ACenv_plaq not converged"
+                λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
+                alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
             end
             λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
             push!(processed_indices, p)
@@ -80,8 +78,7 @@ function Cenv_plaq(C, FL; alg, kwargs...)
             if alg.ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1,j]; power_iter)
             else
-                λCs, Cs, info = eigsolve(f, C[1,j], 1, :LM;
-                    alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
+                λCs, Cs, info = eigsolve(f, C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv_plaq not converged"
             end
             λC[1,j], C′[1,j] = selectpos(λCs, Cs, Ni)

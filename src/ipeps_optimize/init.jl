@@ -2,9 +2,6 @@
 # Handles random initialization, file loading, bond-dimension enlargement,
 # and VUMPS runtime environment creation.
 
-using JLD2
-using LinearAlgebra
-
 # --------------------------------------------------------------------------- #
 #  init_ipeps  —  create or load iPEPS site tensors
 # --------------------------------------------------------------------------- #

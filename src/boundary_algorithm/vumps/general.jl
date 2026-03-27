@@ -4,12 +4,12 @@
 
 # ─── Reshape helpers ──────────────────────────────────────────────────────────
 
-function _to_front(t)
+function _to_tail(t)
     χ = size(t)[end]
     return reshape(t, χ, Int(prod(size(t))/χ))
 end
 
-function _to_tail(t)
+function _to_front(t)
     χ = size(t, 1)
     return reshape(t, Int(prod(size(t))/χ), χ)
 end
@@ -46,7 +46,7 @@ Compute the gauge transform `L` from the transfer matrix density.
 function getL!(A, L; kwargs...)
     Ni, Nj = size(A)
     @inbounds for j = 1:Nj, i = 1:Ni
-        _, ρ = simple_eig(x -> Lmap(x, A[i, :], j), L[i, j]' * L[i, j]; kwargs...)
+        _, ρ = simple_eig(x -> ρmap(x, A[i, :], j), L[i, j]' * L[i, j]; kwargs...)
         ρ = real(ρ + ρ')
         ρ ./= tr(ρ)
         F = svd!(ρ)
@@ -68,7 +68,7 @@ function getAL(A, L)
     Le = similar(L)
     λ = randSA(Array, AL.pattern)
     for i in 1:length(A)
-        Q, R = qrpos!(_to_tail(L[i] * _to_front(A[i])))
+        Q, R = qrpos!(_to_front(L[i] * _to_tail(A[i])))
         AL[i] = reshape(Q, size(A[i]))
         λ[i] = norm(R)
         Le[i] = rmul!(R, 1 / λ[i])
@@ -79,7 +79,7 @@ end
 function getLsped(Le, A, AL; kwargs...)
     L = similar(Le)
     for i in 1:length(A)
-        _, Ls1 = simple_eig(X -> Lmap(X, A[i], conj(AL[i])), Le[i]; power_iter=5, kwargs...)
+        _, Ls1 = simple_eig(X -> Lmap(X, conj(AL[i]), A[i]), Le[i]; power_iter=5, kwargs...)
         _, R = qrpos!(Ls1[1])
         L[i] = R
     end
@@ -551,7 +551,7 @@ function ACCtoAL(AC, C)
     errL = 0.0
     AL = Zygote.Buffer(AC)
     @inbounds for i in 1:length(AC)
-        QAC, RAC = qrpos(_to_tail(AC[i]))
+        QAC, RAC = qrpos(_to_front(AC[i]))
         QC, RC = qrpos(C[i])
         errL += norm(RAC - RC)
         AL[i] = reshape(QAC * QC', size(AC[i]))
@@ -566,7 +566,7 @@ function ACCtoAR(AC, C)
     @inbounds for p in 1:length(AC.data)
         i, j = Tuple(findfirst(==(p), AC.pattern))
         jr = mod1(j - 1, Nj)
-        LAC, QAC = lqpos(_to_front(AC[i, j]))
+        LAC, QAC = lqpos(_to_tail(AC[i, j]))
         LC, QC = lqpos(C[i, jr])
         errR += norm(LAC - LC)
         AR[i, j] = reshape(QC' * QAC, size(AC[i, j]))

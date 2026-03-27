@@ -121,6 +121,10 @@ Array(rt::C4vVUMPSEnv)    = C4vVUMPSEnv(Array(rt.AL), Array(rt.C), Array(rt.FL))
 CuArray(rt::C4vVUMPSEnv)  = C4vVUMPSEnv(CuArray(rt.AL), CuArray(rt.C), CuArray(rt.FL))
 ROCArray(rt::C4vVUMPSEnv) = C4vVUMPSEnv(ROCArray(rt.AL), ROCArray(rt.C), ROCArray(rt.FL))
 
+Array(rt::CTMEnv)    = CTMEnv(Array(rt.C), Array(rt.T))
+CuArray(rt::CTMEnv)  = CTMEnv(CuArray(rt.C), CuArray(rt.T))
+ROCArray(rt::CTMEnv) = CTMEnv(ROCArray(rt.C), ROCArray(rt.T))
+
 # ── In-place update helpers ──────────────────────────────────────────
 function update!(env::VUMPSRuntime, env′::VUMPSRuntime)
     env.AL.data .= env′.AL.data

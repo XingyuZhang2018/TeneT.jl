@@ -4,49 +4,42 @@
 # Uses QR decomposition of the combined C*T tensor to obtain the projector U,
 # then applies a single transfer-matrix step followed by a QR-based corner update.
 
-# ── QRCTM-specific getU ────────────────────────────────────────────────
+# ── initialization ─────────────────────────────────────────
 
-"""
-    getU(env::CTMEnv, ::QRCTM)
+function init_env(M::StructArray, χ::Int, alg::QRCTM)
+    M = M[1][:,:,:,:,:,1]
+    D = size(M, 1)  
+    if M isa leg4
+        T = rand!(similar(M,χ,D,χ))
+        T += conj(permutedims(T, (3,2,1)))
+    else
+        T = rand!(similar(M,χ,D,D,χ))
+        T += conj(permutedims(T, (4,2,3,1)))
+    end
+    C = rand!(similar(M,χ,χ))
+    C += C'
 
-Compute the isometric projector U and updated corner R from a QR
-decomposition of C*T.
-"""
-function getU(env::CTMEnv, ::QRCTM)
-    C = env.C
-    T = env.T
-    Tu = CTtoT(C, T)
-    # _to_tail flattens all-but-first dimensions into rows, first dim into columns:
-    #   (chi, D, chi) -> (D*chi, chi)
-    U, Cnew = qr_for_ad(_to_tail(Tu))
-    U = reshape(U, size(T))
-    return U, Cnew
+    return CTMEnv(C, T)
 end
-
-# ── QRCTM leftmove ─────────────────────────────────────────────────────
 
 """
     leftmove(M, env::CTMEnv, alg::QRCTM)
 
 One CTM left-move step for the QRCTM algorithm.
-
-1. QR-decompose C*T to get projector U and remainder R
-2. Apply the transfer matrix to get new edge tensor T
-3. Update corner via Cmap with R, new T, and U
-4. Return updated environment and convergence error
 """
-function leftmove(M, env::CTMEnv, alg::QRCTM)
+function qrctm_step(env::CTMEnv, M::StructArray, alg::QRCTM)
+    M = M[1][:,:,:,:,:,1]
     C = env.C
     T = env.T
 
-    CT = _to_tail(CTtoT(C, T))
-    U, R = qr_for_ad(CT)
+    CT = _to_front(CTtoT(C, T))
+    U, R = qrpos(CT)
     U = reshape(U, size(T))
 
-    T = FLmap_parallel(T, U, U, M;
+    T = FLmap_parallel(T, U, conj(U), M;
                        ifparallel=alg.ifparallel,
                        forloop_iter=alg.forloop_iter)
-    C_new = Cmap(R, T, U)
+    C_new = Cmap(R, T, conj(U))
 
     T /= Zygote.@ignore norm(T)
     C_new /= Zygote.@ignore norm(C_new)
@@ -54,3 +47,45 @@ function leftmove(M, env::CTMEnv, alg::QRCTM)
 
     return CTMEnv(C_new, T), err
 end
+
+# ── Plaquette iteration + boundary ───────────────────────────────────
+
+function qrctm_itr(env::CTMEnv, M::StructArray, alg::QRCTM)
+    t = Zygote.@ignore time()
+    local err
+
+    Zygote.@ignore alg.verbosity >= 2 && @info "Start QRCTM iteration without AD..."
+    Zygote.@ignore for i in 1:alg.maxiter
+        env, err = qrctm_step(env, M, alg)
+        alg.verbosity >= 3 && i % alg.show_every == 0 &&
+            Zygote.@ignore @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+        if err < alg.tol && i >= alg.miniter
+            alg.verbosity >= 2 &&
+                Zygote.@ignore @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+            break
+        end
+        if i == alg.maxiter
+            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+        end
+    end
+
+    Zygote.@ignore alg.verbosity >= 2 && @info "Start QRCTM iteration with AD..."
+    for i in 1:alg.maxiter_ad
+        env, err = alg.ifcheckpoint ? checkpoint(qrctm_step, env, M, alg) : qrctm_step(env, M, alg)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+        if err < alg.tol && i >= alg.miniter_ad
+            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+            break
+        end
+        if i == alg.maxiter_ad
+            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+        end
+    end
+    return env, err
+end
+
+function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
+    return qrctm_itr(env, M, alg)
+end
+
+ObsEnv(env::CTMEnv, M::StructArray, ::QRCTM) = env
