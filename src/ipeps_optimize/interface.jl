@@ -19,49 +19,42 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
 
     # Verbosity and iteration control
     verbosity::Int = Defaults.VERBOSE_ITER
-    maxiter::Int = 100
-    tol::Real = 1e-10
-    maxiter_restart::Int = 100
+    maxiter_restart::Int = 1
 
     # Simple-update warm start
     SUτ::Real = 0.0
     ifSU::Bool = false
 
     # Optimizer (e.g. LBFGS from OptimKit)
-    optimizer = nothing  # caller sets, e.g. LBFGS(; verbosity=0)
+    optimizer = LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, 
+                      linesearch=HagerZhangLineSearch(maxfg=5)) #GradientDescent()
 
     # I/O paths and intervals
-    folder::String = joinpath(pwd(), "data", "ipeps")
+    folder::String = joinpath(pkgdir(TeneT), "data")
     show_every::Int = 1
     save_every::Int = 1
 
     # Environment save/load
-    ifsave_env::Bool = true
+    ifsave_env::Bool = false
     save_env_tol::Real = 1e-4
     ifload_env::Bool = true
 
     # LBFGS state save/load
     ifsave_lbfgs::Bool = true
-    ifload_lbfgs::Bool = true
+    ifload_lbfgs::Bool = false
 
     # Tensor layout
-    ifflatten::Bool = false
     forloop_iter::Int = 1
 
     # Checkpointing (Zygote checkpoint for memory saving)
     ifcheckpoint::Bool = false
 
+    # Minimal Canonical Form (MCF)
+    ifMCF::Bool = false
+
     # Preconditioning
     ifprecondition::Bool = false
     iter_precond::Int = 20
-
-    # Mixing parameters (from ADC4PEPS)
-    α::Real = 0.0
-    β::Real = 1.0
-
-    # Bond-dimension ordering
-    order::Symbol = :none
-    bondratio = 1.0
 end
 
 """

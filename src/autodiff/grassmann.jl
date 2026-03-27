@@ -5,7 +5,7 @@
 """
 project_AL(∂AL, AL) = project_AL!(deepcopy(∂AL), AL)
 function project_AL!(∂AL, AL)
-    [∂AL .-= ein"deg,(abc,abg)->dec"(AL, ∂AL, conj.(AL)) for (∂AL, AL) in zip(∂AL, AL)]
+    [∂AL .-= (@tensor t[d,e,c] := AL[d,e,g] * ∂AL[a,b,c] * conj(AL)[a,b,g]) for (∂AL, AL) in zip(∂AL, AL)]
     return ∂AL
 end
 

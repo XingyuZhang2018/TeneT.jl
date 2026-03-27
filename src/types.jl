@@ -3,8 +3,9 @@
 # Lattice types — embedded in HamiltonianModel structs
 abstract type AbstractLattice end
 struct Square <: AbstractLattice end
-struct Honeycomb <: AbstractLattice end
-struct KagomeLattice <: AbstractLattice end
+struct Honeycomb{Mode} <: AbstractLattice end
+Honeycomb() = Honeycomb{:brickwall}()
+struct Kagome <: AbstractLattice end
 
 # Contraction modes for VUMPS specialization
 abstract type ContractionMode end

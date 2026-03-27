@@ -28,18 +28,36 @@ checkpoint file; otherwise creates a random initial state.
 # Returns
 An array of shape `(D, D, D, D, d, Nsites)` on the requested backend.
 """
-function init_ipeps(; atype=Array, etype=ComplexF64, No, pattern, χ::Int, D::Int, d::Int, params)
+function init_ipeps(; atype=Array, etype=Float64, No::Int=0, d::Int, D::Int, χ::Int, params::iPEPSOptimize)
+    Ni, Nj = size(params.pattern)
+    N = length(unique(params.pattern))
     if No != 0
         file = joinpath(params.folder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
+        @info "load ipeps from file: $file"
         A = load(file, "bcipeps")
-        params.verbosity >= 2 && @info "load ipeps from $file"
     else
-        Nsites = length(unique(pattern))
-        A = rand(etype, D, D, D, D, d, Nsites) + ones(etype, D, D, D, D, d, Nsites)
+        lattice = params.model.lattice
+        A = _init_random_ipeps(lattice, etype, D, d, N, Ni, Nj)
         A /= norm(A)
-        params.verbosity >= 2 && @info "random initial ipeps"
+        @info "generate random ipeps at $(joinpath(params.folder, "D$(D)"))"
     end
     return atype(A)
+end
+
+# Lattice-dependent random tensor shape
+_init_random_ipeps(::Square, etype, D, d, N, Ni, Nj) =
+    rand(etype, D, D, D, D, d, N) .+ 1
+
+_init_random_ipeps(::Kagome, etype, D, d, N, Ni, Nj) =
+    rand(etype, D, D, D, D, d^3, N) .+ 1
+
+function _init_random_ipeps(::Honeycomb{:merge}, etype, D, d, N, Ni, Nj)
+    rand(etype, D, D, D, D, d^2, N) .+ 1
+end
+
+function _init_random_ipeps(::Honeycomb{:brickwall}, etype, D, d, N, Ni, Nj)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("Ni and Nj should be even for brickwall"))
+    rand(etype, D, 1, D, D, d, N) .+ 1
 end
 
 # --------------------------------------------------------------------------- #
@@ -136,7 +154,7 @@ iPEPS tensors.
 - `restriction_ipeps`: optional function that enforces symmetry constraints on `A`
 """
 function initialize_env(A, D::Int, χ::Int, params::iPEPSOptimize; restriction_ipeps=identity)
-    folder_path = joinpath(params.folder, "D$(D)", "VUMPS_rt_env")
+    folder_path = joinpath(params.folder, "D$(D)", "environment")
     file_path = joinpath(folder_path, "χ$χ.jld2")
 
     if hasproperty(params, :ifload_env) && params.ifload_env
@@ -164,6 +182,5 @@ Internal helper: build a fresh `VUMPSRuntime` from the iPEPS tensors.
 function _create_new_env(A, χ::Int, params::iPEPSOptimize; restriction_ipeps=identity)
     A = restriction_ipeps(A)
     A = build_A(A, params)
-    M = build_M(A, params)
-    return VUMPSRuntime(M, χ, params.boundary_alg)
+    return init_env(A, χ, params.boundary_alg)
 end

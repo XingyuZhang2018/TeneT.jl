@@ -1,7 +1,15 @@
 # Observable computation for iPEPS
 # Magnetization, correlation length, and full observable wrapper
 
-using Printf
+"""
+    energy(A, env, params::iPEPSOptimize)
+
+Main entry point for energy computation during iPEPS optimization.
+Calls `energy_value` dispatching on `params.model` type.
+"""
+function energy(A, env, params::iPEPSOptimize)
+    return energy_value(params.model, A, env, params)[1]
+end
 
 # ============================================================================
 # Full observable computation
@@ -16,16 +24,15 @@ converges the boundary, and evaluates expectation values.
 """
 function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps)
     D = size(A, 1)
-    rt = initialize_vumps_runtime(A, D, χ, params; restriction_ipeps)
+    rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
     A = restriction_ipeps(A)
     A = build_A(A, params)
-    M = build_M(A, params)
 
-    rt, _ = leading_boundary(rt, M, params.boundary_alg)
+    rt, _ = leading_boundary(rt, A, params.boundary_alg)
     params.ifsave_env && save_rt(joinpath(params.folder, "D$(D)", "VUMPS_rt_env"), rt; file="χ$(χ).jld2")
-    env = VUMPSEnv(rt, M, params.boundary_alg)
-    e = expectation_value(params.model, A, env, params)
+    env = ObsEnv(rt, A, params.boundary_alg)
+    e = energy_value(params.model, A, env, params)
     mag = magnetization_value(params.model, A, env, params)
     ξ = cor_len_value(env, params)
     write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
@@ -39,6 +46,7 @@ end
 function magnetization_value(model, A, env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
+    etype = eltype(ACu[1])
     S = model.S
     Sx = atype(const_Sx(S))
     Sy = atype(const_Sy(S))
@@ -46,18 +54,19 @@ function magnetization_value(model, A, env::VUMPSEnv, params)
 
     Ni, Nj = size(ACu)
     len = length(ACu.data)
-    forloop_iter = params.forloop_iter
+    @unpack forloop_iter = params
+    @unpack  ifparallel = params.boundary_alg
     m_dict = Dict{String, Any}()
-    Mnorm = zeros(ComplexF64, Ni, Nj)
+    Mnorm = zeros(Float64, Ni, Nj)
     for p in 1:len
         i, j = Tuple(findfirst(==(p), ACu.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
-        Mx = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx; forloop_iter)
-        My = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy; forloop_iter)
-        Mz = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz; forloop_iter)
+        Mx = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx; forloop_iter, ifparallel)
+        My = etype <: Real ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy; forloop_iter, ifparallel)
+        Mz = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz; forloop_iter, ifparallel)
 
-        n = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; forloop_iter)
+        n = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
         Mag = [Mx/n, My/n, Mz/n]
         Mnorm[i,j] = norm(Mag)
         params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -67,6 +76,36 @@ function magnetization_value(model, A, env::VUMPSEnv, params)
 
     M_mean = sum(Mnorm)/len
     params.verbosity >= 4 && println("|M|_mean = $(M_mean)")
+    return M_mean, m_dict
+end
+
+function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
+    @unpack AL, C, FLo = env
+    AC = ALCtoAC(AL, C)
+    atype = _arraytype(AC[1])
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
+
+    Ni, Nj = size(AC)
+    len = length(AC.data)
+    forloop_iter = params.forloop_iter
+    m_dict = Dict{String, Any}()
+    Mnorm = zeros(ComplexF64, Ni, Nj)
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), AC.pattern))
+        ir = Ni + 1 - i
+        jr = mod1(j + 1, Nj)
+        Mx = contract_o1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], Sx; forloop_iter)
+        My = contract_o1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], Sy; forloop_iter)
+        Mz = contract_o1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], Sz; forloop_iter)
+        n  = contract_n1(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; forloop_iter)
+        Mag = [Mx/n, My/n, Mz/n]
+        Mnorm[i,j] = norm(Mag)
+        m_dict["$(i),$(j)"] = Dict("Mx" => Mag[1], "My" => Mag[2], "Mz" => Mag[3], "|M|" => Mnorm[i,j])
+    end
+    M_mean = sum(Mnorm)/len
     return M_mean, m_dict
 end
 
@@ -170,15 +209,6 @@ end
 # Correlation length
 # ============================================================================
 
-function Cmap(C, Aui, Adi, J::Int)
-    Nj = size(Aui, 1)
-    for j = 1:Nj
-        jr = mod1(J+j-1, Nj)
-        C = ρmap(C, Aui[jr], Adi[jr])
-    end
-    return C
-end
-
 """
     cor_len_value(env::VUMPSEnv, params)
 
@@ -188,7 +218,7 @@ of the VUMPS environment.
 function cor_len_value(env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Cint = cellones(ACu)[1]
-    λcs, _, info = eigsolve(C->Cmap(C, ARu[1,:], conj(ARu[1,:]), 1), Cint, 10, :LM; maxiter=100, ishermitian=false)
+    λcs, _, info = eigsolve(C->Lmap(1, C, ARu[1,:], ARd[1,:]), Cint, 10, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len not converged"
     @show λcs λcs[2]/λcs[1]
     λ2 = 0
@@ -201,6 +231,23 @@ function cor_len_value(env::VUMPSEnv, params)
 
     ξ = -1/log(abs(λ2/λcs[1]))
     @show ξ
+    params.verbosity >= 4 && println("ξ = $(ξ)")
+    return ξ
+end
+
+function cor_len_value(env::PlaquetteVUMPSEnv, params)
+    @unpack AL, C, FLu, FLo = env
+    Cint = cellones(AL)[1]
+    λcs, _, info = eigsolve(Cv -> Cmap(Cv, AL[1,:], conj(AL[1,:]), 1), Cint, 10, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+    ξ = -1/log(abs(λ2/λcs[1]))
     params.verbosity >= 4 && println("ξ = $(ξ)")
     return ξ
 end

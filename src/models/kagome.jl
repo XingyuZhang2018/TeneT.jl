@@ -5,7 +5,7 @@ Kagome model on a given lattice. Has special `hamiltonian_onsite`,
 `hamiltonian_right`, and `hamiltonian_down` functions.
 """
 @kwdef struct Kagome{L<:AbstractLattice} <: HamiltonianModel
-    lattice::L = KagomeLattice()
+    lattice::L = Kagome()
     S::Real = 1/2
     J1::Real = 1.0
     J2::Real = 0.0

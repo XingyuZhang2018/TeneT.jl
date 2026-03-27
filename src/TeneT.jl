@@ -8,7 +8,6 @@ using AMDGPU
 using cuTENSOR
 
 using TensorOperations
-using OMEinsum
 
 using Zygote, ChainRulesCore, ForwardDiff
 using KrylovKit, VectorInterface
@@ -19,6 +18,7 @@ using JLD2, FileIO
 
 using MPI
 
+using Base.Threads
 CUDA.allowscalar(false)
 
 # ============================================================================
@@ -45,6 +45,12 @@ include("utils/io.jl")
 include("utils/misc.jl")
 
 # ============================================================================
+# Patch for other packages (e.g. Zygote, OptimKit)
+# ============================================================================
+
+include("patch/OptimKit_patch.jl")
+
+# ============================================================================
 # Contraction kernels
 # ============================================================================
 
@@ -56,39 +62,11 @@ include("contraction/observable.jl")
 # Boundary algorithms (environment structs, then algorithm implementations)
 # ============================================================================
 
-include("boundary/algorithm.jl")
-include("boundary/environment.jl")
-include("boundary/vumps.jl")
-include("boundary/ctmrg.jl")
-include("boundary/qrctm.jl")
-include("boundary/fpctm.jl")
-include("boundary/pt.jl")
-
-# ============================================================================
-# Hamiltonian models
-# ============================================================================
-
-include("models/lattice.jl")
-include("models/models.jl")
-include("models/heisenberg.jl")
-include("models/j1j2.jl")
-include("models/j1j2j3.jl")
-include("models/shastry_sutherland.jl")
-include("models/kagome.jl")
-
-# ============================================================================
-# iPEPS: interface, build, init, restriction, precondition, SU, energy, observable, optimize
-# ============================================================================
-
-include("ipeps/interface.jl")
-include("ipeps/build.jl")
-include("ipeps/init.jl")
-include("ipeps/restriction.jl")
-include("ipeps/precondition.jl")
-include("ipeps/su_parameterization.jl")
-include("ipeps/energy.jl")
-include("ipeps/observable.jl")
-include("ipeps/optimize.jl")
+include("boundary_algorithm/algorithm.jl")
+include("boundary_algorithm/environment.jl")
+include("boundary_algorithm/vumps/general.jl")
+include("boundary_algorithm/vumps/plaquette.jl")
+include("boundary_algorithm/vumps/c4v.jl")
 
 # ============================================================================
 # Automatic differentiation rules
@@ -96,14 +74,34 @@ include("ipeps/optimize.jl")
 
 include("autodiff/rules.jl")
 include("autodiff/grassmann.jl")
-include("autodiff/simple_eig_ad.jl")
+
+# ============================================================================
+# Hamiltonian models
+# ============================================================================
+
+include("models/basic_op.jl")
+include("models/heisenberg/hamiltonian.jl")
+include("models/heisenberg/energy.jl")
+
+# ============================================================================
+# iPEPS: interface, build, init, restriction, precondition, SU, energy, observable, optimize
+# ============================================================================
+
+include("ipeps_optimize/interface.jl")
+include("ipeps_optimize/build.jl")
+include("ipeps_optimize/init.jl")
+include("ipeps_optimize/restriction.jl")
+include("ipeps_optimize/precondition.jl")
+include("ipeps_optimize/su_parameterization.jl")
+include("ipeps_optimize/observable.jl")
+include("ipeps_optimize/optimize.jl")
 
 # ============================================================================
 # Exports
 # ============================================================================
 
 # --- Core types ---
-export AbstractLattice, Square, Honeycomb, KagomeLattice
+export AbstractLattice, Square, Honeycomb, Kagome
 export ContractionMode, General, Plaquette
 export Algorithm
 export iPEPSOptimize, HamiltonianModel
@@ -128,7 +126,7 @@ export save_rt, load_rt, read_last_log
 export leg3, leg4, leg5, leg8
 export _to_front, _to_tail
 export permute_fronttail
-export simple_eig, simple_eig_linear_ad
+export simple_eig
 export mcform
 export checkpoint
 export takagi_decomposition
@@ -155,6 +153,7 @@ export CTMRG, QRCTM, FPCTM, PT, VUMPS
 
 # --- Boundary environments ---
 export VUMPSRuntime, VUMPSEnv, CTMEnv
+export PlaquetteRuntime, PlaquetteVUMPSEnv
 export update!
 export leading_boundary
 
@@ -166,13 +165,14 @@ export ALCtoAC
 export Heisenberg, J1J2, J1J2J3, SS, Kagome
 export const_Sx, const_Sy, const_Sz
 export hamiltonian, hamiltonian_trunc
+export hamiltonian_onsite, hamiltonian_right, hamiltonian_down
 export expectation_value
 
 # --- iPEPS optimization parameter structs ---
 export GradientOptimize, SUOptimize, FUOptimize
 
 # --- iPEPS build / init ---
-export build_A, build_M
+export build_A
 export init_ipeps, init_ipeps_to_D, init_ipeps_perturbation, init_ipeps_from_small_D
 export initialize_env
 

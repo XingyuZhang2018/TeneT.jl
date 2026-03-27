@@ -1,5 +1,34 @@
 # Boundary contraction algorithm structs
 # All algorithms are subtypes of Algorithm (defined in types.jl)
+"""
+    VUMPS{F} <: Algorithm
+
+Variational Uniform Matrix Product State algorithm
+:General
+:Plaquette
+:C4v
+"""
+@kwdef mutable struct VUMPS{F} <: Algorithm
+    tol::Float64 = 1e-10
+    maxiter::Int = 10
+    miniter::Int = 1
+    maxiter_ad::Int = 10
+    miniter_ad::Int = 3
+    forloop_iter::Int = 1
+    power_iter::Int = 1
+    power_iter_ad::Int = 1
+    power_iter_obs::Int = 20
+
+    show_every::Int = 10
+    verbosity::Int = Defaults.verbosity
+
+    ifupdown::Bool = true
+    ifdownfromup::Bool = false
+    ifparallelupdown = false
+    ifparallel::Bool = false
+    ifsimple_eig::Bool = true
+    ifcheckpoint::Bool = false
+end
 
 """
     CTMRG <: Algorithm
@@ -12,7 +41,7 @@ Corner Transfer Matrix Renormalization Group algorithm.
     miniter::Int = 1
     maxiter_ad::Int = 10
     miniter_ad::Int = 1
-    output_interval::Int = 1
+    show_every::Int = 1
     verbosity::Int = Defaults.verbosity
     ifsimple_eig::Bool = true
 end
@@ -28,12 +57,12 @@ QR-based Corner Transfer Matrix algorithm.
     miniter::Int = 1
     maxiter_ad::Int = 10
     miniter_ad::Int = 1
-    output_interval::Int = 1
+    show_every::Int = 1
     verbosity::Int = Defaults.verbosity
-    ifsimple_eig::Bool = true
+
     maxiter_power::Int = 1
-    ifload_env::Bool = true
-    ifsave_env::Bool = true
+
+    ifsimple_eig::Bool = true
     ifparallel::Bool = false
     ifcheckpoint::Bool = false
     forloop_iter::Int = 1
@@ -50,7 +79,7 @@ Fixed-Point Corner Transfer Matrix algorithm.
     miniter::Int = 1
     maxiter_ad::Int = 10
     miniter_ad::Int = 1
-    output_interval::Int = 1
+    show_every::Int = 1
     verbosity::Int = Defaults.verbosity
     ifsimple_eig::Bool = true
 end
@@ -66,7 +95,7 @@ Power Transfer algorithm.
     miniter::Int = 1
     maxiter_ad::Int = 10
     miniter_ad::Int = 1
-    output_interval::Int = 1
+    show_every::Int = 1
     verbosity::Int = Defaults.verbosity
     ifsimple_eig::Bool = true
     maxiter_power::Int = 10
@@ -75,34 +104,4 @@ Power Transfer algorithm.
     ifparallel::Bool = false
     ifcheckpoint::Bool = false
     forloop_iter::Int = 1
-end
-
-"""
-    VUMPS{M<:ContractionMode} <: Algorithm
-
-Variational Uniform Matrix Product State algorithm, parameterized by
-a `ContractionMode` (`General` or `Plaquette`).
-"""
-@kwdef mutable struct VUMPS{M<:ContractionMode} <: Algorithm
-    mode::M = General()
-
-    tol::Float64 = 1e-10
-    maxiter::Int = 10
-    miniter::Int = 1
-    maxiter_ad::Int = 10
-    miniter_ad::Int = 3
-    forloop_iter::Int = 1
-    power_iter::Int = 5
-    power_iter_obs::Int = 20
-
-    show_every::Int = 10
-    verbosity::Int = Defaults.verbosity
-
-    ifupdown::Bool = true
-    ifdownfromup::Bool = false
-    ifparallel::Bool = false
-    ifsimple_eig::Bool = true
-    ifcheckpoint::Bool = false
-    ifgpu_cpu_combo::Bool = false
-    iflinear_ad::Bool = false
 end

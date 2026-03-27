@@ -5,29 +5,8 @@ const leg4 = Union{<:AbstractArray{T, 4}, Vector{<:AbstractArray{T, 4}}, StructA
 const leg5 = Union{<:AbstractArray{T, 5}, Vector{<:AbstractArray{T, 5}}, StructArray{<:Vector{<:AbstractArray{T, 5}}}} where T
 const leg8 = Union{<:AbstractArray{T, 8}, Vector{<:AbstractArray{T, 8}}, StructArray{<:Vector{<:AbstractArray{T, 8}}}} where T
 
-# ─── Reshape helpers ──────────────────────────────────────────────────────────
-
-function _to_front(t)
-    χ = size(t)[end]
-    return reshape(t, χ, Int(prod(size(t))/χ))
-end
-
-function _to_tail(t)
-    χ = size(t, 1)
-    return reshape(t, Int(prod(size(t))/χ), χ)
-end
-
-# ─── Permutation helpers ─────────────────────────────────────────────────────
-
-permute_fronttail(t::leg3) = permutedims(t, (3,2,1))
-permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
-permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
-permute_fronttail(t::AbstractZero) = t
-
 # ─── Simple eigenvalue solver ────────────────────────────────────────────────
-
-orth_for_ad(v) = v
-function simple_eig(f, v; power_iter, ifvalue=false)
+function simple_eig(f, v; power_iter)
     # λ = 1.0 + 1.0im
     # Zygote.@ignore begin # this is not correct when VUMPS does not converge
         # for _ in 1:power_iter
@@ -46,30 +25,12 @@ function simple_eig(f, v; power_iter, ifvalue=false)
     v1 = f(v)
     λ = dot(v, v1)
     v1 /= norm(v1)
-    # v = orth_for_ad(v)
+    v1 = orth_for_ad(v1)
     # λ = 0.0 + 0.0im
     # if ifvalue
         # λ = dot(v, f(v))
     # end
     return [λ], [v1]
-end
-
-# ─── QR / LQ with positive diagonal ─────────────────────────────────────────
-# (qrpos and lqpos are defined elsewhere; this file provides simple_eig which
-#  is the forward pass used by the AD rule in autodiff/simple_eig_ad.jl)
-
-# ─── Matrix canonical form ───────────────────────────────────────────────────
-
-function mcform(M)
-    aM = Array(M)
-    x = ein"ijil->jl"(aM)
-    _, vh = Zygote.@ignore eigen(x)
-    aM = ein"aj,(ijkl,lb)->iakb"(inv(vh),aM,vh)
-    y = ein"ijkj->ik"(aM)
-    _, vv = Zygote.@ignore eigen(y)
-    aM = ein"(ai,ijkl),kb->ajbl"(inv(vv),aM,vv)
-    aM = typeof(M)(aM)
-    return vh, vv, aM
 end
 
 # ─── Checkpointing ──────────────────────────────────────────────────────────
@@ -107,4 +68,44 @@ function takagi_decomposition(M; D_trunc)
     A = conj(V[:,1:D_trunc]) * diagm(sqrt.(D[1:D_trunc]))
 
     return A
+end
+
+# ─── Positive QR decomposition ───────────────────────────────────────────────────
+
+safesign(x::Number) = iszero(x) ? one(x) : sign(x)
+
+"""
+    qrpos(A)
+
+Returns a QR decomposition, i.e. an isometric `Q` and upper triangular `R` matrix, where `R`
+is guaranteed to have positive diagonal elements.
+"""
+qrpos(A) = qrpos!(copy(A))
+function qrpos!(A)
+    mattype = _mattype(A)
+    F = qr!(mattype(A))
+    Q = mattype(F.Q)
+    R = F.R
+    phases = safesign.(diag(R))
+    Q .= Q * Diagonal(phases)
+    R .= Diagonal(conj.(phases)) * R
+    return Q, R
+end
+
+"""
+    lqpos(A)
+
+Returns a LQ decomposition, i.e. a lower triangular `L` and isometric `Q` matrix, where `L`
+is guaranteed to have positive diagonal elements.
+"""
+lqpos(A) = lqpos!(copy(A))
+function lqpos!(A)
+    mattype = _mattype(A)
+    F = qr!(mattype(A'))
+    Q = mattype(mattype(F.Q)')
+    L = mattype(F.R')
+    phases = safesign.(diag(L))
+    Q .= Diagonal(phases) * Q
+    L .= L * Diagonal(conj!(phases))
+    return L, Q
 end

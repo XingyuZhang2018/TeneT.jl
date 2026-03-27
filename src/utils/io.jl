@@ -1,12 +1,30 @@
 function save_rt(folder, rt; file::String="VUMPS_rt_env.jld2")
     p = joinpath(folder, file)
     rt_save = Array(rt)
+    @info "save a VUMPS runtime environment to $p"
     save(p, "rt", rt_save)
 end
 
-function load_rt(folder, atype; file::String="VUMPS_rt_env.jld2")
+function load_rt(folder, atype, ifparallelupdown; file::String="VUMPS_rt_env.jld2")
     p = joinpath(folder, file)
-    rt = atype(load(p, "rt"))
+    rt = load(p, "rt")
+    if ifparallelupdown
+        rtup, rtdown = rt
+        @sync begin
+            @async begin
+                TeneT.set_device_id!(atype, 1)
+                rtup = atype(rtup)
+            end
+            @async begin
+                TeneT.set_device_id!(atype, 2)
+                rtdown = atype(rtdown)
+            end
+        end
+        rt = (rtup, rtdown)
+    else
+        rt = atype(rt)
+    end
+    @info "load a VUMPS runtime environment from $p"
     return rt
 end
 

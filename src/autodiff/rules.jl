@@ -43,8 +43,8 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     function back((dQ, dR))
         M = R * dR' - dQ' * Q
         # dA, _ = linsolve(x->x * (R + I * 1e-12)', dQ + Q * Hermitian(M, :L); verbosity=0, maxiter = 1)
-        dA = (UpperTriangular(R + I * 1e-12) \ (dQ + Q * Hermitian(M, :L))' )'
-        return NoTangent(), dA
+        dA = (dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)'
+        return NoTangent(), _arraytype(A)(dA)
     end
     return (Q, R), back
 end
@@ -55,11 +55,12 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
         M = L' * dL - dQ * Q'
         # dA, _ = linsolve(x->(L + I * 1e-12)' * x, dQ + Hermitian(M, :L) * Q; verbosity=0, maxiter = 1)
         dA = LowerTriangular(L + I * 1e-12)' \ (dQ + Hermitian(M, :L) * Q)
-        return NoTangent(), dA
+        return NoTangent(), _arraytype(A)(dA)
     end
     return (L, Q), back
 end
 
+orth_for_ad(v) = v
 function ChainRulesCore.rrule(::typeof(orth_for_ad), v)
     function back(dv)
         dv -= dot(v, dv) * v
@@ -228,6 +229,52 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     end
 
     return result, back
+end
+
+function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+    rtup, rtdown = rt
+    atype = _arraytype(M)
+    if alg.ifparallelupdown
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md, _down_M_back = pullback(_down_M, atype(M))
+                (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+            end
+        end
+    else
+        (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+        Md, _down_M_back = pullback(_down_M, M)
+        (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+    end
+    function back(((∂rtup, ∂rtdown), ∂err))
+        if alg.ifparallelupdown
+            @sync begin
+                @async begin
+                    set_device_id!(atype, 1)
+                    ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
+                    ∂Mdown = _down_M_back(∂Mddown)[1]
+                end
+            end
+        else
+            ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
+            ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
+            ∂Mdown = _down_M_back(∂Mddown)[1]
+        end
+        
+        set_device_id!(atype, 1)
+        ∂Mup.data .+= atype(∂Mdown).data
+        return NoTangent(), NoTangent(), ∂Mup, NoTangent()
+    end
+    return ((rtup, rtdown), (errup, errdown)), back
 end
 
 # function ChainRulesCore.rrule(::typeof(vumps_itr), rt::VUMPSRuntime, M, alg::VUMPS)

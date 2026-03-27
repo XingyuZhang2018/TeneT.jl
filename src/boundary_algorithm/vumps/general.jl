@@ -2,46 +2,26 @@
 # Uses struct definitions from boundary/algorithm.jl (VUMPS{M}) and
 # boundary/environment.jl (VUMPSRuntime, VUMPSEnv)
 
+# ─── Reshape helpers ──────────────────────────────────────────────────────────
+
+function _to_front(t)
+    χ = size(t)[end]
+    return reshape(t, χ, Int(prod(size(t))/χ))
+end
+
+function _to_tail(t)
+    χ = size(t, 1)
+    return reshape(t, Int(prod(size(t))/χ), χ)
+end
+
+# ─── Permutation helpers ─────────────────────────────────────────────────────
+
+permute_fronttail(t::leg3) = permutedims(t, (3,2,1))
+permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
+permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
+permute_fronttail(t::AbstractZero) = t
+
 # ── Helpers ──────────────────────────────────────────────────────────
-
-safesign(x::Number) = iszero(x) ? one(x) : sign(x)
-
-"""
-    qrpos(A)
-
-Returns a QR decomposition, i.e. an isometric `Q` and upper triangular `R` matrix, where `R`
-is guaranteed to have positive diagonal elements.
-"""
-qrpos(A) = qrpos!(copy(A))
-function qrpos!(A)
-    mattype = _mattype(A)
-    F = qr!(mattype(A))
-    Q = mattype(F.Q)
-    R = F.R
-    phases = safesign.(diag(R))
-    Q .= Q * Diagonal(phases)
-    R .= Diagonal(conj.(phases)) * R
-    return Q, R
-end
-
-"""
-    lqpos(A)
-
-Returns a LQ decomposition, i.e. a lower triangular `L` and isometric `Q` matrix, where `L`
-is guaranteed to have positive diagonal elements.
-"""
-lqpos(A) = lqpos!(copy(A))
-function lqpos!(A)
-    mattype = _mattype(A)
-    F = qr!(mattype(A'))
-    Q = mattype(mattype(F.Q)')
-    L = mattype(F.R')
-    phases = safesign.(diag(L))
-    Q .= Diagonal(phases) * Q
-    L .= L * Diagonal(conj!(phases))
-    return L, Q
-end
-
 """
     λs[1], Fs[1] = selectpos(λs, Fs, N)
 
@@ -58,14 +38,6 @@ function selectpos(λs, Fs, N)
 end
 
 """
-    ρmap(ρ, A, j)
-
-Density matrix map for the transfer matrix of an MPS row `A` at column `j`.
-"""
-ρmap(ρ, Au::leg3, Ad::leg3) = ein"(dc,csb),dsa -> ab"(ρ, Au, Ad)
-ρmap(ρ, Au::leg4, Ad::leg4) = ein"(dc,cstb),dsta -> ab"(ρ, Au, Ad)
-
-"""
     getL!(A, L; kwargs...)
 
 Compute the gauge transform `L` from the transfer matrix density.
@@ -74,7 +46,7 @@ Compute the gauge transform `L` from the transfer matrix density.
 function getL!(A, L; kwargs...)
     Ni, Nj = size(A)
     @inbounds for j = 1:Nj, i = 1:Ni
-        _, ρ = simple_eig(ρ -> ρmap(ρ, A[i, :], j), L[i, j]' * L[i, j]; kwargs...)
+        _, ρ = simple_eig(x -> Lmap(x, A[i, :], j), L[i, j]' * L[i, j]; kwargs...)
         ρ = real(ρ + ρ')
         ρ ./= tr(ρ)
         F = svd!(ρ)
@@ -107,7 +79,7 @@ end
 function getLsped(Le, A, AL; kwargs...)
     L = similar(Le)
     for i in 1:length(A)
-        _, Ls1 = simple_eig(X -> ρmap(X, A[i], conj(AL[i])), Le[i]; power_iter=5, kwargs...)
+        _, Ls1 = simple_eig(X -> Lmap(X, A[i], conj(AL[i])), Le[i]; power_iter=5, kwargs...)
         _, R = qrpos!(Ls1[1])
         L[i] = R
     end
@@ -174,29 +146,49 @@ end
 
 # ── Mixed canonical tensor ──────────────────────────────────────────
 
-function ALCtoAC(AL::leg3, C)
+function ALCtoAC(AL, C)
     AC = Zygote.Buffer(AL)
     @inbounds for i in 1:length(AL)
-        AC[i] = ein"asc,cb -> asb"(AL[i], C[i])
+        AC[i] = ALCtoAC_map(AL[i], C[i])
     end
     return copy(AC)
 end
 
-function ALCtoAC(AL::leg4, C)
-    AC = Zygote.Buffer(AL)
-    @inbounds for i in 1:length(AL)
-        AC[i] = ein"astc,cb -> astb"(AL[i], C[i])
-    end
-    return copy(AC)
+# ── Int FL FR environments ────────────────────────────────────────
+
+function FLint(AL, M::leg4)
+    χ = size(AL[1], 1)
+    return randSA(M, [(D = size(m, 1); (χ, D, χ)) for m in M.data])
+end
+function FLint(AL, M::leg5)
+    χ = size(AL[1], 1)
+    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
+end
+function FLint(AL, M::leg8)
+    χ = size(AL[1], 1)
+    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
+end
+
+function FRint(AR, M::leg4)
+    χ = size(AR[1], 1)
+    return randSA(M, [(D = size(m, 3); (χ, D, χ)) for m in M.data])
+end
+function FRint(AR, M::leg5)
+    χ = size(AR[1], 1)
+    return randSA(M, [(D = size(m, 3); (χ, D, D, χ)) for m in M.data])
+end
+function FRint(AR, M::leg8)
+    χ = size(AR[1], 1)
+    return randSA(M, [(D = size(m, 5); (χ, D, D, χ)) for m in M.data])
 end
 
 # ── Fixed-point environments ────────────────────────────────────────
 
-function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifcheckpoint, ifparallel, forloop_iter)
+function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifparallel, forloop_iter)
     Nj = length(ALui)
     for j in J:(J + Nj - 1)
         jr = mod1(j, Nj)
-        FLij = ifcheckpoint ? checkpoint(FLmap_parallel, FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter) : FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter)
+        FLij = FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter)
     end
     return FLij
 end
@@ -207,7 +199,7 @@ end
 Compute the left environment tensor for MPS `ALu`, `ALd` and MPO `M`, by finding the left fixed point
 of ALu - M - ALd contracted along the physical dimension.
 """
-function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, ifvalue=false, alg, kwargs...)
+function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     λL = Zygote.Buffer(randSA(Array, M.pattern))
     FL′ = Zygote.Buffer(FL)
     Ni, Nj = size(M)
@@ -220,20 +212,12 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, ifvalue=false, alg,
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
-            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifcheckpoint, ifparallel, forloop_iter) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifcheckpoint, ifparallel, forloop_iter)
+            f(FLij) = FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if alg.iflinear_ad
-                    if ifcheckpoint
-                        λLs, FLi1s = checkpoint(simple_eig_linear_ad, f, FL[i, 1]; ifvalue, power_iter)
-                    else
-                        λLs, FLi1s = simple_eig_linear_ad(f, FL[i, 1]; ifvalue, power_iter)
-                    end
+                if ifcheckpoint
+                    λLs, FLi1s = checkpoint(simple_eig, f, FL[i, 1]; power_iter)
                 else
-                    if ifcheckpoint
-                        λLs, FLi1s = checkpoint(simple_eig, f, FL[i, 1]; ifvalue, power_iter)
-                    else
-                        λLs, FLi1s = simple_eig(f, FL[i, 1]; ifvalue, power_iter)
-                    end
+                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
                 end
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
@@ -249,7 +233,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, ifvalue=false, alg,
         for j in 2:Nj
             p = FL.pattern[i, j]
             if p ∉ processed_indices
-                FL′[i, j] = ifcheckpoint ? checkpoint(FLmap_parallel, FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter) : FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter)
+                FL′[i, j] = FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter)
                 λL[i, j] = λL[i, 1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -262,11 +246,11 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, ifvalue=false, alg,
     return copy(λL), copy(FL′)
 end
 
-function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifcheckpoint, ifparallel, forloop_iter)
+function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifparallel, forloop_iter)
     Nj = length(ARui)
     for j in J:-1:(J - Nj + 1)
         jr = mod1(j, Nj)
-        FRij = ifcheckpoint ? checkpoint(FRmap_parallel, FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter) : FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter)
+        FRij = FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter)
     end
     return FRij
 end
@@ -277,7 +261,7 @@ end
 Compute the right environment tensor for MPS `ARu`, `ARd` and MPO `M`, by finding the right fixed point
 of AR - M - conj(AR) contracted along the physical dimension.
 """
-function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, ifvalue=false, alg, kwargs...)
+function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     Ni, Nj = size(M)
     λR = Zygote.Buffer(randSA(Array, M.pattern))
     FR′ = Zygote.Buffer(FR)
@@ -290,20 +274,12 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, ifvalue=false, alg
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
-            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifcheckpoint, ifparallel, forloop_iter) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifcheckpoint, ifparallel, forloop_iter)
+            f(FRiNj) = FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if alg.iflinear_ad
-                    if ifcheckpoint
-                        λRs, FR1s = checkpoint(simple_eig_linear_ad, f, FR[i, Nj]; ifvalue, power_iter)
-                    else
-                        λRs, FR1s = simple_eig_linear_ad(f, FR[i, Nj]; ifvalue, power_iter)
-                    end
+                if ifcheckpoint
+                    λRs, FR1s = checkpoint(simple_eig, f, FR[i, Nj]; power_iter)
                 else
-                    if ifcheckpoint
-                        λRs, FR1s = checkpoint(simple_eig, f, FR[i, Nj]; ifvalue, power_iter)
-                    else
-                        λRs, FR1s = simple_eig(f, FR[i, Nj]; ifvalue, power_iter)
-                    end
+                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
                 end
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
@@ -319,7 +295,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, ifvalue=false, alg
         for j in Nj-1:-1:1
             p = FR.pattern[i, j]
             if p ∉ processed_indices
-                FR′[i, j] = ifcheckpoint ? checkpoint(FRmap_parallel, FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter) : FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter)
+                FR′[i, j] = FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter)
                 λR[i, j] = λR[i, Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -350,7 +326,7 @@ Compute the left environment tensor for MPS `ALu` and `ALd` (no MPO), by finding
 function leftCenv(ALu::StructArray,
                   ALd::StructArray,
                   L::StructArray=cellones(ALu);
-                  ifobs=false, ifvalue=false, alg, kwargs...)
+                  ifobs=false, alg, kwargs...)
 
     Ni, Nj = size(L)
     λL = Zygote.Buffer(randSA(Array, ALu.pattern))
@@ -363,11 +339,7 @@ function leftCenv(ALu::StructArray,
         if p ∉ processed_indices
             f(Lij) = Lmap(1, Lij, ALu[i, :], ALd[ir, :])
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λLs, Li1s = checkpoint(simple_eig, f, L[i, 1]; ifvalue, power_iter)
-                else
-                    λLs, Li1s = simple_eig(f, L[i, 1]; ifvalue, power_iter)
-                end
+                λLs, Li1s = simple_eig(f, L[i, 1]; power_iter)
             else
                 λLs, Li1s, info = eigsolve(f, L[i, 1], 1, :LM; maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftCenv not converged"
@@ -413,7 +385,7 @@ Compute the right environment tensor for MPS `ARu` and `ARd` (no MPO), by findin
 function rightCenv(ARu::StructArray,
                    ARd::StructArray,
                    R::StructArray=cellones(ARu);
-                   ifobs=false, ifvalue=false, alg, kwargs...)
+                   ifobs=false, alg, kwargs...)
 
     λR = Zygote.Buffer(randSA(Array, ARu.pattern))
     R′ = Zygote.Buffer(R)
@@ -426,11 +398,7 @@ function rightCenv(ARu::StructArray,
         if p ∉ processed_indices
             f(RiNj) = Rmap(Ni, RiNj, ARu[i, :], ARd[ir, :])
             if alg.ifsimple_eig
-                if alg.ifcheckpoint
-                    λLs, Li1s = checkpoint(simple_eig, f, R[i, Nj]; ifvalue, power_iter)
-                else
-                    λLs, Li1s = simple_eig(f, R[i, Nj]; ifvalue, power_iter)
-                end
+                λLs, Li1s = simple_eig(f, R[i, Nj]; power_iter)
             else
                 λLs, Li1s, info = eigsolve(f, R[i, Nj], 1, :LM; maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= Nj && info.converged == 0 && @warn "rightCenv not converged"
@@ -461,11 +429,11 @@ end
 
 # ── AC and C environment updates ────────────────────────────────────
 
-function ACmap(I::Int, ACij, FLj, FRj, Mj; ifcheckpoint, ifparallel, forloop_iter)
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifparallel, forloop_iter)
     Ni = length(FLj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
-        ACij = ifcheckpoint ? checkpoint(ACmap_parallel, ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter) : ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter)
+        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter)
     end
     return ACij
 end
@@ -476,7 +444,7 @@ end
 Compute the up environment tensor for MPS `FL`, `FR` and MPO `M`, by finding the up fixed point
 of `FL - M - FR` contracted along the physical dimension.
 """
-function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
+function ACenv(AC, FL, M, FR; alg, kwargs...)
     Ni, Nj = size(M)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
@@ -488,20 +456,12 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifcheckpoint, ifparallel, forloop_iter) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifcheckpoint, ifparallel, forloop_iter)
+            f(AC1j) = ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if alg.iflinear_ad
-                    if ifcheckpoint
-                        λACs, ACs = checkpoint(simple_eig_linear_ad, f, AC[1, j]; ifvalue, power_iter)
-                    else
-                        λACs, ACs = simple_eig_linear_ad(f, AC[1, j]; ifvalue, power_iter)
-                    end
+                if ifcheckpoint
+                    λACs, ACs = checkpoint(simple_eig, f, AC[1, j]; power_iter)
                 else
-                    if ifcheckpoint
-                        λACs, ACs = checkpoint(simple_eig, f, AC[1, j]; ifvalue, power_iter)
-                    else
-                        λACs, ACs = simple_eig(f, AC[1, j]; ifvalue, power_iter)
-                    end
+                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
                 end
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
@@ -517,7 +477,7 @@ function ACenv(AC, FL, M, FR; ifvalue=false, alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i, j]
             if p ∉ processed_indices
-                ACij = ifcheckpoint ? checkpoint(ACmap_parallel, AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter) : ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter)
+                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter)
                 AC′[i, j] = ACij / norm(ACij)
                 λAC[i, j] = λAC[1, j]
                 push!(processed_indices, p)
@@ -545,32 +505,19 @@ end
 Compute the up environment tensor for MPS `FL` and `FR`, by finding the up fixed point
 of `FL - FR` contracted along the physical dimension.
 """
-function Cenv(C, FL, FR; alg, ifvalue=false, kwargs...)
+function Cenv(C, FL, FR; alg, kwargs...)
     Ni, Nj = size(C)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
-    ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
         p = C.pattern[1, j]
         if p ∉ processed_indices
             f(C1j) = Cmap(1, C1j, FL[:, jr], FR[:, j])
             if alg.ifsimple_eig
-                if alg.iflinear_ad
-                    if ifcheckpoint
-                        λCs, Cs = checkpoint(simple_eig_linear_ad, f, C[1, j]; ifvalue, power_iter)
-                    else
-                        λCs, Cs = simple_eig_linear_ad(f, C[1, j]; ifvalue, power_iter)
-                    end
-                else
-                    if ifcheckpoint
-                        λCs, Cs = checkpoint(simple_eig, f, C[1, j]; ifvalue, power_iter)
-                    else
-                        λCs, Cs = simple_eig(f, C[1, j]; ifvalue, power_iter)
-                    end
-                end
+                λCs, Cs = simple_eig(f, C[1, j]; power_iter)
             else
                 λCs, Cs, info = eigsolve(f, C[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
@@ -640,9 +587,9 @@ end
 
 # ── Down environment helpers ────────────────────────────────────────
 
-_down_m(m::leg4) = permutedims(conj(m), (1, 4, 3, 2))
-_down_m(m::leg5) = permutedims(conj(m), (1, 4, 3, 2, 5))
-_down_m(m::leg8) = permutedims(conj(m), (1, 2, 7, 8, 5, 6, 3, 4))
+_down_m(m::leg4) = permutedims(m, (1, 4, 3, 2))
+_down_m(m::leg5) = permutedims(m, (1, 4, 3, 2, 5))
+_down_m(m::leg8) = permutedims(m, (1, 2, 7, 8, 5, 6, 3, 4))
 
 function _down_M(M::StructArray)
     Ni, Nj = size(M)
@@ -668,141 +615,29 @@ function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
     return VUMPSRuntime(ALd, ARd, Cd, FLd, FRd)
 end
 
-# ── VUMPS step functions ────────────────────────────────────────────
-
-"""
-    vumps_step(rt, M, alg::VUMPS{General})
-
-One step of the VUMPS algorithm with the standard (General) contraction mode.
-Uses the power-method variant: update environments first, then re-solve AC/C.
-"""
-function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
-    @unpack AL, C, AR, FL, FR = rt
-    AC = ALCtoAC(AL, C)
-    _, ACp = ACenv(AC, FL, M, FR; alg)
-    _, Cp = Cenv(C, FL, FR; alg)
-    ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
-    _, FL = leftenv(AL, conj(ALp), M, FL; alg)
-    _, FR = rightenv(AR, conj(ARp), M, FR; alg)
-    _, ACp = ACenv(ACp, FL, M, FR; alg)
-    _, Cp = Cenv(Cp, FL, FR; alg)
-    ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
-    err = errL + errR
-    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
-    Cp = for_gc(Cp)
-    return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
-end
-
-"""
-    vumps_step(rt, M, alg::VUMPS{Plaquette})
-
-One step of the VUMPS algorithm with the 2x2 Plaquette contraction mode.
-TODO: Implement plaquette-specific contraction logic.
-Currently falls back to the General step.
-"""
-function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{Plaquette})
-    # TODO: Implement plaquette-specific VUMPS step with 2x2 unit cell handling
-    # For now, delegate to the same logic as General
-    @unpack AL, C, AR, FL, FR = rt
-    AC = ALCtoAC(AL, C)
-    _, ACp = ACenv(AC, FL, M, FR; alg)
-    _, Cp = Cenv(C, FL, FR; alg)
-    ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
-    _, FL = leftenv(AL, conj(ALp), M, FL; alg)
-    _, FR = rightenv(AR, conj(ARp), M, FR; alg)
-    _, ACp = ACenv(ACp, FL, M, FR; alg)
-    _, Cp = Cenv(Cp, FL, FR; alg)
-    ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
-    err = errL + errR
-    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
-    Cp = for_gc(Cp)
-    return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
-end
-
-# ── VUMPS iteration loop ────────────────────────────────────────────
-
-"""
-    vumps_itr(rt, M, alg::VUMPS)
-
-Run the VUMPS iteration loop: first without AD tracking (warm-up), then with AD.
-Returns the converged runtime and final error.
-"""
-function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
-    t = Zygote.@ignore time()
-
-    err = Inf
-    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration without AD..."
-    Zygote.@ignore for i in 1:alg.maxiter
-        rt, err = vumps_step(rt, M, alg)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time() - t)
-        if err < alg.tol && i >= alg.miniter
-            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time() - t)
-            break
-        end
-        if i == alg.maxiter
-            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time() - t)
-        end
-    end
-
-    if err < 1e-7
-        alg.iflinear_ad = true
-    else
-        alg.iflinear_ad = false
-    end
-    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration with AD..."
-    for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time() - t)
-        if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time() - t)
-            break
-        end
-        if i == alg.maxiter_ad
-            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time() - t)
-        end
-    end
-
-    return rt, err
-end
-
-# ── Public API ───────────────────────────────────────────────────────
-
-"""
-    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS)
-
-Run the VUMPS boundary contraction for a single (up) environment.
-Returns the converged runtime and error.
-"""
-function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS)
-    rt, err = vumps_itr(rt, M, alg)
-    return rt, err
-end
-
-"""
-    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS)
-
-Run the VUMPS boundary contraction for both up and down environments.
-Returns the converged runtimes and errors.
-"""
-function leading_boundary(rt::Tuple{VUMPSRuntime,VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    rtup, rtdown = rt
-
-    rtup, errup = vumps_itr(rtup, M, alg)
-
-    Md = _down_M(M)
-    rtdown, errdown = vumps_itr(rtdown, Md, alg)
-    return (rtup, rtdown), (errup, errdown)
-end
-
 # ── Initialization ──────────────────────────────────────────────────
 
-"""
-    init_VUMPSRuntime(M, alg::VUMPS; χ)
+function cellones(A)
+    χ = size(A[1], 1)
+    return ISA(A, [(χ, χ) for _ in 1:length(A.data)])
+end
 
-Initialize a `VUMPSRuntime` from an MPO `M` and bond dimension `χ`.
-Computes initial canonical forms and fixed-point environments.
+function initial_A(M::leg4, χ::Int)
+    return randSA(M, [(D = size(m, 4); (χ, D, χ)) for m in M.data])
+end
+function initial_A(M::leg5, χ::Int)
+    return randSA(M, [(D = size(m, 4); (χ, D, D, χ)) for m in M.data])
+end
+function initial_A(M::leg8, χ::Int)
+    return randSA(M, [(D = size(m, 7); (χ, D, D, χ)) for m in M.data])
+end
+
 """
-function init_VUMPSRuntime(M::StructArray, alg::VUMPS; χ::Int)
+    init_VUMPSRuntime(M, alg; χ)
+
+Create a single VUMPSRuntime: canonical forms + fixed-point environments.
+"""
+function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{:General})
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
@@ -818,30 +653,189 @@ function init_VUMPSRuntime(M::StructArray, alg::VUMPS; χ::Int)
 end
 
 """
-    init_VUMPSRuntime(M, alg::VUMPS; χ, ifupdown=alg.ifupdown)
+    init_env(M, χ, alg)
 
-Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`.
+Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`
+and bond dimension `χ`.
 """
-function init_VUMPSRuntime(M::StructArray, alg::VUMPS; χ::Int, ifupdown::Bool=alg.ifupdown)
+function init_env(M::StructArray, χ::Int, alg::VUMPS{:General})
+    alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
+    
     Ni, Nj = size(M)
 
-    rtup = init_VUMPSRuntime(M, alg; χ)
-    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)x$(Nj)) χ=$(χ) up environment"
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            if alg.ifdownfromup
+                set_device_id!(atype, 1)
+                rtup = init_VUMPSRuntime(M, χ, alg)
+                alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+                set_device_id!(atype, 2)
+                Md = _down_M(atype(M))
+                rtdown = _down_init_from_up(atype(rtup), Md)
+                alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment"
+            else
+                @async begin
+                    set_device_id!(atype, 1)
+                    rtup = init_VUMPSRuntime(M, χ, alg)
+                    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    Md = _down_M(atype(M))
+                    rtdown = init_VUMPSRuntime(Md, χ, alg)
+                    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
+                end
+            end
+        end
+        return rtup, rtdown
+    end
 
-    if ifupdown
-        Md = _down_M(M)
+    rtup = init_VUMPSRuntime(M, χ, alg)
+    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+
+    if alg.ifupdown    
+        Md = _down_M(M) 
         if alg.ifdownfromup
             rtdown = _down_init_from_up(rtup, Md)
-            alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)x$(Nj)) χ=$(χ) down from up environment"
+            alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment"
             return rtup, rtdown
         else
-            rtdown = init_VUMPSRuntime(Md, alg; χ)
-            alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)x$(Nj)) χ=$(χ) down environment"
+            rtdown = init_VUMPSRuntime(Md, χ, alg)
+            alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
             return rtup, rtdown
         end
     else
         return rtup
     end
+end
+
+# ── VUMPS step functions ────────────────────────────────────────────
+
+"""
+    vumps_step_power(rt, M, alg::VUMPS{:General}{General})
+
+One step of the VUMPS algorithm with the standard (General) contraction mode.
+Uses the power-method variant: update environments first, then re-solve AC/C.
+"""
+function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+    @unpack AL, C, AR, FL, FR = rt
+    AC = ALCtoAC(AL, C)
+    _, ACp = ACenv(AC, FL, M, FR; alg)
+    _, Cp = Cenv(C, FL, FR; alg)
+    ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
+    _, FL = leftenv(AL, conj(ALp), M, FL; alg)
+    _, FR = rightenv(AR, conj(ARp), M, FR; alg)
+    _, ACp = ACenv(ACp, FL, M, FR; alg)
+    _, Cp = Cenv(Cp, FL, FR; alg)
+    ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
+    err = errL + errR
+    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    Cp = for_gc(Cp)
+    return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
+end
+
+function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+    @unpack AL, C, AR, FL, FR = rt
+    AC = ALCtoAC(AL,C)
+    _, FL =  leftenv(AL, conj(AL), M, FL; alg)
+    _, FR = rightenv(AR, conj(AR), M, FR; alg)
+    _, AC = ACenv(AC, FL, M, FR; alg)
+    _,  C =  Cenv( C, FL, FR; alg)
+    AL, AR, errL, errR = ACCtoALAR(AC, C)
+    err = errL + errR
+    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    C = for_gc(C)
+    return VUMPSRuntime(AL, AR, C, FL, FR), err
+end
+
+# ── VUMPS iteration loop ────────────────────────────────────────────
+
+"""
+    vumps_itr(rt, M, alg::VUMPS{:General})
+
+Run the VUMPS iteration loop: first without AD tracking (warm-up), then with AD.
+Returns the converged runtime and final error.
+"""
+function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+    t = Zygote.@ignore time()
+
+    atype = _arraytype(M)
+    id = get_device_id(atype)
+    local err
+    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
+    Zygote.@ignore for i in 1:alg.maxiter
+        rt, err = vumps_step(rt, M, alg)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        if err < alg.tol && i >= alg.miniter
+            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+            break
+        end
+        if i == alg.maxiter
+            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        end
+    end
+
+    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
+    for i in 1:alg.maxiter_ad
+        power_iter_backup = alg.power_iter
+        alg.power_iter = alg.power_iter_ad
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
+        alg.power_iter = power_iter_backup
+        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        if err < alg.tol && i >= alg.miniter_ad
+            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+            break
+        end
+        if i == alg.maxiter_ad
+            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        end
+    end
+
+    return rt, err
+end
+
+"""
+    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS{:General})
+
+Run the VUMPS boundary contraction for a single (up) environment.
+Returns the converged runtime and error.
+"""
+function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+    rt, err = vumps_itr(rt, M, alg)
+    return rt, err
+end
+
+"""
+    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{:General})
+
+Run the VUMPS boundary contraction for both up and down environments.
+Returns the converged runtimes and errors.
+"""
+function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{:General})
+    rtup, rtdown = rt
+    
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                rtup, errup = vumps_itr(rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md = _down_M(atype(M))
+                rtdown, errdown = vumps_itr(rtdown, Md, alg)
+            end
+        end
+        return (rtup, rtdown), (errup, errdown)
+    end
+
+    rtup, errup = vumps_itr(rtup, M, alg)
+
+    Md = _down_M(M)
+    rtdown, errdown = vumps_itr(rtdown, Md, alg)
+    return (rtup, rtdown), (errup, errdown)
 end
 
 # ── Observation environment construction ─────────────────────────────
@@ -850,12 +844,13 @@ end
     VUMPSEnv(rt::VUMPSRuntime, M, alg)
 
 Construct a `VUMPSEnv` observation environment from a single VUMPS runtime.
-Uses the same runtime for both up and down directions.
 """
-function VUMPSEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS, Fo=[rt.FL, rt.FR])
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General}, Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
-    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FL, FR)
+    _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg)
+    _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg)
+    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
 end
 
 """
@@ -864,25 +859,19 @@ end
 Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
 Computes mixed (observation) left and right environments.
 """
-function VUMPSEnv(rt::Tuple{VUMPSRuntime,VUMPSRuntime}, M::StructArray, alg::VUMPS, Fo=[rt[1].FL, rt[1].FR])
+function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{:General}, Fo=[rt[1].FL, rt[1].FR])
+    atype = _arraytype(M)
+    set_device_id!(atype, 1)
     rtup, rtdown = rt
 
     ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR
     ACu = ALCtoAC(ALu, Cu)
 
     ALd, ARd, Cd = rtdown.AL, rtdown.AR, rtdown.C
+    ALd, ARd, Cd = map(x->atype_device!(atype, x, 1), [ALd, ARd, Cd]) # transfer device 2 data to 1
     ACd = ALCtoAC(ALd, Cd)
 
-    _, FLo = leftenv(ALu, conj(ALd), M, Fo[1]; ifobs=true, alg)
-    _, FRo = rightenv(ARu, conj(ARd), M, Fo[2]; ifobs=true, alg)
+    _, FLo =  leftenv(ALu, ALd, M, Fo[1]; ifobs = true, alg)
+    _, FRo = rightenv(ARu, ARd, M, Fo[2]; ifobs = true, alg)
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
-
-# ── GPU/CPU array conversions ────────────────────────────────────────
-
-Array(rt::VUMPSRuntime) = VUMPSRuntime(Array(rt.AL), Array(rt.AR), Array(rt.C), Array(rt.FL), Array(rt.FR))
-Array(rt::Tuple{VUMPSRuntime,VUMPSRuntime}) = Array.(rt)
-CuArray(rt::VUMPSRuntime) = VUMPSRuntime(CuArray(rt.AL), CuArray(rt.AR), CuArray(rt.C), CuArray(rt.FL), CuArray(rt.FR))
-CuArray(rt::Tuple{VUMPSRuntime,VUMPSRuntime}) = CuArray.(rt)
-ROCArray(rt::VUMPSRuntime) = VUMPSRuntime(ROCArray(rt.AL), ROCArray(rt.AR), ROCArray(rt.C), ROCArray(rt.FL), ROCArray(rt.FR))
-ROCArray(rt::Tuple{VUMPSRuntime,VUMPSRuntime}) = ROCArray.(rt)

@@ -25,7 +25,7 @@ get_device_id(x::ROCArray) = Int(AMDGPU.device(x).device_id)
 get_device_id(x::CuArray) = Int(CUDA.device(x).handle + 1)
 get_device_id(S::StructArray) = get_device_id(S[1])
 
-get_device_id(::Type{Array}) = threadid()
+get_device_id(::Type{Array}) = Threads.threadid()
 get_device_id(::Type{ROCArray}) = AMDGPU.device_id()
 get_device_id(::Type{CuArray}) = Int(CUDA.device().handle) + 1
 
@@ -70,10 +70,11 @@ function synchronize(x::AbstractArray)
 end
 
 function reclaim(x::AbstractArray)
-    GC.gc()
     if x isa CuArray
+        GC.gc(true)
         CUDA.reclaim()
     elseif x isa ROCArray
+        GC.gc(true)
         AMDGPU.HIP.reclaim()
     end
 end

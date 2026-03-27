@@ -350,7 +350,7 @@ gauge-transformed iPEPS tensor. Uses LBFGS optimization from OptimKit.
 """
 function find_local_min_norm_G(A, params)
     atype = _arraytype(A)
-    A_cpu = Zygote.@ignore Array(A)
+    A_cpu = Array(A)
 
     function f(G)
         A_prime = guage_transfer(A_cpu, G, params)
@@ -469,10 +469,10 @@ function find_local_hermite_G(A, params)
         Gv[:,:,q] = I(D)
     end
     Ginit = [Gh, Gv]
-    @info "initial norm = $(f(Ginit))"
+    @info "MCF initial norm = $(f(Ginit))"
 
     G, fval, _ = optimize(fg, Ginit, LBFGS(maxiter=100))
-    @info "final norm = $fval"
+    @info "MCF final norm = $fval"
 
     return atype.(G)
 end

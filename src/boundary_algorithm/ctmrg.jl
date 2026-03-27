@@ -15,8 +15,8 @@ C[a,b] * T[b,c,d] -> [a,c,d]      (leg3)
 C[a,b] * T[b,c,d,e] -> [a,c,d,e]  (leg4)
 ```
 """
-CTtoT(C, T::AbstractArray{<:Number,3}) = ein"ab,bcd->acd"(C, T)
-CTtoT(C, T::AbstractArray{<:Number,4}) = ein"ab,bcde->acde"(C, T)
+CTtoT(C, T::AbstractArray{<:Number,3}) = @tensor t[a,c,d] := C[a,b] * T[b,c,d]
+CTtoT(C, T::AbstractArray{<:Number,4}) = @tensor t[a,c,d,e] := C[a,b] * T[b,c,d,e]
 
 """
     CTCtoT(C, T)
@@ -27,16 +27,16 @@ C[a,b] * T[b,c,d] * C[d,e] -> [a,c,e]          (leg3)
 C[a,b] * T[b,c,d,e] * C[e,f] -> [a,c,d,f]      (leg4)
 ```
 """
-CTCtoT(C, T::AbstractArray{<:Number,3}) = ein"(ab,bcd),de->ace"(C,T,C)
-CTCtoT(C, T::AbstractArray{<:Number,4}) = ein"(ab,bcde),ef->acdf"(C,T,C)
+CTCtoT(C, T::AbstractArray{<:Number,3}) = @tensor t[a,c,e] := C[a,b] * T[b,c,d] * C[d,e]
+CTCtoT(C, T::AbstractArray{<:Number,4}) = @tensor t[a,c,d,f] := C[a,b] * T[b,c,d,e] * C[e,f]
 
 """
     ALCtoAC_ctm(AL, C)
 
 Single-site version: contract left-canonical tensor with center matrix.
 """
-ALCtoAC_ctm(AL::AbstractArray{<:Number,3}, C) = ein"asc,cb -> asb"(AL, C)
-ALCtoAC_ctm(AL::AbstractArray{<:Number,4}, C) = ein"astc,cb -> astb"(AL, C)
+ALCtoAC_ctm(AL::AbstractArray{<:Number,3}, C) = @tensor t[a,s,b] := AL[a,s,c] * C[c,b]
+ALCtoAC_ctm(AL::AbstractArray{<:Number,4}, C) = @tensor t[a,s,t,b] := AL[a,s,t,c] * C[c,b]
 
 """
     CTMmap(C, Tu, Tl, Td, Tr, M)
@@ -44,9 +44,9 @@ ALCtoAC_ctm(AL::AbstractArray{<:Number,4}, C) = ein"astc,cb -> astb"(AL, C)
 Full CTM corner map for a single plaquette.
 """
 CTMmap(C, Tu::AbstractArray{<:Number,3}, Tl, Td, Tr, M) =
-    ein"(((((adb,ac),cei),degf),igj),bfh)->hj"(Tu, C, Tl, M, Td, Tr)
+    @tensor t[h,j] := Tu[a,d,b] * C[a,c] * Tl[c,e,i] * M[d,e,g,f] * Td[i,g,j] * Tr[b,f,h]
 CTMmap(C, Tu::AbstractArray{<:Number,4}, Tl, Td, Tr, M) =
-    ein"(((((bcde,ab),afhj),fkgcp),hlidp),jklm),egin->mn"(Tu, C, Tl, M, M, Td, Tr)
+    @tensor t[m,n] := Tu[b,c,d,e] * C[a,b] * Tl[a,f,h,j] * M[f,k,g,c,p] * M[h,l,i,d,p] * Td[j,k,l,m] * Tr[e,g,i,n]
 
 # ── QR / polar decomposition helpers ────────────────────────────────────
 
@@ -246,11 +246,17 @@ function logZ(M::AbstractArray{<:Number,4}, env::CTMEnv)
 
     E = CTCtoT(C, T)
     E2 = CTCtoT(C, T)
-    lambdaM = ein"abc,cba->"(FLmap(E, T, T, M), E2)[] / ein"abc,cba->"(E, E2)[]
+    FLE = FLmap(E, T, T, M)
+    @tensor snum[] := FLE[a,b,c] * E2[c,b,a]
+    @tensor sden[] := E[a,b,c] * E2[c,b,a]
+    lambdaM = snum[] / sden[]
 
     Csq = C * C
     Csq2 = Csq
-    lambdaN = ein"ab,ba->"(Lmap(Csq, T, T), Csq2)[] / ein"ab,ba->"(Csq, Csq2)[]
+    LCsq = Lmap(Csq, T, T)
+    @tensor snum2[] := LCsq[a,b] * Csq2[b,a]
+    @tensor sden2[] := Csq[a,b] * Csq2[b,a]
+    lambdaN = snum2[] / sden2[]
 
     return log(abs(lambdaM / lambdaN))
 end

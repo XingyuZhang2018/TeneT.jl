@@ -58,6 +58,20 @@ function randSA(S::StructArray)
     return randSA(T, atype, S.pattern, size.(S.data))
 end
 
+"""
+    cellones(S::StructArray)
+
+Create a StructArray of identity matrices matching the first dimension (chi)
+of each tensor in `S`. Used as default gauge initialization.
+"""
+function cellones(S::StructArray)
+    atype = _arraytype(S[1])
+    T = eltype(S[1])
+    chi = size(S[1], 1)
+    data = [atype(Matrix{T}(I, chi, chi)) for _ in 1:length(S.data)]
+    return StructArray(data, S.pattern)
+end
+
 function ISA(::Type{T}, atype, pattern::Matrix{Int}, sizes::Vector{NTuple{N,Int}}) where {T<:Number, N}
     data = [atype{T}(I, s...) for s in sizes]
     return StructArray(data, pattern)

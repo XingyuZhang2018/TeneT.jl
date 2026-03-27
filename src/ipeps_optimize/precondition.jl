@@ -9,45 +9,37 @@ Solves `(δ + M_u) x = grad` where `M_u` is the transfer matrix environment map.
 
 TeneT_demo version: uses gauge-transformed environment with `find_local_hermite_G`.
 """
-function precondition_invese_single_envir(A, grad, rt, params, restriction_ipeps, fδEi, iter_precond)
+function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple{VUMPSRuntime,VUMPSRuntime}}, params, restriction_ipeps, fδEi, iter_precond)
     if fδEi[3] <= iter_precond
         return grad
     end
     δ = fδEi[2]
-    Gh, Gv = find_local_hermite_G(A, params)
-    A_prime = guage_transfer(A, [Gh, Gv], params)
+    if params.ifMCF
+        Gh, Gv = find_local_min_norm_G(A, params)
+        A_prime = guage_transfer(A, [Gh, Gv], params)
+    else
+        A_prime = restriction_ipeps(A)
+    end
     A_prime = build_A(A_prime, params)
-    M = build_M(A_prime, params)
 
-    env = VUMPSEnv(rt, M, params.boundary_alg)
+    env = ObsEnv(rt, A_prime, params.boundary_alg)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
 
-    function re(x)
-        chi, D = size(ACu[1])[[1,2]]
-        D = Int(sqrt(D))
-        reshape(x, chi, D, D, chi)
-    end
-
     gradnew = deepcopy(grad)
-    Ni, Nj = size(M)
-    forloop_iter = params.forloop_iter
-    pattern = M.pattern
-    for p in 1:length(M)
+    Ni, Nj = size(A_prime)
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+    pattern = A_prime.pattern
+    for p in 1:length(A_prime)
         i, j = Tuple(findfirst(==(p), pattern))
         ir = Ni + 1 - i
-        n = contract_n1(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter)
-        if params.ifflatten
-            gradnew[:,:,:,:,:,p], _ = linsolve(
-                x -> δ * x + Mumap_forloop(re(ACu[i,j]), re(conj(ACd[ir,j])), re(FLo[i,j]), re(FRo[i,j]), x; forloop_iter) / n,
-                grad[:,:,:,:,:,p];
-                isposdef=true, maxiter=1, verbosity=0
-            )
-        else
-            gradnew[:,:,:,:,:,p], _ = linsolve(
-                x -> δ * x + Mumap_forloop(ACu[i,j], ACd[ir,j], FLo[i,j], FRo[i,j], x; forloop_iter) / n,
-                grad[:,:,:,:,:,p];
-                isposdef=true, maxiter=1, verbosity=0
-            )
+        n = contract_n1(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter,ifparallel)
+        gradnew[:,:,:,:,:,p], _ = linsolve(
+            x -> δ * x + Mumap_parallel(ACu[i,j], ACd[ir,j], FLo[i,j], FRo[i,j], x; forloop_iter,ifparallel) / n,
+            grad[:,:,:,:,:,p];
+            isposdef=true, maxiter=1, verbosity=0
+        )
+        if params.ifMCF
             irr = mod1(i - 1, Ni)
             jr = mod1(j - 1, Nj)
             G_temp = [Gh[:,:,pattern[i,jr]], inv(Gv[:,:,p]), inv(Gh[:,:,p]), Gv[:,:,pattern[irr,j]]]
@@ -58,39 +50,58 @@ function precondition_invese_single_envir(A, grad, rt, params, restriction_ipeps
     return gradnew
 end
 
-"""
-    precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond, model, α, β)
+function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, params, restriction_ipeps, fδEi, iter_precond)
+    if fδEi[3] <= iter_precond
+        return grad
+    end
+    δ = fδEi[2]
 
-Precondition the gradient using the CTM environment.
-Supports both norm-only (α=0) and Hamiltonian-weighted (α>0) preconditioning.
+    A_prime = restriction_ipeps(A)
+    A_prime = build_A(A_prime, params)
+
+    env = ObsEnv(rt, A_prime, params.boundary_alg)
+    @unpack AL, C, FLu, FLo = env
+    AC = ALCtoAC(AL, C)
+
+    gradnew = deepcopy(grad)
+    Ni, Nj = size(A_prime)
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+    pattern = A_prime.pattern
+    for p in 1:length(A_prime)
+        i, j = Tuple(findfirst(==(p), pattern))
+        ir = Ni + 1 - i
+        jr = mod1(j + 1, Nj)
+        n = contract_n1(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
+        gradnew[:,:,:,:,:,p], _ = linsolve(
+            x -> δ * x + Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FLo[i,jr], x; forloop_iter,ifparallel) / n,
+            grad[:,:,:,:,:,p];
+            isposdef=true, maxiter=1, verbosity=0
+        )
+    end
+
+    return gradnew
+end
+
 """
-function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond, model, α, β)
+    precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond)
+
+Precondition the gradient using the CTM environment (norm-only).
+"""
+function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restriction_ipeps, fδEi, iter_precond)
     t0 = time()
     if fδEi[3] <= iter_precond
         return grad
     end
     δ = fδEi[2]
     A = restriction_ipeps(A)
-    h1, h2 = Zygote.@ignore _arraytype(A).(hamiltonian_trunc(model))
-    D, d = size(A)[[1,5]]
-    Dh = size(h1, 3)
 
     @unpack C, T = env
     @unpack forloop_iter, ifparallel = params.boundary_alg
     To = CTCtoT(C, T)
 
-    if α == 0
-        gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-            return δ * x + Mumap_parallel(T, T, To, To, x; forloop_iter, ifparallel)
-        end
-    else
-        A2u = reshape((@tensor A2u[a,i,b,c,d,f] := A[a,b,c,d,e] * h2[i,e,f]), D*Dh, D, D, D, d)
-        gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-            A1u = reshape((@tensor A1u[a,b,c,i,d,f] := x[a,b,c,d,e] * h1[e,f,i]), D, D, D*Dh, D, d)
-            gH = Zygote.gradient(A1d -> oc_H_leg4(To, T, T, A1u, A1d, A2u, A; ifparallel, forloop_iter), A)[1]
-            gN = Zygote.gradient(A1d -> oc_H_leg4(To, T, T, x, A1d, A, A; ifparallel, forloop_iter), A)[1]
-            return δ * x + α * gH + β * gN
-        end
+    gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
+        return δ * x + Mumap_parallel(T, T, To, To, x; forloop_iter, ifparallel)
     end
 
     params.verbosity >= 2 && printstyled("precondition calculation took $(round(time() - t0, digits=2)) s\n"; bold=true, color=:green)
@@ -98,11 +109,11 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
 end
 
 """
-    precondition_invese_single_envir(A, grad, env::VUMPSEnv, params, restriction_ipeps, fδEi, iter_precond, model, α, β)
+    precondition_invese_single_envir(A, grad, env::VUMPSEnv, params, restriction_ipeps, fδEi, iter_precond)
 
 Precondition the gradient using the VUMPS environment directly.
 """
-function precondition_invese_single_envir(A, grad, env::VUMPSEnv, params, restriction_ipeps, fδEi, iter_precond, model, α, β)
+function precondition_invese_single_envir(A, grad, env::VUMPSEnv, params, restriction_ipeps, fδEi, iter_precond)
     if fδEi[3] <= iter_precond
         return grad
     end
@@ -175,14 +186,10 @@ function precondition_invese_hessian(A, grad, rt, rt_prime, params, restriction_
     function build_M_hess(A, Ap, params)
         D = size(A[1], 1)
         len = length(unique(params.pattern))
-        if params.ifflatten
-            return StructArray([begin
-                @tensor M[a,f,b,g,c,h,d,m] := A[i][a,b,c,d,e] * Ap[i][f,g,h,m,e]
-                reshape(M, D^2, D^2, D^2, D^2)
-            end for i in 1:len], params.pattern)
-        else
-            throw(Base.error("precondition only supports ifflatten=true currently"))
-        end
+        return StructArray([begin
+            @tensor M[a,f,b,g,c,h,d,m] := A[i][a,b,c,d,e] * Ap[i][f,g,h,m,e]
+            M
+        end for i in 1:len], params.pattern)
     end
 
     function ipeps_norm_hess(A, Ap, rt, rt_prime, params::iPEPSOptimize)
@@ -221,9 +228,13 @@ function precondition_invese_BP_envir(A, grad, rt, params, restriction_ipeps, f�
     δ = fδEi[2]
     A = restriction_ipeps(A)
     A = build_A(A, params)
-    _, M = build_M(A, params)
 
-    D = Int(sqrt(size(M[1], 1)))
+    D = size(A[1], 1)
+    # Construct double-layer tensor locally for BP contraction
+    M = StructArray([begin
+        @tensor T[a,f,b,g,c,h,d,m] := A[i][a,b,c,d,e] * conj(A[i])[f,g,h,m,e]
+        reshape(T, D^2, D^2, D^2, D^2)
+    end for i in 1:length(unique(params.pattern))], params.pattern)
     B = _arraytype(M[1])(randn(ComplexF64, D^2))
     error_val = 1.0
     Z = 1.0
