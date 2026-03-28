@@ -5,6 +5,8 @@
 @non_differentiable set_device_id!(kwargs...)
 @non_differentiable get_device(kwargs...)
 @non_differentiable get_device_id(kwargs...)
+@non_differentiable hamiltonian(kwargs...)
+@non_differentiable hamiltonian_trunc(kwargs...)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}

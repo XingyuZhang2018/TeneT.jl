@@ -43,8 +43,12 @@ Return the Hamiltonian for the given `model` as a two-site operator.
 """
 function hamiltonian end
 
-function hamiltonian_trunc(model)
+function hamiltonian_trunc(model::HamiltonianModel)
     h = hamiltonian(model)
+    return hamiltonian_trunc(h)
+end
+
+function hamiltonian_trunc(h)
     d = size(h, 1)
     U, S, V = svd(reshape(h,d^2,d^2))
     truc = sum(S .> 1e-10)

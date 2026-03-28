@@ -70,19 +70,21 @@ include("boundary_algorithm/vumps/c4v.jl")
 include("boundary_algorithm/qrctm.jl")
 
 # ============================================================================
+# Hamiltonian models
+# ============================================================================
+
+include("models/basic_op.jl")
+include("models/Heisenberg/hamiltonian.jl")
+include("models/Heisenberg/energy.jl")
+include("models/Kitaev/hamiltonian.jl")
+include("models/Kitaev/energy.jl")
+
+# ============================================================================
 # Automatic differentiation rules
 # ============================================================================
 
 include("autodiff/rules.jl")
 include("autodiff/grassmann.jl")
-
-# ============================================================================
-# Hamiltonian models
-# ============================================================================
-
-include("models/basic_op.jl")
-include("models/heisenberg/hamiltonian.jl")
-include("models/heisenberg/energy.jl")
 
 # ============================================================================
 # iPEPS: interface, build, init, restriction, precondition, SU, energy, observable, optimize
@@ -104,7 +106,7 @@ include("ipeps_optimize/optimize.jl")
 export VUMPS
 export QRCTM
 
-export Heisenberg
+export Heisenberg, Kitaev
 export Square, Honeycomb, Kagome
 
 export C4v_restriction

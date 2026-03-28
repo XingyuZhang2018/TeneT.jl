@@ -8,15 +8,14 @@ using Zygote
 seed = 42
 Random.seed!(seed)
 atype = Array
-etype = Float64
+etype = ComplexF64
 D, χ, χshift = 2, 16, 0
-# pattern = [1 2;
-#            2 1]
-pattern = [1;;]
+pattern = [1 2;
+           2 1]
 # pattern = [1 3;
 #            2 4]
-model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
-No = 0
+model = Kitaev(Honeycomb{:brickwall}(), 0.5, -1.0, -1.0, -1.0, 1.0)
+No = 92
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
                                ifdownfromup=false,
@@ -47,7 +46,7 @@ params = GradientOptimize(model=model,
                           folder=folder,
                           ifSU=false,
                           SUτ=0,
-                          ifprecondition=true,
+                          ifprecondition=false,
                           ifMCF=false,
                           iter_precond=0,
                           reuse_env=true, 

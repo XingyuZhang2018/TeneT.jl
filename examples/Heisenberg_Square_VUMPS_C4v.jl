@@ -13,7 +13,7 @@ D, χ, χshift = 3, 64, 0
 pattern = [1;;]
 model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
 No = 0
-folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_C4v/seed$seed/")
+folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_C4v/$etype/seed$seed/")
 boundary_alg = VUMPS{:C4v}(ifsimple_eig=true,
                            ifparallel=false,
                            ifcheckpoint=false,

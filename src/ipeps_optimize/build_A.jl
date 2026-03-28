@@ -59,6 +59,8 @@ honeycomb maps onto a square lattice.
 """
 function _lattice_map(A, ::Honeycomb{:brickwall}, pattern)
     cartindex = CartesianIndices(pattern)
+    Ni, Nj = size(pattern)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("For Honeycomb{:brickwall}, pattern must have even dimensions."))
     return StructArray([(sum(cartindex[i].I) % 2 == 0 ?
         A[i] : permutedims(A[i], (3,4,1,2,5))) for i in 1:length(unique(pattern))], pattern)
 end

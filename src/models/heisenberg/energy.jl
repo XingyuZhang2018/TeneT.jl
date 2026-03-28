@@ -2,7 +2,7 @@ function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPS
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
-    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
+    O1, O2 = atype.(hamiltonian_trunc(model))
     etol = 0
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
@@ -40,7 +40,7 @@ function energy_value(model::Heisenberg{Square}, A, env::PlaquetteVUMPSEnv, para
     AC = ALCtoAC(AL, C)
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
-    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
+    O1, O2 = atype.(hamiltonian_trunc(model))
     etol = 0
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
@@ -80,7 +80,7 @@ function energy_value(model::Heisenberg{Square}, A, env::C4vVUMPSEnv, params::iP
     )
 
     A1 = A[1]
-    O1, O2 = Zygote.@ignore _arraytype(A1).(hamiltonian_trunc(model))
+    O1, O2 = _arraytype(A1).(hamiltonian_trunc(model))
     AC = ALCtoAC_map(AL,C)
 
     e = contract_o2_H(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC), O1, O2; ifparallel, forloop_iter)
@@ -102,7 +102,7 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
 
     # Extract site tensor once to avoid repeated StructArray indexing in AD
     A1 = A[1]
-    O1, O2 = Zygote.@ignore _arraytype(A1).(hamiltonian_trunc(model))
+    O1, O2 = _arraytype(A1).(hamiltonian_trunc(model))
 
     To = CTCtoT(C, T)
     e = contract_o2_H(To, T, A1, T, To, T, A1, T, O1, O2; ifparallel, forloop_iter)
