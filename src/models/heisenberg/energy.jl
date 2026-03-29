@@ -36,6 +36,8 @@ function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPS
 end
 
 function energy_value(model::Heisenberg{Square}, A, env::PlaquetteVUMPSEnv, params::iPEPSOptimize)
+    model.ifrotate == true || throw(ArgumentError("model.ifrotate must be true for Plaquette VUMPS energy evaluation"))
+    
     @unpack AL, C, FLu, FLo = env
     AC = ALCtoAC(AL, C)
     Ni, Nj = size(A)

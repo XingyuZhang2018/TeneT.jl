@@ -1,9 +1,11 @@
+export Kitaev
+
 """
     Kitaev{L<:AbstractLattice}
 
 Kitaev model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
 """
-@kwdef struct Kitaev{L<:AbstractLattice} <: HamiltonianModel
+@kwdef mutable struct Kitaev{L<:AbstractLattice} <: HamiltonianModel
     lattice::L = Honeycomb{:brickwall}()
     S::Real = 1/2
     Jx::Real = -1.0

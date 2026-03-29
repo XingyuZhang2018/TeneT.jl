@@ -27,20 +27,18 @@ abstract type iPEPSOptimize end
 abstract type HamiltonianModel end
 
 # Filesystem-safe show for all HamiltonianModel subtypes
-# Produces e.g. "Heisenberg_Square(-1.0,-1.0,1.0)" instead of
+# Produces e.g. "Heisenberg_Square(S=0.5,Jx=-1.0,Jy=-1.0,Jz=1.0,ifrotate=true)" instead of
 # "Heisenberg{Square}(Square(), 0.5, -1.0, -1.0, 1.0, true)"
 function Base.show(io::IO, model::HamiltonianModel)
     # type name without parameter: Heisenberg{Square} -> Heisenberg
     name = nameof(typeof(model))
     print(io, name, "_", model.lattice, "(")
-    fields = fieldnames(typeof(model))
     first = true
-    for f in fields
-        f in (:lattice, :S) && continue
+    for f in fieldnames(typeof(model))
+        f === :lattice && continue
         v = getfield(model, f)
-        (v isa Real && !(v isa Bool)) || continue
         first ? (first = false) : print(io, ",")
-        print(io, v)
+        print(io, f, "=", v)
     end
     print(io, ")")
 end

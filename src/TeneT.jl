@@ -78,6 +78,9 @@ include("models/Heisenberg/hamiltonian.jl")
 include("models/Heisenberg/energy.jl")
 include("models/Kitaev/hamiltonian.jl")
 include("models/Kitaev/energy.jl")
+include("models/J1J2/hamiltonian.jl")
+include("models/J1J2/order_init.jl")
+include("models/J1J2/energy.jl")
 
 # ============================================================================
 # Automatic differentiation rules
@@ -106,7 +109,6 @@ include("ipeps_optimize/optimize.jl")
 export VUMPS
 export QRCTM
 
-export Heisenberg, Kitaev
 export Square, Honeycomb, Kagome
 
 export C4v_restriction
