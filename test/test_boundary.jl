@@ -66,8 +66,9 @@
                                            ifdownfromup=true)
                 rt_ud = init_env(M1, chi, alg_ud)
                 @test rt_ud isa Tuple{VUMPSRuntime, VUMPSRuntime}
-                rt_ud, err = leading_boundary(rt_ud, M1, alg_ud)
-                @test err < 1e-6
+                (rtup, rtdown), (errup, errdown) = leading_boundary(rt_ud, M1, alg_ud)
+                @test errup < 1e-6
+                @test errdown < 1e-6
             end
 
             # ---- 2x2 unit cell ----
@@ -121,21 +122,28 @@
                                     maxiter_ad=1, miniter_ad=1,
                                     tol=1e-8)
 
+            # C4v init_env expects rank-5 tensors (4 virtual + 1 physical) in the StructArray.
+            # Build a rank-5 MPO from the rank-4 Ising MPO by adding a trivial physical dim.
+            M4 = ising_mpo(beta; atype).data[1]
+            D = size(M4, 1)
+            M5_data = reshape(M4, D, D, D, D, 1)
+            M_c4v = StructArray([M5_data], [1;;])
+
             @testset "init returns C4vVUMPSEnv" begin
-                rt = init_env(M1, chi, alg_c4v)
+                rt = init_env(M_c4v, chi, alg_c4v)
                 @test rt isa C4vVUMPSEnv
             end
 
             @testset "convergence" begin
-                rt = init_env(M1, chi, alg_c4v)
-                rt, err = leading_boundary(rt, M1, alg_c4v)
+                rt = init_env(M_c4v, chi, alg_c4v)
+                rt, err = leading_boundary(rt, M_c4v, alg_c4v)
                 @test err < 1e-6
             end
 
             @testset "ObsEnv returns C4vVUMPSEnv" begin
-                rt = init_env(M1, chi, alg_c4v)
-                rt, _ = leading_boundary(rt, M1, alg_c4v)
-                env = ObsEnv(rt, M1, alg_c4v)
+                rt = init_env(M_c4v, chi, alg_c4v)
+                rt, _ = leading_boundary(rt, M_c4v, alg_c4v)
+                env = ObsEnv(rt, M_c4v, alg_c4v)
                 @test env isa C4vVUMPSEnv
             end
         end

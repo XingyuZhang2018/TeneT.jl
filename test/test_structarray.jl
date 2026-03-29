@@ -37,15 +37,15 @@
 
         # Addition
         S3 = S1 + S2
-        @test S3[1,1] ≈ Array(S1[1,1]) + Array(S2[1,1])
+        @test Array(S3[1,1]) ≈ Array(S1[1,1]) + Array(S2[1,1])
 
         # Scalar multiplication
         S4 = 2.0 * S1
-        @test S4[1,1] ≈ 2.0 * Array(S1[1,1])
+        @test Array(S4[1,1]) ≈ 2.0 * Array(S1[1,1])
 
         # Division
         S5 = S1 / 3.0
-        @test S5[1,1] ≈ Array(S1[1,1]) / 3.0
+        @test Array(S5[1,1]) ≈ Array(S1[1,1]) / 3.0
 
         # Norm
         n = norm(S1)
@@ -54,7 +54,7 @@
 
         # Conjugate
         Sc = conj(S1)
-        @test Sc[1,1] ≈ conj(Array(S1[1,1]))
+        @test Array(Sc[1,1]) ≈ conj(Array(S1[1,1]))
     end
 
     @testset "rmul! and axpy!" for atype in ATYPES
@@ -66,11 +66,11 @@
 
         S1_orig = copy(S1)
         rmul!(S1, 0.5)
-        @test S1[1,1] ≈ 0.5 * Array(S1_orig[1,1])
+        @test Array(S1[1,1]) ≈ 0.5 * Array(S1_orig[1,1])
 
         S2_orig = copy(S2)
         axpy!(2.0, S1, S2)
-        @test S2[1,1] ≈ Array(S2_orig[1,1]) + 2.0 * Array(S1[1,1])
+        @test Array(S2[1,1]) ≈ Array(S2_orig[1,1]) + 2.0 * Array(S1[1,1])
     end
 
     @testset "similar, zero, copy" for atype in ATYPES
@@ -85,10 +85,10 @@
         @test norm(S_z) ≈ 0 atol=1e-15
 
         S_c = copy(S)
-        @test S_c[1,1] ≈ Array(S[1,1])
+        @test Array(S_c[1,1]) ≈ Array(S[1,1])
         # copy is independent
         S_c[1,1] = atype(zeros(ComplexF64, 3, 3))
-        @test !(S[1,1] ≈ zeros(ComplexF64, 3, 3))
+        @test !(Array(S[1,1]) ≈ zeros(ComplexF64, 3, 3))
     end
 
     @testset "circshift" for atype in ATYPES
@@ -120,7 +120,7 @@
         nt = (data = [atype(rand(ComplexF64, 3, 3)), atype(rand(ComplexF64, 3, 3))],)
         result = S + nt
         @test result isa StructArray
-        @test result[1,1] ≈ Array(S[1,1]) + Array(nt.data[1])
+        @test Array(result[1,1]) ≈ Array(S[1,1]) + Array(nt.data[1])
     end
 
     @testset "Initialization functions" for atype in ATYPES

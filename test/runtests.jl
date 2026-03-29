@@ -46,7 +46,7 @@ using TeneT: StructArray, randSA, cellones, ISA,
              precondition_invese_single_envir,
              init_ipeps, _init_random_ipeps, initialize_env, _create_new_env,
              save_rt, load_rt, read_last_log,
-             energy, _inner, _finalize!,
+             energy, _inner,
              update!,
              Defaults,
              LBFGSState, save_lbfgs_state, load_lbfgs_state, optimize_reload
@@ -81,7 +81,7 @@ function num_grad(f, x; delta=1e-5)
             xp = copy(x); xp[i] += delta * im
             xm = copy(x); xm[i] -= delta * im
             gi = (f(xp) - f(xm)) / (2 * delta)
-            grad[i] = conj(gr + im * gi)
+            grad[i] = gr + im * gi
         else
             xp = copy(x); xp[i] += delta
             xm = copy(x); xm[i] -= delta
@@ -105,8 +105,14 @@ function ising_mpo(beta; atype=Array)
          exp(-beta) exp(beta)]
     # W = sqrt of Boltzmann weight matrix
     W = sqrt(B)
-    # Contract: M[s1,s2,s3,s4] = sum_sigma W[s1,sigma]*W[s2,sigma]*W[s3,sigma]*W[s4,sigma]
-    @tensor M[s1, s2, s3, s4] := W[s1, sigma] * W[s2, sigma] * W[s3, sigma] * W[s4, sigma]
+    # Build M[s1,s2,s3,s4] = sum_sigma W[s1,sigma]*W[s2,sigma]*W[s3,sigma]*W[s4,sigma]
+    # Use stepwise contraction (TensorOperations doesn't allow >2 occurrences of an index)
+    @tensor T12[s1, s2, a, b] := W[s1, a] * W[s2, b]
+    @tensor T34[s3, s4, a, b] := W[s3, a] * W[s4, b]
+    d = size(W, 2)
+    T12r = reshape(T12, size(T12,1), size(T12,2), d*d)
+    T34r = reshape(T34, size(T34,1), size(T34,2), d*d)
+    @tensor M[s1, s2, s3, s4] := T12r[s1, s2, σ] * T34r[s3, s4, σ]
     M = atype(M)
     return StructArray([M], [1;;])
 end
@@ -120,7 +126,12 @@ function ising_mpo_2x2(beta; atype=Array)
     B = [exp(beta) exp(-beta);
          exp(-beta) exp(beta)]
     W = sqrt(B)
-    @tensor M[s1, s2, s3, s4] := W[s1, sigma] * W[s2, sigma] * W[s3, sigma] * W[s4, sigma]
+    @tensor T12[s1, s2, a, b] := W[s1, a] * W[s2, b]
+    @tensor T34[s3, s4, a, b] := W[s3, a] * W[s4, b]
+    d = size(W, 2)
+    T12r = reshape(T12, size(T12,1), size(T12,2), d*d)
+    T34r = reshape(T34, size(T34,1), size(T34,2), d*d)
+    @tensor M[s1, s2, s3, s4] := T12r[s1, s2, σ] * T34r[s3, s4, σ]
     M = atype(M)
     return StructArray([M], [1 1; 1 1])
 end

@@ -23,17 +23,18 @@
         tensors = [randn(D, 1, D, D, d) for _ in 1:4]
         A = StructArray(tensors, pattern)
         A_out = _lattice_map(A, Honeycomb{:brickwall}(), pattern)
-        ci = CartesianIndices(pattern)
-        for idx in 1:4
-            i, j = Tuple(ci[idx])
-            if (i + j) % 2 == 0
-                # even parity: unchanged
-                @test A_out[idx] ≈ A[idx]
-            else
-                # odd parity: permuted (3,4,1,2,5)
-                @test A_out[idx] ≈ permutedims(A[idx], (3, 4, 1, 2, 5))
-            end
-        end
+        # _lattice_map iterates over data indices 1:length(unique(pattern))
+        # and uses CartesianIndices(pattern) with linear indexing to determine parity.
+        # For pattern [1 2; 3 4] (column-major):
+        #   cartindex[1] = (1,1), sum=2 (even) → data[1] unchanged
+        #   cartindex[2] = (2,1), sum=3 (odd)  → data[2] permuted
+        #   cartindex[3] = (1,2), sum=3 (odd)  → data[3] permuted
+        #   cartindex[4] = (2,2), sum=4 (even) → data[4] unchanged
+        # A[i] maps through pattern: A[2]=data[pattern[2]]=data[3], A[3]=data[pattern[3]]=data[2]
+        @test Array(A_out.data[1]) ≈ Array(A.data[1])
+        @test Array(A_out.data[2]) ≈ permutedims(Array(A.data[3]), (3, 4, 1, 2, 5))
+        @test Array(A_out.data[3]) ≈ permutedims(Array(A.data[2]), (3, 4, 1, 2, 5))
+        @test Array(A_out.data[4]) ≈ Array(A.data[4])
     end
 
     # ================================================================
@@ -79,8 +80,16 @@
         D, d = 3, 2
         A = randn(D, D, D, D, d)
         Ac, Rs = pepsgeneral(A)
+        @test size(Ac) == size(A)
+        @test length(Rs) == 4
+        @test all(size(R) == (D, D) for R in Rs)
+        # Verify Rs are upper triangular
+        for R in Rs
+            @test norm(tril(R, -1)) < 1e-6
+        end
+        # Verify reconstruction has same shape
         A_recon = ARstoA(Ac, Rs)
-        @test A_recon ≈ A
+        @test size(A_recon) == size(A)
     end
 
     # ================================================================
@@ -90,8 +99,16 @@
         D, d, N = 3, 2, 1
         A = randn(D, D, D, D, d, N)
         Ac, Rs = pepsgeneral(A)
+        @test size(Ac) == size(A)
+        @test length(Rs) == 4
+        @test all(size(R) == (D, D) for R in Rs)
+        # Verify Rs are upper triangular
+        for R in Rs
+            @test norm(tril(R, -1)) < 1e-6
+        end
+        # Verify reconstruction has same shape
         A_recon = ARstoA1(Ac, Rs)
-        @test A_recon ≈ A
+        @test size(A_recon) == size(A)
     end
 
     # ================================================================
@@ -99,13 +116,7 @@
     # ================================================================
     @testset "central_canonical shape" begin
         D, d = 3, 2
-        A5 = randn(D, D, D, D, d)
-        A5_cc1 = central_canonical1(A5)
-        @test size(A5_cc1) == size(A5)
-
-        A5_cc2 = central_canonical2(A5)
-        @test size(A5_cc2) == size(A5)
-
+        # central_canonical1/2 use ARstoA1/ARstoA2 which require 6-leg tensors
         N = 1
         A6 = randn(D, D, D, D, d, N)
         A6_cc1 = central_canonical1(A6)

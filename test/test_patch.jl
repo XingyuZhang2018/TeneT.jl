@@ -76,7 +76,8 @@ using OptimKit: LBFGS, LBFGSInverseHessian
         x0 = [1.0, 2.0, 3.0]
         alg = LBFGS(5; maxiter=20, verbosity=0, gradtol=1e-8)
 
-        x_opt, f_opt, g_opt, numfg, history = optimize_reload(fg, x0, alg)
+        x_opt, f_opt, g_opt, numfg, history = optimize_reload(fg, x0, alg;
+            finalize! = (x,f,g,i) -> (x,f,g))
 
         @test f_opt < 1e-10
         @test norm(x_opt) < 1e-5
@@ -93,12 +94,14 @@ using OptimKit: LBFGS, LBFGSInverseHessian
 
             # Run 5 iterations and save state
             x1, f1, _, _, _ = optimize_reload(fg, x0, alg1;
-                                              save_state_to=filepath, save_every=1)
+                                              save_state_to=filepath, save_every=1,
+                                              finalize! = (x,f,g,i) -> (x,f,g))
 
             # Resume from saved state with more iterations
             alg2 = LBFGS(5; maxiter=20, verbosity=0, gradtol=1e-14)
             x2, f2, _, _, _ = optimize_reload(fg, x0, alg2;
-                                              resume_from=filepath)
+                                              resume_from=filepath,
+                                              finalize! = (x,f,g,i) -> (x,f,g))
 
             @test f2 <= f1
         end

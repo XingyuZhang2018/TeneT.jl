@@ -12,7 +12,7 @@
         end
 
         @testset "_arraytype on StructArray" begin
-            S = randSA(ComplexF64, Array, [1;;], [NTuple{3,Int}[(2,3,4)]])
+            S = randSA(ComplexF64, Array, [1;;], NTuple{3,Int}[(2,3,4)])
             @test _arraytype(S) === Array
         end
 
@@ -196,11 +196,11 @@
                 pattern = [1;;]
                 chi = 4
                 d = 2
-                AL = randSA(ComplexF64, Array, pattern, [NTuple{3,Int}[(d, chi, chi)]])
-                AR = randSA(ComplexF64, Array, pattern, [NTuple{3,Int}[(d, chi, chi)]])
-                C  = randSA(ComplexF64, Array, pattern, [NTuple{2,Int}[(chi, chi)]])
-                FL = randSA(ComplexF64, Array, pattern, [NTuple{3,Int}[(chi, d, chi)]])
-                FR = randSA(ComplexF64, Array, pattern, [NTuple{3,Int}[(chi, d, chi)]])
+                AL = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(d, chi, chi)])
+                AR = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(d, chi, chi)])
+                C  = randSA(ComplexF64, Array, pattern, NTuple{2,Int}[(chi, chi)])
+                FL = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(chi, d, chi)])
+                FR = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(chi, d, chi)])
                 rt = VUMPSRuntime(AL, AR, C, FL, FR)
 
                 # Save and load
