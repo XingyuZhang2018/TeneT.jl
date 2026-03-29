@@ -1,0 +1,219 @@
+@testset "boundary algorithms" begin
+    beta = 0.3
+    chi = 8
+
+    @testset "atype=$atype" for atype in ATYPES
+
+        M1 = ising_mpo(beta; atype)
+        M2 = ising_mpo_2x2(beta; atype)
+
+        # ==================================================================
+        # VUMPS General
+        # ==================================================================
+        @testset "VUMPS General" begin
+            alg = VUMPS{:General}(; verbosity=0, maxiter=100,
+                                    maxiter_ad=1, miniter_ad=1,
+                                    tol=1e-8, ifupdown=false)
+
+            # ---- Canonical forms ----
+            @testset "left_canonical isometry" begin
+                A = initial_A(M1, chi)
+                AL, L, lam = left_canonical(A)
+                # AL reshaped to matrix should have orthonormal columns
+                mat = reshape(Array(AL[1]), :, size(AL[1])[end])
+                @test mat' * mat ≈ I atol=1e-10
+            end
+
+            @testset "right_canonical isometry" begin
+                A = initial_A(M1, chi)
+                R, AR, lam = right_canonical(A)
+                mat = reshape(Array(AR[1]), size(AR[1], 1), :)
+                @test mat * mat' ≈ I atol=1e-10
+            end
+
+            # ---- LRtoC and ALCtoAC shapes ----
+            @testset "LRtoC and ALCtoAC shapes" begin
+                A = initial_A(M1, chi)
+                AL, L, _ = left_canonical(A)
+                R, AR, _ = right_canonical(AL)
+                C = LRtoC(L, R)
+                @test size(C[1]) == (chi, chi)
+                AC = ALCtoAC(AL, C)
+                @test size(AC[1]) == size(AL[1])
+            end
+
+            # ---- Environment init ----
+            @testset "init_env returns VUMPSRuntime" begin
+                rt = init_env(M1, chi, alg)
+                @test rt isa VUMPSRuntime
+                @test size(rt.AL[1], 1) == chi
+                @test size(rt.AR[1], 1) == chi
+                @test size(rt.C[1]) == (chi, chi)
+            end
+
+            # ---- Convergence 1x1 ----
+            @testset "convergence 1x1" begin
+                rt = init_env(M1, chi, alg)
+                rt, err = leading_boundary(rt, M1, alg)
+                @test err < 1e-6
+            end
+
+            # ---- Up/down ----
+            @testset "up/down returns tuple" begin
+                alg_ud = VUMPS{:General}(; verbosity=0, maxiter=100,
+                                           maxiter_ad=1, miniter_ad=1,
+                                           tol=1e-8, ifupdown=true,
+                                           ifdownfromup=true)
+                rt_ud = init_env(M1, chi, alg_ud)
+                @test rt_ud isa Tuple{VUMPSRuntime, VUMPSRuntime}
+                rt_ud, err = leading_boundary(rt_ud, M1, alg_ud)
+                @test err < 1e-6
+            end
+
+            # ---- 2x2 unit cell ----
+            @testset "convergence 2x2" begin
+                rt2 = init_env(M2, chi, alg)
+                rt2, err2 = leading_boundary(rt2, M2, alg)
+                @test err2 < 1e-4
+            end
+
+            # ---- ObsEnv ----
+            @testset "ObsEnv returns VUMPSEnv" begin
+                rt = init_env(M1, chi, alg)
+                rt, _ = leading_boundary(rt, M1, alg)
+                env = ObsEnv(rt, M1, alg)
+                @test env isa VUMPSEnv
+            end
+        end
+
+        # ==================================================================
+        # VUMPS Plaquette
+        # ==================================================================
+        @testset "VUMPS Plaquette" begin
+            alg_plaq = VUMPS{:Plaquette}(; verbosity=0, maxiter=100,
+                                           maxiter_ad=1, miniter_ad=1,
+                                           tol=1e-8)
+
+            @testset "init returns PlaquetteVUMPSRuntime" begin
+                rt = init_env(M2, chi, alg_plaq)
+                @test rt isa PlaquetteVUMPSRuntime
+            end
+
+            @testset "convergence" begin
+                rt = init_env(M2, chi, alg_plaq)
+                rt, err = leading_boundary(rt, M2, alg_plaq)
+                @test err < 1e-4
+            end
+
+            @testset "ObsEnv returns PlaquetteVUMPSEnv" begin
+                rt = init_env(M2, chi, alg_plaq)
+                rt, _ = leading_boundary(rt, M2, alg_plaq)
+                env = ObsEnv(rt, M2, alg_plaq)
+                @test env isa PlaquetteVUMPSEnv
+            end
+        end
+
+        # ==================================================================
+        # VUMPS C4v
+        # ==================================================================
+        @testset "VUMPS C4v" begin
+            alg_c4v = VUMPS{:C4v}(; verbosity=0, maxiter=100,
+                                    maxiter_ad=1, miniter_ad=1,
+                                    tol=1e-8)
+
+            @testset "init returns C4vVUMPSEnv" begin
+                rt = init_env(M1, chi, alg_c4v)
+                @test rt isa C4vVUMPSEnv
+            end
+
+            @testset "convergence" begin
+                rt = init_env(M1, chi, alg_c4v)
+                rt, err = leading_boundary(rt, M1, alg_c4v)
+                @test err < 1e-6
+            end
+
+            @testset "ObsEnv returns C4vVUMPSEnv" begin
+                rt = init_env(M1, chi, alg_c4v)
+                rt, _ = leading_boundary(rt, M1, alg_c4v)
+                env = ObsEnv(rt, M1, alg_c4v)
+                @test env isa C4vVUMPSEnv
+            end
+        end
+
+        # ==================================================================
+        # QRCTM
+        # ==================================================================
+        @testset "QRCTM" begin
+            alg_qr = QRCTM(; verbosity=0, maxiter=100,
+                             maxiter_ad=1, miniter_ad=1,
+                             tol=1e-8)
+
+            @testset "init returns CTMEnv" begin
+                rt = init_env(M1, chi, alg_qr)
+                @test rt isa CTMEnv
+                @test size(rt.C) == (chi, chi)
+            end
+
+            @testset "convergence" begin
+                rt = init_env(M1, chi, alg_qr)
+                rt, err = leading_boundary(rt, M1, alg_qr)
+                @test err < 1e-6
+            end
+
+            @testset "ObsEnv returns CTMEnv" begin
+                rt = init_env(M1, chi, alg_qr)
+                rt, _ = leading_boundary(rt, M1, alg_qr)
+                env = ObsEnv(rt, M1, alg_qr)
+                @test env isa CTMEnv
+            end
+        end
+
+        # ==================================================================
+        # Environment helpers
+        # ==================================================================
+        @testset "environment helpers" begin
+            alg = VUMPS{:General}(; verbosity=0, maxiter=20,
+                                    maxiter_ad=1, miniter_ad=1,
+                                    tol=1e-6, ifupdown=false)
+
+            # ---- update! in-place copy ----
+            @testset "update! VUMPSRuntime" begin
+                rt1 = init_env(M1, chi, alg)
+                rt2 = init_env(M1, chi, alg)
+                update!(rt1, rt2)
+                @test Array(rt1.AL[1]) ≈ Array(rt2.AL[1])
+                @test Array(rt1.C[1]) ≈ Array(rt2.C[1])
+            end
+
+            # ---- _down_M ----
+            @testset "_down_M permutes legs" begin
+                Md = _down_M(M1)
+                m_orig = Array(M1[1])
+                m_down = Array(Md[1])
+                @test m_down ≈ permutedims(m_orig, (1, 4, 3, 2))
+            end
+
+            # ---- GPU roundtrip (only when atype != Array) ----
+            if atype != Array
+                @testset "VUMPSRuntime GPU roundtrip" begin
+                    rt = init_env(M1, chi, alg)
+                    rt_cpu = Array(rt)
+                    rt_gpu = atype(rt_cpu)
+                    rt_cpu2 = Array(rt_gpu)
+                    @test rt_cpu2.AL[1] ≈ rt_cpu.AL[1]
+                    @test rt_cpu2.C[1] ≈ rt_cpu.C[1]
+                end
+
+                @testset "CTMEnv GPU roundtrip" begin
+                    alg_qr = QRCTM(; verbosity=0, maxiter=10, tol=1e-6)
+                    rt = init_env(M1, chi, alg_qr)
+                    rt_cpu = Array(rt)
+                    rt_gpu = atype(rt_cpu)
+                    rt_cpu2 = Array(rt_gpu)
+                    @test rt_cpu2.C ≈ rt_cpu.C
+                    @test rt_cpu2.T ≈ rt_cpu.T
+                end
+            end
+        end
+    end
+end

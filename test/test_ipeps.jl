@@ -1,0 +1,195 @@
+@testset "iPEPS optimize modules" begin
+
+    # ================================================================
+    # 1. _lattice_map -- Square identity
+    # ================================================================
+    @testset "_lattice_map Square identity" begin
+        pattern = [1 2; 2 1]
+        D, d = 2, 2
+        tensors = [randn(D, D, D, D, d) for _ in 1:2]
+        A = StructArray(tensors, pattern)
+        A_out = _lattice_map(A, Square(), pattern)
+        for i in 1:length(tensors)
+            @test A_out[i] ≈ A[i]
+        end
+    end
+
+    # ================================================================
+    # 2. _lattice_map -- Honeycomb brickwall
+    # ================================================================
+    @testset "_lattice_map Honeycomb brickwall" begin
+        pattern = [1 2; 3 4]
+        D, d = 2, 2
+        tensors = [randn(D, 1, D, D, d) for _ in 1:4]
+        A = StructArray(tensors, pattern)
+        A_out = _lattice_map(A, Honeycomb{:brickwall}(), pattern)
+        ci = CartesianIndices(pattern)
+        for idx in 1:4
+            i, j = Tuple(ci[idx])
+            if (i + j) % 2 == 0
+                # even parity: unchanged
+                @test A_out[idx] ≈ A[idx]
+            else
+                # odd parity: permuted (3,4,1,2,5)
+                @test A_out[idx] ≈ permutedims(A[idx], (3, 4, 1, 2, 5))
+            end
+        end
+    end
+
+    # ================================================================
+    # 3. C4v_restriction -- 5-leg
+    # ================================================================
+    @testset "C4v_restriction 5-leg" begin
+        D, d = 3, 2
+        A = randn(D, D, D, D, d)
+        A_sym = C4v_restriction(A)
+        # applying twice should give 16x (4 operations each doubling)
+        A_sym2 = C4v_restriction(A_sym)
+        @test A_sym2 ≈ 16 * A_sym
+        # symmetry check: up-down reflection with conj
+        @test A_sym ≈ permutedims(conj(A_sym), (1, 4, 3, 2, 5))
+    end
+
+    # ================================================================
+    # 4. C4v_restriction -- 6-leg
+    # ================================================================
+    @testset "C4v_restriction 6-leg" begin
+        D, d, N = 3, 2, 1
+        A = randn(D, D, D, D, d, N)
+        A_sym = C4v_restriction(A)
+        A_sym2 = C4v_restriction(A_sym)
+        @test A_sym2 ≈ 16 * A_sym
+        # symmetry check
+        @test A_sym ≈ permutedims(conj(A_sym), (1, 4, 3, 2, 5, 6))
+    end
+
+    # ================================================================
+    # 5. _restriction_ipeps -- identity
+    # ================================================================
+    @testset "_restriction_ipeps identity" begin
+        D, d = 3, 2
+        A = randn(D, D, D, D, d)
+        @test _restriction_ipeps(A) === A
+    end
+
+    # ================================================================
+    # 6. pepsgeneral -- 5-leg reconstruct via ARstoA
+    # ================================================================
+    @testset "pepsgeneral 5-leg roundtrip" begin
+        D, d = 3, 2
+        A = randn(D, D, D, D, d)
+        Ac, Rs = pepsgeneral(A)
+        A_recon = ARstoA(Ac, Rs)
+        @test A_recon ≈ A
+    end
+
+    # ================================================================
+    # 7. pepsgeneral -- 6-leg reconstruct via ARstoA1
+    # ================================================================
+    @testset "pepsgeneral 6-leg roundtrip" begin
+        D, d, N = 3, 2, 1
+        A = randn(D, D, D, D, d, N)
+        Ac, Rs = pepsgeneral(A)
+        A_recon = ARstoA1(Ac, Rs)
+        @test A_recon ≈ A
+    end
+
+    # ================================================================
+    # 8. central_canonical1 and central_canonical2 shape preservation
+    # ================================================================
+    @testset "central_canonical shape" begin
+        D, d = 3, 2
+        A5 = randn(D, D, D, D, d)
+        A5_cc1 = central_canonical1(A5)
+        @test size(A5_cc1) == size(A5)
+
+        A5_cc2 = central_canonical2(A5)
+        @test size(A5_cc2) == size(A5)
+
+        N = 1
+        A6 = randn(D, D, D, D, d, N)
+        A6_cc1 = central_canonical1(A6)
+        @test size(A6_cc1) == size(A6)
+
+        A6_cc2 = central_canonical2(A6)
+        @test size(A6_cc2) == size(A6)
+    end
+
+    # ================================================================
+    # 9. to_mcf_ipeps shape
+    # ================================================================
+    @testset "to_mcf_ipeps shape" begin
+        D, d = 3, 2
+        A = randn(D, D, D, D, d)
+        A_mcf = to_mcf_ipeps(A)
+        @test size(A_mcf) == (D, D, D, D, d)
+    end
+
+    # ================================================================
+    # 10. local_gauge_contraction shape
+    # ================================================================
+    @testset "local_gauge_contraction shape" begin
+        D, d = 3, 2
+        A = randn(D, D, D, D, d)
+        G = [randn(D, D) for _ in 1:4]
+        A_out = local_gauge_contraction(A, G)
+        @test size(A_out) == (D, D, D, D, d)
+    end
+
+    # ================================================================
+    # 11. _init_random_ipeps shapes
+    # ================================================================
+    @testset "_init_random_ipeps shapes" begin
+        D, d, N = 2, 2, 2
+        Ni, Nj = 2, 2
+
+        # Square: (D,D,D,D,d,N)
+        A_sq = _init_random_ipeps(Square(), Float64, D, d, N, Ni, Nj)
+        @test size(A_sq) == (D, D, D, D, d, N)
+
+        # Kagome: (D,D,D,D,d^3,N)
+        A_kg = _init_random_ipeps(Kagome(), Float64, D, d, N, Ni, Nj)
+        @test size(A_kg) == (D, D, D, D, d^3, N)
+
+        # Honeycomb merge: (D,D,D,D,d^2,N)
+        A_hm = _init_random_ipeps(Honeycomb{:merge}(), Float64, D, d, N, Ni, Nj)
+        @test size(A_hm) == (D, D, D, D, d^2, N)
+
+        # Honeycomb brickwall: (D,1,D,D,d,N)
+        A_hb = _init_random_ipeps(Honeycomb{:brickwall}(), Float64, D, d, N, Ni, Nj)
+        @test size(A_hb) == (D, 1, D, D, d, N)
+    end
+
+    # ================================================================
+    # 12. Environment struct fieldnames
+    # ================================================================
+    @testset "Environment struct fieldnames" begin
+        @test fieldnames(VUMPSRuntime) == (:AL, :AR, :C, :FL, :FR)
+        @test fieldnames(PlaquetteVUMPSRuntime) == (:AL, :C, :FL)
+        @test fieldnames(VUMPSEnv) == (:ACu, :ARu, :ACd, :ARd, :FLu, :FRu, :FLo, :FRo)
+        @test fieldnames(PlaquetteVUMPSEnv) == (:AL, :C, :FLu, :FLo)
+        @test fieldnames(CTMEnv) == (:C, :T)
+    end
+
+    # ================================================================
+    # 13. GradientOptimize/SUOptimize/FUOptimize subtypes
+    # ================================================================
+    @testset "iPEPSOptimize subtypes" begin
+        @test GradientOptimize <: TeneT.iPEPSOptimize
+        @test SUOptimize <: TeneT.iPEPSOptimize
+        @test FUOptimize <: TeneT.iPEPSOptimize
+    end
+
+    # ================================================================
+    # 14. _inner product
+    # ================================================================
+    @testset "_inner product" begin
+        x = randn(4, 4)
+        dx1 = randn(4, 4) + im * randn(4, 4)
+        dx2 = randn(4, 4) + im * randn(4, 4)
+        result = _inner(x, dx1, dx2)
+        @test result isa Real
+        @test result ≈ real(dot(dx1, dx2))
+    end
+
+end
