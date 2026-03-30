@@ -68,5 +68,5 @@ function restriction_ipeps(A)
    return A
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
-# observable(A, χ, params; restriction_ipeps)
+# optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
+observable(A, χ, params; restriction_ipeps)
