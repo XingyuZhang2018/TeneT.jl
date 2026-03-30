@@ -2,9 +2,6 @@
 @non_differentiable VUMPSRuntime(M, χ::Int, alg::VUMPS)
 @non_differentiable randSA(kwargs...)
 @non_differentiable ISA(kwargs...)
-@non_differentiable set_device_id!(kwargs...)
-@non_differentiable get_device(kwargs...)
-@non_differentiable get_device_id(kwargs...)
 @non_differentiable hamiltonian(kwargs...)
 @non_differentiable hamiltonian_trunc(kwargs...)
 @non_differentiable CuArray(kwargs...)
@@ -24,19 +21,6 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
         return NoTangent(), @thunk(As' \ unthunk(dAs) ./ 2)
     end
     return As, back
-end
-
-function ChainRulesCore.rrule(::typeof(atype_device!), atype, x, i::Int)
-    id_old = get_device_id(atype)
-    function back(dx)
-        _dx = unthunk(dx)
-        f = pullback(atype, x)[2]
-        set_device_id!(atype, get_device_id(x))
-        _dx = atype(f(_dx)[1])
-        set_device_id!(atype, id_old)
-        return NoTangent(), NoTangent(), _dx, NoTangent()
-    end
-    return atype_device!(atype, x, i), back
 end
 
 # adjoint for QR factorization
@@ -276,52 +260,6 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     end
 
     return result, back
-end
-
-function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
-    rtup, rtdown = rt
-    atype = _arraytype(M)
-    if alg.ifparallelupdown
-        @sync begin
-            @async begin
-                set_device_id!(atype, 1)
-                (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-            end
-            @async begin
-                set_device_id!(atype, 2)
-                Md, _down_M_back = pullback(_down_M, atype(M))
-                (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
-            end
-        end
-    else
-        (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
-        Md, _down_M_back = pullback(_down_M, M)
-        (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
-    end
-    function back(((∂rtup, ∂rtdown), ∂err))
-        if alg.ifparallelupdown
-            @sync begin
-                @async begin
-                    set_device_id!(atype, 1)
-                    ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
-                end
-                @async begin
-                    set_device_id!(atype, 2)
-                    ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
-                    ∂Mdown = _down_M_back(∂Mddown)[1]
-                end
-            end
-        else
-            ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
-            ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
-            ∂Mdown = _down_M_back(∂Mddown)[1]
-        end
-        
-        set_device_id!(atype, 1)
-        ∂Mup.data .+= atype(∂Mdown).data
-        return NoTangent(), NoTangent(), ∂Mup, NoTangent()
-    end
-    return ((rtup, rtdown), (errup, errdown)), back
 end
 
 # ─── SVD adjoint ──────────────────────────────────────────────────────────────

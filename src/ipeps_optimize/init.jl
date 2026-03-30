@@ -157,7 +157,7 @@ function initialize_env(A, D::Int, χ::Int, params::iPEPSOptimize; restriction_i
     if hasproperty(params, :ifload_env) && params.ifload_env
         if ispath(file_path)
             try
-                return load_rt(folder_path, _arraytype(A), params.boundary_alg.ifparallelupdown; file="χ$χ.jld2")
+                return load_rt(folder_path, _arraytype(A); file="χ$χ.jld2")
             catch e
                 @warn "Failed to load environment from $file_path: $(sprint(showerror, e)). Creating new environment."
                 return _create_new_env(A, χ, params; restriction_ipeps)

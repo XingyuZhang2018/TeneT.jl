@@ -8,32 +8,6 @@ _arraytype(::CuArray) = CuArray
 _arraytype(::ROCArray) = ROCArray
 _arraytype(S::StructArray) = _arraytype(S.data[1])
 
-set_device_id!(::Type{ROCArray}, i::Int) = AMDGPU.device_id!(i)
-set_device_id!(::Type{CuArray}, i::Int) = CUDA.device!(i-1)
-set_device_id!(::Type{Array}, i::Int) = nothing
-
-get_device(::Type{ROCArray}) = AMDGPU.device()
-get_device(::Type{CuArray}) = CUDA.device()
-get_device(::Type{Array}) = "CPU thread $(threadid())"
-
-device_count(::Type{ROCArray}) = length(AMDGPU.devices())
-device_count(::Type{CuArray}) = length(CUDA.devices())
-device_count(::Type{Array}) = Threads.nthreads()
-
-get_device_id(::Array) = 1
-get_device_id(x::ROCArray) = Int(AMDGPU.device(x).device_id)
-get_device_id(x::CuArray) = Int(CUDA.device(x).handle + 1)
-get_device_id(S::StructArray) = get_device_id(S[1])
-
-get_device_id(::Type{Array}) = Threads.threadid()
-get_device_id(::Type{ROCArray}) = AMDGPU.device_id()
-get_device_id(::Type{CuArray}) = Int(CUDA.device().handle) + 1
-
-function atype_device!(atype, x, i::Int)
-    set_device_id!(atype, i)
-    return atype(x)
-end
-
 function ROCArray(x::NamedTuple)
     x.data .= map(ROCArray, x.data)
     return x

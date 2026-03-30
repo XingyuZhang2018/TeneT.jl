@@ -134,38 +134,38 @@ end
 # ── Plaquette iteration + boundary ───────────────────────────────────
 
 function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{:Plaquette})
-    t = ChainRulesCore.ignore_derivatives(() -> time())
+    t = ignore_derivatives(() -> time())
     local err
-    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration without AD...")
-    ChainRulesCore.ignore_derivatives() do
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration without AD...")
+    ignore_derivatives() do
         for i in 1:alg.maxiter
         rt, err = vumps_step(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 &&
-            ChainRulesCore.ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 &&
-                ChainRulesCore.ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+                ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     end
 
-    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
     for i in 1:alg.maxiter_ad
         power_iter_backup = alg.power_iter
         alg.power_iter = alg.power_iter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
         alg.power_iter = power_iter_backup
-        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     return rt, err

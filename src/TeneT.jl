@@ -10,6 +10,7 @@ using cuTENSOR
 using TensorOperations
 
 using Zygote, ChainRulesCore, ForwardDiff
+using ChainRulesCore: ignore_derivatives
 using KrylovKit, VectorInterface
 
 using OptimKit, LineSearches

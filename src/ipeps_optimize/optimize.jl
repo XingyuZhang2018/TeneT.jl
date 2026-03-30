@@ -21,7 +21,7 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
     env = ObsEnv(rt, A, params.boundary_alg)
     e = energy_value(params.model, A, env, params)[1]
 
-    ChainRulesCore.ignore_derivatives() do
+    ignore_derivatives() do
         update!(rt′, rt)
         if eltype(e) <: Complex
             fδEierr[4] = abs(imag(e))

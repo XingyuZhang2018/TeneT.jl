@@ -45,9 +45,9 @@ function qrctm_step(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     T = FLmap_parallel(T, U, U, M; ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter)
     C_new = Cmap(R, T, U)
 
-    T /= ChainRulesCore.ignore_derivatives(() -> norm(T))
-    C_new /= ChainRulesCore.ignore_derivatives(() -> norm(C_new))
-    err = ChainRulesCore.ignore_derivatives(() -> norm(C_new - C))
+    T /= ignore_derivatives(() -> norm(T))
+    C_new /= ignore_derivatives(() -> norm(C_new))
+    err = ignore_derivatives(() -> norm(C_new - C))
 
     return CTMEnv(C_new, T), err
 end
@@ -57,36 +57,36 @@ end
 # Core implementation operating on plain tensors (avoids StructArray overhead in AD)
 function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
     M = M[1]
-    t = ChainRulesCore.ignore_derivatives(() -> time())
+    t = ignore_derivatives(() -> time())
     local err
 
-    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTM iteration without AD...")
-    ChainRulesCore.ignore_derivatives() do
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTM iteration without AD...")
+    ignore_derivatives() do
         for i in 1:alg.maxiter
         env, err = qrctm_step(env, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 &&
-            ChainRulesCore.ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 &&
-                ChainRulesCore.ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+                ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     end
 
-    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTM iteration with AD...")
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTM iteration with AD...")
     for i in 1:alg.maxiter_ad
         env, err = alg.ifcheckpoint ? checkpoint(qrctm_step, env, M, alg) : qrctm_step(env, M, alg)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     return env, err

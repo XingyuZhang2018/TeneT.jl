@@ -102,7 +102,7 @@ function pepsgeneral(A::AbstractArray{<:Number, 6}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
+        conv_sum = ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -148,7 +148,7 @@ function pepsgeneral(A::AbstractArray{<:Number, 5}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
+        conv_sum = ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -250,7 +250,7 @@ function pepsgeneral_Ac(A::AbstractArray{<:Number, 6}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
+        conv_sum = ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -292,7 +292,7 @@ function pepsgeneral_Ac(A::AbstractArray{<:Number, 5}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
+        conv_sum = ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -388,7 +388,7 @@ If `ifignore_gauge=true`, the gauge optimization is excluded from AD.
 """
 function local_min_norm(A, params; ifignore_gauge=true)
     if ifignore_gauge
-        G = ChainRulesCore.ignore_derivatives(() -> find_local_min_norm_G(A, params))
+        G = ignore_derivatives(() -> find_local_min_norm_G(A, params))
     else
         G = find_local_min_norm_G(A, params)
     end
@@ -445,7 +445,7 @@ Uses LBFGS optimization from OptimKit.
 """
 function find_local_hermite_G(A, params)
     atype = _arraytype(A)
-    A_cpu = ChainRulesCore.ignore_derivatives(() -> Array(A))
+    A_cpu = ignore_derivatives(() -> Array(A))
 
     function f(G)
         A_prime = gauge_transfer(A_cpu, G, params)
@@ -482,7 +482,7 @@ Apply the Hermite-symmetrizing gauge transformation to iPEPS tensor `A`.
 The gauge optimization is excluded from AD (via Zygote.@ignore).
 """
 function local_hermite(A, params)
-    G = ChainRulesCore.ignore_derivatives(() -> find_local_hermite_G(A, params))
+    G = ignore_derivatives(() -> find_local_hermite_G(A, params))
     AG = gauge_transfer(A, G, params)
     return AG
 end
