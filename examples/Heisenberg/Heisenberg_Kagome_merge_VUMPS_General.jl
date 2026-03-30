@@ -7,17 +7,19 @@ using Zygote
 
 seed = 42
 Random.seed!(seed)
-atype = Array
-etype = ComplexF64
-D, χ, χshift = 2, 16, 0
+atype = CuArray
+etype = Float64
+D, χ, χshift, maxiter_restart = 2, 16, 0, 2
+# pattern = [1;;]
 pattern = [1 2;
            2 1]
 # pattern = [1 3;
 #            2 4]
-model = Kitaev(lattice=Honeycomb(:brickwall), 
-               S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0, 
-               couplingtype=:uniform, bondratio=1.0)
-No = 0
+model = Heisenberg(lattice=Kagome(:merge),
+                   S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                   couplingtype=:uniform, bondratio=1.0)
+No = 10
+SUτ = 0.01
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
                                ifdownfromup=false,
@@ -39,14 +41,14 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=1, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=3, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
-                          maxiter_restart=1,
+                          maxiter_restart=maxiter_restart,
                           verbosity=4, 
                           folder=folder,
                           ifSU=false,
-                          SUτ=0,
+                          SUτ=SUτ,
                           ifprecondition=false,
                           ifMCF=false,
                           iter_precond=0,
@@ -56,13 +58,13 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, D, χ, params)
-# A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
+# A = init_ipeps(;atype, etype, No, D, χ, params)
+# A = init_ipeps_perturbation(;atype, No, D, D_new=3, params)
+A = init_ipeps_SU(; atype, No, D, D_new=3, χ, params)
+# A = init_ipeps_from_1x1(;atype, etype, No, pattern, χ, D, ϵ=1e-2, infolder=joinpath(pkgdir(TeneT), "data/$model/[1;;]/VUMPS_General/$etype/seed$seed/"))
 
 function restriction_ipeps(A)
-   # A = C4v_restriction(A)
    A /= norm(A)
-   # A = local_min_norm(A, params)
    return A
 end
 

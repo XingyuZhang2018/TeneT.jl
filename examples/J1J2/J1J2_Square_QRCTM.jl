@@ -52,7 +52,7 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, d=2, D, χ, params)
+A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 function restriction_ipeps(A)

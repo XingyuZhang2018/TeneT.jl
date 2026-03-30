@@ -4,6 +4,7 @@
 @non_differentiable ISA(kwargs...)
 @non_differentiable hamiltonian(kwargs...)
 @non_differentiable hamiltonian_trunc(kwargs...)
+@non_differentiable hamiltonian_onsite(kwargs...)
 @non_differentiable CuArray(kwargs...)
 
 # patch since it's currently broken otherwise

@@ -21,16 +21,7 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
     for p in 1:len
         i, j = Tuple(findfirst(==(p), ACu.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
-        @unpack Jx, Jy, Jz, bondratio = model
-        if (i,j) in [(1,2),(2,5)]
-            Jy *= bondratio
-        end
-        if (i,j) in [(1,6),(2,3)]
-            Jx *= bondratio
-        end
-        if (i,j) in [(1,3),(2,6)]
-            Jz *= bondratio
-        end
+        Jx, Jy, Jz = enlarge_coupling(model, i, j)
         if (i + j) % 2 != 0
             ir  = mod1(i + 1, Ni)
             irr = mod1(Ni - i, Ni) 

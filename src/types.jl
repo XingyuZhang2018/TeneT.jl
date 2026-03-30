@@ -4,8 +4,9 @@
 abstract type AbstractLattice end
 struct Square <: AbstractLattice end
 struct Honeycomb{Mode} <: AbstractLattice end
-Honeycomb() = Honeycomb{:brickwall}()
-struct Kagome <: AbstractLattice end
+Honeycomb(s::Symbol) = Honeycomb{s}()
+struct Kagome{Mode} <: AbstractLattice end
+Kagome(s::Symbol) = Kagome{s}()
 
 # Filesystem-safe string representations (avoid : { } characters for Windows paths)
 Base.show(io::IO, ::Square)              = print(io, "Square")

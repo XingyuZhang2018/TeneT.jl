@@ -5,18 +5,21 @@ using OptimKit
 using LinearAlgebra
 using Zygote
 
+
 seed = 42
 Random.seed!(seed)
-atype = Array
-etype = ComplexF64
-D, χ, χshift = 2, 16, 0
+atype = CuArray
+etype = Float64
+D, χ, χshift = 3, 128, 0
 pattern = [1 2;
            2 1]
+# pattern = [1;;]
 # pattern = [1 3;
 #            2 4]
-model = Kitaev(lattice=Honeycomb(:brickwall), 
-               S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0, 
-               couplingtype=:uniform, bondratio=1.0)
+model = J1J2(lattice=Honeycomb(:brickwall), 
+             S=0.5, J1=1.0, J2=0.3,
+             ifrotate=true, 
+             couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
@@ -24,9 +27,9 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
                                ifsimple_eig=true,
                                ifparallel=false,
                                ifcheckpoint=false,
-                               forloop_iter=1,
+                               forloop_iter=2,
                                maxiter=30, 
-                               miniter=0, 
+                               miniter=10, 
                                maxiter_ad=4,
                                miniter_ad=4,
                                power_iter=1,
@@ -39,7 +42,7 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=1, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=0, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=1,
@@ -58,7 +61,7 @@ params = GradientOptimize(model=model,
 )
 A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
-
+TeneT.reclaim(A)
 function restriction_ipeps(A)
    # A = C4v_restriction(A)
    A /= norm(A)

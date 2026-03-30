@@ -12,7 +12,8 @@ J1-J2 Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-neig
     J2::Real = 0.5
     ifrotate::Bool = true
     couplingtype::Symbol = :uniform # :uniform, :plaquette, :dimmer1, :dimmer2, :mixed
-    bondratio::Real = 0.5 # only used when couplingtype is not :uniform
+    bondratio::Real = 1.0 # only used when couplingtype is not :uniform
+                          # for Honeycomb{:brickwall}, bondratio<1 is plaquette, bondratio>1 is dimmer
 end
 
 """

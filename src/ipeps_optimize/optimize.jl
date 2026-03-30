@@ -26,7 +26,11 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
         if eltype(e) <: Complex
             fδEierr[4] = abs(imag(e))
         else
-            iSy = _arraytype(A[1])(real(1im * const_Sy(params.model.S)))
+            iSy = real(1im * const_Sy(params.model.S))
+            d = size(iSy, 1)
+            Id = Matrix{Float64}(I, d, d)
+            n = round(Int, log(d, size(A[1], 5)))
+            iSy = _arraytype(A[1])(reduce(kron, fill(Id, n - 1); init = iSy))
             @unpack forloop_iter, ifparallel = params.boundary_alg
             i, j = 1, 1
             Ni = size(A, 1)

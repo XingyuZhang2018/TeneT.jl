@@ -26,8 +26,18 @@ First applies horizontal gates, then vertical gates, truncating bond dimensions 
 function SU_parameterization(A, params; D_new)
     Ni, Nj = size(A)
     D, d = size(A[1])[[1,5]]
-    h = hamiltonian(params.model)
-    exp_h = _arraytype(A[1])(reshape(exp(-params.SUτ * reshape(permutedims(h, (1,3,2,4)), d^2, d^2)), d, d, d, d))
+    if params.model.lattice isa Kagome{:merge}
+        h_H, h_V = hamiltonian(params.model)
+        h_onsite = hamiltonian_onsite(params.model)
+        @tensor h_twosite[1,2,3,4] := h_onsite[1,2] * h_onsite[3,4] 
+        h_H += h_twosite
+        h_V += h_twosite
+    else
+        h = hamiltonian(params.model)
+        h_H = h_V = h
+    end
+
+    exp_h = _arraytype(A[1])(reshape(exp(-params.SUτ * reshape(permutedims(h_H, (1,3,2,4)), d^2, d^2)), d, d, d, d))
 
     # Expand bond dimension if needed
     Ah = Zygote.Buffer(A)
@@ -76,6 +86,9 @@ function SU_parameterization(A, params; D_new)
     for p in 1:length(A)
         Av[p] = Ah[p]
     end
+
+    exp_h = _arraytype(A[1])(reshape(exp(-params.SUτ * reshape(permutedims(h_V, (1,3,2,4)), d^2, d^2)), d, d, d, d))
+
     for p in 1:length(A)
         i, j = Tuple(findfirst(==(p), A.pattern))
         ir = mod1(i + 1, Ni)

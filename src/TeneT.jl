@@ -77,8 +77,10 @@ include("boundary_algorithm/qrctm.jl")
 include("models/basic_op.jl")
 include("models/Heisenberg/hamiltonian.jl")
 include("models/Heisenberg/energy.jl")
+include("models/Heisenberg/order_init.jl")
 include("models/Kitaev/hamiltonian.jl")
 include("models/Kitaev/energy.jl")
+include("models/Kitaev/order_init.jl")
 include("models/J1J2/hamiltonian.jl")
 include("models/J1J2/order_init.jl")
 include("models/J1J2/energy.jl")
@@ -114,7 +116,8 @@ export Square, Honeycomb, Kagome
 
 export C4v_restriction
 
-export GradientOptimize, init_ipeps, optimise_ipeps
+export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
+export GradientOptimize, optimise_ipeps
 export observable
 
 end # module TeneT

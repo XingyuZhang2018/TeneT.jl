@@ -176,9 +176,12 @@ end
 # Magnetization — Kagome (3 sublattice sites per unit cell)
 # ============================================================================
 
-function magnetization_value(model::Kagome, A, env::VUMPSEnv, params)
+function magnetization_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    @unpack ifparallel = params.boundary_alg
+    @unpack forloop_iter = params 
     atype = _arraytype(ACu[1])
+    etype = eltype(ACu[1])
     S = model.S
     Sx = atype(const_Sx(S))
     Sy = atype(const_Sy(S))
@@ -200,28 +203,27 @@ function magnetization_value(model::Kagome, A, env::VUMPSEnv, params)
 
     Ni, Nj = size(ACu)
     len = length(ACu.data)
-    forloop_iter = params.forloop_iter
     m_dict = Dict{String, Any}()
-    Mnorm1 = zeros(ComplexF64, Ni, Nj)
-    Mnorm2 = zeros(ComplexF64, Ni, Nj)
-    Mnorm3 = zeros(ComplexF64, Ni, Nj)
+    Mnorm1 = zeros(etype, Ni, Nj)
+    Mnorm2 = zeros(etype, Ni, Nj)
+    Mnorm3 = zeros(etype, Ni, Nj)
     for p in 1:len
         i, j = Tuple(findfirst(==(p), ACu.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
-        Mx1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx1; forloop_iter)
-        My1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy1; forloop_iter)
-        Mz1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz1; forloop_iter)
+        Mx1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx1; ifparallel, forloop_iter)
+        My1 = etype == Float64 ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy1; ifparallel, forloop_iter)
+        Mz1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz1; ifparallel, forloop_iter)
 
-        Mx2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx2; forloop_iter)
-        My2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy2; forloop_iter)
-        Mz2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz2; forloop_iter)
+        Mx2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx2; ifparallel, forloop_iter)
+        My2 = etype == Float64 ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy2; ifparallel, forloop_iter)
+        Mz2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz2; ifparallel, forloop_iter)
 
-        Mx3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx3; forloop_iter)
-        My3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy3; forloop_iter)
-        Mz3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz3; forloop_iter)
+        Mx3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx3; ifparallel, forloop_iter)
+        My3 = etype == Float64 ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy3; ifparallel, forloop_iter)
+        Mz3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz3; ifparallel, forloop_iter)
 
-        n = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; forloop_iter)
+        n = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; ifparallel, forloop_iter)
 
         Mag1 = [Mx1/n, My1/n, Mz1/n]
         Mnorm1[i,j] = norm(Mag1)

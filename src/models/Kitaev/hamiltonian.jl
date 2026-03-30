@@ -11,6 +11,7 @@ Kitaev model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
     Jx::Real = -1.0
     Jy::Real = -1.0
     Jz::Real = 1.0
+    couplingtype::Symbol = :uniform # :uniform, :plaquette
     bondratio::Real = 1.0 # bondratio < 1.0 for plaquette >1.0 for dimer
 end
 
@@ -19,7 +20,7 @@ end
 
 Return the Kitaev Hamiltonian as a two-site operator.
 """
-function hamiltonian(model::Kitaev)
+function hamiltonian(model::Kitaev{Honeycomb{:brickwall}})
     S = model.S
     Sx = const_Sx(S)
     Sy = const_Sy(S)
