@@ -594,7 +594,7 @@ _down_m(m::leg8) = permutedims(m, (1, 2, 7, 8, 5, 6, 3, 4))
 function _down_M(M::StructArray)
     Ni, Nj = size(M)
     pattern_d = copy(M.pattern)
-    Zygote.@ignore begin
+    ChainRulesCore.ignore_derivatives() do
         @inbounds for i in 1:Ni, j in 1:Nj
             ir = Ni + 1 - i
             pattern_d[i, j] = M.pattern[ir, j]
@@ -669,22 +669,22 @@ function init_env(M::StructArray, χ::Int, alg::VUMPS{:General})
             if alg.ifdownfromup
                 set_device_id!(atype, 1)
                 rtup = init_VUMPSRuntime(M, χ, alg)
-                alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+                alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
                 set_device_id!(atype, 2)
                 Md = _down_M(atype(M))
                 rtdown = _down_init_from_up(atype(rtup), Md)
-                alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment"
+                alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment")
             else
                 @async begin
                     set_device_id!(atype, 1)
                     rtup = init_VUMPSRuntime(M, χ, alg)
-                    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+                    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
                 end
                 @async begin
                     set_device_id!(atype, 2)
                     Md = _down_M(atype(M))
                     rtdown = init_VUMPSRuntime(Md, χ, alg)
-                    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
+                    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment")
                 end
             end
         end
@@ -692,17 +692,17 @@ function init_env(M::StructArray, χ::Int, alg::VUMPS{:General})
     end
 
     rtup = init_VUMPSRuntime(M, χ, alg)
-    alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment"
+    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
 
-    if alg.ifupdown    
-        Md = _down_M(M) 
+    if alg.ifupdown
+        Md = _down_M(M)
         if alg.ifdownfromup
             rtdown = _down_init_from_up(rtup, Md)
-            alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment"
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment")
             return rtup, rtdown
         else
             rtdown = init_VUMPSRuntime(Md, χ, alg)
-            alg.verbosity >= 2 && Zygote.@ignore @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment"
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment")
             return rtup, rtdown
         end
     else
@@ -758,37 +758,39 @@ Run the VUMPS iteration loop: first without AD tracking (warm-up), then with AD.
 Returns the converged runtime and final error.
 """
 function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
-    t = Zygote.@ignore time()
+    t = ChainRulesCore.ignore_derivatives(() -> time())
 
     atype = _arraytype(M)
     id = get_device_id(atype)
     local err
-    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD..."
-    Zygote.@ignore for i in 1:alg.maxiter
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD...")
+    ChainRulesCore.ignore_derivatives() do
+        for i in 1:alg.maxiter
         rt, err = vumps_step(rt, M, alg)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
-            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
             break
         end
         if i == alg.maxiter
-            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         end
     end
+    end
 
-    Zygote.@ignore alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD..."
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD...")
     for i in 1:alg.maxiter_ad
         power_iter_backup = alg.power_iter
         alg.power_iter = alg.power_iter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
         alg.power_iter = power_iter_backup
-        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         end
     end
 

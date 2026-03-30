@@ -21,7 +21,7 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
     env = ObsEnv(rt, A, params.boundary_alg)
     e = energy_value(params.model, A, env, params)[1]
 
-    Zygote.@ignore begin
+    ChainRulesCore.ignore_derivatives() do
         update!(rt′, rt)
         if eltype(e) <: Complex
             fδEierr[4] = abs(imag(e))
@@ -60,6 +60,11 @@ _inner(x, dx1, dx2) = real(dot(dx1, dx2))
 # Finalize callback — called after each LBFGS iteration
 # ============================================================================
 
+# NOTE: Always called through a 4-arg closure adapter, never invoked directly.
+# The full 11-arg signature is specific to iPEPS optimization and does not follow
+# OptimKit's default finalize! convention (x, f, g, iter).  The closure in
+# optimise_ipeps captures rt, rt′, D, χ, params, t0, and fδEierr so that
+# optimize_reload only ever sees the standard 4-arg interface.
 """
     _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
 

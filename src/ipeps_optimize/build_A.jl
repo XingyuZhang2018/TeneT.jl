@@ -58,11 +58,16 @@ Brickwall mapping: permute legs on odd-parity sites so the brickwall
 honeycomb maps onto a square lattice.
 """
 function _lattice_map(A, ::Honeycomb{:brickwall}, pattern)
-    cartindex = CartesianIndices(pattern)
     Ni, Nj = size(pattern)
     Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("For Honeycomb{:brickwall}, pattern must have even dimensions."))
-    return StructArray([(sum(cartindex[i].I) % 2 == 0 ?
-        A[i] : permutedims(A[i], (3,4,1,2,5))) for i in 1:length(unique(pattern))], pattern)
+    n_unique = length(unique(pattern))
+    return StructArray([
+        begin
+            pos = findfirst(==(i), pattern)
+            sum(Tuple(pos)) % 2 == 0 ? A[i] : permutedims(A[i], (3,4,1,2,5))
+        end
+        for i in 1:n_unique
+    ], pattern)
 end
 
 """

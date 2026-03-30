@@ -258,7 +258,6 @@ function cor_len_value(env::VUMPSEnv, params)
     Cint = cellones(ACu)[1]
     λcs, _, info = eigsolve(C->Lmap(1, C, ARu[1,:], ARd[1,:]), Cint, 10, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len not converged"
-    @show λcs λcs[2]/λcs[1]
     λ2 = 0
     for i in 2:length(λcs)
         if !(norm(λcs[i]) ≈ norm(λcs[1]))
@@ -268,7 +267,6 @@ function cor_len_value(env::VUMPSEnv, params)
     end
 
     ξ = -1/log(abs(λ2/λcs[1]))
-    @show ξ
     params.verbosity >= 4 && println("ξ = $(ξ)")
     return ξ
 end
@@ -278,7 +276,6 @@ function cor_len_value(env::PlaquetteVUMPSEnv, params)
     Cint = cellones(AL)[1]
     λcs, _, info = eigsolve(C -> Rmap(1, C, AL[1,:], conj(AL[1,:])), Cint, 10, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len not converged"
-    @show λcs
     λ2 = 0
     for i in 2:length(λcs)
         if !(norm(λcs[i]) ≈ norm(λcs[1]))

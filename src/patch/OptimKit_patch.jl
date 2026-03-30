@@ -88,7 +88,7 @@ function optimize_reload(fg, x, alg::LBFGS;
                          save_state_to::Union{String,Nothing}=nothing,
                          save_every::Int=100,
                          precondition=_precondition,
-                         (finalize!)=_finalize!,
+                         (finalize!)=_finalize!,  # default is OptimKit's own _finalize!; callers pass TeneT's closure adapter
                          shouldstop=DefaultShouldStop(alg.maxiter),
                          hasconverged=DefaultHasConverged(alg.gradtol),
                          retract=_retract, inner=_inner, (transport!)=_transport!,

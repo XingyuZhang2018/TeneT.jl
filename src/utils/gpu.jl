@@ -46,18 +46,24 @@ end
 
 Array(x::NamedTuple) = x
 
-function gc(atype)
-    N_device = device_count(atype)
-    # @sync begin
-        println("GC!")
-        for i in 1:N_device
-            # @async begin
-                set_device_id!(atype, i)
-                GC.gc()
-                CUDA.reclaim()
-            # end
-        end
-    # end
+function gc(::Type{Array})
+    N_device = device_count(Array)
+    for i in 1:N_device
+        set_device_id!(Array, i)
+        GC.gc()
+    end
+    @debug "GC triggered"
+    return nothing
+end
+
+function gc(::Type{<:CuArray})
+    N_device = device_count(CuArray)
+    for i in 1:N_device
+        set_device_id!(CuArray, i)
+        GC.gc()
+        CUDA.reclaim()
+    end
+    @debug "GC triggered"
     return nothing
 end
 
@@ -85,7 +91,7 @@ for_gc(x) = x
 function ChainRulesCore.rrule(::typeof(for_gc), x)
     function back(dx)
         reclaim(x[1])
-        return NoTangent, dx
+        return NoTangent(), dx
     end
     return x, back
 end

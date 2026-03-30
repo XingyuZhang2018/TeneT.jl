@@ -102,7 +102,7 @@ function pepsgeneral(A::AbstractArray{<:Number, 6}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = Zygote.@ignore 0
+        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -148,7 +148,7 @@ function pepsgeneral(A::AbstractArray{<:Number, 5}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = Zygote.@ignore 0
+        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -250,7 +250,7 @@ function pepsgeneral_Ac(A::AbstractArray{<:Number, 6}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = Zygote.@ignore 0
+        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -292,7 +292,7 @@ function pepsgeneral_Ac(A::AbstractArray{<:Number, 5}; tol=1e-12)
     conv = Inf
     iter = 0
     while conv > tol
-        conv_sum = Zygote.@ignore 0
+        conv_sum = ChainRulesCore.ignore_derivatives(() -> 0)
         for i in 1:4
             A, R = leftorth(A)
             A = rotate(A)
@@ -319,13 +319,13 @@ Returns `G1 * A * G2 * G3 * G4` contracted on the four virtual legs.
 local_gauge_contraction(A, G) = @tensor out[e,f,g,h,p] := A[a,b,c,d,p] * G[1][e,a] * G[2][b,f] * G[3][c,g] * G[4][h,d]
 
 """
-    guage_transfer(A, G, params)
+    gauge_transfer(A, G, params)
 
 Apply gauge transformation to all sites of a multi-site iPEPS tensor `A` (6-leg, last index = site).
 `G = [Gh, Gv]` are horizontal and vertical gauge matrices indexed by site number.
 Uses `params.pattern` to determine the unit cell layout.
 """
-function guage_transfer(A, G, params)
+function gauge_transfer(A, G, params)
     Gh, Gv = G
     pattern = params.pattern
     Ni, Nj = size(pattern)
@@ -353,7 +353,7 @@ function find_local_min_norm_G(A, params)
     A_cpu = Array(A)
 
     function f(G)
-        A_prime = guage_transfer(A_cpu, G, params)
+        A_prime = gauge_transfer(A_cpu, G, params)
         return norm(A_prime)
     end
 
@@ -388,11 +388,11 @@ If `ifignore_gauge=true`, the gauge optimization is excluded from AD.
 """
 function local_min_norm(A, params; ifignore_gauge=true)
     if ifignore_gauge
-        G = Zygote.@ignore find_local_min_norm_G(A, params)
+        G = ChainRulesCore.ignore_derivatives(() -> find_local_min_norm_G(A, params))
     else
         G = find_local_min_norm_G(A, params)
     end
-    AG = guage_transfer(A, G, params)
+    AG = gauge_transfer(A, G, params)
     return AG
 end
 
@@ -411,7 +411,7 @@ function ChainRulesCore.rrule(::typeof(find_local_min_norm_G), A, params)
         A_arr = Array(A)
         G_arr = Array.(G)
         function fixpoint(A_in, G_in)
-            AG = guage_transfer(A_in, G_in, params)
+            AG = gauge_transfer(A_in, G_in, params)
 
             @tensor Ml[1,6] := AG[1,2,3,4,5,7] * conj(AG[6,2,3,4,5,7])
             @tensor Mr[6,3] := AG[1,2,3,4,5,7] * conj(AG[1,2,6,4,5,7])
@@ -428,11 +428,9 @@ function ChainRulesCore.rrule(::typeof(find_local_min_norm_G), A, params)
         vjp_G(x) = vjp(x)[2]
 
         dA, info = linsolve(vjp_G, -DeltaG; maxiter=1)
-        if info == 0
+        if info.converged == 0
             @warn "linsolve did not converge in find_local_min_norm_G_pullback, info=$info"
         end
-        @show norm(dA)
-
         return NoTangent(), atype(vjp_A(dA)), NoTangent()
     end
     return G, find_local_min_norm_G_pullback
@@ -447,10 +445,10 @@ Uses LBFGS optimization from OptimKit.
 """
 function find_local_hermite_G(A, params)
     atype = _arraytype(A)
-    A_cpu = Zygote.@ignore Array(A)
+    A_cpu = ChainRulesCore.ignore_derivatives(() -> Array(A))
 
     function f(G)
-        A_prime = guage_transfer(A_cpu, G, params)
+        A_prime = gauge_transfer(A_cpu, G, params)
         return norm(A_prime - permutedims(A_prime, (3,2,1,4,5,6))) + norm(A_prime - permutedims(A_prime, (1,4,3,2,5,6)))
     end
 
@@ -484,8 +482,8 @@ Apply the Hermite-symmetrizing gauge transformation to iPEPS tensor `A`.
 The gauge optimization is excluded from AD (via Zygote.@ignore).
 """
 function local_hermite(A, params)
-    G = Zygote.@ignore find_local_hermite_G(A, params)
-    AG = guage_transfer(A, G, params)
+    G = ChainRulesCore.ignore_derivatives(() -> find_local_hermite_G(A, params))
+    AG = gauge_transfer(A, G, params)
     return AG
 end
 
@@ -596,6 +594,5 @@ function local_min_norm_iter(A, params)
     @tensor Mu[4,6] := AG[1,2,3,4,5] * conj(AG[1,2,3,6,5])
     @tensor Md[6,2] := AG[1,2,3,4,5] * conj(AG[1,6,3,4,5])
 
-    @show norm(Ml - Mr) + norm(Mu - Md)
     return reshape(AG, size(A))
 end

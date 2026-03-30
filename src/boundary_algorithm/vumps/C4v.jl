@@ -80,7 +80,7 @@ function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{:C4v})
     QAC, RAC = qrpos(_to_front(AC))
     QC, RC = qrpos(C)
     AL = reshape(QAC*QC', size(AC))
-    err = Zygote.@ignore norm(RAC - RC)
+    err = ChainRulesCore.ignore_derivatives(() -> norm(RAC - RC))
 
     return C4vVUMPSEnv(AL, C, FL), err
 end
@@ -88,38 +88,40 @@ end
 # ── Plaquette iteration + boundary ───────────────────────────────────
 
 function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
-    t = Zygote.@ignore time()
+    t = ChainRulesCore.ignore_derivatives(() -> time())
     M = M[1]
     local err
 
-    Zygote.@ignore alg.verbosity >= 2 && @info "Start C4v VUMPS iteration without AD..."
-    Zygote.@ignore for i in 1:alg.maxiter
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start C4v VUMPS iteration without AD...")
+    ChainRulesCore.ignore_derivatives() do
+        for i in 1:alg.maxiter
         rt, err = vumps_step(rt, M, alg)
         alg.verbosity >= 3 && i % alg.show_every == 0 &&
-            Zygote.@ignore @info @sprintf("C4vVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+            ChainRulesCore.ignore_derivatives(() -> @info @sprintf("C4vVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 &&
-                Zygote.@ignore @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+                ChainRulesCore.ignore_derivatives(() -> @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter
-            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("C4vVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("C4vVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
+    end
 
-    Zygote.@ignore alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD..."
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
     for i in 1:alg.maxiter_ad
         power_iter_backup = alg.power_iter
         alg.power_iter = alg.power_iter_ad
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
         alg.power_iter = power_iter_backup
-        alg.verbosity >= 3 && i % alg.show_every == 0 && Zygote.@ignore @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && Zygote.@ignore @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && Zygote.@ignore @warn @sprintf("C4vVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("C4vVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     return rt, err

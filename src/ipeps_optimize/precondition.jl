@@ -16,7 +16,7 @@ function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple
     δ = fδEi[2]
     if params.ifMCF
         Gh, Gv = find_local_min_norm_G(A, params)
-        A_prime = guage_transfer(A, [Gh, Gv], params)
+        A_prime = gauge_transfer(A, [Gh, Gv], params)
     else
         A_prime = restriction_ipeps(A)
     end
