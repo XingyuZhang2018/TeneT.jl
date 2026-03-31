@@ -1,5 +1,3 @@
-enlarge_coupling(model, i::Int, j::Int) = enlarge_coupling(model, Val(model.couplingtype), i::Int, j::Int)
-
 function enlarge_coupling(model::J1J2{Square}, ::Val{:uniform}, i, j)
     J1 = model.J1
     J1h = J1v = J1

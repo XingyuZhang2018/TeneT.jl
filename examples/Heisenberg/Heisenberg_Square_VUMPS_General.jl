@@ -8,14 +8,17 @@ using Zygote
 seed = 42
 Random.seed!(seed)
 atype = Array
-etype = Float64
+etype = ComplexF64
 D, χ, χshift = 2, 16, 0
 # pattern = [1 2;
 #            2 1]
 pattern = [1;;]
 # pattern = [1 3;
 #            2 4]
-model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
+model = Heisenberg(lattice=Square(),
+                   S=0.5, Jx=-1.0, Jy=-1.0, Jz=1.0,
+                   ifrotate=true,
+                   couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
@@ -38,7 +41,7 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=1,
@@ -46,8 +49,7 @@ params = GradientOptimize(model=model,
                           folder=folder,
                           ifSU=false,
                           SUτ=0,
-                          ifprecondition=false,
-                          ifMCF=false,
+                          ifprecondition=true,
                           iter_precond=0,
                           reuse_env=true, 
                           ifsave_env=false,
@@ -55,13 +57,13 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, d=2, D, χ, params)
+A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 function restriction_ipeps(A)
    # A = C4v_restriction(A)
-   A /= norm(A)
-   # A = local_min_norm(A, params)
+   # A /= norm(A)
+   A = local_min_norm(A, params)
    return A
 end
 

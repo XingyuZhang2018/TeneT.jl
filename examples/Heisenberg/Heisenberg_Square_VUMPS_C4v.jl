@@ -7,11 +7,14 @@ using Zygote
 
 seed = 42
 Random.seed!(seed)
-atype = CuArray
+atype = Array
 etype = Float64
-D, χ, χshift = 3, 64, 0
+D, χ, χshift = 2, 16, 0
 pattern = [1;;]
-model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
+model = Heisenberg(lattice=Square(),
+                   S=0.5, Jx=-1.0, Jy=-1.0, Jz=1.0,
+                   ifrotate=true,
+                   couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_C4v/$etype/seed$seed/")
 boundary_alg = VUMPS{:C4v}(ifsimple_eig=true,
@@ -41,7 +44,6 @@ params = GradientOptimize(model=model,
                           ifSU=false,
                           SUτ=0,
                           ifprecondition=true,
-                          ifMCF=false,
                           iter_precond=0,
                           reuse_env=true, 
                           ifsave_env=true,
@@ -49,7 +51,7 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, d=2, D, χ, params)
+A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 

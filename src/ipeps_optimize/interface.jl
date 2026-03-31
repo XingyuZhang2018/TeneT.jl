@@ -49,9 +49,6 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     # Checkpointing (Zygote checkpoint for memory saving)
     ifcheckpoint::Bool = false
 
-    # Minimal Canonical Form (MCF)
-    ifMCF::Bool = false
-
     # Preconditioning
     ifprecondition::Bool = false
     iter_precond::Int = 20

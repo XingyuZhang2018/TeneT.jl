@@ -11,28 +11,13 @@ function C4v_restriction(A::AbstractArray{<:Number, 6})
     A += permutedims(conj(A), (3,2,1,4,5,6)) # left-right reflection
     A += permutedims(conj(A), (2,1,4,3,5,6)) # diagonal reflection
     A += permutedims(conj(A), (4,3,2,1,5,6)) # rotation
-    return A
-end
-
-"""
-    C4v_restriction(A)
-
-Impose C4v symmetry on an iPEPS tensor `A` with indices `(l, d, r, u, p)` (5-leg)
-by averaging over all C4v symmetry operations (reflections and rotations).
-"""
-function C4v_restriction(A::AbstractArray{<:Number, 5})
-    A += permutedims(conj(A), (1,4,3,2,5)) # up-down reflection
-    A += permutedims(conj(A), (3,2,1,4,5)) # left-right reflection
-    A += permutedims(conj(A), (2,1,4,3,5)) # diagonal reflection
-    A += permutedims(conj(A), (4,3,2,1,5)) # rotation
-    return A
+    return A/norm(A) 
 end
 
 """
     _restriction_ipeps(A)
 
-Default restriction for iPEPS tensor. Returns `A` unchanged (identity restriction).
-Override for specific symmetry constraints.
+Default restriction for iPEPS tensor. Simply normalizes the tensor to have unit Frobenius norm.
 ```
         4
         |
@@ -42,7 +27,7 @@ Override for specific symmetry constraints.
 ```
 """
 function _restriction_ipeps(A)
-    return A
+    return A/norm(A)
 end
 
 # --- Central canonical forms ---
@@ -380,6 +365,41 @@ function find_local_min_norm_G(A, params)
     return atype.(G)
 end
 
+_primal_value(x::ForwardDiff.Dual) = ForwardDiff.value(x)
+_primal_value(z::Complex{<:ForwardDiff.Dual}) = Complex(ForwardDiff.value(real(z)), ForwardDiff.value(imag(z)))
+_primal_value(x) = x  # plain Float64 / ComplexF64: identity
+
+# Cache for gauge matrices: populated by the plain-array call (Zygote / normal execution),
+# reused by ForwardDiff JVP calls (which all share the same primal A).
+# This avoids running find_local_min_norm_G once per JVP direction.
+const _G_cache = Ref{Any}(nothing)
+
+# Plain-array path (normal execution / Zygote VJP).
+# Checks cache first — if the preconditioner has pre-populated it, skip the expensive call.
+# Falls back to computing G and caching when the cache is empty (first call per preconditioner).
+function _gauge_fixed(A, params)
+    G = _G_cache[]
+    G !== nothing && return G
+    G = ignore_derivatives(() -> find_local_min_norm_G(A, params))
+    _G_cache[] = G
+    return G
+end
+
+# ForwardDiff JVP path — element type is Dual{T, Float64, N} (real case).
+function _gauge_fixed(A::AbstractArray{<:ForwardDiff.Dual}, params)
+    G = _G_cache[]
+    G !== nothing && return G
+    return find_local_min_norm_G(map(_primal_value, A), params)
+end
+
+# ForwardDiff JVP path — element type is Complex{Dual{T, Float64, N}} (complex case).
+# This is the actual type produced by ForwardDiff.derivative on a ComplexF64 array.
+function _gauge_fixed(A::AbstractArray{T}, params) where {T <: Complex{<:ForwardDiff.Dual}}
+    G = _G_cache[]
+    G !== nothing && return G
+    return find_local_min_norm_G(map(_primal_value, A), params)
+end
+    
 """
     local_min_norm(A, params; ifignore_gauge=true)
 
@@ -387,11 +407,8 @@ Apply the minimum-norm gauge transformation to iPEPS tensor `A`.
 If `ifignore_gauge=true`, the gauge optimization is excluded from AD.
 """
 function local_min_norm(A, params; ifignore_gauge=true)
-    if ifignore_gauge
-        G = ignore_derivatives(() -> find_local_min_norm_G(A, params))
-    else
-        G = find_local_min_norm_G(A, params)
-    end
+    A /= norm(A) 
+    G = ifignore_gauge ? _gauge_fixed(A, params) : find_local_min_norm_G(A, params)
     AG = gauge_transfer(A, G, params)
     return AG
 end

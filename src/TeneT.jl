@@ -114,7 +114,7 @@ export QRCTM
 
 export Square, Honeycomb, Kagome
 
-export C4v_restriction
+export C4v_restriction, local_min_norm
 
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
 export GradientOptimize, optimise_ipeps

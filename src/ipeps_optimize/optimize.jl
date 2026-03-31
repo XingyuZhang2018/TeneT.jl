@@ -172,8 +172,7 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
     alg = params.optimizer
     t0 = time()
 
-    _precond(x, g) = params.ifprecondition ?
-        precondition_invese_single_envir(x, g, rt, params, restriction_ipeps, fδEierr, params.iter_precond) : g
+    _precond(x, g) = params.ifprecondition ? precondition_invese_single_envir(x, g, rt, params, restriction_ipeps, fδEierr, params.iter_precond) : g
 
     state_path = joinpath(params.folder, "D$(D)", "lbfgs_checkpoint")
 
