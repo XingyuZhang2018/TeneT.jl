@@ -47,9 +47,12 @@ function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple
     gradnew, _ = linsolve(grad; isposdef = true, maxiter=1, verbosity=0) do x
         # Step 1: JVP — perturb A by x, get site-tensor perturbation A_prime_x[p] = J_R_p * x
         # ForwardDiff.derivative: real t → no nested complex Dual issue
-        A_prime_x = [ForwardDiff.derivative(
-            t -> build_restricted_A(A + t * x)[p], 0.0
-        ) for p in 1:length(A_prime)]
+        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
+        # (cuTENSOR has no equivalent for Dual element types).
+        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
+        ε_fd = sqrt(eps(real(eltype(A))))
+        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
+                     for p in 1:length(A_prime)]
 
         # Step 2: transfer matrix action on each perturbed site tensor
         T_x = [begin
@@ -100,9 +103,12 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
     pattern = A_prime.pattern
 
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        A_prime_x = [ForwardDiff.derivative(
-            t -> build_restricted_A(A + t * x)[p], 0.0
-        ) for p in 1:length(A_prime)]
+        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
+        # (cuTENSOR has no equivalent for Dual element types).
+        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
+        ε_fd = sqrt(eps(real(eltype(A))))
+        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
+                     for p in 1:length(A_prime)]
 
         T_x = [begin
             i, j = Tuple(findfirst(==(p), pattern))
@@ -147,9 +153,12 @@ function precondition_invese_single_envir(A, grad, env::C4vVUMPSEnv, params, res
     @unpack ifparallel = params.boundary_alg
 
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        A_prime_x = [ForwardDiff.derivative(
-            t -> build_restricted_A(A + t * x)[p], 0.0
-        ) for p in 1:length(A_prime)]
+        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
+        # (cuTENSOR has no equivalent for Dual element types).
+        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
+        ε_fd = sqrt(eps(real(eltype(A))))
+        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
+                     for p in 1:length(A_prime)]
 
         T_x = [begin
             n = contract_n1(FL, AC, A_prime[p], AC, FL; ifparallel, forloop_iter)
@@ -191,9 +200,12 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
     @unpack ifparallel = params.boundary_alg
 
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        A_prime_x = [ForwardDiff.derivative(
-            t -> build_restricted_A(A + t * x)[p], 0.0
-        ) for p in 1:length(A_prime)]
+        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
+        # (cuTENSOR has no equivalent for Dual element types).
+        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
+        ε_fd = sqrt(eps(real(eltype(A))))
+        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
+                     for p in 1:length(A_prime)]
 
         T_x = [begin
             n = dot(To, To)

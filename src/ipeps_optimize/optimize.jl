@@ -153,6 +153,7 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
     params_obs.boundary_alg.maxiter = params.boundary_alg.maxiter * 10
 
     function fenergy(A)
+        _G_cache[] = nothing
         A = restriction_ipeps(A)
         return real(energy(A, rt, rt′, fδEierr, params))
     end

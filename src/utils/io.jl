@@ -59,6 +59,7 @@ end
 Internal helper: build a fresh `VUMPSRuntime` from the iPEPS tensors.
 """
 function _create_new_env(A, χ::Int, params::iPEPSOptimize; restriction_ipeps=identity)
+    _G_cache[] = nothing
     A = restriction_ipeps(A)
     A = build_A(A, params)
     return init_env(A, χ, params.boundary_alg)

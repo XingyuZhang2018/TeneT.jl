@@ -8,7 +8,7 @@ using Zygote
 seed = 42
 Random.seed!(seed)
 atype = Array
-etype = ComplexF64
+etype = Float64
 D, χ, χshift = 2, 16, 0
 pattern = [1 2;
            2 1]
@@ -59,7 +59,6 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 function restriction_ipeps(A)
-   # A = C4v_restriction(A)
    A /= norm(A)
    # A = local_min_norm(A, params)
    return A
