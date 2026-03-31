@@ -41,10 +41,10 @@ Base.length(S::StructArray) = length(S.data)
 for T1 in [:Int, :Colon, :UnitRange], T2 in [:Int, :Colon, :UnitRange]
     @eval Base.getindex(S::StructArray, i::$T1, j::$T2) = S.data[S.pattern[i, j]]
 end
-Base.getindex(S::StructArray, i::Int) = S.data[S.pattern[i]]
+Base.getindex(S::StructArray, i::Int) = S.data[i]
 Base.axes(S::StructArray, i::Int) = axes(S.pattern, i)
 Base.setindex!(S::StructArray, value, i::Int, j::Int) = (S.data[S.pattern[i, j]] = value)
-Base.setindex!(S::StructArray, value, i::Int) = (S.data[S.pattern[i]] = value)
+Base.setindex!(S::StructArray, value, i::Int) = (S.data[i] = value)
 Base.vec(S::StructArray) = S
 Base.similar(S::StructArray) = StructArray(similar(S.data), S.pattern)
 Base.zero(S::StructArray) = StructArray(zero(S.data), S.pattern)
@@ -89,3 +89,10 @@ end
 function Base.circshift(S::StructArray, shift::NTuple{N,Int}) where N
     return StructArray(S.data, circshift(S.pattern, shift))
 end
+
+# Returns (i,j) for each unique site in ascending site-number order.
+# Allows `for (i,j) in eachindex(S)` just like a regular matrix.
+Base.eachindex(S::StructArray) =
+    map(sort!(unique(vec(S.pattern)))) do q
+        Tuple(findfirst(==(q), S.pattern))
+    end

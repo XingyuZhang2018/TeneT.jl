@@ -307,22 +307,36 @@ local_gauge_contraction(A, G) = @tensor out[e,f,g,h,p] := A[a,b,c,d,p] * G[1][e,
     gauge_transfer(A, G, params)
 
 Apply gauge transformation to all sites of a multi-site iPEPS tensor `A` (6-leg, last index = site).
-`G = [Gh, Gv]` are horizontal and vertical gauge matrices indexed by site number.
+`G = [Gh, Gv]` are vectors of matrices indexed by site number (one matrix per site).
 Uses `params.pattern` to determine the unit cell layout.
+
+For Honeycomb{:brickwall} (detected by D2 ≠ D4), odd-parity sites are permuted with
+(3,4,1,2,5) before applying the gauge and permuted back afterwards, matching the
+brickwall orientation convention used in `_lattice_map`.  In this case Gv has mixed
+sizes: I(D2) at even-parity sites and D4×D4 matrices at odd-parity sites.
 """
 function gauge_transfer(A, G, params)
     Gh, Gv = G
     pattern = params.pattern
     Ni, Nj = size(pattern)
+    D2, D4 = size(A, 2), size(A, 4)
+    brickwall = D2 != D4   # true only for Honeycomb{:brickwall}
     A_buf = Zygote.Buffer(A)
     for q in 1:size(A, 6)
         i, j = Tuple(findfirst(==(q), pattern))
         ir = mod1(i - 1, Ni)
         jr = mod1(j - 1, Nj)
-        A_buf[:,:,:,:,:,q] = local_gauge_contraction(
-            A[:,:,:,:,:,q],
-            [inv(Gh[:,:,pattern[i,jr]]), Gv[:,:,q], Gh[:,:,q], inv(Gv[:,:,pattern[ir,j]])]
-        )
+        gauges = [inv(Gh[pattern[i,jr]]), Gv[q], Gh[q], inv(Gv[pattern[ir,j]])]
+        if brickwall && (i + j) % 2 != 0
+            # Odd-parity brickwall site: permute (l,d,r,u,p)→(r,u,l,d,p) so the effective
+            # dim-D bond becomes leg 2, apply gauge, then permute back.
+            A_buf[:,:,:,:,:,q] = permutedims(
+                local_gauge_contraction(permutedims(A[:,:,:,:,:,q], (3,4,1,2,5)), gauges),
+                (3,4,1,2,5)
+            )
+        else
+            A_buf[:,:,:,:,:,q] = local_gauge_contraction(A[:,:,:,:,:,q], gauges)
+        end
     end
     return copy(A_buf)
 end
@@ -332,37 +346,53 @@ end
 
 Find gauge matrices `G = [Gh, Gv]` that minimize the Frobenius norm of the
 gauge-transformed iPEPS tensor. Uses LBFGS optimization from OptimKit.
+
+Gauge matrices are stored as `Vector{Matrix}` (one matrix per site), allowing
+mixed sizes for Honeycomb{:brickwall}: even-parity sites get `I(D2)` (trivial,
+dim-1 bond), odd-parity sites get `I(D4)` (full D×D bond).
 """
 function find_local_min_norm_G(A, params)
     atype = _arraytype(A)
     A_cpu = Array(A)
 
-    function f(G)
-        A_prime = gauge_transfer(A_cpu, G, params)
-        return norm(A_prime)
-    end
+    D1, D2, D3, D4, _, N = size(A)
+    eltypeA = eltype(A)
+    brickwall = D2 != D4   # true only for Honeycomb{:brickwall}
 
+    # Horizontal gauge: D1×D1 per site (D1 == D3 always).
+    Gh_init = [Matrix{eltypeA}(I, D1, D1) for _ in 1:N]
+
+    # Vertical gauge: parity-dependent for brickwall, uniform D2×D2 otherwise.
+    # For brickwall: even-parity sites have the trivial dim-D2=1 bond → I(D2);
+    #               odd-parity sites have the real dim-D4=D bond → I(D4).
+    # Parity is determined by findfirst(==(q), pattern), consistent with _lattice_map
+    # and gauge_transfer — NOT by cartindex[q] (which is column-major order, not site order).
+    # Both Gv and inv(Gv) are always applied in pairs (one on each side of the bond),
+    # so the optimization is well-posed regardless of bond dimension.
+    Gv_init = [
+        if brickwall
+            pos = findfirst(==(q), params.pattern)
+            sum(Tuple(pos)) % 2 == 0 ? Matrix{eltypeA}(I, D2, D2) : Matrix{eltypeA}(I, D4, D4)
+        else
+            Matrix{eltypeA}(I, D2, D2)
+        end
+        for q in 1:N
+    ]
+
+    Ginit = [Gh_init, Gv_init]
+    function f(G)
+        return norm(gauge_transfer(A_cpu, G, params))
+    end
     function fg(G)
         cost, vjp = Zygote.pullback(f, G)
-        g = vjp(1)[1]
-        return cost, g
+        return cost, vjp(one(cost))[1]
     end
-
-    D, N = size(A)[[1, 6]]
-    eltypeA = eltype(A)
-    Gh = randn(eltypeA, D, D, N)
-    Gv = randn(eltypeA, D, D, N)
-    for q in 1:N
-        Gh[:,:,q] = I(D)
-        Gv[:,:,q] = I(D)
-    end
-    Ginit = [Gh, Gv]
     @info "initial norm = $(f(Ginit))"
-
     G, fval, _ = optimize(fg, Ginit, LBFGS(maxiter=1000, gradtol=1e-15))
     @info "final norm = $fval"
 
-    return atype.(G)
+    # atype.(g) broadcasts the array constructor over each per-site matrix.
+    return [atype.(G[1]), atype.(G[2])]
 end
 
 _primal_value(x::ForwardDiff.Dual) = ForwardDiff.value(x)
@@ -424,9 +454,10 @@ function ChainRulesCore.rrule(::typeof(find_local_min_norm_G), A, params)
     G = find_local_min_norm_G(A, params)
     atype = _arraytype(A)
     function find_local_min_norm_G_pullback(DeltaG)
-        DeltaG = Array.(DeltaG)
+        # G is now Vector{Vector{Matrix}} — convert each per-site matrix to CPU.
+        DeltaG_arr = [[Array(m) for m in dg] for dg in DeltaG]
         A_arr = Array(A)
-        G_arr = Array.(G)
+        G_arr = [[Array(m) for m in g] for g in G]
         function fixpoint(A_in, G_in)
             AG = gauge_transfer(A_in, G_in, params)
 
@@ -444,7 +475,7 @@ function ChainRulesCore.rrule(::typeof(find_local_min_norm_G), A, params)
         vjp_A(x) = vjp(x)[1]
         vjp_G(x) = vjp(x)[2]
 
-        dA, info = linsolve(vjp_G, -DeltaG; maxiter=1)
+        dA, info = linsolve(vjp_G, -DeltaG_arr; maxiter=1)
         if info.converged == 0
             @warn "linsolve did not converge in find_local_min_norm_G_pullback, info=$info"
         end
@@ -477,19 +508,15 @@ function find_local_hermite_G(A, params)
 
     D, N = size(A)[[1, 6]]
     eltypeA = eltype(A)
-    Gh = randn(eltypeA, D, D, N)
-    Gv = randn(eltypeA, D, D, N)
-    for q in 1:N
-        Gh[:,:,q] = I(D)
-        Gv[:,:,q] = I(D)
-    end
+    Gh = [Matrix{eltypeA}(I, D, D) for _ in 1:N]
+    Gv = [Matrix{eltypeA}(I, D, D) for _ in 1:N]
     Ginit = [Gh, Gv]
     @info "MCF initial norm = $(f(Ginit))"
 
     G, fval, _ = optimize(fg, Ginit, LBFGS(maxiter=100))
     @info "MCF final norm = $fval"
 
-    return atype.(G)
+    return [atype.(G[1]), atype.(G[2])]
 end
 
 """

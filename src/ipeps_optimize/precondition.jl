@@ -20,8 +20,8 @@ arbitrary `build_A ∘ restriction_ipeps` (Jacobian J_R).
 Split into three steps to avoid nested ForwardDiff which breaks for ComplexF64
 (ForwardDiff's promote_rule for Dual requires V<:Real, so two differently-tagged
 ComplexF64 Duals in the same @tensor give TC = Array{Union{},N}):
-  1. JVP via ForwardDiff.derivative (real t): A_prime_x[p] = J_R_p * x
-  2. Transfer matrix action: T_x[p] = Mumap_parallel(..., A_prime_x[p]) / n
+  1. JVP via finite difference: B_plus/B_minus bracket one full evaluation each
+  2. Transfer matrix action: T_x[i,j] = Mumap_parallel(..., A_prime_x) / n
   3. VJP via Zygote: gN = J_R^† * T_x
 """
 function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple{VUMPSRuntime,VUMPSRuntime}}, params, restriction_ipeps, fδEi, iter_precond)
@@ -42,33 +42,25 @@ function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple
     Ni, Nj = size(A_prime)
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
-    pattern = A_prime.pattern
 
     gradnew, _ = linsolve(grad; isposdef = true, maxiter=1, verbosity=0) do x
-        # Step 1: JVP — perturb A by x, get site-tensor perturbation A_prime_x[p] = J_R_p * x
-        # ForwardDiff.derivative: real t → no nested complex Dual issue
-        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
-        # (cuTENSOR has no equivalent for Dual element types).
-        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
         ε_fd = sqrt(eps(real(eltype(A))))
-        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
-                     for p in 1:length(A_prime)]
+        B_plus  = build_restricted_A(A + ε_fd * x)
+        B_minus = build_restricted_A(A - ε_fd * x)
 
-        # Step 2: transfer matrix action on each perturbed site tensor
-        T_x = [begin
-            i, j = Tuple(findfirst(==(p), pattern))
+        T_x_data = [begin
+            A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
             ir = Ni + 1 - i
             n = contract_n1(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
-            Mumap_parallel(ACu[i,j], ACd[ir,j], FLo[i,j], FRo[i,j], A_prime_x[p]; forloop_iter, ifparallel) / n
-        end for p in 1:length(A_prime)]
+            Mumap_parallel(ACu[i,j], ACd[ir,j], FLo[i,j], FRo[i,j], A_prime_x_q; forloop_iter, ifparallel) / n
+        end for (i,j) in eachindex(A_prime)]
+        T_x = StructArray(T_x_data, A_prime.pattern)
 
-        # Step 3: VJP — pull T_x back through build_A ∘ restriction_ipeps via Zygote
-        # Zygote gradient of real(dot(T_x[p], Ad)) w.r.t. Ad equals T_x[p]
         function overlap_vjp(y)
             total = zero(real(eltype(y)))
             Ad = build_restricted_A(y)
-            for p in 1:length(A_prime)
-                total += real(dot(Ad[p], T_x[p]))
+            for (i,j) in eachindex(A_prime)
+                total += real(dot(Ad[i,j], T_x[i,j]))
             end
             return total
         end
@@ -100,29 +92,26 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
     Ni, Nj = size(A_prime)
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
-    pattern = A_prime.pattern
 
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
-        # (cuTENSOR has no equivalent for Dual element types).
-        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
         ε_fd = sqrt(eps(real(eltype(A))))
-        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
-                     for p in 1:length(A_prime)]
+        B_plus  = build_restricted_A(A + ε_fd * x)
+        B_minus = build_restricted_A(A - ε_fd * x)
 
-        T_x = [begin
-            i, j = Tuple(findfirst(==(p), pattern))
+        T_x_data = [begin
+            A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
             ir = Ni + 1 - i
             jr = mod1(j + 1, Nj)
             n = contract_n1(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
-            Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FLo[i,jr], A_prime_x[p]; forloop_iter, ifparallel) / n
-        end for p in 1:length(A_prime)]
+            Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FLo[i,jr], A_prime_x_q; forloop_iter, ifparallel) / n
+        end for (i,j) in eachindex(A_prime)]
+        T_x = StructArray(T_x_data, A_prime.pattern)
 
         function overlap_vjp(y)
             total = zero(real(eltype(y)))
             Ad = build_restricted_A(y)
-            for p in 1:length(A_prime)
-                total += real(dot(Ad[p], T_x[p]))
+            for (i,j) in eachindex(A_prime)
+                total += real(dot(Ad[i,j], T_x[i,j]))
             end
             return total
         end
@@ -146,30 +135,30 @@ function precondition_invese_single_envir(A, grad, env::C4vVUMPSEnv, params, res
     @unpack AL, C, FL = env
     AC = ALCtoAC_map(AL, C)
 
-    A_prime = build_restricted_A(A)
+    _G_cache[] = nothing          # reset so the first plain call below computes fresh G
+    A_prime = build_restricted_A(A)   # populates _G_cache; all JVP+VJP calls reuse it
     gradnew = deepcopy(grad)
 
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
 
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
-        # (cuTENSOR has no equivalent for Dual element types).
-        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
         ε_fd = sqrt(eps(real(eltype(A))))
-        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
-                     for p in 1:length(A_prime)]
+        B_plus  = build_restricted_A(A + ε_fd * x)
+        B_minus = build_restricted_A(A - ε_fd * x)
 
-        T_x = [begin
-            n = contract_n1(FL, AC, A_prime[p], AC, FL; ifparallel, forloop_iter)
-            Mumap_parallel(AC, AC, FL, FL, A_prime_x[p]; forloop_iter, ifparallel) / n
-        end for p in 1:length(A_prime)]
+        T_x_data = [begin
+            A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
+            n = contract_n1(FL, AC, A_prime[i,j], AC, FL; ifparallel, forloop_iter)
+            Mumap_parallel(AC, AC, FL, FL, A_prime_x_q; forloop_iter, ifparallel) / n
+        end for (i,j) in eachindex(A_prime)]
+        T_x = StructArray(T_x_data, A_prime.pattern)
 
         function overlap_vjp(y)
             total = zero(real(eltype(y)))
             Ad = build_restricted_A(y)
-            for p in 1:length(A_prime)
-                total += real(dot(Ad[p], T_x[p]))
+            for (i,j) in eachindex(A_prime)
+                total += real(dot(Ad[i,j], T_x[i,j]))
             end
             return total
         end
@@ -193,30 +182,30 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
     @unpack C, T = env
     To = CTCtoT(C, T)
 
-    A_prime = build_restricted_A(A)
+    _G_cache[] = nothing          # reset so the first plain call below computes fresh G
+    A_prime = build_restricted_A(A)   # populates _G_cache; all JVP+VJP calls reuse it
     gradnew = deepcopy(grad)
 
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
 
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
-        # Centered finite-difference JVP: avoids ForwardDiff Dual types on GPU
-        # (cuTENSOR has no equivalent for Dual element types).
-        # Error is O(ε²) ≈ machine precision for Float64; G is reused from _G_cache.
         ε_fd = sqrt(eps(real(eltype(A))))
-        A_prime_x = [(build_restricted_A(A + ε_fd * x)[p] - build_restricted_A(A - ε_fd * x)[p]) / (2 * ε_fd)
-                     for p in 1:length(A_prime)]
+        B_plus  = build_restricted_A(A + ε_fd * x)
+        B_minus = build_restricted_A(A - ε_fd * x)
 
-        T_x = [begin
+        T_x_data = [begin
+            A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
             n = dot(To, To)
-            Mumap_parallel(T, T, To, To, A_prime_x[p]; forloop_iter, ifparallel) / n
-        end for p in 1:length(A_prime)]
+            Mumap_parallel(T, T, To, To, A_prime_x_q; forloop_iter, ifparallel) / n
+        end for (i,j) in eachindex(A_prime)]
+        T_x = StructArray(T_x_data, A_prime.pattern)
 
         function overlap_vjp(y)
             total = zero(real(eltype(y)))
             Ad = build_restricted_A(y)
-            for p in 1:length(A_prime)
-                total += real(dot(Ad[p], T_x[p]))
+            for (i,j) in eachindex(A_prime)
+                total += real(dot(Ad[i,j], T_x[i,j]))
             end
             return total
         end
