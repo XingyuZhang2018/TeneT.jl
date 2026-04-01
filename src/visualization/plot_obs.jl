@@ -112,10 +112,11 @@ function plot_observables(obs_dir::String, lattice_type, pattern::Matrix{Int};
     # Convergence plot from all logs
     _plot_convergence(obs_dir, logs; save_format)
 
-    # Lattice plot from latest χ
-    latest = logs[end]
-    plot_lattice_obs(latest.e_dict, latest.m_dict, lattice_type, pattern;
-                     save_path=obs_dir, save_format=save_format, χ=latest.χ)
+    # Lattice plot for every χ
+    for r in logs
+        plot_lattice_obs(r.e_dict, r.m_dict, lattice_type, pattern;
+                         save_path=obs_dir, save_format=save_format, χ=r.χ)
+    end
     return nothing
 end
 
