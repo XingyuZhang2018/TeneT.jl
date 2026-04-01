@@ -36,6 +36,13 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     e = energy_value(params.model, A, env, params)
     mag = magnetization_value(params.model, A, env, params)
     ξ = cor_len_value(env, params)
+
+    # For Kagome merge: compute per-bond energies and use them for logging/plotting
+    if params.model.lattice isa Kagome{:merge}
+        e_perbond = energy_value_perbond(params.model, A, env, params)
+        e = (e[1], e_perbond)  # replace aggregate e_dict with per-bond e_dict
+    end
+
     write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
 
     # Visualization: read all logs and plot (includes history from previous runs)
