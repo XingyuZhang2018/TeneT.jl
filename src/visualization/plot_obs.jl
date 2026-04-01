@@ -333,6 +333,7 @@ function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall}, all_coords, all_mdata
 
     for (bond_type, bond_data) in e_dict
         color = _bond_color(bond_type)
+        (off1i, off1j), (off2i, off2j) = _bond_offsets_honeycomb(bond_type)
         for (pos_str, eval) in bond_data
             parts = split(pos_str, ",")
             oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
@@ -340,15 +341,11 @@ function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall}, all_coords, all_mdata
             lw = _bond_linewidth(eval, e_min, e_max)
 
             for (ci, cj) in pval_positions[pv]
-                pi2, pj2 = _bond_partner_honeycomb(bond_type, ci, cj, Ni, Nj)
-
                 for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
-                    gi1 = ci + di * Ni
-                    gj1 = cj + dj * Nj
-                    gi2 = pi2 + di * Ni
-                    gj2 = pj2 + dj * Nj
-                    if pi2 < ci; gi2 = pi2 + (di + 1) * Ni; end
-                    if pj2 < cj; gj2 = pj2 + (dj + 1) * Nj; end
+                    gi1 = ci + di * Ni + off1i
+                    gj1 = cj + dj * Nj + off1j
+                    gi2 = ci + di * Ni + off2i
+                    gj2 = cj + dj * Nj + off2j
 
                     haskey(all_coords, (gi1, gj1)) || continue
                     haskey(all_coords, (gi2, gj2)) || continue
@@ -391,6 +388,7 @@ function _draw_lattice_bonds!(ax, ::Square, all_coords, all_mdata,
 
     for (bond_type, bond_data) in e_dict
         color = _bond_color(bond_type)
+        (off1i, off1j), (off2i, off2j) = _bond_offsets_square(bond_type)
         for (pos_str, eval) in bond_data
             parts = split(pos_str, ",")
             oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
@@ -398,14 +396,11 @@ function _draw_lattice_bonds!(ax, ::Square, all_coords, all_mdata,
             lw = _bond_linewidth(eval, e_min, e_max)
 
             for (ci, cj) in pval_positions[pv]
-                pi2, pj2 = _bond_partner_square(bond_type, ci, cj, Ni, Nj)
                 for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
-                    gi1 = ci + di * Ni
-                    gj1 = cj + dj * Nj
-                    gi2 = pi2 + di * Ni
-                    gj2 = pj2 + dj * Nj
-                    if pi2 < ci; gi2 = pi2 + (di + 1) * Ni; end
-                    if pj2 < cj; gj2 = pj2 + (dj + 1) * Nj; end
+                    gi1 = ci + di * Ni + off1i
+                    gj1 = cj + dj * Nj + off1j
+                    gi2 = ci + di * Ni + off2i
+                    gj2 = cj + dj * Nj + off2j
 
                     haskey(all_coords, (gi1, gj1)) || continue
                     haskey(all_coords, (gi2, gj2)) || continue
@@ -444,30 +439,41 @@ end
 # Bond partner logic
 # ============================================================================
 
-function _bond_partner_honeycomb(bond_type::String, i, j, Ni, Nj)
+"""
+Bond offsets for honeycomb brickwall. Returns ((di1,dj1), (di2,dj2)) as raw
+offsets from the anchor site (i,j). Both endpoints are computed as
+(i+di1, j+dj1) and (i+di2, j+dj2) — no mod1, so tiling works correctly.
+
+- Vertical/Jy: (0,0)→(1,0)
+- Horizontal/Jx/Jz: (0,0)→(0,1)
+- J2_Horizontal: (0,0)→(0,2)
+- Diagonal1: (0,0)→(1,1)
+- Diagonal2: (0,1)→(1,0) — cross diagonal of 2×2 plaquette
+"""
+function _bond_offsets_honeycomb(bond_type::String)
     if occursin("Vertical", bond_type) || occursin("Jy", bond_type)
-        return (mod1(i + 1, Ni), j)
+        return (0, 0), (1, 0)
     elseif occursin("Horizontal", bond_type) && occursin("J2", bond_type)
-        return (i, mod1(j + 2, Nj))
+        return (0, 0), (0, 2)
     elseif occursin("Horizontal", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
-        return (i, mod1(j + 1, Nj))
+        return (0, 0), (0, 1)
     elseif occursin("Diagonal1", bond_type)
-        return (mod1(i + 1, Ni), mod1(j + 1, Nj))
+        return (0, 0), (1, 1)
     elseif occursin("Diagonal2", bond_type)
-        return (mod1(i + 1, Ni), mod1(j + 1, Nj))
+        return (0, 1), (1, 0)
     else
-        return (i, mod1(j + 1, Nj))
+        return (0, 0), (0, 1)
     end
 end
 
-function _bond_partner_square(bond_type::String, i, j, Ni, Nj)
+function _bond_offsets_square(bond_type::String)
     if occursin("Vertical", bond_type) || occursin("vertical", bond_type)
-        return (mod1(i + 1, Ni), j)
+        return (0, 0), (1, 0)
     elseif occursin("Horizontal", bond_type) || occursin("horizontal", bond_type)
-        return (i, mod1(j + 1, Nj))
+        return (0, 0), (0, 1)
     elseif occursin("Diagonal", bond_type) || occursin("diagonal", bond_type)
-        return (mod1(i + 1, Ni), mod1(j + 1, Nj))
+        return (0, 0), (1, 1)
     else
-        return (i, mod1(j + 1, Nj))
+        return (0, 0), (0, 1)
     end
 end
