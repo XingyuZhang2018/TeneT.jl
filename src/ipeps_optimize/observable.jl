@@ -37,6 +37,9 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     mag = magnetization_value(params.model, A, env, params)
     ξ = cor_len_value(env, params)
     write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
+    if params.model.lattice == Honeycomb(:brickwall) 
+        Wp_value(params.model, A, env, params)
+    end
     return e, mag, ξ
 end
 
@@ -63,11 +66,11 @@ function magnetization_value(model, A, env::VUMPSEnv, params)
         i, j = Tuple(findfirst(==(p), ACu.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
-        Mx = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx; forloop_iter, ifparallel)
-        My = etype <: Real ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy; forloop_iter, ifparallel)
-        Mz = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz; forloop_iter, ifparallel)
+        Mx = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx; forloop_iter, ifparallel)
+        My = etype <: Real ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy; forloop_iter, ifparallel)
+        Mz = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz; forloop_iter, ifparallel)
 
-        n = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
+        n = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
         Mag = [Mx/n, My/n, Mz/n]
         Mnorm[i,j] = norm(Mag)
         params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -102,11 +105,11 @@ function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        Mx = contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sx; ifparallel, forloop_iter)
-        My = etype == Float64 ? 0.0 : contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sy; ifparallel, forloop_iter)
-        Mz = contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter)
+        Mx = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sx; ifparallel, forloop_iter)
+        My = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sy; ifparallel, forloop_iter)
+        Mz = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter)
         
-        n = contract_n1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
+        n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
         Mag = [Mx/n, My/n, Mz/n]
         Mnorm[i,j] = norm(Mag)
         params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -133,11 +136,11 @@ function magnetization_value(model, A, env::C4vVUMPSEnv, params)
     Sy = atype(const_Sy(S))
     Sz = atype(const_Sz(S))
 
-    Mx = contract_o1(FL,AC,A1,AC,FL, Sx; ifparallel, forloop_iter)
-    My = etype == Float64 ? 0.0 : contract_o1(FL,AC,A1,AC,FL, Sy; ifparallel, forloop_iter)
-    Mz =contract_o1(FL,AC,A1,AC,FL, Sz; ifparallel, forloop_iter)
+    Mx = contract_o_11(FL,AC,A1,AC,FL, Sx; ifparallel, forloop_iter)
+    My = etype == Float64 ? 0.0 : contract_o_11(FL,AC,A1,AC,FL, Sy; ifparallel, forloop_iter)
+    Mz =contract_o_11(FL,AC,A1,AC,FL, Sz; ifparallel, forloop_iter)
 
-    n = contract_n1(FL,AC,A1,AC,FL; ifparallel, forloop_iter)
+    n = contract_n_11(FL,AC,A1,AC,FL; ifparallel, forloop_iter)
     Mag = [Mx/n, My/n, Mz/n]
     Mnorm = norm(Mag)
     params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -160,11 +163,11 @@ function magnetization_value(model, A, env::CTMEnv, params)
     Sy = atype(const_Sy(S))
     Sz = atype(const_Sz(S))
 
-    Mx = contract_o1(To,T,A1,T,To, Sx; ifparallel, forloop_iter)
-    My = etype == Float64 ? 0.0 : contract_o1(To,T,A1,T,To, Sy; ifparallel, forloop_iter)
-    Mz =contract_o1(To,T,A1,T,To, Sz; ifparallel, forloop_iter)
+    Mx = contract_o_11(To,T,A1,T,To, Sx; ifparallel, forloop_iter)
+    My = etype == Float64 ? 0.0 : contract_o_11(To,T,A1,T,To, Sy; ifparallel, forloop_iter)
+    Mz =contract_o_11(To,T,A1,T,To, Sz; ifparallel, forloop_iter)
 
-    n = contract_n1(To,T,A1,T,To; ifparallel, forloop_iter)
+    n = contract_n_11(To,T,A1,T,To; ifparallel, forloop_iter)
     Mag = [Mx/n, My/n, Mz/n]
     Mnorm = norm(Mag)
     params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -212,19 +215,19 @@ function magnetization_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv
         i, j = Tuple(findfirst(==(p), ACu.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
-        Mx1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx1; ifparallel, forloop_iter)
-        My1 = etype == Float64 ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy1; ifparallel, forloop_iter)
-        Mz1 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz1; ifparallel, forloop_iter)
+        Mx1 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx1; ifparallel, forloop_iter)
+        My1 = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy1; ifparallel, forloop_iter)
+        Mz1 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz1; ifparallel, forloop_iter)
 
-        Mx2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx2; ifparallel, forloop_iter)
-        My2 = etype == Float64 ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy2; ifparallel, forloop_iter)
-        Mz2 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz2; ifparallel, forloop_iter)
+        Mx2 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx2; ifparallel, forloop_iter)
+        My2 = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy2; ifparallel, forloop_iter)
+        Mz2 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz2; ifparallel, forloop_iter)
 
-        Mx3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx3; ifparallel, forloop_iter)
-        My3 = etype == Float64 ? 0.0 : contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy3; ifparallel, forloop_iter)
-        Mz3 = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz3; ifparallel, forloop_iter)
+        Mx3 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx3; ifparallel, forloop_iter)
+        My3 = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy3; ifparallel, forloop_iter)
+        Mz3 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz3; ifparallel, forloop_iter)
 
-        n = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; ifparallel, forloop_iter)
+        n = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; ifparallel, forloop_iter)
 
         Mag1 = [Mx1/n, My1/n, Mz1/n]
         Mnorm1[i,j] = norm(Mag1)
@@ -334,39 +337,39 @@ function cor_len_value(env::CTMEnv, params)
 end
 
 # ============================================================================
-# Observable log writer
+# Wp value for iPEPS with brickwall unit cell 
 # ============================================================================
+function Wp_value(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOptimize)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    @unpack ifparallel = params.boundary_alg
+    @unpack forloop_iter = params.boundary_alg
+    atype = _arraytype(ACu[1])
+    S = model.S
+    iSx = Zygote.@ignore atype(exp(1im * pi * const_Sx(S)))
+    iSy = Zygote.@ignore atype(exp(1im * pi * const_Sy(S)))
+    iSz = Zygote.@ignore atype(exp(1im * pi * const_Sz(S)))
 
-"""
-    write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
+    Ni, Nj = size(ACu)
+    Ni,Nj = size(ACu)
+    i, j = 1, 2
+    ir = mod1(i + 1, Ni)
+    id = mod1(Ni - i, Ni) 
+    jr = mod1(j + 1, Nj)
+    jrr = mod1(j + 2, Nj)
 
-Write energy, magnetization, and correlation length to a log file.
-"""
-function write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
-    path = joinpath(folder, "observable")
-    isdir(path) || mkpath(path)
-    obs_log = joinpath(path, "χ$χ.log")
-    e_dict = e[2]
-    m_dict = mag[2]
+    o = contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], iSx, iSy, iSz; ifparallel, forloop_iter)
+    n = contract_n_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]; ifparallel, forloop_iter)
+    Wp1 = o/n
 
-    open(obs_log, "w") do io
-        write(io, @sprintf("energy_per_site:\n%.15f\n", real(e[1])))
+    i, j = 2, 1
+    ir = mod1(i + 1, Ni)
+    id = mod1(Ni - i, Ni) 
+    jr = mod1(j + 1, Nj)
+    jrr = mod1(j + 2, Nj)
 
-        for bond_type in keys(e_dict)
-            write(io, "$bond_type: i j energy\n")
-            for pos in keys(e_dict[bond_type])
-                write(io, @sprintf("%s %.15f\t", pos, real(e_dict[bond_type][pos])))
-            end
-            write(io, "\n")
-        end
-
-        write(io, @sprintf("magnetization_norm_per_site:\n%.15f\n", real(mag[1])))
-
-        write(io, "magnetization: i j |M| Mx My Mz\n")
-        for pos in keys(m_dict)
-            write(io, @sprintf("%s %.15f %.15f %.15f %.15f\t", pos, real(m_dict[pos]["|M|"]), real(m_dict[pos]["Mx"]), real(m_dict[pos]["My"]), real(m_dict[pos]["Mz"])))
-            write(io, "\n")
-        end
-        write(io, @sprintf("correlation_length:\n%.15f\n", real(ξ)))
-    end
+    o = contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], iSx, iSy, iSz; ifparallel, forloop_iter)
+    n = contract_n_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]; ifparallel, forloop_iter)
+    Wp2 = o/n
+    @show Wp1 Wp2
+    return Wp1, Wp2
 end

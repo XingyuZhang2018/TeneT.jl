@@ -88,3 +88,41 @@ function read_last_log(folder::String, D::Int)
 end
 
 read_last_log(params::iPEPSOptimize, D::Int) = read_last_log(params.folder, D)
+
+# ============================================================================
+# Observable log writer
+# ============================================================================
+
+"""
+    write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
+
+Write energy, magnetization, and correlation length to a log file.
+"""
+function write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
+    path = joinpath(folder, "observable")
+    isdir(path) || mkpath(path)
+    obs_log = joinpath(path, "χ$χ.log")
+    e_dict = e[2]
+    m_dict = mag[2]
+
+    open(obs_log, "w") do io
+        write(io, @sprintf("energy_per_site:\n%.15f\n", real(e[1])))
+
+        for bond_type in keys(e_dict)
+            write(io, "$bond_type: i j energy\n")
+            for pos in keys(e_dict[bond_type])
+                write(io, @sprintf("%s %.15f\t", pos, real(e_dict[bond_type][pos])))
+            end
+            write(io, "\n")
+        end
+
+        write(io, @sprintf("magnetization_norm_per_site:\n%.15f\n", real(mag[1])))
+
+        write(io, "magnetization: i j |M| Mx My Mz\n")
+        for pos in keys(m_dict)
+            write(io, @sprintf("%s %.15f %.15f %.15f %.15f\t", pos, real(m_dict[pos]["|M|"]), real(m_dict[pos]["Mx"]), real(m_dict[pos]["My"]), real(m_dict[pos]["Mz"])))
+            write(io, "\n")
+        end
+        write(io, @sprintf("correlation_length:\n%.15f\n", real(ξ)))
+    end
+end

@@ -37,6 +37,7 @@ function Base.show(io::IO, model::HamiltonianModel)
     first = true
     for f in fieldnames(typeof(model))
         f === :lattice && continue
+        f === :bondratio && continue
         v = getfield(model, f)
         first ? (first = false) : print(io, ",")
         print(io, f, "=", v)

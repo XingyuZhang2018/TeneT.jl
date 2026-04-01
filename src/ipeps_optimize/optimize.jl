@@ -37,15 +37,15 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
             if env isa VUMPSEnv
                 @unpack FLo, ACu, ACd, FRo = env
                 id = Ni + 1 - i
-                My = contract_o1(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
-                n  = contract_n1(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
+                My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
+                n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
                 fδEierr[4] = abs(My/n)
             elseif env isa PlaquetteVUMPSEnv
                 @unpack AL, C, FLu, FLo = env
                 AC = ALCtoAC(AL, C)
                 ir, jr = 2,2
-                My = contract_o1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], iSy; ifparallel, forloop_iter)
-                n = contract_n1(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
+                My = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], iSy; ifparallel, forloop_iter)
+                n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
                 fδEierr[4] = abs(My/n)
             end
         end

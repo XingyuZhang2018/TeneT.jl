@@ -8,18 +8,17 @@ using Zygote
 
 seed = 42
 Random.seed!(seed)
-atype = CuArray
+atype = Array
 etype = Float64
-D, χ, χshift = 3, 128, 0
+D, χ, χshift = 2, 16, 0
 pattern = [1 2;
            2 1]
-# pattern = [1;;]
 # pattern = [1 3;
 #            2 4]
 model = J1J2(lattice=Honeycomb(:brickwall), 
              S=0.5, J1=1.0, J2=0.3,
              ifrotate=true, 
-             couplingtype=:uniform, bondratio=1.0)
+             couplingtype=:plaquette, bondratio=0.5)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
@@ -42,7 +41,7 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=0, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=1,
@@ -50,7 +49,7 @@ params = GradientOptimize(model=model,
                           folder=folder,
                           ifSU=false,
                           SUτ=0,
-                          ifprecondition=false,
+                          ifprecondition=true,
                           iter_precond=0,
                           reuse_env=true, 
                           ifsave_env=false,
@@ -60,12 +59,23 @@ params = GradientOptimize(model=model,
 )
 A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
-TeneT.reclaim(A)
+
 function restriction_ipeps(A)
-   # A = C4v_restriction(A)
-   A /= norm(A)
+   # A /= norm(A)
    # A = local_min_norm(A, params)
-   return A
+   B = Zygote.Buffer(A)
+   for i in 1:length(A)
+       if i in [1,6]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
+       elseif i in [2,5]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
+       elseif i in [3,4]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,3]
+       end
+   end
+   B = copy(B)
+   return B/norm(B)
+   # return A
 end
 
 optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
