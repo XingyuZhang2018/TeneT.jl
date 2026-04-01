@@ -206,7 +206,7 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
         "J1_Horizontal_energy" => Dict{String, Any}(),
         "J2_Horizontal_energy" => Dict{String, Any}(),
         "J1_Vertical_energy"   => Dict{String, Any}(),
-        "J2_Diagonal\_energy"  => Dict{String, Any}(),
+        "J2_Diagonal\\_energy"  => Dict{String, Any}(),
         "J2_Diagonal/_energy"  => Dict{String, Any}()
     )
     etol = 0.0
@@ -245,10 +245,10 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
         e1 = contract_o_22_1(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
         e2 = contract_o_22_2(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
         n =  contract_n_22(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J2_Diagonal\_energy = $(J2 * e1/n)")
+        params.verbosity >= 4 && println("J2_Diagonal\\_energy = $(J2 * e1/n)")
         params.verbosity >= 4 && println("J2_Diagonal/_energy = $(J2 * e2/n)")
         etol += J2 * (e1 + e2)/n
-        e_dict["J2_Diagonal\_energy"]["$(i),$(j)"] = J2 * e1/n
+        e_dict["J2_Diagonal\\_energy"]["$(i),$(j)"] = J2 * e1/n
         e_dict["J2_Diagonal/_energy"]["$(i),$(j)"] = J2 * e2/n
 
         ir = Ni + 1 - i
