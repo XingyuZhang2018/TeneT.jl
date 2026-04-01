@@ -231,19 +231,21 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
                  strokecolor=(:gray40, alpha))
     end
 
-    # Magnetization arrows (original unit cell only)
+    # Magnetization arrows on every site
     mag_max_val = maximum(abs(real(all_mdata[k]["|M|"])) for k in keys(all_coords))
     arrow_scale = mag_max_val > 1e-10 ? 0.45 / mag_max_val : 0.0
     for (k, (x, y)) in all_coords
-        is_original[k] || continue
         mdata = all_mdata[k]
         amx = real(mdata["Mx"]) * arrow_scale
         amz = real(mdata["Mz"]) * arrow_scale
         amag = sqrt(amx^2 + amz^2)
         amag < 1e-8 && continue
+        alpha = is_original[k] ? 0.9 : 0.35
+        lw = is_original[k] ? 2.5 : 1.5
+        as = is_original[k] ? 12 : 8
         arrows!(ax, [x], [y], [amx], [amz];
-                color=(:black, 0.9), linewidth=2.5,
-                arrowsize=12, arrowcolor=(:black, 0.9))
+                color=(:black, alpha), linewidth=lw,
+                arrowsize=as, arrowcolor=(:black, alpha))
     end
 
     # Site labels
