@@ -22,7 +22,7 @@ Compute all observables (energy, magnetization, correlation length) for a
 given iPEPS tensor `A` at bond dimension `χ`. Initializes a VUMPS runtime,
 converges the boundary, and evaluates expectation values.
 """
-function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps, _obs_callback=nothing)
+function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps)
     D = size(A, 1)
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
@@ -38,14 +38,11 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     ξ = cor_len_value(env, params)
     write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
 
-    # Visualization
-    if _obs_callback !== nothing
-        _obs_callback(e, mag, ξ, χ)
-    elseif params.ifplot
-        # Standalone call: one-shot lattice plot (no convergence accumulation)
+    # Visualization: read all logs and plot (includes history from previous runs)
+    if params.ifplot
         obs_path = joinpath(params.folder, "D$(D)", "observable")
-        plot_lattice_obs(e[2], mag[2], params.model.lattice, params.pattern;
-                         save_path=obs_path, save_format=params.plot_format, χ=χ)
+        plot_observables(obs_path, params.model.lattice, params.pattern;
+                         save_format=params.plot_format)
     end
 
     if params.model.lattice == Honeycomb(:brickwall)
