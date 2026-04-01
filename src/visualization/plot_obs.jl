@@ -501,18 +501,20 @@ Arranged so that bonds form the characteristic Kagome pattern.
 # Kagome lattice coordinates with all bonds equal length = 1.
 # Lattice vectors: a_i = (2, 0), a_j = (1, sqrt(3)).
 # Basis: p1=(0,0), p2=(1,0), p3=(3/2, sqrt(3)/2).
+# Then rotated 90° CCW so vertical bonds are vertical on screen.
 function _kagome_site_xy(i, j, k)
-    # Unit cell origin: a_i=(2,0) for i-direction, a_j=(1,√3) for j-direction
-    # y is negated for display (i/j increasing → visually down/right)
+    # Raw coordinates (before rotation)
     cx = Float64(i - 1) * 2.0 + Float64(j - 1) * 1.0
     cy = -Float64(j - 1) * sqrt(3)
     if k == 1
-        return (cx, cy)
+        rx, ry = cx, cy
     elseif k == 2
-        return (cx + 1.0, cy)
+        rx, ry = cx + 1.0, cy
     else  # k == 3
-        return (cx + 1.5, cy - sqrt(3) / 2)
+        rx, ry = cx + 1.5, cy - sqrt(3) / 2
     end
+    # Rotate 90° CCW: (x, y) → (-y, x)
+    return (-ry, rx)
 end
 
 function _site_xy(::Square, i, j)
