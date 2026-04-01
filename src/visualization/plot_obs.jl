@@ -243,7 +243,8 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
         alpha = is_original[k] ? 0.9 : 0.35
         lw = is_original[k] ? 2.5 : 1.5
         as = is_original[k] ? 12 : 8
-        arrows!(ax, [x], [y], [amx], [amz];
+        # Center arrow on site: start at (x - dx/2, y - dz/2)
+        arrows!(ax, [x - amx/2], [y - amz/2], [amx], [amz];
                 color=(:black, alpha), linewidth=lw,
                 arrowsize=as, arrowcolor=(:black, alpha))
     end
