@@ -93,7 +93,7 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
 
     # Save environment to disk
     if params.ifsave_env
-        folder1 = joinpath(folder, "D$(D)", "VUMPS_rt_env")
+        folder1 = joinpath(folder, "D$(D)", "environment")
         save_rt(folder1, rt; file="χ$(χ).jld2")
     end
 
@@ -114,7 +114,7 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x))
     end
 
-    if abs(fδEierr[2]) < 1e-12 || abs(fδEierr[4]) > 1e-4
+    if abs(fδEierr[2]) < 1e-12 || abs(fδEierr[4]) > 1e-8
         g .= 0
     end
 

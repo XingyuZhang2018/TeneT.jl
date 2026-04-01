@@ -1,11 +1,11 @@
-function save_rt(folder, rt; file::String="VUMPS_rt_env.jld2")
+function save_rt(folder, rt; file::String)
     p = joinpath(folder, file)
     rt_save = Array(rt)
     @info "save a $(typeof(rt)) environment to $p"
     save(p, "rt", rt_save)
 end
 
-function load_rt(folder, atype; file::String="VUMPS_rt_env.jld2")
+function load_rt(folder, atype; file::String)
     p = joinpath(folder, file)
     rt = load(p, "rt")
     rt = atype(rt)
