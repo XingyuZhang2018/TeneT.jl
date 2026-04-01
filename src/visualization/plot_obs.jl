@@ -305,6 +305,7 @@ const _BOND_COLORS = Dict(
     "Jz" => colorant"#80FF80",
     "J1_Horizontal" => :royalblue, "J1_Vertical" => :forestgreen,
     "J2_Horizontal" => :orange, "J2_Diagonal1" => :purple, "J2_Diagonal2" => :hotpink,
+    "Diagonal\\" => :gray60, "Diagonal/" => :gray60,
 )
 
 function _bond_color(bond_type::String)
@@ -467,15 +468,25 @@ function _bond_offsets_honeycomb(bond_type::String)
     end
 end
 
+"""
+Bond offsets for Square lattice.
+Square J1J2 uses `\\` and `/` in bond names:
+- `J2_Diagonal\\_energy`: `\\` = (i,j)→(i+1,j+1) right-down
+- `J2_Diagonal/_energy`:  `/`  = (i,j+1)→(i+1,j) left-down (cross-diagonal)
+"""
 function _bond_offsets_square(bond_type::String)
     if occursin("Vertical", bond_type) || occursin("vertical", bond_type)
         return (0, 0), (1, 0)
     elseif occursin("Horizontal", bond_type) || occursin("horizontal", bond_type)
         return (0, 0), (0, 1)
-    elseif occursin("Diagonal2", bond_type) || occursin("diagonal2", bond_type)
-        # Cross-diagonal: (i,j+1) → (i+1,j)
+    elseif occursin("/", bond_type)
+        # / diagonal: (i,j+1) → (i+1,j)
         return (0, 1), (1, 0)
-    elseif occursin("Diagonal", bond_type) || occursin("diagonal", bond_type)
+    elseif occursin("Diagonal2", bond_type)
+        # Fallback for Diagonal2 naming convention
+        return (0, 1), (1, 0)
+    elseif occursin("\\", bond_type) || occursin("Diagonal", bond_type)
+        # \ diagonal or generic: (i,j) → (i+1,j+1)
         return (0, 0), (1, 1)
     else
         return (0, 0), (0, 1)
