@@ -253,7 +253,7 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
     for (k, (x, y)) in all_coords
         is_original[k] || continue
         ci, cj = mod1(k[1], Ni), mod1(k[2], Nj)
-        text!(ax, x, y + 0.55; text="($ci,$cj)", fontsize=10, color=:gray20,
+        text!(ax, x, y + 0.25; text="($ci,$cj)", fontsize=10, color=:gray20,
               align=(:center, :bottom))
     end
 
@@ -374,7 +374,7 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:merge}, pattern:
         is_original[k] || continue
         ci, cj = mod1(k[1], Ni), mod1(k[2], Nj)
         sublat = k[3]
-        text!(ax, x, y + 0.4; text="($ci,$cj,$sublat)", fontsize=9, color=:gray20,
+        text!(ax, x, y + 0.2; text="($ci,$cj,$sublat)", fontsize=9, color=:gray20,
               align=(:center, :bottom))
     end
 
