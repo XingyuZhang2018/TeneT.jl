@@ -260,7 +260,6 @@ function oc_23(FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, Au11, Ad11,
     D1 = size(Au21, 4)
     D2 = size(Ad21, 4)
     Q = Zygote.@ignore _arraytype(FLu)(randn(eltype(FLu), χ,D1,D2,χ))
-    @show typeof(Q)
     Q = oc_Q_23(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, Au11, Ad11, Au12, Ad12, Au13, Ad13, Au21, Ad21, Au22, Ad22, Au23, Ad23; ifparallel, forloop_iter)
     Q, _ = TeneT.qrpos(reshape(Q, χ*D1*D2, χ))
     Q = reshape(Q, χ,D1,D2,χ)
@@ -273,18 +272,18 @@ function contract_n_23(FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, A11
     return oc_23(FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, A11, conj(A11), A12, conj(A12), A13, conj(A13), A21, conj(A21), A22, conj(A22), A23, conj(A23); ifparallel, forloop_iter)
 end
 
-function contract_o_23(FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, A11, A12, A13, A21, A22, A23, Ox, Oy, Oz; ifparallel, forloop_iter)
-    @tensor Au11[a,b,c,d,f] := A11[a,b,c,d,e] * Oz[e,f]
+function contract_o_23(FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, A11, A12, A13, A21, A22, A23, O11, O12, O13, O21,O22, O23; ifparallel, forloop_iter)
+    @tensor Au11[a,b,c,d,f] := A11[a,b,c,d,e] * O11[e,f]
     Ad11 = conj(A11)
-    @tensor Au12[a,b,c,d,f] := A12[a,b,c,d,e] * Oy[e,f]
+    @tensor Au12[a,b,c,d,f] := A12[a,b,c,d,e] * O12[e,f]
     Ad12 = conj(A12)
-    @tensor Au13[a,b,c,d,f] := A13[a,b,c,d,e] * Ox[e,f]
+    @tensor Au13[a,b,c,d,f] := A13[a,b,c,d,e] * O13[e,f]
     Ad13 = conj(A13)
-    @tensor Au21[a,b,c,d,f] := A21[a,b,c,d,e] * Ox[e,f]
+    @tensor Au21[a,b,c,d,f] := A21[a,b,c,d,e] * O21[e,f]
     Ad21 = conj(A21)
-    @tensor Au22[a,b,c,d,f] := A22[a,b,c,d,e] * Oy[e,f]
+    @tensor Au22[a,b,c,d,f] := A22[a,b,c,d,e] * O22[e,f]
     Ad22 = conj(A22)
-    @tensor Au23[a,b,c,d,f] := A23[a,b,c,d,e] * Oz[e,f]
+    @tensor Au23[a,b,c,d,f] := A23[a,b,c,d,e] * O23[e,f]
     Ad23 = conj(A23)
     return oc_23(FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, Au11, Ad11, Au12, Ad12, Au13, Ad13, Au21, Ad21, Au22, Ad22, Au23, Ad23; ifparallel, forloop_iter)
 end
