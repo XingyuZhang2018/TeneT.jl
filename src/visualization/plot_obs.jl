@@ -305,8 +305,8 @@ const _BOND_COLORS = Dict(
     "Jz" => colorant"#80FF80",
     "J1_Horizontal" => :royalblue, "J1_Vertical" => :forestgreen,
     "J2_Horizontal" => :orange,
-    "Diagonal1" => :purple, "Diagonal\\" => :purple,     # \ direction
-    "Diagonal2" => :hotpink, "Diagonal/" => :hotpink,    # / direction
+    "Diagonal\\" => :purple,    # \ direction
+    "Diagonal/" => :hotpink,    # / direction
 )
 
 function _bond_color(bond_type::String)
@@ -445,31 +445,17 @@ end
 """
     _is_cross_diagonal(bond_type) → Bool
 
-Detect the / cross-diagonal direction. Matches:
-- "Diagonal/" or "/" (Square convention)
-- "Diagonal2" (Honeycomb J1J2 convention)
-Must be checked BEFORE generic "Diagonal" match.
+Detect the / cross-diagonal direction: (i,j+1)→(i+1,j).
+Must be checked BEFORE `_is_forward_diagonal`.
 """
-function _is_cross_diagonal(bond_type::String)
-    occursin("/", bond_type) && return true
-    occursin("Diagonal2", bond_type) && return true
-    return false
-end
+_is_cross_diagonal(bond_type::String) = occursin("/", bond_type)
 
 """
     _is_forward_diagonal(bond_type) → Bool
 
-Detect the \\ forward-diagonal direction. Matches:
-- "Diagonal\\" or "\\" (Square convention)
-- "Diagonal1" (Honeycomb J1J2 convention)
-- generic "Diagonal" (fallback)
+Detect the \\ forward-diagonal direction: (i,j)→(i+1,j+1).
 """
-function _is_forward_diagonal(bond_type::String)
-    occursin("\\", bond_type) && return true
-    occursin("Diagonal1", bond_type) && return true
-    occursin("Diagonal", bond_type) && return true   # generic fallback
-    return false
-end
+_is_forward_diagonal(bond_type::String) = occursin("\\", bond_type) || occursin("Diagonal", bond_type)
 
 """
 Bond offsets for honeycomb brickwall.
