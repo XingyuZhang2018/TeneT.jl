@@ -530,12 +530,15 @@ end
 # ============================================================================
 
 const _BOND_COLORS = Dict(
-    "Jx" => colorant"#00BFFF",
-    "Jy" => colorant"#FF8080",
-    "Jz" => colorant"#80FF80",
-    "J1_Horizontal" => :royalblue, "J1_Vertical" => :forestgreen,
-    "J2_Horizontal" => :orange,
-    "Diagonal\\" => :purple, "Diagonal/" => :hotpink,
+    # Kitaev
+    "bond_Jx" => colorant"#00BFFF", "bond_Jy" => colorant"#FF8080", "bond_Jz" => colorant"#80FF80",
+    # Heisenberg Square
+    "bond_H" => :royalblue, "bond_V" => :forestgreen,
+    # J1J2
+    "bond_J1H" => :royalblue, "bond_J1V" => :forestgreen,
+    "bond_J2H" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
+    # Heisenberg Kagome
+    "bond_onsite" => :gray50,
     "bond_12" => colorant"#FF6666", "bond_23" => colorant"#66BB66",
     "bond_31H" => colorant"#6666FF", "bond_32H" => colorant"#FF9933",
     "bond_31V" => colorant"#9966CC", "bond_21V" => colorant"#33CCCC",
@@ -687,18 +690,18 @@ _is_cross_diagonal(bond_type::String) = occursin("/", bond_type)
 
 Detect the \\ forward-diagonal direction: (i,j)→(i+1,j+1).
 """
-_is_forward_diagonal(bond_type::String) = occursin("\\", bond_type) || occursin("Diagonal", bond_type)
+_is_forward_diagonal(bond_type::String) = occursin("\\", bond_type)
 
 """
 Bond offsets for honeycomb brickwall.
 Returns ((di1,dj1), (di2,dj2)) as raw offsets from the anchor site (i,j).
 """
 function _bond_offsets_honeycomb(bond_type::String)
-    if occursin("Vertical", bond_type) || occursin("Jy", bond_type)
+    if occursin("_V_", bond_type) || occursin("J1V", bond_type) || occursin("Jy", bond_type)
         return (0, 0), (1, 0)
-    elseif occursin("Horizontal", bond_type) && occursin("J2", bond_type)
+    elseif occursin("J2H", bond_type)
         return (0, 0), (0, 2)
-    elseif occursin("Horizontal", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
+    elseif occursin("_H_", bond_type) || occursin("J1H", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
         return (0, 0), (0, 1)
     elseif _is_cross_diagonal(bond_type)
         return (0, 1), (1, 0)    # / direction
@@ -713,9 +716,9 @@ end
 Bond offsets for Square lattice. Same diagonal logic as Honeycomb.
 """
 function _bond_offsets_square(bond_type::String)
-    if occursin("Vertical", bond_type) || occursin("vertical", bond_type)
+    if occursin("_V_", bond_type) || occursin("J1V", bond_type)
         return (0, 0), (1, 0)
-    elseif occursin("Horizontal", bond_type) || occursin("horizontal", bond_type)
+    elseif occursin("_H_", bond_type) || occursin("J1H", bond_type)
         return (0, 0), (0, 1)
     elseif _is_cross_diagonal(bond_type)
         return (0, 1), (1, 0)    # / direction

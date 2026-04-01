@@ -11,9 +11,9 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
     Sz1, Sz2 = atype.(hamiltonian_trunc(h[3]))
 
     e_dict = Dict{String, Dict{String, Any}}(
-        "Jx_energy" => Dict{String, Any}(),
-        "Jy_energy" => Dict{String, Any}(),
-        "Jz_energy" => Dict{String, Any}()
+        "bond_Jx_energy" => Dict{String, Any}(),
+        "bond_Jy_energy" => Dict{String, Any}(),
+        "bond_Jz_energy" => Dict{String, Any}()
     )
     etol = 0.0
 
@@ -27,7 +27,7 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
             n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
             params.verbosity >= 4 && println("hy = $(Jy * e/n)")
             etol += Jy * e/n
-            e_dict["Jy_energy"]["$(i),$(j)"] = Jy * e/n
+            e_dict["bond_Jy_energy"]["$(i),$(j)"] = Jy * e/n
 
             O_H = (Sx1, Sx2)
         else
@@ -41,11 +41,11 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
         if (i + j) % 2 != 0 
             params.verbosity >= 4 && println("hx = $(Jx * e/n)") 
             etol += Jx * e/n
-            e_dict["Jx_energy"]["$(i),$(j)"] = Jx * e/n
+            e_dict["bond_Jx_energy"]["$(i),$(j)"] = Jx * e/n
         else
             params.verbosity >= 4 && println("hz = $(Jz * e/n)")
             etol += Jz * e/n
-            e_dict["Jz_energy"]["$(i),$(j)"] = Jz * e/n
+            e_dict["bond_Jz_energy"]["$(i),$(j)"] = Jz * e/n
         end
     end
 

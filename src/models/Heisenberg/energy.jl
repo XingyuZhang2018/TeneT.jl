@@ -8,8 +8,8 @@ function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPS
     @unpack ifparallel = params.boundary_alg
     len = length(A)
     e_dict = Dict{String, Dict{String, Any}}(
-        "Horizontal_energy" => Dict{String, Any}(),
-        "Vertical_energy"   => Dict{String, Any}()
+        "bond_H_energy" => Dict{String, Any}(),
+        "bond_V_energy"   => Dict{String, Any}()
     )
     for p in 1:len
         i, j = Tuple(findfirst(==(p), A.pattern))
@@ -20,7 +20,7 @@ function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPS
         n = contract_n_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; forloop_iter, ifparallel)
         params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
         etol += e/n
-        e_dict["Horizontal_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_H_energy"]["$(i),$(j)"] = e/n
 
         ir  =  mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
@@ -28,7 +28,7 @@ function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPS
         n = contract_n_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; forloop_iter, ifparallel)
         params.verbosity >= 4 && println("Vertical energy = $(e/n)")
         etol += e/n
-        e_dict["Vertical_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_V_energy"]["$(i),$(j)"] = e/n
     end
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
@@ -48,8 +48,8 @@ function energy_value(model::Heisenberg{Square}, A, env::PlaquetteVUMPSEnv, para
     @unpack ifparallel = params.boundary_alg
     len = length(A)
     e_dict = Dict{String, Dict{String, Any}}(
-        "Horizontal_energy" => Dict{String, Any}(),
-        "Vertical_energy"   => Dict{String, Any}()
+        "bond_H_energy" => Dict{String, Any}(),
+        "bond_V_energy"   => Dict{String, Any}()
     )
     for p in 1:len
         i, j = Tuple(findfirst(==(p), A.pattern))
@@ -61,13 +61,13 @@ function energy_value(model::Heisenberg{Square}, A, env::PlaquetteVUMPSEnv, para
         n = contract_n_12(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr]; ifparallel, forloop_iter)
         params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
         etol += e/n
-        e_dict["Horizontal_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_H_energy"]["$(i),$(j)"] = e/n
 
         e = contract_o_21(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j], O1, O2; ifparallel, forloop_iter)
         n = contract_n_21(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j]; ifparallel, forloop_iter)
         params.verbosity >= 4 && println("Vertical energy = $(e/n)")
         etol += e/n
-        e_dict["Vertical_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_V_energy"]["$(i),$(j)"] = e/n
     end
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
@@ -78,7 +78,7 @@ function energy_value(model::Heisenberg{Square}, A, env::C4vVUMPSEnv, params::iP
     @unpack AL, C, FL = env
     @unpack ifparallel, forloop_iter = params.boundary_alg
     e_dict = Dict{String, Dict{String, Any}}(
-        "Horizontal_energy" => Dict{String, Any}(),
+        "bond_H_energy" => Dict{String, Any}(),
     )
 
     A1 = A[1]
@@ -89,7 +89,7 @@ function energy_value(model::Heisenberg{Square}, A, env::C4vVUMPSEnv, params::iP
     n = contract_n_12(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC); ifparallel, forloop_iter)
     params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
     etol = e/n
-    e_dict["Horizontal_energy"]["1,1"] = e/n
+    e_dict["bond_H_energy"]["1,1"] = e/n
 
     params.verbosity >= 3 && println("energy = $(etol*2)")
     return etol*2, e_dict
@@ -99,7 +99,7 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
     @unpack C, T = env
     @unpack ifparallel, forloop_iter = params.boundary_alg
     e_dict = Dict{String, Dict{String, Any}}(
-        "Horizontal_energy" => Dict{String, Any}(),
+        "bond_H_energy" => Dict{String, Any}(),
     )
 
     # Extract site tensor once to avoid repeated StructArray indexing in AD
@@ -111,7 +111,7 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
     n = contract_n_12(To, T, A1, T, To, T, A1, T; ifparallel, forloop_iter)
     params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
     etol = e/n
-    e_dict["Horizontal_energy"]["1,1"] = e/n
+    e_dict["bond_H_energy"]["1,1"] = e/n
 
     params.verbosity >= 3 && println("energy = $(etol*2)")
     return etol*2, e_dict
@@ -240,9 +240,9 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
     etol = 0
     len = length(A)
     e_dict = Dict{String, Dict{String, Any}}(
-        "onsite_energy"   => Dict{String, Any}(),
-        "Horizontal_energy" => Dict{String, Any}(),
-        "Vertical_energy"   => Dict{String, Any}()
+        "bond_onsite_energy"   => Dict{String, Any}(),
+        "bond_H_energy" => Dict{String, Any}(),
+        "bond_V_energy"   => Dict{String, Any}()
     )
 
     h_H, h_V = hamiltonian(model)
@@ -258,7 +258,7 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
         n = contract_n_11(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,j]; ifparallel, forloop_iter)
         params.verbosity >= 4 && println("Onsite energy = $(e/n)")
         etol += e/n
-        e_dict["onsite_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_onsite_energy"]["$(i),$(j)"] = e/n
 
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
@@ -266,7 +266,7 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
         n = contract_n_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; ifparallel, forloop_iter)
         params.verbosity >= 4 && println("Horizontal energy = $(e/n)")
         etol += e/n
-        e_dict["Horizontal_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_H_energy"]["$(i),$(j)"] = e/n
 
         ir  =  mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni) 
@@ -274,7 +274,7 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
         n = contract_n_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; ifparallel, forloop_iter)
         params.verbosity >= 4 && println("Vertical energy = $(e/n)")
         etol += e/n
-        e_dict["Vertical_energy"]["$(i),$(j)"] = e/n
+        e_dict["bond_V_energy"]["$(i),$(j)"] = e/n
     end
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
