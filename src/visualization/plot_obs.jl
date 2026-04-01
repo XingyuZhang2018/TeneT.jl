@@ -498,17 +498,20 @@ Returns positions for sublattice k ∈ {1,2,3}.
   Site 3: bottom corner
 Arranged so that bonds form the characteristic Kagome pattern.
 """
+# Kagome lattice coordinates with all bonds equal length = 1.
+# Lattice vectors: a_i = (2, 0), a_j = (1, sqrt(3)).
+# Basis: p1=(0,0), p2=(1,0), p3=(3/2, sqrt(3)/2).
 function _kagome_site_xy(i, j, k)
-    # Kagome unit cell with skew: cells below shift right to form proper triangles
-    # Lattice vectors: a1=(2,0), a2=(1,-√3) → corner-sharing triangles
-    cx = Float64(j - 1) * 2.0 + Float64(i - 1) * 1.0
-    cy = -Float64(i - 1) * sqrt(3)
-    if k == 1      # left vertex of upward triangle
+    # Unit cell origin: a_i=(2,0) for i-direction, a_j=(1,√3) for j-direction
+    # y is negated for display (i/j increasing → visually down/right)
+    cx = Float64(i - 1) * 2.0 + Float64(j - 1) * 1.0
+    cy = -Float64(j - 1) * sqrt(3)
+    if k == 1
         return (cx, cy)
-    elseif k == 2  # right vertex of upward triangle
+    elseif k == 2
         return (cx + 1.0, cy)
-    else            # bottom vertex of upward triangle
-        return (cx + 0.5, cy - sqrt(3) / 2)
+    else  # k == 3
+        return (cx + 1.5, cy - sqrt(3) / 2)
     end
 end
 
