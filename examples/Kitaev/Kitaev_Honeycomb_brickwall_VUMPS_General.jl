@@ -4,22 +4,21 @@ using CUDA
 using OptimKit
 using LinearAlgebra
 using Zygote
-
 seed = 42
 Random.seed!(seed)
 atype = Array
 etype = ComplexF64
 # etype = Float64
-D, χ, χshift = 2, 16, 0
-pattern = [1 2;
-           2 1]
+D, χ, χshift, maxiter_restart = 2, 16, 1, 3
+# pattern = [1 2;
+#            2 1]
 # pattern = [1 3;
 #            2 4]
-# pattern = [1 3 5 2 4 6;
-#            2 4 6 1 3 5]
+pattern = [1 3 5 2 4 6;
+           2 4 6 1 3 5]
 model = Kitaev(lattice=Honeycomb(:brickwall), 
-               S=1.0, Jx=-1.0, Jy=-1.0, Jz=-1.0, 
-               couplingtype=:uniform, bondratio=1.0)
+               S=0.5, Jx=1.0, Jy=1.0, Jz=1.0, 
+               couplingtype=:plaquette, bondratio=0.5)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
@@ -32,7 +31,7 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
                                miniter=0, 
                                maxiter_ad=4,
                                miniter_ad=4,
-                               power_iter=1,
+                               power_iter=5,
                                power_iter_ad=5,
                                power_iter_obs=40,
                                show_every=10,
@@ -42,10 +41,10 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
-                          maxiter_restart=4,
+                          maxiter_restart=maxiter_restart,
                           verbosity=4, 
                           folder=folder,
                           ifSU=false,
@@ -53,8 +52,8 @@ params = GradientOptimize(model=model,
                           ifprecondition=true,
                           iter_precond=0,
                           reuse_env=true, 
-                          ifsave_env=false,
-                          ifload_env=false,
+                          ifsave_env=true,
+                          ifload_env=true,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
@@ -62,8 +61,8 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 function restriction_ipeps(A)
-   A /= norm(A)
-   # A = local_min_norm(A, params)
+   # A /= norm(A)
+   A = local_min_norm(A, params)
    # B = Zygote.Buffer(A)
    # for i in 1:length(A)
    #     if i in [1,6]

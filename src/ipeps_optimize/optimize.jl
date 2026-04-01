@@ -152,6 +152,15 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
     params_obs = deepcopy(params)
     params_obs.boundary_alg.maxiter = params.boundary_alg.maxiter * 10
 
+    # Auto-create plotting callback if enabled
+    _obs_cb = nothing
+    if params.ifplot
+        obs_path = joinpath(params.folder, "D$(D)", "observable")
+        plotter = ObsPlotter(obs_path; save_format=params.plot_format)
+        _obs_cb = (e, mag, ξ, χ) -> plot_observable_callback!(plotter, e, mag, ξ, χ,
+                                        params.model.lattice, params.pattern)
+    end
+
     function fenergy(A)
         _G_cache[] = nothing
         A = restriction_ipeps(A)
@@ -188,7 +197,7 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
             finalize!     = (x, f, g, iter) -> _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         )
         χ += χshift
-        enew, = observable(A, χ, params_obs; restriction_ipeps)
+        enew, = observable(A, χ, params_obs; restriction_ipeps, _obs_callback=_obs_cb)
         rt = initialize_env(A, D, χ, params; restriction_ipeps)
         rt′ = deepcopy(rt)
         if abs(real(enew[1]) - e) < 1e-7 && history[end-1] < 1e-5

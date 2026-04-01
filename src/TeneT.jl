@@ -19,6 +19,8 @@ using JLD2, FileIO
 
 using MPI
 
+using CairoMakie
+
 using Base.Threads
 CUDA.allowscalar(false)
 
@@ -103,6 +105,7 @@ include("ipeps_optimize/restriction.jl")
 include("ipeps_optimize/precondition.jl")
 include("ipeps_optimize/su_parameterization.jl")
 include("ipeps_optimize/observable.jl")
+include("visualization/plot_obs.jl")
 include("ipeps_optimize/optimize.jl")
 
 # ============================================================================

@@ -22,7 +22,7 @@ Compute all observables (energy, magnetization, correlation length) for a
 given iPEPS tensor `A` at bond dimension `χ`. Initializes a VUMPS runtime,
 converges the boundary, and evaluates expectation values.
 """
-function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps)
+function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps, _obs_callback=nothing)
     D = size(A, 1)
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
@@ -37,7 +37,18 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     mag = magnetization_value(params.model, A, env, params)
     ξ = cor_len_value(env, params)
     write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
-    if params.model.lattice == Honeycomb(:brickwall) 
+
+    # Visualization
+    if _obs_callback !== nothing
+        _obs_callback(e, mag, ξ, χ)
+    elseif params.ifplot
+        # Standalone call: one-shot lattice plot (no convergence accumulation)
+        obs_path = joinpath(params.folder, "D$(D)", "observable")
+        plot_lattice_obs(e[2], mag[2], params.model.lattice, params.pattern;
+                         save_path=obs_path, save_format=params.plot_format, χ=χ)
+    end
+
+    if params.model.lattice == Honeycomb(:brickwall)
         Wp_value(params.model, A, env, params)
     end
     return e, mag, ξ
@@ -372,4 +383,81 @@ function Wp_value(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOptimi
     Wp2 = o/n
     @show Wp1 Wp2
     return Wp1, Wp2
+end
+
+# ============================================================================
+# f-wave pRVB (Kekulé VBS) order parameter for honeycomb brickwall iPEPS
+# ============================================================================
+# Measures dimerization on hexagonal plaquettes.
+# Hexagon layout (brickwall coordinates, starting at (i,j)):
+#
+#   (i,j)---(i,j+1)---(i,j+2)
+#     |                   |
+#   (ir,j)--(ir,j+1)--(ir,j+2)
+#
+# 6 NN bonds clockwise:
+#   B1: (i,j)-(i,j+1)       horizontal
+#   B2: (i,j+1)-(i,j+2)     horizontal
+#   B3: (i,j+2)-(ir,j+2)    vertical
+#   B4: (ir,j+1)-(ir,j+2)   horizontal
+#   B5: (ir,j)-(ir,j+1)     horizontal
+#   B6: (i,j)-(ir,j)        vertical
+#
+# Kekulé K₁ = {B1, B3, B5},  K₂ = {B2, B4, B6}
+# Δf = avg(K₁) - avg(K₂)
+# ============================================================================
+function fwave_order(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOptimize)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    atype = _arraytype(ACu[1])
+    Ni, Nj = size(ACu)
+    forloop_iter = params.boundary_alg.forloop_iter
+
+    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
+
+    function bond_H(i, j)
+        ir = Ni + 1 - i
+        jr = mod1(j + 1, Nj)
+        e = contract_o2_H(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr], O1, O2; forloop_iter)
+        n = contract_n2_H(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; forloop_iter)
+        return e / n
+    end
+
+    function bond_V(i, j)
+        ir  = mod1(i + 1, Ni)
+        irr = mod1(Ni - i, Ni)
+        e = contract_o2_V(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j], O1, O2; forloop_iter)
+        n = contract_n2_V(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; forloop_iter)
+        return e / n
+    end
+
+    function hexagon_bonds(i, j)
+        j1 = j
+        j2 = mod1(j + 1, Nj)
+        j3 = mod1(j + 2, Nj)
+        ir = mod1(i + 1, Ni)
+        B = zeros(ComplexF64, 6)
+        B[1] = bond_H(i,  j1)   # (i,j)-(i,j+1)
+        B[2] = bond_H(i,  j2)   # (i,j+1)-(i,j+2)
+        B[3] = bond_V(i,  j3)   # (i,j+2)-(ir,j+2)
+        B[4] = bond_H(ir, j2)   # (ir,j+1)-(ir,j+2)
+        B[5] = bond_H(ir, j1)   # (ir,j)-(ir,j+1)
+        B[6] = bond_V(i,  j1)   # (i,j)-(ir,j)
+        return B
+    end
+
+    # Hexagon 1: starting at (1,2)
+    bonds1 = hexagon_bonds(1, 2)
+    Δf1 = (bonds1[1] + bonds1[3] + bonds1[5]) / 3 - (bonds1[2] + bonds1[4] + bonds1[6]) / 3
+
+    # Hexagon 2: starting at (2,1)
+    bonds2 = hexagon_bonds(2, 1)
+    Δf2 = (bonds2[1] + bonds2[3] + bonds2[5]) / 3 - (bonds2[2] + bonds2[4] + bonds2[6]) / 3
+
+    params.verbosity >= 3 && println("f-wave order parameter:")
+    params.verbosity >= 3 && println("  Hexagon 1 bonds: ", real.(bonds1))
+    params.verbosity >= 3 && println("  Hexagon 2 bonds: ", real.(bonds2))
+    params.verbosity >= 3 && println("  Δf1 = $(real(Δf1)),  Δf2 = $(real(Δf2))")
+
+    @show Δf1 Δf2
+    return (Δf1, Δf2), (bonds1, bonds2)
 end
