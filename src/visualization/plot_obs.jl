@@ -115,7 +115,7 @@ function plot_observables(obs_dir::String, lattice_type, pattern::Matrix{Int};
     # Lattice plot for every χ
     for r in logs
         plot_lattice_obs(r.e_dict, r.m_dict, lattice_type, pattern;
-                         save_path=obs_dir, save_format=save_format, χ=r.χ)
+                         save_path=obs_dir, save_format=save_format, χ=r.χ, e_scalar=r.e)
     end
     return nothing
 end
@@ -169,7 +169,8 @@ end
 # ============================================================================
 
 function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
-                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3)
+                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
+                          e_scalar::Real=NaN)
     isdir(save_path) || mkpath(save_path)
 
     Ni, Nj = size(pattern)
@@ -212,7 +213,8 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
     yspan = maximum(all_ys) - minimum(all_ys) + 2.0
     fig_size = max(700, round(Int, max(xspan, yspan) * 110))
     fig = Figure(size=(fig_size, fig_size), fontsize=13, backgroundcolor=:white)
-    ax = Axis(fig[1, 1]; title="Lattice Observables  (χ=$χ)", aspect=DataAspect(),
+    e_str = isnan(e_scalar) ? "" : "  E=$(round(e_scalar; sigdigits=8))"
+    ax = Axis(fig[1, 1]; title="Lattice Observables  (χ=$χ)$e_str", aspect=DataAspect(),
               backgroundcolor=:white)
     hidedecorations!(ax)
     hidespines!(ax)
@@ -285,7 +287,8 @@ end
 # ============================================================================
 
 function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:merge}, pattern::Matrix{Int};
-                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3)
+                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
+                          e_scalar::Real=NaN)
     isdir(save_path) || mkpath(save_path)
     Ni, Nj = size(pattern)
 
@@ -335,7 +338,8 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:merge}, pattern:
     yspan = maximum(all_ys) - minimum(all_ys) + 2.0
     fig_size = max(700, round(Int, max(xspan, yspan) * 110))
     fig = Figure(size=(fig_size, fig_size), fontsize=13, backgroundcolor=:white)
-    ax = Axis(fig[1, 1]; title="Kagome Lattice Observables  (χ=$χ)", aspect=DataAspect(),
+    e_str = isnan(e_scalar) ? "" : "  E=$(round(e_scalar; sigdigits=8))"
+    ax = Axis(fig[1, 1]; title="Kagome Lattice Observables  (χ=$χ)$e_str", aspect=DataAspect(),
               backgroundcolor=:white)
     hidedecorations!(ax)
     hidespines!(ax)
