@@ -407,7 +407,6 @@ where di/dj are unit cell offsets.
 """
 const _KAGOME_BOND_OFFSETS = Dict(
     "bond_12"  => (1, 2, 0, 0),  # intra-cell: site 1 → site 2
-    "bond_13"  => (1, 3, 0, 0),  # intra-cell: site 1 → site 3
     "bond_23"  => (2, 3, 0, 0),  # intra-cell: site 2 → site 3
     "bond_31H" => (3, 1, 0, 1),  # horizontal: site 3@(i,j) → site 1@(i,j+1)
     "bond_32H" => (3, 2, 0, 1),  # horizontal: site 3@(i,j) → site 2@(i,j+1)
@@ -417,7 +416,6 @@ const _KAGOME_BOND_OFFSETS = Dict(
 
 const _KAGOME_BOND_COLORS = Dict(
     "bond_12"  => colorant"#FF6666",   # red
-    "bond_13"  => colorant"#CC66CC",   # magenta
     "bond_23"  => colorant"#66BB66",   # green
     "bond_31H" => colorant"#6666FF",   # blue
     "bond_32H" => colorant"#FF9933",   # orange
@@ -536,7 +534,7 @@ const _BOND_COLORS = Dict(
     "J1_Horizontal" => :royalblue, "J1_Vertical" => :forestgreen,
     "J2_Horizontal" => :orange,
     "Diagonal\\" => :purple, "Diagonal/" => :hotpink,
-    "bond_12" => colorant"#FF6666", "bond_13" => colorant"#CC66CC", "bond_23" => colorant"#66BB66",
+    "bond_12" => colorant"#FF6666", "bond_23" => colorant"#66BB66",
     "bond_31H" => colorant"#6666FF", "bond_32H" => colorant"#FF9933",
     "bond_31V" => colorant"#9966CC", "bond_21V" => colorant"#33CCCC",
 )

@@ -125,7 +125,6 @@ More expensive than energy_value — use only for observation, not optimization.
 
 Returns `e_dict` with keys:
 - `"bond_12_energy"`: intra-cell, site 1 ↔ site 2
-- `"bond_13_energy"`: intra-cell, site 1 ↔ site 3
 - `"bond_23_energy"`: intra-cell, site 2 ↔ site 3
 - `"bond_31H_energy"`: inter-cell horizontal, site 3@(i,j) ↔ site 1@(i,j+1)
 - `"bond_32H_energy"`: inter-cell horizontal, site 3@(i,j) ↔ site 2@(i,j+1)
@@ -150,14 +149,10 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
     h_12 = Jx * reshape((@tensor o[1,2,3,4,5,6] := Sx[1,4] * Sx[2,5] * Id[3,6]), d^3, d^3) +
            Jy * reshape((@tensor o[1,2,3,4,5,6] := Sy[1,4] * Sy[2,5] * Id[3,6]), d^3, d^3) +
            Jz * reshape((@tensor o[1,2,3,4,5,6] := Sz[1,4] * Sz[2,5] * Id[3,6]), d^3, d^3)
-    h_13 = Jx * reshape((@tensor o[1,2,3,4,5,6] := Sx[1,4] * Id[2,5] * Sx[3,6]), d^3, d^3) +
-           Jy * reshape((@tensor o[1,2,3,4,5,6] := Sy[1,4] * Id[2,5] * Sy[3,6]), d^3, d^3) +
-           Jz * reshape((@tensor o[1,2,3,4,5,6] := Sz[1,4] * Id[2,5] * Sz[3,6]), d^3, d^3)
     h_23 = Jx * reshape((@tensor o[1,2,3,4,5,6] := Id[1,4] * Sx[2,5] * Sx[3,6]), d^3, d^3) +
            Jy * reshape((@tensor o[1,2,3,4,5,6] := Id[1,4] * Sy[2,5] * Sy[3,6]), d^3, d^3) +
            Jz * reshape((@tensor o[1,2,3,4,5,6] := Id[1,4] * Sz[2,5] * Sz[3,6]), d^3, d^3)
     h_12 = atype(real(h_12))
-    h_13 = atype(real(h_13))
     h_23 = atype(real(h_23))
 
     # Inter-cell horizontal operators: site 3@left ↔ site 1@right, site 3@left ↔ site 2@right
@@ -182,7 +177,6 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
 
     e_dict = Dict{String, Dict{String, Any}}(
         "bond_12_energy"  => Dict{String, Any}(),
-        "bond_13_energy"  => Dict{String, Any}(),
         "bond_23_energy"  => Dict{String, Any}(),
         "bond_31H_energy" => Dict{String, Any}(),
         "bond_32H_energy" => Dict{String, Any}(),
@@ -201,10 +195,6 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
         e = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_12; ifparallel, forloop_iter)
         e_dict["bond_12_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_12 = $(e/n)")
-
-        e = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_13; ifparallel, forloop_iter)
-        e_dict["bond_13_energy"]["$(i),$(j)"] = e / n
-        params.verbosity >= 4 && println("bond_13 = $(e/n)")
 
         e = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_23; ifparallel, forloop_iter)
         e_dict["bond_23_energy"]["$(i),$(j)"] = e / n
