@@ -304,8 +304,9 @@ const _BOND_COLORS = Dict(
     "Jy" => colorant"#FF8080",
     "Jz" => colorant"#80FF80",
     "J1_Horizontal" => :royalblue, "J1_Vertical" => :forestgreen,
-    "J2_Horizontal" => :orange, "J2_Diagonal1" => :purple, "J2_Diagonal2" => :hotpink,
-    "Diagonal\\" => :gray60, "Diagonal/" => :gray60,
+    "J2_Horizontal" => :orange,
+    "Diagonal1" => :purple, "Diagonal\\" => :purple,     # \ direction
+    "Diagonal2" => :hotpink, "Diagonal/" => :hotpink,    # / direction
 )
 
 function _bond_color(bond_type::String)
@@ -442,15 +443,37 @@ end
 # ============================================================================
 
 """
-Bond offsets for honeycomb brickwall. Returns ((di1,dj1), (di2,dj2)) as raw
-offsets from the anchor site (i,j). Both endpoints are computed as
-(i+di1, j+dj1) and (i+di2, j+dj2) — no mod1, so tiling works correctly.
+    _is_cross_diagonal(bond_type) → Bool
 
-- Vertical/Jy: (0,0)→(1,0)
-- Horizontal/Jx/Jz: (0,0)→(0,1)
-- J2_Horizontal: (0,0)→(0,2)
-- Diagonal1: (0,0)→(1,1)
-- Diagonal2: (0,1)→(1,0) — cross diagonal of 2×2 plaquette
+Detect the / cross-diagonal direction. Matches:
+- "Diagonal/" or "/" (Square convention)
+- "Diagonal2" (Honeycomb J1J2 convention)
+Must be checked BEFORE generic "Diagonal" match.
+"""
+function _is_cross_diagonal(bond_type::String)
+    occursin("/", bond_type) && return true
+    occursin("Diagonal2", bond_type) && return true
+    return false
+end
+
+"""
+    _is_forward_diagonal(bond_type) → Bool
+
+Detect the \\ forward-diagonal direction. Matches:
+- "Diagonal\\" or "\\" (Square convention)
+- "Diagonal1" (Honeycomb J1J2 convention)
+- generic "Diagonal" (fallback)
+"""
+function _is_forward_diagonal(bond_type::String)
+    occursin("\\", bond_type) && return true
+    occursin("Diagonal1", bond_type) && return true
+    occursin("Diagonal", bond_type) && return true   # generic fallback
+    return false
+end
+
+"""
+Bond offsets for honeycomb brickwall.
+Returns ((di1,dj1), (di2,dj2)) as raw offsets from the anchor site (i,j).
 """
 function _bond_offsets_honeycomb(bond_type::String)
     if occursin("Vertical", bond_type) || occursin("Jy", bond_type)
@@ -459,35 +482,27 @@ function _bond_offsets_honeycomb(bond_type::String)
         return (0, 0), (0, 2)
     elseif occursin("Horizontal", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
         return (0, 0), (0, 1)
-    elseif occursin("Diagonal1", bond_type)
-        return (0, 0), (1, 1)
-    elseif occursin("Diagonal2", bond_type)
-        return (0, 1), (1, 0)
+    elseif _is_cross_diagonal(bond_type)
+        return (0, 1), (1, 0)    # / direction
+    elseif _is_forward_diagonal(bond_type)
+        return (0, 0), (1, 1)    # \ direction
     else
         return (0, 0), (0, 1)
     end
 end
 
 """
-Bond offsets for Square lattice.
-Square J1J2 uses `\\` and `/` in bond names:
-- `J2_Diagonal\\_energy`: `\\` = (i,j)→(i+1,j+1) right-down
-- `J2_Diagonal/_energy`:  `/`  = (i,j+1)→(i+1,j) left-down (cross-diagonal)
+Bond offsets for Square lattice. Same diagonal logic as Honeycomb.
 """
 function _bond_offsets_square(bond_type::String)
     if occursin("Vertical", bond_type) || occursin("vertical", bond_type)
         return (0, 0), (1, 0)
     elseif occursin("Horizontal", bond_type) || occursin("horizontal", bond_type)
         return (0, 0), (0, 1)
-    elseif occursin("/", bond_type)
-        # / diagonal: (i,j+1) → (i+1,j)
-        return (0, 1), (1, 0)
-    elseif occursin("Diagonal2", bond_type)
-        # Fallback for Diagonal2 naming convention
-        return (0, 1), (1, 0)
-    elseif occursin("\\", bond_type) || occursin("Diagonal", bond_type)
-        # \ diagonal or generic: (i,j) → (i+1,j+1)
-        return (0, 0), (1, 1)
+    elseif _is_cross_diagonal(bond_type)
+        return (0, 1), (1, 0)    # / direction
+    elseif _is_forward_diagonal(bond_type)
+        return (0, 0), (1, 1)    # \ direction
     else
         return (0, 0), (0, 1)
     end
