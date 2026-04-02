@@ -524,8 +524,8 @@ function _kagome_site_xy(i, j, k)
     else  # k == 3
         rx, ry = cx + 1.5, cy - sqrt(3) / 2
     end
-    # Rotate 90° CCW: (x, y) → (-y, x)
-    return (-ry, rx)
+    # Rotate 90° CCW then flip vertically: (x, y) → (-y, -x)
+    return (-ry, -rx)
 end
 
 function _site_xy(::Square, i, j)
