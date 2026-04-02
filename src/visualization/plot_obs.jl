@@ -105,7 +105,7 @@ plot for the latest χ. Called automatically by observable()/optimise_ipeps()
 when `params.ifplot == true`.
 """
 function plot_observables(obs_dir::String, lattice_type, pattern::Matrix{Int};
-                          save_format::String="png")
+                          save_format::String="png", S::Real=0.5)
     logs = read_all_obs_logs(obs_dir)
     isempty(logs) && return nothing
 
@@ -116,7 +116,7 @@ function plot_observables(obs_dir::String, lattice_type, pattern::Matrix{Int};
     for r in logs
         plot_lattice_obs(r.e_dict, r.m_dict, lattice_type, pattern;
                          save_path=obs_dir, save_format=save_format, χ=r.χ,
-                         e_scalar=r.e, mag_scalar=r.mag, ξ_scalar=r.ξ)
+                         e_scalar=r.e, mag_scalar=r.mag, ξ_scalar=r.ξ, S=S)
     end
     return nothing
 end
@@ -171,7 +171,7 @@ end
 
 function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
                           save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
-                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN)
+                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN, S::Real=0.5)
     isdir(save_path) || mkpath(save_path)
 
     Ni, Nj = size(pattern)
@@ -238,8 +238,8 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
     end
 
     # Magnetization arrows on every site
-    mag_max_val = maximum(abs(real(all_mdata[k]["|M|"])) for k in keys(all_coords))
-    arrow_scale = mag_max_val > 1e-10 ? 0.45 / mag_max_val : 0.0
+    # Arrow length = |M|/S * 0.45, so full polarization (|M|=S) gives half a lattice spacing
+    arrow_scale = S > 1e-10 ? 0.45 / S : 0.0
     for (k, (x, y)) in all_coords
         mdata = all_mdata[k]
         amx = real(mdata["Mx"]) * arrow_scale
@@ -292,7 +292,7 @@ end
 
 function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:merge}, pattern::Matrix{Int};
                           save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
-                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN)
+                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN, S::Real=0.5)
     isdir(save_path) || mkpath(save_path)
     Ni, Nj = size(pattern)
 
@@ -363,9 +363,8 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:merge}, pattern:
                  strokecolor=(:gray40, alpha))
     end
 
-    # Magnetization arrows on every site
-    mag_max_val = maximum(abs(real(all_mdata[k]["|M|"])) for k in keys(all_coords))
-    arrow_scale = mag_max_val > 1e-10 ? 0.35 / mag_max_val : 0.0
+    # Magnetization arrows: length = |M|/S * 0.35
+    arrow_scale = S > 1e-10 ? 0.35 / S : 0.0
     for (k, (x, y)) in all_coords
         mdata = all_mdata[k]
         amx = real(mdata["Mx"]) * arrow_scale

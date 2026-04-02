@@ -49,11 +49,12 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     if params.ifplot
         obs_path = joinpath(params.folder, "D$(D)", "observable")
         plot_observables(obs_path, params.model.lattice, params.pattern;
-                         save_format=params.plot_format)
+                         save_format=params.plot_format, S=params.model.S)
     end
 
     if params.model.lattice == Honeycomb(:brickwall)
         Wp_value(params.model, A, env, params)
+        # fwave_order(params.model, A, env, params)
     end
     return e, mag, ξ
 end
@@ -412,25 +413,26 @@ end
 # ============================================================================
 function fwave_order(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    @unpack forloop_iter = params
+    @unpack ifparallel, forloop_iter = params.boundary_alg
     atype = _arraytype(ACu[1])
     Ni, Nj = size(ACu)
-    forloop_iter = params.boundary_alg.forloop_iter
 
     O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
 
     function bond_H(i, j)
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        e = contract_o2_H(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr], O1, O2; forloop_iter)
-        n = contract_n2_H(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; forloop_iter)
+        e = contract_o_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; ifparallel, forloop_iter)
         return e / n
     end
 
     function bond_V(i, j)
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
-        e = contract_o2_V(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j], O1, O2; forloop_iter)
-        n = contract_n2_V(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; forloop_iter)
+        e = contract_o_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; ifparallel, forloop_iter)
         return e / n
     end
 
@@ -449,8 +451,8 @@ function fwave_order(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOpt
         return B
     end
 
-    # Hexagon 1: starting at (1,2)
-    bonds1 = hexagon_bonds(1, 2)
+    # Hexagon 1: starting at (1,4)
+    bonds1 = hexagon_bonds(1, 4)
     Δf1 = (bonds1[1] + bonds1[3] + bonds1[5]) / 3 - (bonds1[2] + bonds1[4] + bonds1[6]) / 3
 
     # Hexagon 2: starting at (2,1)
