@@ -54,7 +54,7 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
 
     if params.model.lattice == Honeycomb(:brickwall)
         Wp_value(params.model, A, env, params)
-        # fwave_order(params.model, A, env, params)
+        fwave_order(params.model, A, env, params)
     end
     return e, mag, ξ
 end
@@ -391,79 +391,90 @@ function Wp_value(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOptimi
 end
 
 # ============================================================================
-# f-wave pRVB (Kekulé VBS) order parameter for honeycomb brickwall iPEPS
+# f-wave pRVB order parameter via ring exchange ⟨K₆⟩ = ⟨C₆ + C₆⁻¹⟩
 # ============================================================================
-# Measures dimerization on hexagonal plaquettes.
-# Hexagon layout (brickwall coordinates, starting at (i,j)):
+# K₆ is the ring exchange operator on a hexagonal plaquette.
+# The f-wave pRVB state is an eigenstate of K₆.
+# ⟨K₆⟩ ≠ 0 indicates ring-exchange coherence (f-wave character).
 #
-#   (i,j)---(i,j+1)---(i,j+2)
-#     |                   |
-#   (ir,j)--(ir,j+1)--(ir,j+2)
+# Grid layout (2×3 plaquette, sites 1-6):
 #
-# 6 NN bonds clockwise:
-#   B1: (i,j)-(i,j+1)       horizontal
-#   B2: (i,j+1)-(i,j+2)     horizontal
-#   B3: (i,j+2)-(ir,j+2)    vertical
-#   B4: (ir,j+1)-(ir,j+2)   horizontal
-#   B5: (ir,j)-(ir,j+1)     horizontal
-#   B6: (i,j)-(ir,j)        vertical
+#   site1---site2---site3     (top row: A[i,j], A[i,jr], A[i,jrr])
+#     |                 |
+#   site4---site5---site6     (bottom row: A[ir,j], A[ir,jr], A[ir,jrr])
 #
-# Kekulé K₁ = {B1, B3, B5},  K₂ = {B2, B4, B6}
-# Δf = avg(K₁) - avg(K₂)
+# Hexagonal ring (clockwise): 1 → 2 → 3 → 6 → 5 → 4 → 1
+#
+# C₆ shifts spins one step along the ring:
+#   grid source = [2, 3, 6, 1, 4, 5]
+#   i.e. site 1 ← site 2, site 2 ← site 3, site 3 ← site 6, etc.
+#
+# Decomposition: C₆ = Σ_{s} ⊗ₖ |s[source[k]]⟩⟨s[k]|  (64 terms)
+# ⟨K₆⟩ = 2 Re(⟨C₆⟩)
 # ============================================================================
 function fwave_order(model::HamiltonianModel, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
-    @unpack forloop_iter = params
-    @unpack ifparallel, forloop_iter = params.boundary_alg
+    @unpack ifparallel = params.boundary_alg
+    @unpack forloop_iter = params.boundary_alg
     atype = _arraytype(ACu[1])
     Ni, Nj = size(ACu)
 
-    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
+    # Projector basis: proj[a,b] = |a⟩⟨b|  (a,b ∈ {1,2}, 1=↑, 2=↓)
+    proj = Zygote.@ignore [atype(Float64[(i == a) * (j == b) for i in 1:2, j in 1:2])
+                           for a in 1:2, b in 1:2]
 
-    function bond_H(i, j)
-        ir = Ni + 1 - i
-        jr = mod1(j + 1, Nj)
-        e = contract_o_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; ifparallel, forloop_iter)
-        return e / n
-    end
+    # C₆ source mapping in grid indices (hexagonal ring clockwise)
+    c6_src = [2, 3, 6, 1, 4, 5]
 
-    function bond_V(i, j)
+    function compute_K6(i, j)
         ir  = mod1(i + 1, Ni)
-        irr = mod1(Ni - i, Ni)
-        e = contract_o_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j], O1, O2; ifparallel, forloop_iter)
-        n = contract_n_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; ifparallel, forloop_iter)
-        return e / n
+        id  = mod1(Ni - i, Ni)
+        jr  = mod1(j + 1, Nj)
+        jrr = mod1(j + 2, Nj)
+
+        n = contract_n_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j],
+                          FRu[i,jrr], FRo[ir,jrr],
+                          ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr],
+                          A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr];
+                          ifparallel, forloop_iter)
+
+        # Sum over 2⁶ = 64 spin configurations for ⟨C₆⟩
+        C6_val = ComplexF64(0)
+        for idx in 0:63
+            s1 = (idx       & 1) + 1
+            s2 = ((idx >> 1) & 1) + 1
+            s3 = ((idx >> 2) & 1) + 1
+            s4 = ((idx >> 3) & 1) + 1
+            s5 = ((idx >> 4) & 1) + 1
+            s6 = ((idx >> 5) & 1) + 1
+            s = (s1, s2, s3, s4, s5, s6)
+
+            # Operator at grid site k: |s[c6_src[k]]⟩⟨s[k]|
+            o = contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j],
+                              FRu[i,jrr], FRo[ir,jrr],
+                              ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr],
+                              A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr],
+                              proj[s[c6_src[1]], s[1]],
+                              proj[s[c6_src[2]], s[2]],
+                              proj[s[c6_src[3]], s[3]],
+                              proj[s[c6_src[4]], s[4]],
+                              proj[s[c6_src[5]], s[5]],
+                              proj[s[c6_src[6]], s[6]];
+                              ifparallel, forloop_iter)
+            C6_val += o
+        end
+
+        return 2 * real(C6_val / n)
     end
 
-    function hexagon_bonds(i, j)
-        j1 = j
-        j2 = mod1(j + 1, Nj)
-        j3 = mod1(j + 2, Nj)
-        ir = mod1(i + 1, Ni)
-        B = zeros(ComplexF64, 6)
-        B[1] = bond_H(i,  j1)   # (i,j)-(i,j+1)
-        B[2] = bond_H(i,  j2)   # (i,j+1)-(i,j+2)
-        B[3] = bond_V(i,  j3)   # (i,j+2)-(ir,j+2)
-        B[4] = bond_H(ir, j2)   # (ir,j+1)-(ir,j+2)
-        B[5] = bond_H(ir, j1)   # (ir,j)-(ir,j+1)
-        B[6] = bond_V(i,  j1)   # (i,j)-(ir,j)
-        return B
-    end
+    # Two inequivalent hexagonal plaquettes
+    K6_1 = compute_K6(1, mod1(4, Nj))
+    K6_2 = compute_K6(2, 1)
 
-    # Hexagon 1: starting at (1,4)
-    bonds1 = hexagon_bonds(1, 4)
-    Δf1 = (bonds1[1] + bonds1[3] + bonds1[5]) / 3 - (bonds1[2] + bonds1[4] + bonds1[6]) / 3
+    params.verbosity >= 3 && println("f-wave ring exchange ⟨K₆⟩:")
+    params.verbosity >= 3 && println("  Hexagon (1,4): K₆ = $(K6_1)")
+    params.verbosity >= 3 && println("  Hexagon (2,1): K₆ = $(K6_2)")
 
-    # Hexagon 2: starting at (2,1)
-    bonds2 = hexagon_bonds(2, 1)
-    Δf2 = (bonds2[1] + bonds2[3] + bonds2[5]) / 3 - (bonds2[2] + bonds2[4] + bonds2[6]) / 3
-
-    params.verbosity >= 3 && println("f-wave order parameter:")
-    params.verbosity >= 3 && println("  Hexagon 1 bonds: ", real.(bonds1))
-    params.verbosity >= 3 && println("  Hexagon 2 bonds: ", real.(bonds2))
-    params.verbosity >= 3 && println("  Δf1 = $(real(Δf1)),  Δf2 = $(real(Δf2))")
-
-    @show Δf1 Δf2
-    return (Δf1, Δf2), (bonds1, bonds2)
+    @show K6_1 K6_2
+    return K6_1, K6_2
 end

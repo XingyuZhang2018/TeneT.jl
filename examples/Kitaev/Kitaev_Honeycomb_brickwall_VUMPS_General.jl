@@ -9,7 +9,7 @@ Random.seed!(seed)
 atype = Array
 etype = ComplexF64
 # etype = Float64
-D, χ, χshift, maxiter_restart = 2, 16, 1, 3
+D, χ, χshift, maxiter_restart = 2, 20, 1, 10
 # pattern = [1 2;
 #            2 1]
 # pattern = [1 3;
@@ -17,9 +17,9 @@ D, χ, χshift, maxiter_restart = 2, 16, 1, 3
 pattern = [1 3 5 2 4 6;
            2 4 6 1 3 5]
 model = Kitaev(lattice=Honeycomb(:brickwall), 
-               S=0.5, Jx=1.0, Jy=1.0, Jz=1.0, 
-               couplingtype=:plaquette, bondratio=0.5)
-No = 0
+               S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0, 
+               couplingtype=:plaquette, bondratio=1.0)
+No = 3
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
                                ifdownfromup=false,
@@ -62,21 +62,21 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 
 function restriction_ipeps(A)
    # A /= norm(A)
-   A = local_min_norm(A, params)
-   # B = Zygote.Buffer(A)
-   # for i in 1:length(A)
-   #     if i in [1,6]
-   #         B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
-   #     elseif i in [2,5]
-   #         B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
-   #     elseif i in [3,4]
-   #         B[:,:,:,:,:,i] = A[:,:,:,:,:,3]
-   #     end
-   # end
-   # B = copy(B)
+   # A = local_min_norm(A, params)
+   B = Zygote.Buffer(A)
+   for i in 1:length(A)
+       if i in [1,6]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
+       elseif i in [2,5]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
+       elseif i in [3,4]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,3]
+       end
+   end
+   B = copy(B)
    # return B/norm(B)
    return A
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
+optimise_ipeps(A, 16, χshift, params; restriction_ipeps);
 # observable(A, χ, params; restriction_ipeps)

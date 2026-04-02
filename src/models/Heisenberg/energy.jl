@@ -117,6 +117,48 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
     return etol*2, e_dict
 end
 
+function energy_value(model::Heisenberg{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+
+    atype = _arraytype(ACu[1])
+    Ni, Nj = size(ACu)
+    len = length(ACu.data)
+
+    e_dict = Dict{String, Dict{String, Any}}(
+        "bond_J1H_energy" => Dict{String, Any}(),
+        "bond_J1V_energy"   => Dict{String, Any}(),
+    )
+    etol = 0.0
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), ACu.pattern))
+        O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
+        
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        if (i + j) % 2 != 0
+            ir  = mod1(i + 1, Ni)
+            irr = mod1(Ni - i, Ni) 
+            e = contract_o_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j], O1, O2; ifparallel, forloop_iter)
+            n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
+            params.verbosity >= 4 && println("bond_J1V = $(e/n)")
+            etol += e/n
+            e_dict["bond_J1V_energy"]["$(i),$(j)"] =  e/n
+        end
+
+        ir = Ni + 1 - i
+        jr = mod1(j + 1, Nj)
+        e = contract_o_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J1H = $(e/n)")
+        etol += e/n
+        e_dict["bond_J1H_energy"]["$(i),$(j)"] = e/n
+    end
+
+    params.verbosity >= 3 && println("energy per site = $(etol/len)")
+    return etol/len, e_dict
+end
+
 """
     energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env, params)
 

@@ -86,6 +86,8 @@ include("models/Kitaev/order_init.jl")
 include("models/J1J2/hamiltonian.jl")
 include("models/J1J2/order_init.jl")
 include("models/J1J2/energy.jl")
+include("models/FWavePRVB/hamiltonian.jl")
+include("models/FWavePRVB/energy.jl")
 
 # ============================================================================
 # Automatic differentiation rules

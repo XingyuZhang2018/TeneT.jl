@@ -238,8 +238,8 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
     end
 
     # Magnetization arrows on every site
-    # Arrow length = |M|/S * 0.45, so full polarization (|M|=S) gives half a lattice spacing
-    arrow_scale = S > 1e-10 ? 0.45 / S : 0.0
+    # Arrow length = |M|/S * 0.6, so full polarization (|M|=S) gives half a lattice spacing
+    arrow_scale = S > 1e-10 ? 0.6 / S : 0.0
     for (k, (x, y)) in all_coords
         mdata = all_mdata[k]
         amx = real(mdata["Mx"]) * arrow_scale
