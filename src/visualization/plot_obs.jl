@@ -564,11 +564,13 @@ end
 
 function _bond_linewidth(eval, e_min, e_max)
     ae = abs(real(eval))
-    if e_max ≈ e_min
+    # Scale linewidth proportional to absolute value (not min-max normalized)
+    # so bonds with similar energy get similar thickness
+    if e_max < 1e-12
         return 14.0
     end
-    t = (ae - e_min) / (e_max - e_min)
-    return 5.0 + t * 18.0
+    t = ae / e_max   # 0 to 1 based on absolute magnitude
+    return 3.0 + t * 18.0
 end
 
 function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall}, all_coords, all_mdata,
