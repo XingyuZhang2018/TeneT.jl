@@ -92,6 +92,7 @@ include("models/J1J2/energy.jl")
 include("clifford/group.jl")
 include("clifford/transform.jl")
 include("clifford/entanglement.jl")
+include("clifford/optimize.jl")
 
 # ============================================================================
 # Automatic differentiation rules

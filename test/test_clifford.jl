@@ -193,3 +193,39 @@ end
     end
 
 end
+
+@testset "Clifford optimizer" begin
+    @testset "Kitaev model optimization runs" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=2, verbosity=0)
+        @test haskey(result, :h_transformed)
+        @test haskey(result, :circuit)
+        @test haskey(result, :entanglement_history)
+        h_t = result[:h_transformed]
+        @test length(h_t) == 3
+        for h in h_t
+            @test size(h) == (2, 2, 2, 2)
+        end
+    end
+
+    @testset "Optimization does not increase entanglement" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=5, verbosity=0)
+        hist = result[:entanglement_history]
+        for i in 2:length(hist)
+            @test hist[i] <= hist[i-1] + 1e-10
+        end
+    end
+
+    @testset "Eigenvalues preserved after optimization" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        h_orig = hamiltonian(model)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=3, verbosity=0)
+        h_t = result[:h_transformed]
+        for (ho, ht) in zip(h_orig, h_t)
+            eig_o = sort(real.(eigvals(TeneT._tensor_to_mat(ComplexF64.(ho)))))
+            eig_t = sort(real.(eigvals(TeneT._tensor_to_mat(ComplexF64.(ht)))))
+            @test eig_o ≈ eig_t atol=1e-10
+        end
+    end
+end

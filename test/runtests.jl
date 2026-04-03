@@ -54,6 +54,7 @@ using TeneT: GradientOptimize, SUOptimize, FUOptimize
 using TeneT: generate_clifford_group, clifford_H, clifford_S, clifford_CNOT, pauli_basis_matrices
 using TeneT: pauli_decompose, pauli_compose, transform_bond_hamiltonian
 using TeneT: bond_entanglement_entropy, total_bond_entanglement
+using TeneT: optimize_clifford, hamiltonian
 using TeneT: const_Sx, const_Sy, const_Sz
 
 # ---------- Array type setup ----------
