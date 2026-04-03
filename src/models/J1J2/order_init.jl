@@ -71,10 +71,10 @@ function enlarge_coupling(model::J1J2{Honeycomb{:brickwall}}, ::Val{:plaquette},
     @unpack J1, bondratio = model
     J1h = J1v = J1
     if (i,j) in [(1,2),(2,5)]
-        J1v = J1 * params.bondratio
+        J1v = J1 * bondratio
     end
     if (i,j) in [(1,6),(2,3),(1,3),(2,6)]
-        J1h = J1 * params.bondratio
+        J1h = J1 * bondratio
     end
 
     return J1h, J1v

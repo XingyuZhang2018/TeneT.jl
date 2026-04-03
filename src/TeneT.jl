@@ -19,6 +19,8 @@ using JLD2, FileIO
 
 using MPI
 
+using CairoMakie
+
 using Base.Threads
 CUDA.allowscalar(false)
 
@@ -85,6 +87,8 @@ include("models/Kitaev/transformed.jl")
 include("models/J1J2/hamiltonian.jl")
 include("models/J1J2/order_init.jl")
 include("models/J1J2/energy.jl")
+include("models/FWavePRVB/hamiltonian.jl")
+include("models/FWavePRVB/energy.jl")
 
 # ============================================================================
 # Clifford circuits for CAPEPS
@@ -113,6 +117,7 @@ include("ipeps_optimize/restriction.jl")
 include("ipeps_optimize/precondition.jl")
 include("ipeps_optimize/su_parameterization.jl")
 include("ipeps_optimize/observable.jl")
+include("visualization/plot_obs.jl")
 include("ipeps_optimize/optimize.jl")
 
 # ============================================================================

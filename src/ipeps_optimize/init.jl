@@ -100,13 +100,17 @@ tensor, filling the new entries with a small random perturbation of magnitude
 function init_ipeps_perturbation(; atype=Array, No, D::Int, D_new::Int, χ::Int, ϵ=1e-1, params::iPEPSOptimize)
     file = joinpath(params.folder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
     A = load(file, "bcipeps")
-    D_old, d = size(A)[[1, 5]]
     params.verbosity >= 2 && @info "load ipeps from $file"
 
+    # Preserve the original tensor shape per bond dimension
+    # (e.g. Honeycomb brickwall has shape (D,1,D,D,d,N) — dim 2 stays 1)
+    old_dims = size(A)[1:4]
+    d = size(A, 5)
     Nsites = length(unique(params.pattern))
-    A_new = (rand(eltype(A), D_new, D_new, D_new, D_new, d, Nsites) .- 0.5) * norm(A) * ϵ
+    new_dims = ntuple(k -> old_dims[k] == 1 ? 1 : D_new, 4)
+    A_new = (rand(eltype(A), new_dims..., d, Nsites) .- 0.5) * norm(A) * ϵ
     for i in 1:Nsites
-        A_new[1:D_old, 1:D_old, 1:D_old, 1:D_old, :, i] = A[:,:,:,:,:,i]
+        A_new[ntuple(k -> 1:old_dims[k], 4)..., :, i] = A[:,:,:,:,:,i]
     end
     params.verbosity >= 2 && @info "perturbed iPEPS to D=$D_new, size=$(size(A_new))"
     return atype(A_new)

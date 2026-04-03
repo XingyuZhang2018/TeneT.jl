@@ -9,10 +9,13 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = ComplexF64
-D, χ, χshift = 2, 16, 0
+D, χ, χshift,maxiter_restart = 2, 16, 1, 10
 pattern = [1 3;
            2 4]
-model = Heisenberg(Square(), 0.5,-1.0,-1.0,1.0, true)
+model = Heisenberg(lattice=Square(),
+                   S=0.5, Jx=-1.0, Jy=-1.0, Jz=1.0,
+                   ifrotate=true,
+                   couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/seed$seed/")
 boundary_alg = VUMPS{:Plaquette}(ifsimple_eig=true,
@@ -33,10 +36,10 @@ boundary_alg = VUMPS{:Plaquette}(ifsimple_eig=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
-                          maxiter_restart=1,
+                          maxiter_restart=maxiter_restart,
                           verbosity=4, 
                           folder=folder,
                           ifSU=false,
@@ -49,7 +52,7 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, d=2, D, χ, params)
+A = init_ipeps(;atype, etype, No,  D, χ, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 

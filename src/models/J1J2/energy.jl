@@ -9,10 +9,10 @@ function energy_value(model::J1J2{Square}, A, env::VUMPSEnv, params::iPEPSOptimi
     etol = 0
     len = length(A)
     e_dict = Dict{String, Dict{String, Any}}(
-        "J1_Horizontal_energy" => Dict{String, Any}(),
-        "J1_Vertical_energy"   => Dict{String, Any}(),
-        "J2_Diagonal\\_energy"  => Dict{String, Any}(),
-        "J2_Diagonal/_energy"  => Dict{String, Any}()
+        "bond_J1H_energy" => Dict{String, Any}(),
+        "bond_J1V_energy"   => Dict{String, Any}(),
+        "bond_J2\\_energy"  => Dict{String, Any}(),
+        "bond_J2/_energy"  => Dict{String, Any}()
     )
     for p in 1:len
         i, j = Tuple(findfirst(==(p), A.pattern))
@@ -22,19 +22,19 @@ function energy_value(model::J1J2{Square}, A, env::VUMPSEnv, params::iPEPSOptimi
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        e = contract_o2_H(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n2_H(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J1_Horizontal_energy = $(J1h * e/n)")
+        e = contract_o_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_12(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
-        e_dict["J1_Horizontal_energy"]["$(i),$(j)"] = J1h * e/n
+        e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
 
         ir  =  mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni) 
-        e = contract_o2_V(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j], O1, O2; ifparallel, forloop_iter)
-        n = contract_n2_V(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J1_Vertical_energy = $(J1v * e/n)")
+        e = contract_o_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_21(ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
         etol += J1v * e/n
-        e_dict["J1_Vertical_energy"]["$(i),$(j)"] = J1v * e/n
+        e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
 
         if model.ifrotate
             model.ifrotate = false
@@ -44,14 +44,14 @@ function energy_value(model::J1J2{Square}, A, env::VUMPSEnv, params::iPEPSOptimi
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
         jr = mod1(j + 1, Nj)
-        e1 = contract_o_D1(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
-        e2 = contract_o_D2(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n_D(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J2_Diagonal\\_energy = $(J2 * e1/n)")
-        params.verbosity >= 4 && println("J2_Diagonal/_energy = $(J2 * e2/n)")
+        e1 = contract_o_22_1(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
+        e2 = contract_o_22_2(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_22(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e1/n)")
+        params.verbosity >= 4 && println("bond_J2/ = $(J2 * e2/n)")
         etol += J2 * (e1/n + e2/n)
-        e_dict["J2_Diagonal\\_energy"]["$(i),$(j)"] = J2 * e1/n
-        e_dict["J2_Diagonal/_energy"]["$(i),$(j)"] = J2 * e2/n
+        e_dict["bond_J2\\_energy"]["$(i),$(j)"] = J2 * e1/n
+        e_dict["bond_J2/_energy"]["$(i),$(j)"] = J2 * e2/n
     end
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
@@ -73,9 +73,9 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
     @unpack ifparallel = params.boundary_alg
     len = length(A)
     e_dict = Dict{String, Dict{String, Any}}(
-        "J1_Horizontal_energy" => Dict{String, Any}(),
-        "J1_Vertical_energy"   => Dict{String, Any}(),
-        "J2_Diagonal\\_energy" => Dict{String, Any}()
+        "bond_J1H_energy" => Dict{String, Any}(),
+        "bond_J1V_energy"   => Dict{String, Any}(),
+        "bond_J2\\_energy" => Dict{String, Any}()
     )
     for p in 1:len
         i, j = Tuple(findfirst(==(p), A.pattern))
@@ -86,28 +86,28 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
         O1, O2 = atype.(hamiltonian_trunc(model))
 
         params.verbosity >= 4 && println("===========$i,$j===========")
-        e = contract_o2_H(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n2_H(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J1_Horizontal_energy = $(J1h * e/n)")
+        e = contract_o_12(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_12(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
-        e_dict["J1_Horizontal_energy"]["$(i),$(j)"] = J1h * e/n
+        e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
 
-        e = contract_o2_V(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j], O1, O2; ifparallel, forloop_iter)
-        n = contract_n2_V(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J1_Vertical_energy = $(J1v * e/n)")
+        e = contract_o_21(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_21(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
         etol += J1v * e/n
-        e_dict["J1_Vertical_energy"]["$(i),$(j)"] = J1v * e/n
+        e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
 
         if model.ifrotate
             model.ifrotate = false
             O1, O2 = atype.(hamiltonian_trunc(model))
             model.ifrotate = true
         end
-        e = contract_o_D1(FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n_D(FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J2_Diagonal\\_energy = $(J2 * e/n)")
+        e = contract_o_22_1(FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_22(FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e/n)")
         etol += J2 * e/n * 2 # factor of 2 for the two diagonals in the plaquette
-        e_dict["J2_Diagonal\\_energy"]["$(i),$(j)"] = J2 * e/n
+        e_dict["bond_J2\\_energy"]["$(i),$(j)"] = J2 * e/n
     end
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
@@ -121,8 +121,8 @@ function energy_value(model::J1J2{Square}, A, env::C4vVUMPSEnv, params::iPEPSOpt
     @unpack ifparallel, forloop_iter = params.boundary_alg
     @unpack J1, J2 = model
     e_dict = Dict{String, Dict{String, Any}}(
-        "J1_Horizontal_energy" => Dict{String, Any}(),
-        "J2_Diagonal\\_energy"  => Dict{String, Any}(),
+        "bond_J1H_energy" => Dict{String, Any}(),
+        "bond_J2\\_energy"  => Dict{String, Any}(),
     )
     etol = 0.0
 
@@ -131,22 +131,22 @@ function energy_value(model::J1J2{Square}, A, env::C4vVUMPSEnv, params::iPEPSOpt
     O1, O2 = atype.(hamiltonian_trunc(model))
     AC = ALCtoAC_map(AL,C)
 
-    e = contract_o2_H(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC), O1, O2; ifparallel, forloop_iter)
-    n = contract_n2_H(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC); ifparallel, forloop_iter)
-    params.verbosity >= 4 && println("J1_Horizontal energy = $(J1 * e/n)")
+    e = contract_o_12(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC), O1, O2; ifparallel, forloop_iter)
+    n = contract_n_12(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC); ifparallel, forloop_iter)
+    params.verbosity >= 4 && println("bond_J1H = $(J1 * e/n)")
     etol += J1 * e/n
-    e_dict["J1_Horizontal_energy"]["1,1"] = J1 * e/n
+    e_dict["bond_J1H_energy"]["1,1"] = J1 * e/n
 
     if model.ifrotate
         model.ifrotate = false
         O1, O2 = atype.(hamiltonian_trunc(model))
         model.ifrotate = true
     end
-    e = contract_o_D1(FL, FL, AL, conj(AL), FL, FL, AC, conj(AC), A1, A1, A1, A1, O1, O2; ifparallel, forloop_iter)
-    n = contract_n_D(FL, FL, AL, conj(AL), FL, FL, AC, conj(AC), A1, A1, A1, A1; ifparallel, forloop_iter)
-    params.verbosity >= 4 && println("J2_Diagonal\\_energy= $(J2 * e/n)")
+    e = contract_o_22_1(FL, FL, AL, conj(AL), FL, FL, AC, conj(AC), A1, A1, A1, A1, O1, O2; ifparallel, forloop_iter)
+    n = contract_n_22(FL, FL, AL, conj(AL), FL, FL, AC, conj(AC), A1, A1, A1, A1; ifparallel, forloop_iter)
+    params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e/n)")
     etol += J2 * e/n
-    e_dict["J2_Diagonal\\_energy"]["1,1"] = J2 * e/n
+    e_dict["bond_J2\\_energy"]["1,1"] = J2 * e/n
 
     params.verbosity >= 3 && println("energy = $(etol*2)")
     return etol*2, e_dict
@@ -160,8 +160,8 @@ function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize
     @unpack J1, J2 = model
     etol = 0.0
     e_dict = Dict{String, Dict{String, Any}}(
-        "J1_Horizontal_energy" => Dict{String, Any}(),
-        "J2_Diagonal\\_energy" => Dict{String, Any}(),
+        "bond_J1H_energy" => Dict{String, Any}(),
+        "bond_J2\\_energy" => Dict{String, Any}(),
     )
     
     A1 = A[1]
@@ -169,11 +169,11 @@ function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize
     O1, O2 = atype.(hamiltonian_trunc(model))
 
     To = CTCtoT(C, T)
-    e = contract_o2_H(To, T, A1, T, To, T, A1, T, O1, O2; ifparallel, forloop_iter)
-    n = contract_n2_H(To, T, A1, T, To, T, A1, T; ifparallel, forloop_iter)
-    params.verbosity >= 4 && println("J1_Horizontal_energy = $(J1 * e/n)")
+    e = contract_o_12(To, T, A1, T, To, T, A1, T, O1, O2; ifparallel, forloop_iter)
+    n = contract_n_12(To, T, A1, T, To, T, A1, T; ifparallel, forloop_iter)
+    params.verbosity >= 4 && println("bond_J1H = $(J1 * e/n)")
     etol += J1 * e/n
-    e_dict["J1_Horizontal_energy"]["1,1"] = J1 * e/n
+    e_dict["bond_J1H_energy"]["1,1"] = J1 * e/n
 
     if model.ifrotate
         model.ifrotate = false
@@ -182,11 +182,11 @@ function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize
     end
     @tensor Tu[1,3,4,5] := C[1,2] * T[2,3,4,5] 
     @tensor Td[1,2,3,5] := T[1,2,3,4] * C[4,5]
-    e = contract_o_D1(Tu, Td, T, conj(T), Tu, Td, T, conj(T), A1, A1, A1, A1, O1, O2; ifparallel, forloop_iter)
-    n = contract_n_D(Tu, Td, T, conj(T), Tu, Td, T, conj(T), A1, A1, A1, A1; ifparallel, forloop_iter)
-    params.verbosity >= 4 && println("J2_Diagonal\\_energy= $(J2 * e/n)")
+    e = contract_o_22_1(Tu, Td, T, conj(T), Tu, Td, T, conj(T), A1, A1, A1, A1, O1, O2; ifparallel, forloop_iter)
+    n = contract_n_22(Tu, Td, T, conj(T), Tu, Td, T, conj(T), A1, A1, A1, A1; ifparallel, forloop_iter)
+    params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e/n)")
     etol += J2 * e/n
-    e_dict["J2_Diagonal\\_energy"]["1,1"] = J2 * e/n
+    e_dict["bond_J2\\_energy"]["1,1"] = J2 * e/n
 
     params.verbosity >= 3 && println("energy = $(etol*2)")
     return etol*2, e_dict
@@ -203,11 +203,11 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
     len = length(ACu.data)
 
     e_dict = Dict{String, Dict{String, Any}}(
-        "J1_Horizontal_energy" => Dict{String, Any}(),
-        "J2_Horizontal_energy" => Dict{String, Any}(),
-        "J1_Vertical_energy"   => Dict{String, Any}(),
-        "J2_Diagonal1_energy"  => Dict{String, Any}(),
-        "J2_Diagonal2_energy"  => Dict{String, Any}()
+        "bond_J1H_energy" => Dict{String, Any}(),
+        "bond_J2H_energy" => Dict{String, Any}(),
+        "bond_J1V_energy"   => Dict{String, Any}(),
+        "bond_J2\\_energy"  => Dict{String, Any}(),
+        "bond_J2/_energy"  => Dict{String, Any}()
     )
     etol = 0.0
     for p in 1:len
@@ -219,20 +219,20 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
         if (i + j) % 2 != 0
             ir  = mod1(i + 1, Ni)
             irr = mod1(Ni - i, Ni) 
-            e = contract_o2_V(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j], O1, O2; ifparallel, forloop_iter)
-            n = contract_n2_V(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
-            params.verbosity >= 4 && println("J1_Vertical_energy = $(J1v * e/n)")
+            e = contract_o_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j], O1, O2; ifparallel, forloop_iter)
+            n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
+            params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
             etol += J1v * e/n
-            e_dict["J1_Vertical_energy"]["$(i),$(j)"] = J1v * e/n
+            e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
         end
 
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        e = contract_o2_H(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n2_H(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J1_Horizontal_energy = $(J1h * e/n)")
+        e = contract_o_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
-        e_dict["J1_Horizontal_energy"]["$(i),$(j)"] = J1h * e/n
+        e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
 
         if model.ifrotate
             model.ifrotate = false
@@ -242,23 +242,23 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
         jr = mod1(j + 1, Nj)
-        e1 = contract_o_D1(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
-        e2 = contract_o_D2(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
-        n =  contract_n_D(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J2_Diagonal1_energy = $(J2 * e1/n)")
-        params.verbosity >= 4 && println("J2_Diagonal2_energy = $(J2 * e2/n)")
+        e1 = contract_o_22_1(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
+        e2 = contract_o_22_2(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
+        n =  contract_n_22(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e1/n)")
+        params.verbosity >= 4 && println("bond_J2/ = $(J2 * e2/n)")
         etol += J2 * (e1 + e2)/n
-        e_dict["J2_Diagonal1_energy"]["$(i),$(j)"] = J2 * e1/n
-        e_dict["J2_Diagonal2_energy"]["$(i),$(j)"] = J2 * e2/n
+        e_dict["bond_J2\\_energy"]["$(i),$(j)"] = J2 * e1/n
+        e_dict["bond_J2/_energy"]["$(i),$(j)"] = J2 * e2/n
 
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
         jrr = mod1(j + 2, Nj)
-        e = contract_o3_H(FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr], O1, O2; ifparallel, forloop_iter)
-        n = contract_n3_H(FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr]; ifparallel, forloop_iter)
-        params.verbosity >= 4 && println("J2_Horizontal_energy = $(J2 * e/n)")
+        e = contract_o_13(FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr], O1, O2; ifparallel, forloop_iter)
+        n = contract_n_13(FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr]; ifparallel, forloop_iter)
+        params.verbosity >= 4 && println("bond_J2H = $(J2 * e/n)")
         etol += J2 * e/n
-        e_dict["J2_Horizontal_energy"]["$(i),$(j)"] = J2 * e/n
+        e_dict["bond_J2H_energy"]["$(i),$(j)"] = J2 * e/n
     end
 
     params.verbosity >= 3 && println("energy per site = $(etol/len)")

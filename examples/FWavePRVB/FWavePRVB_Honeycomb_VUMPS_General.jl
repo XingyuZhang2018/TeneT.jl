@@ -5,12 +5,11 @@ using OptimKit
 using LinearAlgebra
 using Zygote
 
-
-seed = 66
+seed = 44
 Random.seed!(seed)
-atype = CuArray
+atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 4, 27, 1, 100
+D, χ, χshift, maxiter_restart = 2, 16, 1, 100
 # pattern = [1 2;
 #            2 1]
 # pattern = [1 3;
@@ -19,11 +18,9 @@ D, χ, χshift, maxiter_restart = 4, 27, 1, 100
 #            2 4 6 1 3 5]
 pattern = [1 3 5 7  9 11;
            2 4 6 8 10 12]
-model = J1J2(lattice=Honeycomb(:brickwall), 
-             S=0.5, J1=1.0, J2=0.3,
-             ifrotate=false, 
-             couplingtype=:plaquette, bondratio=1.0)
-No = 2
+model = FWavePRVB(lattice=Honeycomb(:brickwall), 
+                  S=0.5, J1=0.5, K=1)
+No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
                                ifdownfromup=false,
@@ -83,6 +80,6 @@ function restriction_ipeps(A)
    # return A
 end
 
-# observable(A, 16, params; restriction_ipeps)
-optimise_ipeps(A, 28, χshift, params; restriction_ipeps);
+# observable(A, χ, params; restriction_ipeps)
+optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
 # 
