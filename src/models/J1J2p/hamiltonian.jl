@@ -1,4 +1,4 @@
-export J1J2
+export J1J2p
 
 """
     J1J2p{L<:AbstractLattice}
