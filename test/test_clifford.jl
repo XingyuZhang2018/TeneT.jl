@@ -92,3 +92,103 @@
     end
 
 end
+
+@testset "Pauli decomposition" begin
+    # Identity decomposes to coeff 1 on I*I, 0 elsewhere
+    h_identity = zeros(ComplexF64, 2, 2, 2, 2)
+    for i in 1:2, j in 1:2
+        h_identity[i, j, i, j] = 1.0
+    end
+    coeffs = pauli_decompose(h_identity)
+    @test length(coeffs) == 16
+    @test abs(coeffs[1] - 1.0) < 1e-12
+    @test all(abs.(coeffs[2:end]) .< 1e-12)
+
+    # Sx*Sx: coefficient at position 6 (index (X,X) = (2-1)*4+2 = 6)
+    Sx = ComplexF64[0 1; 1 0]
+    @tensor hxx[i,j,k,l] := Sx[i,j] * Sx[k,l]
+    coeffs_xx = pauli_decompose(hxx)
+    @test abs(coeffs_xx[6] - 1.0) < 1e-12
+end
+
+@testset "Pauli roundtrip" begin
+    h = randn(ComplexF64, 2, 2, 2, 2)
+    h_herm = zeros(ComplexF64, 2, 2, 2, 2)
+    for i in 1:2, j in 1:2, k in 1:2, l in 1:2
+        h_herm[i,j,k,l] = (h[i,j,k,l] + conj(h[j,i,l,k])) / 2
+    end
+    coeffs = pauli_decompose(h_herm)
+    h_recon = pauli_compose(coeffs)
+    @test h_recon ≈ h_herm atol=1e-10
+end
+
+@testset "Clifford Hamiltonian transformation" begin
+    # H*I transforms Sz*Sz -> Sx*Sz
+    Sz = ComplexF64[1 0; 0 -1]
+    @tensor hzz[i,j,k,l] := Sz[i,j] * Sz[k,l]
+    H_gate = clifford_H()
+    I2 = Matrix{ComplexF64}(I, 2, 2)
+    C = kron(H_gate, I2)
+    h_t = transform_bond_hamiltonian(hzz, C)
+    Sx = ComplexF64[0 1; 1 0]
+    @tensor hxz[i,j,k,l] := Sx[i,j] * Sz[k,l]
+    @test h_t ≈ hxz atol=1e-10
+end
+
+@testset "Clifford preserves eigenvalues" begin
+    Sx = const_Sx(0.5)
+    Sy = const_Sy(0.5)
+    Sz = const_Sz(0.5)
+    @tensor h[i,j,k,l] := Sx[i,j]*Sx[k,l] + Sy[i,j]*Sy[k,l] + Sz[i,j]*Sz[k,l]
+    group = generate_clifford_group()
+    eig_orig = sort(real.(eigvals(reshape(ComplexF64.(h), 4, 4))))
+    for C in group[1:20]
+        h_t = transform_bond_hamiltonian(ComplexF64.(h), C)
+        eig_t = sort(real.(eigvals(reshape(h_t, 4, 4))))
+        @test eig_orig ≈ eig_t atol=1e-10
+    end
+end
+
+@testset "Bond entanglement entropy" begin
+
+    @testset "Product state has zero entanglement" begin
+        # h = sigma_z x I has product eigenstates
+        Sz = ComplexF64[1 0; 0 -1]
+        I2 = ComplexF64[1 0; 0 1]
+        @tensor h[i,j,k,l] := Sz[i,j] * I2[k,l]
+        @test bond_entanglement_entropy(h) ≈ 0.0 atol=1e-10
+    end
+
+    @testset "Bell state has maximal entanglement" begin
+        # AFM Heisenberg: Sx*Sx + Sy*Sy + Sz*Sz, ground state is singlet with S = ln(2)
+        Sx = const_Sx(0.5)
+        Sy = const_Sy(0.5)
+        Sz = const_Sz(0.5)
+        @tensor h[i,j,k,l] := Sx[i,j]*Sx[k,l] + Sy[i,j]*Sy[k,l] + Sz[i,j]*Sz[k,l]
+        S = bond_entanglement_entropy(h)
+        @test S ≈ log(2) atol=1e-10
+    end
+
+    @testset "Entanglement is non-negative" begin
+        group = generate_clifford_group()
+        Sz = ComplexF64[1 0; 0 -1]
+        @tensor hzz[i,j,k,l] := Sz[i,j] * Sz[k,l]
+        for C in group[1:10]
+            h_t = transform_bond_hamiltonian(hzz, C)
+            S = bond_entanglement_entropy(h_t)
+            @test S >= -1e-14
+        end
+    end
+
+    @testset "Total bond entanglement" begin
+        Sx = ComplexF64[0 1; 1 0]
+        Sy = ComplexF64[0 -im; im 0]
+        Sz = ComplexF64[1 0; 0 -1]
+        @tensor hx[i,j,k,l] := Sx[i,j] * Sx[k,l]
+        @tensor hy[i,j,k,l] := Sy[i,j] * Sy[k,l]
+        @tensor hz[i,j,k,l] := Sz[i,j] * Sz[k,l]
+        S_total = total_bond_entanglement((hx, hy, hz))
+        @test S_total ≈ bond_entanglement_entropy(hx) + bond_entanglement_entropy(hy) + bond_entanglement_entropy(hz)
+    end
+
+end

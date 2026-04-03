@@ -90,6 +90,8 @@ include("models/J1J2/energy.jl")
 # ============================================================================
 
 include("clifford/group.jl")
+include("clifford/transform.jl")
+include("clifford/entanglement.jl")
 
 # ============================================================================
 # Automatic differentiation rules
@@ -127,5 +129,7 @@ export GradientOptimize, optimise_ipeps
 export observable
 
 export generate_clifford_group, clifford_H, clifford_S, clifford_CNOT, pauli_basis_matrices
+export pauli_decompose, pauli_compose, transform_bond_hamiltonian
+export bond_entanglement_entropy, total_bond_entanglement
 
 end # module TeneT
