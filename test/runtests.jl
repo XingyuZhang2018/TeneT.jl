@@ -51,6 +51,7 @@ using TeneT: StructArray, randSA, cellones, ISA,
              Defaults,
              LBFGSState, save_lbfgs_state, load_lbfgs_state, optimize_reload
 using TeneT: GradientOptimize, SUOptimize, FUOptimize
+using TeneT: generate_clifford_group, clifford_H, clifford_S, clifford_CNOT, pauli_basis_matrices
 
 # ---------- Array type setup ----------
 const ATYPES = if CUDA.functional()
@@ -171,6 +172,7 @@ end
     include("test_autodiff.jl")
     include("test_ipeps.jl")
     include("test_patch.jl")
+    include("test_clifford.jl")
 
     if get(ENV, "TENET_TEST_MPI", "false") == "true"
         include("test_mpi.jl")

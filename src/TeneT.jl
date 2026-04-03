@@ -86,6 +86,12 @@ include("models/J1J2/order_init.jl")
 include("models/J1J2/energy.jl")
 
 # ============================================================================
+# Clifford circuits for CAPEPS
+# ============================================================================
+
+include("clifford/group.jl")
+
+# ============================================================================
 # Automatic differentiation rules
 # ============================================================================
 
@@ -119,5 +125,7 @@ export C4v_restriction, local_min_norm
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
 export GradientOptimize, optimise_ipeps
 export observable
+
+export generate_clifford_group, clifford_H, clifford_S, clifford_CNOT, pauli_basis_matrices
 
 end # module TeneT
