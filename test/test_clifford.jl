@@ -229,3 +229,48 @@ end
         end
     end
 end
+
+@testset "TransformedKitaev integration" begin
+    @testset "TransformedKitaev construction" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=2, verbosity=0)
+        tmodel = TransformedKitaev(model, result[:h_transformed], result[:circuit])
+        @test getfield(tmodel, :original) === model
+        h = hamiltonian(tmodel)
+        @test length(h) == 3
+        @test all(size(hi) == (2,2,2,2) for hi in h)
+    end
+
+    @testset "Property forwarding" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=1, verbosity=0)
+        tmodel = TransformedKitaev(model, result[:h_transformed], result[:circuit])
+        @test tmodel.Jx == -1.0
+        @test tmodel.Jy == -1.0
+        @test tmodel.Jz == -1.0
+        @test tmodel.S == 0.5
+        @test tmodel.lattice isa Honeycomb{:brickwall}
+    end
+
+    @testset "hamiltonian_trunc works on transformed" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=1, verbosity=0)
+        tmodel = TransformedKitaev(model, result[:h_transformed], result[:circuit])
+        h = hamiltonian(tmodel)
+        for hi in h
+            h1, h2 = hamiltonian_trunc(hi)
+            @test ndims(h1) == 3
+            @test ndims(h2) == 3
+        end
+    end
+
+    @testset "enlarge_coupling dispatches correctly" begin
+        model = Kitaev(lattice=Honeycomb(:brickwall), S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0)
+        result = optimize_clifford(model; n_layers=1, max_sweeps=1, verbosity=0)
+        tmodel = TransformedKitaev(model, result[:h_transformed], result[:circuit])
+        Jx, Jy, Jz = enlarge_coupling(tmodel, 1, 1)
+        @test Jx == model.Jx
+        @test Jy == model.Jy
+        @test Jz == model.Jz
+    end
+end
