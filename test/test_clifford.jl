@@ -95,10 +95,8 @@ end
 
 @testset "Pauli decomposition" begin
     # Identity decomposes to coeff 1 on I*I, 0 elsewhere
-    h_identity = zeros(ComplexF64, 2, 2, 2, 2)
-    for i in 1:2, j in 1:2
-        h_identity[i, j, i, j] = 1.0
-    end
+    I2 = ComplexF64[1 0; 0 1]
+    @tensor h_identity[i,j,k,l] := I2[i,j] * I2[k,l]
     coeffs = pauli_decompose(h_identity)
     @test length(coeffs) == 16
     @test abs(coeffs[1] - 1.0) < 1e-12
@@ -141,10 +139,13 @@ end
     Sz = const_Sz(0.5)
     @tensor h[i,j,k,l] := Sx[i,j]*Sx[k,l] + Sy[i,j]*Sy[k,l] + Sz[i,j]*Sz[k,l]
     group = generate_clifford_group()
-    eig_orig = sort(real.(eigvals(reshape(ComplexF64.(h), 4, 4))))
+    # Use kron-ordered matrix for eigenvalues (consistent with transform_bond_hamiltonian)
+    h_mat = TeneT._tensor_to_mat(ComplexF64.(h))
+    eig_orig = sort(real.(eigvals(h_mat)))
     for C in group[1:20]
         h_t = transform_bond_hamiltonian(ComplexF64.(h), C)
-        eig_t = sort(real.(eigvals(reshape(h_t, 4, 4))))
+        h_t_mat = TeneT._tensor_to_mat(h_t)
+        eig_t = sort(real.(eigvals(h_t_mat)))
         @test eig_orig ≈ eig_t atol=1e-10
     end
 end
