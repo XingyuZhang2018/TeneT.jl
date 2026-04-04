@@ -17,14 +17,14 @@ Heisenberg model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
 end
 
 """
-    hamiltonian(model::Heisenberg{Square})
+    hamiltonian(model::Heisenberg)
 
 Return the Heisenberg Hamiltonian as a two-site operator.
 When `ifrotate=true`, applies a sublattice rotation `U = 2Sx` so that the
 antiferromagnetic Néel order becomes a uniform state, enabling efficient
 optimization with a single-site unit cell.
 """
-function hamiltonian(model::Heisenberg{Square})
+function hamiltonian(model::Heisenberg)
     S = model.S
     Sx = const_Sx(S)
     Sy = const_Sy(S)

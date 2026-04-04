@@ -7,9 +7,9 @@ using Zygote
 
 seed = 42
 Random.seed!(seed)
-atype = CuArray
+atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 2, 16, 0, 2
+D, χ, χshift, maxiter_restart = 3, 16, 4, 10
 pattern = [1;;]
 # pattern = [1 2;
 #            2 1]
@@ -41,7 +41,7 @@ boundary_alg = VUMPS{:General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=maxiter_restart,

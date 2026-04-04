@@ -5,24 +5,21 @@ using OptimKit
 using LinearAlgebra
 using Zygote
 
-
-seed = 66
+seed = 44
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 2, 16, 1, 4
-pattern = [1 2;
-           2 1]
+D, χ, χshift, maxiter_restart = 2, 16, 1, 100
+# pattern = [1 2;
+#            2 1]
 # pattern = [1 3;
 #            2 4]
 # pattern = [1 3 5 2 4 6;
 #            2 4 6 1 3 5]
-# pattern = [1 3 5 7  9 11;
-#            2 4 6 8 10 12]
-model = J1J2p(lattice=Honeycomb(:brickwall), 
-              S=0.5, J1=1.0, J2p=0.5,
-              ifrotate=false, 
-              couplingtype=:plaquette, bondratio=1)
+pattern = [1 3 5 7  9 11;
+           2 4 6 8 10 12]
+model = FWavePRVB(lattice=Honeycomb(:brickwall), 
+                  S=0.5, J1=0.5, K=1)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
 boundary_alg = VUMPS{:General}(ifupdown=true,
@@ -54,12 +51,12 @@ params = GradientOptimize(model=model,
                           ifSU=false,
                           SUτ=0,
                           ifprecondition=true,
-                          iter_precond=5,
+                          iter_precond=0,
                           reuse_env=true, 
                           ifsave_env=true,
                           ifload_env=true,
                           ifsave_lbfgs=true,
-                          ifload_lbfgs=false
+                          ifload_lbfgs=true
 )
 A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = init_ipeps_SU(; atype, No, D, D_new=3, χ, params)
@@ -83,6 +80,6 @@ function restriction_ipeps(A)
    # return A
 end
 
-# observable(A, 16, params; restriction_ipeps)
-optimise_ipeps(A, 16, χshift, params; restriction_ipeps);
+# observable(A, χ, params; restriction_ipeps)
+optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
 # 

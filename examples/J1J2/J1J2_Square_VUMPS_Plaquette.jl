@@ -9,11 +9,11 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift = 2, 16, 0
+D, χ, χshift, maxiter_restart = 2, 16, 1, 10
 pattern = [1 3;
            2 4]
 model = J1J2(lattice=Square(), 
-             S=0.5, J1=1.0, J2=0.5,
+             S=0.5, J1=1.0, J2=0.6,
              ifrotate=true, 
              couplingtype=:uniform, bondratio=1.0)
 No = 0
@@ -36,10 +36,10 @@ boundary_alg = VUMPS{:Plaquette}(ifsimple_eig=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
-                          maxiter_restart=4,
+                          maxiter_restart=maxiter_restart,
                           verbosity=4, 
                           folder=folder,
                           ifSU=false,
@@ -58,7 +58,7 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 function restriction_ipeps(A)
    Ar = Zygote.Buffer(A)
    Ar[:,:,:,:,:,1] = A[:,:,:,:,:,1]
-   # Ar[:,:,:,:,:,1] += permutedims(Ar[:,:,:,:,:,1],(4,3,2,1,5))
+   Ar[:,:,:,:,:,1] += permutedims(Ar[:,:,:,:,:,1],(4,3,2,1,5))
 
    Ar[:,:,:,:,:,2] = permutedims(Ar[:,:,:,:,:,1], (1,4,3,2,5))
    Ar[:,:,:,:,:,3] = permutedims(Ar[:,:,:,:,:,1], (3,2,1,4,5))

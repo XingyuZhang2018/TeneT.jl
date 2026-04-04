@@ -43,16 +43,23 @@ function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
 
+    # Precompute normalizations (independent of x, so hoist out of linsolve)
+    n_map = [begin
+        ir = Ni + 1 - i
+        contract_n_11(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
+    end for (i,j) in eachindex(A_prime)]
+
     gradnew, _ = linsolve(grad; isposdef = true, maxiter=1, verbosity=0) do x
         ε_fd = sqrt(eps(real(eltype(A))))
         B_plus  = build_restricted_A(A + ε_fd * x)
         B_minus = build_restricted_A(A - ε_fd * x)
 
+        idx = 0
         T_x_data = [begin
+            idx += 1
             A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
             ir = Ni + 1 - i
-            n = contract_n1(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
-            Mumap_parallel(ACu[i,j], ACd[ir,j], FLo[i,j], FRo[i,j], A_prime_x_q; forloop_iter, ifparallel) / n
+            Mumap_parallel(ACu[i,j], ACd[ir,j], FLo[i,j], FRo[i,j], A_prime_x_q; forloop_iter, ifparallel) / n_map[idx]
         end for (i,j) in eachindex(A_prime)]
         T_x = StructArray(T_x_data, A_prime.pattern)
 
@@ -93,17 +100,25 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
 
+    # Precompute normalizations (independent of x, so hoist out of linsolve)
+    n_map = [begin
+        ir = Ni + 1 - i
+        jr = mod1(j + 1, Nj)
+        contract_n_11(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
+    end for (i,j) in eachindex(A_prime)]
+
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
         ε_fd = sqrt(eps(real(eltype(A))))
         B_plus  = build_restricted_A(A + ε_fd * x)
         B_minus = build_restricted_A(A - ε_fd * x)
 
+        idx = 0
         T_x_data = [begin
+            idx += 1
             A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
             ir = Ni + 1 - i
             jr = mod1(j + 1, Nj)
-            n = contract_n1(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
-            Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FLo[i,jr], A_prime_x_q; forloop_iter, ifparallel) / n
+            Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FLo[i,jr], A_prime_x_q; forloop_iter, ifparallel) / n_map[idx]
         end for (i,j) in eachindex(A_prime)]
         T_x = StructArray(T_x_data, A_prime.pattern)
 
@@ -142,15 +157,21 @@ function precondition_invese_single_envir(A, grad, env::C4vVUMPSEnv, params, res
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
 
+    # Precompute normalizations (independent of x, so hoist out of linsolve)
+    n_map = [begin
+        contract_n_11(FL, AC, A_prime[i,j], AC, FL; ifparallel, forloop_iter)
+    end for (i,j) in eachindex(A_prime)]
+
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
         ε_fd = sqrt(eps(real(eltype(A))))
         B_plus  = build_restricted_A(A + ε_fd * x)
         B_minus = build_restricted_A(A - ε_fd * x)
 
+        idx = 0
         T_x_data = [begin
+            idx += 1
             A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
-            n = contract_n1(FL, AC, A_prime[i,j], AC, FL; ifparallel, forloop_iter)
-            Mumap_parallel(AC, AC, FL, FL, A_prime_x_q; forloop_iter, ifparallel) / n
+            Mumap_parallel(AC, AC, FL, FL, A_prime_x_q; forloop_iter, ifparallel) / n_map[idx]
         end for (i,j) in eachindex(A_prime)]
         T_x = StructArray(T_x_data, A_prime.pattern)
 
@@ -189,6 +210,9 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
 
+    # Precompute normalization (independent of x, so hoist out of linsolve)
+    n_val = dot(To, To)
+
     gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
         ε_fd = sqrt(eps(real(eltype(A))))
         B_plus  = build_restricted_A(A + ε_fd * x)
@@ -196,8 +220,7 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
 
         T_x_data = [begin
             A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
-            n = dot(To, To)
-            Mumap_parallel(T, T, To, To, A_prime_x_q; forloop_iter, ifparallel) / n
+            Mumap_parallel(T, T, To, To, A_prime_x_q; forloop_iter, ifparallel) / n_val
         end for (i,j) in eachindex(A_prime)]
         T_x = StructArray(T_x_data, A_prime.pattern)
 

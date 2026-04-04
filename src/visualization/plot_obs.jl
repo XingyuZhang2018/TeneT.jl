@@ -1,0 +1,742 @@
+# Observable visualization using Makie.jl
+# Reads χ*.log files and generates convergence + lattice plots.
+
+using CairoMakie
+
+# ============================================================================
+# Log reader: parse χ*.log → (e, mag, ξ, χ)
+# ============================================================================
+
+"""
+    read_obs_log(logfile) → (e_scalar, e_dict, mag_norm, m_dict, ξ)
+
+Parse a single χ*.log file into the same data structures used by observable().
+"""
+function read_obs_log(logfile::String)
+    lines = readlines(logfile)
+    e_scalar = 0.0
+    e_dict = Dict{String, Dict{String, Any}}()
+    mag_norm = 0.0
+    m_dict = Dict{String, Any}()
+    ξ = 0.0
+
+    i = 1
+    while i <= length(lines)
+        line = strip(lines[i])
+
+        if line == "energy_per_site:"
+            i += 1
+            e_scalar = parse(Float64, strip(lines[i]))
+            i += 1
+        elseif endswith(line, ": i j energy")
+            bond_type = strip(split(line, ":")[1])
+            e_dict[bond_type] = Dict{String, Any}()
+            i += 1
+            # Parse "pos value\tpos value\t..." (may span one line)
+            for token in split(strip(lines[i]), '\t')
+                token = strip(token)
+                isempty(token) && continue
+                parts = split(token)
+                length(parts) >= 2 || continue
+                pos = parts[1]
+                val = parse(Float64, parts[2])
+                e_dict[bond_type][pos] = val
+            end
+            i += 1
+        elseif line == "magnetization_norm_per_site:"
+            i += 1
+            mag_norm = parse(Float64, strip(lines[i]))
+            i += 1
+        elseif startswith(line, "magnetization: i j")
+            i += 1
+            while i <= length(lines) && !startswith(strip(lines[i]), "correlation_length")
+                parts = split(strip(lines[i]))
+                if length(parts) >= 5
+                    pos = parts[1]
+                    m_dict[pos] = Dict{String, Any}(
+                        "|M|" => parse(Float64, parts[2]),
+                        "Mx"  => parse(Float64, parts[3]),
+                        "My"  => parse(Float64, parts[4]),
+                        "Mz"  => parse(Float64, parts[5])
+                    )
+                end
+                i += 1
+            end
+        elseif line == "correlation_length:"
+            i += 1
+            ξ = parse(Float64, strip(lines[i]))
+            i += 1
+        else
+            i += 1
+        end
+    end
+
+    return e_scalar, e_dict, mag_norm, m_dict, ξ
+end
+
+"""
+    read_all_obs_logs(obs_dir) → Vector{(χ, e_scalar, e_dict, mag_norm, m_dict, ξ)}
+
+Scan `obs_dir` for χ*.log files, parse each, return sorted by χ.
+"""
+function read_all_obs_logs(obs_dir::String)
+    results = []
+    isdir(obs_dir) || return results
+    for f in readdir(obs_dir)
+        m = match(r"^χ(\d+)\.log$", f)
+        m === nothing && continue
+        χ = parse(Int, m.captures[1])
+        e_scalar, e_dict, mag_norm, m_dict, ξ = read_obs_log(joinpath(obs_dir, f))
+        push!(results, (χ=χ, e=e_scalar, e_dict=e_dict, mag=mag_norm, m_dict=m_dict, ξ=ξ))
+    end
+    sort!(results; by=r -> r.χ)
+    return results
+end
+
+# ============================================================================
+# Main entry point: read logs → plot
+# ============================================================================
+
+"""
+    plot_observables(obs_dir, lattice_type, pattern; save_format="png")
+
+Read all χ*.log files in `obs_dir`, generate convergence plot and lattice
+plot for the latest χ. Called automatically by observable()/optimise_ipeps()
+when `params.ifplot == true`.
+"""
+function plot_observables(obs_dir::String, lattice_type, pattern::Matrix{Int};
+                          save_format::String="png", S::Real=0.5)
+    logs = read_all_obs_logs(obs_dir)
+    isempty(logs) && return nothing
+
+    # Convergence plot from all logs
+    _plot_convergence(obs_dir, logs; save_format)
+
+    # Lattice plot for every χ
+    for r in logs
+        plot_lattice_obs(r.e_dict, r.m_dict, lattice_type, pattern;
+                         save_path=obs_dir, save_format=save_format, χ=r.χ,
+                         e_scalar=r.e, mag_scalar=r.mag, ξ_scalar=r.ξ, S=S)
+    end
+    return nothing
+end
+
+# ============================================================================
+# Convergence plot (reads from log history)
+# ============================================================================
+
+function _plot_convergence(obs_dir::String, logs; save_format::String="png")
+    n = length(logs)
+    χs      = [r.χ for r in logs]
+    energies = [r.e for r in logs]
+    mags     = [r.mag for r in logs]
+    ξs       = [r.ξ for r in logs]
+
+    fig = Figure(size=(700, 900), fontsize=14)
+
+    function _make_panel(pos, ylabel, data, color; title="")
+        ax = Axis(fig[pos, 1]; xlabel=(pos == 3 ? "χ" : ""),
+                  ylabel=ylabel, title=title,
+                  xticks=χs,
+                  xgridvisible=true, ygridvisible=true,
+                  xgridstyle=:dash, ygridstyle=:dash,
+                  xgridcolor=(:black, 0.1), ygridcolor=(:black, 0.1))
+        if n == 1
+            scatter!(ax, χs, data; color=color, markersize=10)
+            yval = data[1]
+            margin = max(abs(yval) * 0.1, 1e-6)
+            ylims!(ax, yval - margin, yval + margin)
+            xlims!(ax, χs[1] - 1, χs[1] + 1)
+        else
+            lines!(ax, χs, data; color=color, linewidth=2)
+            scatter!(ax, χs, data; color=color, markersize=8)
+            xpad = max(1, (χs[end] - χs[1]) * 0.05)
+            xlims!(ax, χs[1] - xpad, χs[end] + xpad)
+        end
+        return ax
+    end
+
+    _make_panel(1, "Energy / site", energies, :steelblue; title="Observable Convergence")
+    _make_panel(2, "|M| mean", mags, :crimson)
+    _make_panel(3, "ξ", ξs, :seagreen)
+
+    outfile = joinpath(obs_dir, "convergence.$(save_format)")
+    save(outfile, fig; px_per_unit=2)
+    return fig
+end
+
+# ============================================================================
+# Lattice visualization
+# ============================================================================
+
+function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
+                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
+                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN, S::Real=0.5)
+    isdir(save_path) || mkpath(save_path)
+
+    Ni, Nj = size(pattern)
+
+    unique_sites = Dict{Int, Tuple{Int,Int}}()
+    for (key, _) in m_dict
+        parts = split(key, ",")
+        i, j = parse(Int, parts[1]), parse(Int, parts[2])
+        unique_sites[pattern[i, j]] = (i, j)
+    end
+
+    all_coords = Dict{Tuple{Int,Int}, Tuple{Float64,Float64}}()
+    all_mdata  = Dict{Tuple{Int,Int}, Dict{String, Any}}()
+    is_original = Dict{Tuple{Int,Int}, Bool}()
+
+    for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+        for ci in 1:Ni, cj in 1:Nj
+            gi = ci + di * Ni
+            gj = cj + dj * Nj
+            pval = pattern[ci, cj]
+            oi, oj = unique_sites[pval]
+            all_mdata[(gi, gj)] = m_dict["$oi,$oj"]
+            all_coords[(gi, gj)] = _site_xy(lattice_type, gi, gj)
+            is_original[(gi, gj)] = (di == 0 && dj == 0)
+        end
+    end
+
+    all_evals = Float64[]
+    for (_, bond_data) in e_dict
+        for (_, ev) in bond_data
+            push!(all_evals, abs(real(ev)))
+        end
+    end
+    e_max = isempty(all_evals) ? 1.0 : maximum(all_evals)
+    e_min = isempty(all_evals) ? 0.0 : minimum(all_evals)
+
+    all_xs = [c[1] for c in values(all_coords)]
+    all_ys = [c[2] for c in values(all_coords)]
+    xspan = maximum(all_xs) - minimum(all_xs) + 2.0
+    yspan = maximum(all_ys) - minimum(all_ys) + 2.0
+    fig_size = max(700, round(Int, max(xspan, yspan) * 110))
+    fig = Figure(size=(fig_size, fig_size), fontsize=13, backgroundcolor=:white)
+    info = "χ=$χ"
+    isnan(e_scalar) || (info *= "  E=$(round(e_scalar; sigdigits=8))")
+    isnan(mag_scalar) || (info *= "  |M|=$(round(mag_scalar; sigdigits=6))")
+    isnan(ξ_scalar) || (info *= "  ξ=$(round(ξ_scalar; sigdigits=6))")
+    ax = Axis(fig[1, 1]; title="Lattice Observables  ($info)", aspect=DataAspect(),
+              backgroundcolor=:white)
+    hidedecorations!(ax)
+    hidespines!(ax)
+
+    # Bonds
+    _draw_lattice_bonds!(ax, lattice_type, all_coords, all_mdata,
+                         e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
+                         e_min, e_max)
+
+    # Sites
+    for (k, (x, y)) in all_coords
+        alpha = is_original[k] ? 1.0 : 0.4
+        ms = is_original[k] ? 22 : 16
+        scatter!(ax, [x], [y]; color=(:gray70, alpha), markersize=ms,
+                 strokewidth=is_original[k] ? 1.5 : 0.5,
+                 strokecolor=(:gray40, alpha))
+    end
+
+    # Magnetization arrows on every site
+    # Arrow length = |M|/S * 0.6, so full polarization (|M|=S) gives half a lattice spacing
+    arrow_scale = S > 1e-10 ? 0.6 / S : 0.0
+    for (k, (x, y)) in all_coords
+        mdata = all_mdata[k]
+        amx = real(mdata["Mx"]) * arrow_scale
+        amz = real(mdata["Mz"]) * arrow_scale
+        amag = sqrt(amx^2 + amz^2)
+        amag < 1e-8 && continue
+        alpha = is_original[k] ? 0.9 : 0.35
+        lw = is_original[k] ? 2.5 : 1.5
+        as = is_original[k] ? 12 : 8
+        # Center arrow on site: start at (x - dx/2, y - dz/2)
+        arrows!(ax, [x - amx/2], [y - amz/2], [amx], [amz];
+                color=(:black, alpha), linewidth=lw,
+                arrowsize=as, arrowcolor=(:black, alpha))
+    end
+
+    # Site labels
+    for (k, (x, y)) in all_coords
+        is_original[k] || continue
+        ci, cj = mod1(k[1], Ni), mod1(k[2], Nj)
+        text!(ax, x, y + 0.25; text="($ci,$cj)", fontsize=10, color=:gray20,
+              align=(:center, :bottom))
+    end
+
+    # Padding
+    xmargin = max(1.5, xspan * 0.12)
+    ymargin = max(1.5, yspan * 0.12)
+    xlims!(ax, minimum(all_xs) - xmargin, maximum(all_xs) + xmargin)
+    ylims!(ax, minimum(all_ys) - ymargin, maximum(all_ys) + ymargin)
+
+    # Legend
+    legend_entries = []
+    for (bond_type, _) in e_dict
+        col = _bond_color(bond_type)
+        push!(legend_entries, (bond_type, col))
+    end
+    if !isempty(legend_entries)
+        elems = [LineElement(color=col, linewidth=4) for (_, col) in legend_entries]
+        labels = [bt for (bt, _) in legend_entries]
+        Legend(fig[1, 2], elems, labels; framevisible=false, labelsize=10, patchsize=(20, 4))
+    end
+
+    outfile = joinpath(save_path, "lattice_χ$χ.$(save_format)")
+    save(outfile, fig; px_per_unit=2)
+    return fig
+end
+
+# ============================================================================
+# Kagome lattice visualization
+# ============================================================================
+
+function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:merge}, pattern::Matrix{Int};
+                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
+                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN, S::Real=0.5)
+    isdir(save_path) || mkpath(save_path)
+    Ni, Nj = size(pattern)
+
+    # Parse m_dict: keys are "i,j,k" for sublattice k
+    # Build unique_sites: pattern_value → first (i,j)
+    unique_sites = Dict{Int, Tuple{Int,Int}}()
+    for (key, _) in m_dict
+        parts = split(key, ",")
+        i, j = parse(Int, parts[1]), parse(Int, parts[2])
+        unique_sites[pattern[i, j]] = (i, j)
+    end
+
+    # Build tiled grid: each (gi, gj, k) → (x, y) and mag data
+    all_coords = Dict{Tuple{Int,Int,Int}, Tuple{Float64,Float64}}()
+    all_mdata  = Dict{Tuple{Int,Int,Int}, Dict{String, Any}}()
+    is_original = Dict{Tuple{Int,Int,Int}, Bool}()
+
+    for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+        for ci in 1:Ni, cj in 1:Nj
+            gi = ci + di * Ni
+            gj = cj + dj * Nj
+            pval = pattern[ci, cj]
+            oi, oj = unique_sites[pval]
+            orig = (di == 0 && dj == 0)
+            for k in 1:3
+                all_coords[(gi, gj, k)] = _kagome_site_xy(gi, gj, k)
+                all_mdata[(gi, gj, k)] = m_dict["$oi,$oj,$k"]
+                is_original[(gi, gj, k)] = orig
+            end
+        end
+    end
+
+    # Bond energy scaling
+    all_evals = Float64[]
+    for (_, bond_data) in e_dict
+        for (_, ev) in bond_data
+            push!(all_evals, abs(real(ev)))
+        end
+    end
+    e_max = isempty(all_evals) ? 1.0 : maximum(all_evals)
+    e_min = isempty(all_evals) ? 0.0 : minimum(all_evals)
+
+    # Figure
+    all_xs = [c[1] for c in values(all_coords)]
+    all_ys = [c[2] for c in values(all_coords)]
+    xspan = maximum(all_xs) - minimum(all_xs) + 2.0
+    yspan = maximum(all_ys) - minimum(all_ys) + 2.0
+    fig_size = max(700, round(Int, max(xspan, yspan) * 110))
+    fig = Figure(size=(fig_size, fig_size), fontsize=13, backgroundcolor=:white)
+    info = "χ=$χ"
+    isnan(e_scalar) || (info *= "  E=$(round(e_scalar; sigdigits=8))")
+    isnan(mag_scalar) || (info *= "  |M|=$(round(mag_scalar; sigdigits=6))")
+    isnan(ξ_scalar) || (info *= "  ξ=$(round(ξ_scalar; sigdigits=6))")
+    ax = Axis(fig[1, 1]; title="Kagome Lattice Observables  ($info)", aspect=DataAspect(),
+              backgroundcolor=:white)
+    hidedecorations!(ax)
+    hidespines!(ax)
+
+    # Draw bonds
+    _draw_kagome_bonds!(ax, all_coords, e_dict, pattern, unique_sites, Ni, Nj, n_repeat, e_min, e_max)
+
+    # Draw sites
+    for (k, (x, y)) in all_coords
+        alpha = is_original[k] ? 1.0 : 0.4
+        ms = is_original[k] ? 18 : 12
+        scatter!(ax, [x], [y]; color=(:gray70, alpha), markersize=ms,
+                 strokewidth=is_original[k] ? 1.5 : 0.5,
+                 strokecolor=(:gray40, alpha))
+    end
+
+    # Magnetization arrows: length = |M|/S * 0.35
+    arrow_scale = S > 1e-10 ? 0.35 / S : 0.0
+    for (k, (x, y)) in all_coords
+        mdata = all_mdata[k]
+        amx = real(mdata["Mx"]) * arrow_scale
+        amz = real(mdata["Mz"]) * arrow_scale
+        amag = sqrt(amx^2 + amz^2)
+        amag < 1e-8 && continue
+        alpha = is_original[k] ? 0.9 : 0.35
+        lw = is_original[k] ? 2.0 : 1.0
+        as = is_original[k] ? 10 : 6
+        arrows!(ax, [x - amx/2], [y - amz/2], [amx], [amz];
+                color=(:black, alpha), linewidth=lw,
+                arrowsize=as, arrowcolor=(:black, alpha))
+    end
+
+    # Labels on original unit cell
+    for (k, (x, y)) in all_coords
+        is_original[k] || continue
+        ci, cj = mod1(k[1], Ni), mod1(k[2], Nj)
+        sublat = k[3]
+        text!(ax, x, y + 0.2; text="($ci,$cj,$sublat)", fontsize=9, color=:gray20,
+              align=(:center, :bottom))
+    end
+
+    # Padding
+    xmargin = max(1.5, xspan * 0.12)
+    ymargin = max(1.5, yspan * 0.12)
+    xlims!(ax, minimum(all_xs) - xmargin, maximum(all_xs) + xmargin)
+    ylims!(ax, minimum(all_ys) - ymargin, maximum(all_ys) + ymargin)
+
+    # Legend
+    legend_entries = []
+    for (bond_type, _) in e_dict
+        col = _bond_color(bond_type)
+        push!(legend_entries, (bond_type, col))
+    end
+    if !isempty(legend_entries)
+        elems = [LineElement(color=col, linewidth=4) for (_, col) in legend_entries]
+        labels = [bt for (bt, _) in legend_entries]
+        Legend(fig[1, 2], elems, labels; framevisible=false, labelsize=10, patchsize=(20, 4))
+    end
+
+    outfile = joinpath(save_path, "lattice_χ$χ.$(save_format)")
+    save(outfile, fig; px_per_unit=2)
+    return fig
+end
+
+"""
+Kagome bond offsets: (sublattice_from, sublattice_to, di, dj)
+where di/dj are unit cell offsets.
+"""
+const _KAGOME_BOND_OFFSETS = Dict(
+    "bond_12"  => (1, 2, 0, 0),  # intra-cell: site 1 → site 2
+    "bond_23"  => (2, 3, 0, 0),  # intra-cell: site 2 → site 3
+    "bond_31H" => (3, 1, 0, 1),  # horizontal: site 3@(i,j) → site 1@(i,j+1)
+    "bond_32H" => (3, 2, 0, 1),  # horizontal: site 3@(i,j) → site 2@(i,j+1)
+    "bond_31V" => (3, 1, 1, 0),  # vertical:   site 3@(i,j) → site 1@(i+1,j)
+    "bond_21V" => (2, 1, 1, 0),  # vertical:   site 2@(i,j) → site 1@(i+1,j)
+)
+
+const _KAGOME_BOND_COLORS = Dict(
+    "bond_12"  => colorant"#FF6666",   # red
+    "bond_23"  => colorant"#66BB66",   # green
+    "bond_31H" => colorant"#6666FF",   # blue
+    "bond_32H" => colorant"#FF9933",   # orange
+    "bond_31V" => colorant"#9966CC",   # purple
+    "bond_21V" => colorant"#33CCCC",   # teal
+)
+
+function _draw_kagome_bonds!(ax, all_coords, e_dict, pattern, unique_sites, Ni, Nj, n_repeat, e_min, e_max)
+    pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
+    for ci in 1:Ni, cj in 1:Nj
+        pv = pattern[ci, cj]
+        push!(get!(pval_positions, pv, Tuple{Int,Int}[]), (ci, cj))
+    end
+
+    for (bond_type, bond_data) in e_dict
+        # Extract bond key without "_energy" suffix
+        bond_key = replace(bond_type, "_energy" => "")
+        haskey(_KAGOME_BOND_OFFSETS, bond_key) || continue
+        k1, k2, off_i, off_j = _KAGOME_BOND_OFFSETS[bond_key]
+        color = get(_KAGOME_BOND_COLORS, bond_key, :gray60)
+
+        for (pos_str, eval) in bond_data
+            parts = split(pos_str, ",")
+            oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
+            pv = pattern[oi, oj]
+            lw = _bond_linewidth(eval, e_min, e_max)
+
+            for (ci, cj) in pval_positions[pv]
+                for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+                    gi1 = ci + di * Ni
+                    gj1 = cj + dj * Nj
+                    gi2 = ci + di * Ni + off_i
+                    gj2 = cj + dj * Nj + off_j
+
+                    haskey(all_coords, (gi1, gj1, k1)) || continue
+                    haskey(all_coords, (gi2, gj2, k2)) || continue
+
+                    x1, y1 = all_coords[(gi1, gj1, k1)]
+                    x2, y2 = all_coords[(gi2, gj2, k2)]
+
+                    is_orig = (di == 0 && dj == 0)
+                    alpha = is_orig ? 0.85 : 0.3
+                    lines!(ax, [x1, x2], [y1, y2]; color=(color, alpha),
+                           linewidth=lw, linecap=:round)
+
+                    if is_orig
+                        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                        elabel = "$(round(real(eval); sigdigits=4))"
+                        dx, dy = x2 - x1, y2 - y1
+                        blen = sqrt(dx^2 + dy^2)
+                        if blen > 1e-6
+                            nx, ny = -dy / blen * 0.12, dx / blen * 0.12
+                        else
+                            nx, ny = 0.1, 0.0
+                        end
+                        text!(ax, mx + nx, my + ny; text=elabel, fontsize=8,
+                              align=(:center, :center), color=:gray30)
+                    end
+                end
+            end
+        end
+    end
+end
+
+# ============================================================================
+# Site coordinates
+# ============================================================================
+
+function _site_xy(::Honeycomb{:brickwall}, i, j)
+    x = (j - 1) * sqrt(3) / 2
+    y = -(i - 1) * 1.5 - ((i + j) % 2 == 1 ? 0.5 : 0.0)
+    return (x, y)
+end
+
+"""
+Kagome merge: 3 sublattice sites per unit cell (i,j).
+Returns positions for sublattice k ∈ {1,2,3}.
+  Site 1: top-left corner of upward triangle
+  Site 2: top-right corner
+  Site 3: bottom corner
+Arranged so that bonds form the characteristic Kagome pattern.
+"""
+# Kagome lattice coordinates with all bonds equal length = 1.
+# Lattice vectors: a_i = (2, 0), a_j = (1, sqrt(3)).
+# Basis: p1=(0,0), p2=(1,0), p3=(3/2, sqrt(3)/2).
+# Then rotated 90° CCW so vertical bonds are vertical on screen.
+function _kagome_site_xy(i, j, k)
+    # Raw coordinates (before rotation)
+    cx = Float64(i - 1) * 2.0 + Float64(j - 1) * 1.0
+    cy = -Float64(j - 1) * sqrt(3)
+    if k == 1
+        rx, ry = cx, cy
+    elseif k == 2
+        rx, ry = cx + 1.0, cy
+    else  # k == 3
+        rx, ry = cx + 1.5, cy - sqrt(3) / 2
+    end
+    # Rotate 90° CCW then flip vertically: (x, y) → (-y, -x)
+    return (-ry, -rx)
+end
+
+function _site_xy(::Square, i, j)
+    return (Float64(j) * 1.5, -Float64(i) * 1.5)
+end
+
+function _site_xy(lattice, i, j)
+    return (Float64(j) * 1.5, -Float64(i) * 1.5)
+end
+
+# ============================================================================
+# Bond drawing
+# ============================================================================
+
+const _BOND_COLORS = Dict(
+    # Kitaev
+    "bond_Jx" => colorant"#00BFFF", "bond_Jy" => colorant"#FF8080", "bond_Jz" => colorant"#80FF80",
+    # Heisenberg Square
+    "bond_H" => :royalblue, "bond_V" => :forestgreen,
+    # J1J2
+    "bond_J1H" => :royalblue, "bond_J1V" => :forestgreen,
+    "bond_J2H" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
+    # Heisenberg Kagome
+    "bond_onsite" => :gray50,
+    "bond_12" => colorant"#FF6666", "bond_23" => colorant"#66BB66",
+    "bond_31H" => colorant"#6666FF", "bond_32H" => colorant"#FF9933",
+    "bond_31V" => colorant"#9966CC", "bond_21V" => colorant"#33CCCC",
+)
+
+function _bond_color(bond_type::String)
+    for (key, col) in _BOND_COLORS
+        occursin(key, bond_type) && return col
+    end
+    return :gray60
+end
+
+function _bond_linewidth(eval, e_min, e_max)
+    ae = abs(real(eval))
+    # Scale linewidth proportional to absolute value (not min-max normalized)
+    # so bonds with similar energy get similar thickness
+    if e_max < 1e-12
+        return 14.0
+    end
+    t = ae / e_max   # 0 to 1 based on absolute magnitude
+    return 3.0 + t * 18.0
+end
+
+function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall}, all_coords, all_mdata,
+                               e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
+                               e_min, e_max)
+    pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
+    for ci in 1:Ni, cj in 1:Nj
+        pv = pattern[ci, cj]
+        push!(get!(pval_positions, pv, Tuple{Int,Int}[]), (ci, cj))
+    end
+
+    for (bond_type, bond_data) in e_dict
+        color = _bond_color(bond_type)
+        (off1i, off1j), (off2i, off2j) = _bond_offsets_honeycomb(bond_type)
+        for (pos_str, eval) in bond_data
+            parts = split(pos_str, ",")
+            oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
+            pv = pattern[oi, oj]
+            lw = _bond_linewidth(eval, e_min, e_max)
+
+            for (ci, cj) in pval_positions[pv]
+                for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+                    gi1 = ci + di * Ni + off1i
+                    gj1 = cj + dj * Nj + off1j
+                    gi2 = ci + di * Ni + off2i
+                    gj2 = cj + dj * Nj + off2j
+
+                    haskey(all_coords, (gi1, gj1)) || continue
+                    haskey(all_coords, (gi2, gj2)) || continue
+
+                    x1, y1 = all_coords[(gi1, gj1)]
+                    x2, y2 = all_coords[(gi2, gj2)]
+
+                    is_orig = (di == 0 && dj == 0)
+                    alpha = is_orig ? 0.85 : 0.3
+                    lines!(ax, [x1, x2], [y1, y2]; color=(color, alpha),
+                           linewidth=lw, linecap=:round)
+
+                    if is_orig
+                        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                        elabel = "$(round(real(eval); sigdigits=4))"
+                        dx, dy = x2 - x1, y2 - y1
+                        blen = sqrt(dx^2 + dy^2)
+                        if blen > 1e-6
+                            nx, ny = -dy / blen * 0.15, dx / blen * 0.15
+                        else
+                            nx, ny = 0.1, 0.0
+                        end
+                        text!(ax, mx + nx, my + ny; text=elabel, fontsize=9,
+                              align=(:center, :center), color=:gray30)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function _draw_lattice_bonds!(ax, ::Square, all_coords, all_mdata,
+                               e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
+                               e_min, e_max)
+    pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
+    for ci in 1:Ni, cj in 1:Nj
+        pv = pattern[ci, cj]
+        push!(get!(pval_positions, pv, Tuple{Int,Int}[]), (ci, cj))
+    end
+
+    for (bond_type, bond_data) in e_dict
+        color = _bond_color(bond_type)
+        (off1i, off1j), (off2i, off2j) = _bond_offsets_square(bond_type)
+        for (pos_str, eval) in bond_data
+            parts = split(pos_str, ",")
+            oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
+            pv = pattern[oi, oj]
+            lw = _bond_linewidth(eval, e_min, e_max)
+
+            for (ci, cj) in pval_positions[pv]
+                for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+                    gi1 = ci + di * Ni + off1i
+                    gj1 = cj + dj * Nj + off1j
+                    gi2 = ci + di * Ni + off2i
+                    gj2 = cj + dj * Nj + off2j
+
+                    haskey(all_coords, (gi1, gj1)) || continue
+                    haskey(all_coords, (gi2, gj2)) || continue
+
+                    x1, y1 = all_coords[(gi1, gj1)]
+                    x2, y2 = all_coords[(gi2, gj2)]
+                    is_orig = (di == 0 && dj == 0)
+                    alpha = is_orig ? 0.85 : 0.3
+                    lines!(ax, [x1, x2], [y1, y2]; color=(color, alpha),
+                           linewidth=lw, linecap=:round)
+                    if is_orig
+                        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                        dx, dy = x2 - x1, y2 - y1
+                        blen = sqrt(dx^2 + dy^2)
+                        if blen > 1e-6
+                            nx, ny = -dy / blen * 0.15, dx / blen * 0.15
+                        else
+                            nx, ny = 0.1, 0.0
+                        end
+                        text!(ax, mx + nx, my + ny;
+                              text="$(round(real(eval); sigdigits=4))",
+                              fontsize=9, align=(:center, :center), color=:gray30)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function _draw_lattice_bonds!(ax, lattice, all_coords, all_mdata,
+                               e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
+                               e_min, e_max)
+end
+
+# ============================================================================
+# Bond partner logic
+# ============================================================================
+
+"""
+    _is_cross_diagonal(bond_type) → Bool
+
+Detect the / cross-diagonal direction: (i,j+1)→(i+1,j).
+Must be checked BEFORE `_is_forward_diagonal`.
+"""
+_is_cross_diagonal(bond_type::String) = occursin("/", bond_type)
+
+"""
+    _is_forward_diagonal(bond_type) → Bool
+
+Detect the \\ forward-diagonal direction: (i,j)→(i+1,j+1).
+"""
+_is_forward_diagonal(bond_type::String) = occursin("\\", bond_type)
+
+"""
+Bond offsets for honeycomb brickwall.
+Returns ((di1,dj1), (di2,dj2)) as raw offsets from the anchor site (i,j).
+"""
+function _bond_offsets_honeycomb(bond_type::String)
+    if occursin("_V_", bond_type) || occursin("J1V", bond_type) || occursin("Jy", bond_type)
+        return (0, 0), (1, 0)
+    elseif occursin("J2H", bond_type)
+        return (0, 0), (0, 2)
+    elseif occursin("_H_", bond_type) || occursin("J1H", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
+        return (0, 0), (0, 1)
+    elseif _is_cross_diagonal(bond_type)
+        return (0, 1), (1, 0)    # / direction
+    elseif _is_forward_diagonal(bond_type)
+        return (0, 0), (1, 1)    # \ direction
+    else
+        return (0, 0), (0, 1)
+    end
+end
+
+"""
+Bond offsets for Square lattice. Same diagonal logic as Honeycomb.
+"""
+function _bond_offsets_square(bond_type::String)
+    if occursin("_V_", bond_type) || occursin("J1V", bond_type)
+        return (0, 0), (1, 0)
+    elseif occursin("_H_", bond_type) || occursin("J1H", bond_type)
+        return (0, 0), (0, 1)
+    elseif _is_cross_diagonal(bond_type)
+        return (0, 1), (1, 0)    # / direction
+    elseif _is_forward_diagonal(bond_type)
+        return (0, 0), (1, 1)    # \ direction
+    else
+        return (0, 0), (0, 1)
+    end
+end

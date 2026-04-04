@@ -52,6 +52,10 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     # Preconditioning
     ifprecondition::Bool = false
     iter_precond::Int = 20
+
+    # Visualization (requires CairoMakie)
+    ifplot::Bool = true
+    plot_format::String = "png"
 end
 
 """

@@ -5,6 +5,7 @@ version = "0.2.0"
 
 [deps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
@@ -28,6 +29,7 @@ cuTENSOR = "011b41b2-24ef-40a8-b3eb-fa098493e9e1"
 
 [compat]
 AMDGPU = "2"
+CairoMakie = "0.12, 0.13"
 CUDA = "5"
 ChainRulesCore = "1"
 ForwardDiff = "0.10"
