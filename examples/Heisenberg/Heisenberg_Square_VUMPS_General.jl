@@ -16,7 +16,7 @@ pattern = [1;;]
 # pattern = [1 3;
 #            2 4]
 model = Heisenberg(lattice=Square(),
-                   S=0.5, Jx=-1.0, Jy=-1.0, Jz=1.0,
+                   S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
                    ifrotate=true,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0

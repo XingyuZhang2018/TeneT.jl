@@ -124,6 +124,7 @@ export VUMPS
 export QRCTM
 
 export Square, Honeycomb, Kagome
+export General, C4v, Plaquette
 
 export C4v_restriction, local_min_norm
 

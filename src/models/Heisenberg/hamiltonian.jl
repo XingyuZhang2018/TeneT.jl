@@ -20,7 +20,7 @@ end
     hamiltonian(model::Heisenberg)
 
 Return the Heisenberg Hamiltonian as a two-site operator.
-When `ifrotate=true`, applies a sublattice rotation `U = 2Sx` so that the
+When `ifrotate=true`, applies a sublattice rotation `U = 2Sy` so that the
 antiferromagnetic Néel order becomes a uniform state, enabling efficient
 optimization with a single-site unit cell.
 """
@@ -33,7 +33,7 @@ function hamiltonian(model::Heisenberg)
         model.Jy * (@tensor out[i,j,k,l] := Sy[i,j] * Sy[k,l]) +
         model.Jz * (@tensor out[i,j,k,l] := Sz[i,j] * Sz[k,l])
     if model.ifrotate
-        U = Sx * 2
+        U = Sy * 2
         @tensor h_rot[i,j,k,l] := h[i,j,c,d] * U[k,c] * conj(U[l,d])
         h = h_rot
     end
