@@ -22,7 +22,7 @@ model = J1J2(lattice=Honeycomb(:brickwall),
              couplingtype=:plaquette, bondratio=1.0)
 No = 45
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
-boundary_alg = VUMPS{:General}(ifupdown=true,
+boundary_alg = VUMPS{General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
                                ifparallel=false,

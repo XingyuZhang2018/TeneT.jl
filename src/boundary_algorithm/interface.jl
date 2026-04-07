@@ -4,9 +4,9 @@
     VUMPS{F} <: Algorithm
 
 Variational Uniform Matrix Product State algorithm
-:General
-:Plaquette
-:C4v
+General
+Plaquette{<:AbstractLattice}
+C4v
 """
 @kwdef mutable struct VUMPS{F} <: Algorithm
     tol::Float64 = 1e-10
@@ -28,6 +28,9 @@ Variational Uniform Matrix Product State algorithm
     ifsimple_eig::Bool = true
     ifcheckpoint::Bool = false
 end
+
+# Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
+VUMPS(::F; kwargs...) where {F <: ContractionMode} = VUMPS{F}(; kwargs...)
 
 """
     CTMRG <: Algorithm

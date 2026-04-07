@@ -16,7 +16,9 @@ Base.show(io::IO, ::Kagome)              = print(io, "Kagome")
 # Contraction modes for VUMPS specialization
 abstract type ContractionMode end
 struct General <: ContractionMode end
-struct Plaquette <: ContractionMode end
+struct C4v <: ContractionMode end
+struct Plaquette{Mode} <: ContractionMode end
+Plaquette(L::AbstractLattice) = Plaquette{typeof(L)}()
 
 # Boundary algorithm base type
 abstract type Algorithm end

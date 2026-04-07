@@ -19,28 +19,27 @@ pattern = [1 3 5 2 4 6;
            2 4 6 1 3 5]
 # pattern = [1 3 5 7  9 11;
 #            2 4 6 8 10 12]
-model = J1J2J3(lattice=Honeycomb(:brickwall), 
-              S=0.5, J1=1.0, J2=0.5, J3=0.25,
-              ifrotate=true, 
-              couplingtype=:plaquette, bondratio=1)
+lattice = Honeycomb(:brickwall)
+model = J1J2J3(lattice=lattice, 
+               S=0.5, J1=1.0, J2=0.5, J3=0.25,
+               ifrotate=true, 
+               couplingtype=:plaquette, bondratio=1)
 No = 0
-folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
-boundary_alg = VUMPS{General}(ifupdown=true,
-                               ifdownfromup=false,
-                               ifsimple_eig=true,
-                               ifparallel=false,
-                               ifcheckpoint=false,
-                               forloop_iter=1,
-                               maxiter=30, 
-                               miniter=0, 
-                               maxiter_ad=4,
-                               miniter_ad=4,
-                               power_iter=1,
-                               power_iter_ad=5,
-                               power_iter_obs=40,
-                               show_every=10,
-                               tol=1e-10,
-                               verbosity=3,
+folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/seed$seed/")
+boundary_alg = VUMPS(Plaquette(lattice); ifsimple_eig=true,
+                                         ifparallel=false,
+                                         ifcheckpoint=false,
+                                         forloop_iter=1,
+                                         maxiter=30, 
+                                         miniter=0, 
+                                         maxiter_ad=4,
+                                         miniter_ad=4,
+                                         power_iter=1,
+                                         power_iter_ad=5,
+                                         power_iter_obs=40,
+                                         show_every=10,
+                                         tol=1e-10,
+                                         verbosity=3,
 )
 params = GradientOptimize(model=model,
                           pattern=pattern,
@@ -64,22 +63,6 @@ params = GradientOptimize(model=model,
 A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = init_ipeps_SU(; atype, No, D, D_new=3, χ, params)
 # A = init_ipeps_perturbation(;atype, No, D, D_new=4, χ, ϵ=1e-2, params)
-
-# function restriction_ipeps(A)
-#    # A /= norm(A)
-#    A = local_min_norm(A, params)
-# #    B = Zygote.Buffer(A)
-# #    for i in 1:length(A)
-# #        if i in [1,4,5]
-# #            B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
-# #        elseif i in [2,3,6]
-# #            B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
-# #        end
-# #    end
-# #    B = copy(B)
-# #    return B/norm(B)
-#    # return A
-# end
 
 function restriction_ipeps(A)
    # A /= norm(A)

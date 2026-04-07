@@ -637,7 +637,7 @@ end
 
 Create a single VUMPSRuntime: canonical forms + fixed-point environments.
 """
-function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{:General})
+function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{General})
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
@@ -658,7 +658,7 @@ end
 Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`
 and bond dimension `χ`.
 """
-function init_env(M::StructArray, χ::Int, alg::VUMPS{:General})
+function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
     Ni, Nj = size(M)
 
     rtup = init_VUMPSRuntime(M, χ, alg)
@@ -683,12 +683,12 @@ end
 # ── VUMPS step functions ────────────────────────────────────────────
 
 """
-    vumps_step_power(rt, M, alg::VUMPS{:General}{General})
+    vumps_step_power(rt, M, alg::VUMPS{General}{General})
 
 One step of the VUMPS algorithm with the standard (General) contraction mode.
 Uses the power-method variant: update environments first, then re-solve AC/C.
 """
-function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL, C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
@@ -705,7 +705,7 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General}
     return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
 end
 
-function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL,C)
     _, FL =  leftenv(AL, conj(AL), M, FL; alg)
@@ -722,12 +722,12 @@ end
 # ── VUMPS iteration loop ────────────────────────────────────────────
 
 """
-    vumps_itr(rt, M, alg::VUMPS{:General})
+    vumps_itr(rt, M, alg::VUMPS{General})
 
 Run the VUMPS iteration loop: first without AD tracking (warm-up), then with AD.
 Returns the converged runtime and final error.
 """
-function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     t = ChainRulesCore.ignore_derivatives(() -> time())
 
     local err
@@ -766,23 +766,23 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
 end
 
 """
-    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS{:General})
+    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS{General})
 
 Run the VUMPS boundary contraction for a single (up) environment.
 Returns the converged runtime and error.
 """
-function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     rt, err = vumps_itr(rt, M, alg)
     return rt, err
 end
 
 """
-    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{:General})
+    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General})
 
 Run the VUMPS boundary contraction for both up and down environments.
 Returns the converged runtimes and errors.
 """
-function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{:General})
+function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General})
     rtup, rtdown = rt
     rtup, errup = vumps_itr(rtup, M, alg)
     Md = _down_M(M)
@@ -797,7 +797,7 @@ end
 
 Construct a `VUMPSEnv` observation environment from a single VUMPS runtime.
 """
-function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General}, Fo=[rt.FL, rt.FR])
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General}, Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg)
@@ -811,7 +811,7 @@ end
 Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
 Computes mixed (observation) left and right environments.
 """
-function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{:General}, Fo=[rt[1].FL, rt[1].FR])
+function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General}, Fo=[rt[1].FL, rt[1].FR])
     rtup, rtdown = rt
 
     ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR

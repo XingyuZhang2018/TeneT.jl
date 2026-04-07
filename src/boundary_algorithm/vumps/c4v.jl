@@ -48,7 +48,7 @@ end
 
 # ── initialization ─────────────────────────────────────────
 
-function init_env(M::StructArray, χ::Int, alg::VUMPS{:C4v})
+function init_env(M::StructArray, χ::Int, alg::VUMPS{C4v})
     M = M[1][:,:,:,:,:,1]
     D = size(M, 1)  
     if M isa leg4
@@ -65,12 +65,12 @@ function init_env(M::StructArray, χ::Int, alg::VUMPS{:C4v})
 end
 
 """
-    vumps_step(rt::C4vVUMPSEnv, M, alg::VUMPS{:C4v})
+    vumps_step(rt::C4vVUMPSEnv, M, alg::VUMPS{C4v})
 
 One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
-function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{:C4v})
+function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{C4v})
     @unpack AL, C, FL = rt
     AC = ALCtoAC_map(AL, C)
     _, FL = leftenv_c4v(AL, conj(AL), M, FL; alg)
@@ -87,7 +87,7 @@ end
 
 # ── Plaquette iteration + boundary ───────────────────────────────────
 
-function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
+function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     t = ignore_derivatives(() -> time())
     M = M[1]
     local err
@@ -127,4 +127,4 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
     return rt, err
 end
 
-ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{:C4v}) = rt
+ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{C4v}) = rt

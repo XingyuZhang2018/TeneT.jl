@@ -11,7 +11,7 @@
         # VUMPS General
         # ==================================================================
         @testset "VUMPS General" begin
-            alg = VUMPS{:General}(; verbosity=0, maxiter=100,
+            alg = VUMPS{General}(; verbosity=0, maxiter=100,
                                     maxiter_ad=1, miniter_ad=1,
                                     tol=1e-8, ifupdown=false)
 
@@ -60,7 +60,7 @@
 
             # ---- Up/down ----
             @testset "up/down returns tuple" begin
-                alg_ud = VUMPS{:General}(; verbosity=0, maxiter=100,
+                alg_ud = VUMPS{General}(; verbosity=0, maxiter=100,
                                            maxiter_ad=1, miniter_ad=1,
                                            tol=1e-8, ifupdown=true,
                                            ifdownfromup=true)
@@ -91,7 +91,7 @@
         # VUMPS Plaquette
         # ==================================================================
         @testset "VUMPS Plaquette" begin
-            alg_plaq = VUMPS{:Plaquette}(; verbosity=0, maxiter=100,
+            alg_plaq = VUMPS{Plaquette{Square}}(; verbosity=0, maxiter=100,
                                            maxiter_ad=1, miniter_ad=1,
                                            tol=1e-8)
 
@@ -118,7 +118,7 @@
         # VUMPS C4v
         # ==================================================================
         @testset "VUMPS C4v" begin
-            alg_c4v = VUMPS{:C4v}(; verbosity=0, maxiter=100,
+            alg_c4v = VUMPS{C4v}(; verbosity=0, maxiter=100,
                                     maxiter_ad=1, miniter_ad=1,
                                     tol=1e-8)
 
@@ -180,7 +180,7 @@
         # Environment helpers
         # ==================================================================
         @testset "environment helpers" begin
-            alg = VUMPS{:General}(; verbosity=0, maxiter=20,
+            alg = VUMPS{General}(; verbosity=0, maxiter=20,
                                     maxiter_ad=1, miniter_ad=1,
                                     tol=1e-6, ifupdown=false)
 

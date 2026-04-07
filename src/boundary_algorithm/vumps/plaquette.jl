@@ -1,5 +1,5 @@
 # ============================================================================
-# Plaquette VUMPS — specialized for 2×2 plaquette contractions
+# Plaquette VUMPS — specialized for 2×2 and 2x6 plaquette contractions
 #
 # Key differences from General VUMPS:
 #   - Only left-canonical form (no AR, FR)
@@ -16,7 +16,7 @@
 AC environment for plaquette mode.  Uses `FL` on both sides of the
 column transfer matrix (no FR).
 """
-function ACenv_plaq(AC, FL, M; alg, kwargs...)
+function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     Ni, Nj = size(M)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
@@ -27,7 +27,14 @@ function ACenv_plaq(AC, FL, M; alg, kwargs...)
     ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         p = AC.pattern[1,j]
-        jr = mod1(j + 1, Nj)
+        if L <: Plaquette{Square}
+            jr = mod1(j + 1, Nj)
+        elseif L <: Plaquette{Honeycomb{:brickwall}}
+            jr = mod1(Nj - j , Nj)
+        else
+            error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")
+        end
+        
         if p ∉ processed_indices
             f(AC1j) = ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
@@ -64,17 +71,24 @@ end
 C environment for plaquette mode.  Uses `FL` on both sides:
 `Cmap(C, FL[:,jr], FL[:,jr])`.
 """
-function Cenv_plaq(C, FL; alg, kwargs...)
+function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     Ni, Nj = size(C)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
     for j in 1:Nj
-        jr = mod1(j + 1, Nj)
+        jl = mod1(j + 1, Nj)
+        if L <: Plaquette{Square}
+            jr = mod1(j + 1, Nj)
+        elseif L <: Plaquette{Honeycomb{:brickwall}}
+            jr = mod1(Nj - j , Nj)
+        else
+            error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")
+        end
         p = C.pattern[1,j]
         if p ∉ processed_indices
-            f(C1j) = Cmap(1, C1j, FL[:,jr], FL[:,jr])
+            f(C1j) = Cmap(1, C1j, FL[:,jl], FL[:,jr])
             if alg.ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1,j]; power_iter)
             else
@@ -88,7 +102,7 @@ function Cenv_plaq(C, FL; alg, kwargs...)
         for i in 2:Ni
             p = C.pattern[i,j]
             if p ∉ processed_indices
-                Cij = Cmap(C′[i-1,j], FL[i-1,jr], FL[i-1,jr])
+                Cij = Cmap(C′[i-1,j], FL[i-1,jl], FL[i-1,jr])
                 C′[i,j] = Cij / norm(Cij)
                 λC[i,j] = λC[1,j]
                 push!(processed_indices, p)
@@ -104,12 +118,12 @@ end
 # ── Plaquette VUMPS step ─────────────────────────────────────────────
 
 """
-    vumps_step(rt::PlaquetteVUMPSRuntime, M, alg::VUMPS{:Plaquette})
+    vumps_step(rt::PlaquetteVUMPSRuntime, M, alg::VUMPS{<:Plaquette})
 
 One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
-function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{:Plaquette})
+function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     @unpack AL, C, FL = rt
     AC = ALCtoAC(AL, C)
     _, FL = leftenv(AL, conj(AL), M, FL; alg)
@@ -122,8 +136,8 @@ end
 
 # ── Plaquette initialization ─────────────────────────────────────────
 
-function init_env(M::StructArray, χ::Int, alg::VUMPS{:Plaquette})
-    size(M.pattern) == (2,2) || error("Plaquette VUMPS only supports 2×2 patterns")
+function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Plaquette})
+    size(M.pattern) == (2,2) || size(M.pattern) == (2,6) || error("Plaquette VUMPS only supports 2×2 and 2×6 patterns. Got pattern of size $(size(M.pattern)).")
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     C = LRtoC(L, L)   # use L on both sides (no right canonical)
@@ -133,7 +147,7 @@ end
 
 # ── Plaquette iteration + boundary ───────────────────────────────────
 
-function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{:Plaquette})
+function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     t = ignore_derivatives(() -> time())
     local err
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration without AD...")
@@ -171,7 +185,7 @@ function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{:Plaque
     return rt, err
 end
 
-function leading_boundary(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{:Plaquette})
+function leading_boundary(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     return vumps_itr(rt, M, alg)
 end
 
@@ -182,7 +196,7 @@ end
 Construct a `PlaquetteVUMPSEnv` from a plaquette runtime.
 Computes the observation left environment `FLo` using `ifobs=true`.
 """
-function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{:Plaquette})
+function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     @unpack AL, C, FL = rt
     _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
     return PlaquetteVUMPSEnv(AL, C, FL, FLo)

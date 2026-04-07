@@ -6,7 +6,7 @@ using LinearAlgebra
 using Zygote
 
 
-seed = 88
+seed = 99
 Random.seed!(seed)
 atype = Array
 etype = Float64
@@ -25,7 +25,7 @@ model = J1J2(lattice=Honeycomb(:brickwall),
               couplingtype=:plaquette, bondratio=0.1)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
-boundary_alg = VUMPS{:General}(ifupdown=true,
+boundary_alg = VUMPS{General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
                                ifparallel=false,
@@ -67,17 +67,17 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 
 function restriction_ipeps(A)
    # A /= norm(A)
-   # A = local_min_norm(A, params)
-   B = Zygote.Buffer(A)
-   for i in 1:length(A)
-       if i in [1,4,5]
-           B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
-       elseif i in [2,3,6]
-           B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
-       end
-   end
-   B = copy(B)
-   return B/norm(B)
+   A = local_min_norm(A, params)
+#    B = Zygote.Buffer(A)
+#    for i in 1:length(A)
+#        if i in [1,4,5]
+#            B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
+#        elseif i in [2,3,6]
+#            B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
+#        end
+#    end
+#    B = copy(B)
+#    return B/norm(B)
    # return A
 end
 

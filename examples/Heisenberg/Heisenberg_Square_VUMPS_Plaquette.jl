@@ -18,7 +18,7 @@ model = Heisenberg(lattice=Square(),
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/seed$seed/")
-boundary_alg = VUMPS{:Plaquette}(ifsimple_eig=true,
+boundary_alg = VUMPS{Plaquette{Square}}(ifsimple_eig=true,
                                  ifparallel=false,
                                  ifcheckpoint=false,
                                  forloop_iter=1,
