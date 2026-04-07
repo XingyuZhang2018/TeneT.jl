@@ -33,7 +33,7 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
             iSy = _arraytype(A[1])(reduce(kron, fill(Id, n - 1); init = iSy))
             @unpack forloop_iter, ifparallel = params.boundary_alg
             i, j = 1, 1
-            Ni = size(A, 1)
+            Ni,Nj = size(A)
             if env isa VUMPSEnv
                 @unpack FLo, ACu, ACd, FRo = env
                 id = Ni + 1 - i
@@ -43,7 +43,8 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
             elseif env isa PlaquetteVUMPSEnv
                 @unpack AL, C, FLu, FLo = env
                 AC = ALCtoAC(AL, C)
-                ir, jr = 2,2
+                ir = 2
+                jr = params.model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
                 My = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], iSy; ifparallel, forloop_iter)
                 n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
                 fδEierr[4] = abs(My/n)

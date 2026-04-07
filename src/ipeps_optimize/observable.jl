@@ -120,7 +120,7 @@ function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
         i, j = Tuple(findfirst(==(p), AC.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
-        jr = mod1(j + 1, Nj)
+        jr = model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
         Mx = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sx; ifparallel, forloop_iter)
         My = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sy; ifparallel, forloop_iter)
         Mz = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter)
