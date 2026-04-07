@@ -10,7 +10,7 @@ seed = 88
 Random.seed!(seed)
 atype = CuArray
 etype = Float64
-D, χ, χshift, maxiter_restart = 3, 25, 4, 100
+D, χ, χshift, maxiter_restart = 3, 44, 4, 100
 # pattern = [1 2;
 #            2 1]
 # pattern = [1 3;
@@ -20,11 +20,11 @@ pattern = [1 3 5 2 4 6;
 # pattern = [1 3 5 7  9 11;
 #            2 4 6 8 10 12]
 lattice = Honeycomb(:brickwall)
-model = J1J2J3(lattice=lattice, 
-               S=0.5, J1=1.0, J2=0.35, J3=0.1,
-               ifrotate=true, 
-               couplingtype=:plaquette, bondratio=1)
-No = 8
+model = J1J2(lattice=lattice, 
+             S=0.5, J1=1.0, J2=0.3,
+             ifrotate=true, 
+             couplingtype=:plaquette, bondratio=1)
+No = 2
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/seed$seed/")
 boundary_alg = VUMPS(Plaquette(lattice); ifsimple_eig=true,
                                          ifparallel=false,
@@ -86,4 +86,4 @@ end
 #    observable(A, χ, params; restriction_ipeps)
 # end
 # observable(A, 23, params; restriction_ipeps)
-optimise_ipeps(A, 32, χshift, params; restriction_ipeps);
+optimise_ipeps(A, 16, χshift, params; restriction_ipeps);

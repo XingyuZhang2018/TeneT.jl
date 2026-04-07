@@ -243,7 +243,7 @@ end
 # ============================================================================
 function oc_Q_23(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu1, ARd1, ARu2, ARd2, Au11, Ad11, Au12, Ad12, Au13, Ad13, Au21, Ad21, Au22, Ad22, Au23, Ad23; ifparallel, forloop_iter)
     χ = size(Q, 1)
-    Iχ = reshape(_arraytype(FLu){eltype(FLu)}(I(χ)), χ, 1,1, χ)
+    Iχ = Zygote.@ignore reshape(_arraytype(FLu){eltype(FLu)}(I(χ)), χ, 1,1, χ)
 
     Q = FLmap_parallel(FLo, Q, ACd, (Au21, Ad21); ifparallel, forloop_iter)
     Q = FLmap_parallel(Q, Iχ, ARd1, (Au22, Ad22); ifparallel, forloop_iter)
