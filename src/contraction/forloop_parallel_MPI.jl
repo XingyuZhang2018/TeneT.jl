@@ -30,7 +30,7 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
         for range in D_split_ranges
             cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
             cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
-            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            split_args = Tuple(j == N_in[1] ? @view(args[j][cols_in...]) : args[j] for j in 1:length(args))
             result[cols_out...] = f(split_args...)
         end
 
@@ -51,7 +51,7 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
         ind = forloop_iter * rank + i
         cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
         cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1: ndims(result))
-        split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+        split_args = Tuple(j == N_in[1] ? @view(args[j][cols_in...]) : args[j] for j in 1:length(args))
         result[cols_out...] = f(split_args...)
         synchronize(args[1])
     end
@@ -76,8 +76,8 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         for range in D_split_ranges
             cols_in1 = (j == N_in1[2] ? range : (:) for j in 1:ndims(args[N_in1[1]]))
             cols_in2 = (j == N_in2[2] ? range : (:) for j in 1:ndims(args[N_in2[1]]))
-            split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-            result += f(split_args...)
+            split_args = (j == N_in1[1] ? @view(args[j][cols_in1...]) : (j == N_in2[1] ? @view(args[j][cols_in2...]) : args[j]) for j in 1:length(args))
+            result .+= f(split_args...)
         end
 
         return result
@@ -98,8 +98,8 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         ind = forloop_iter * rank + i
         cols_in1 = (j == N_in1[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in1[1]]))
         cols_in2 = (j == N_in2[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in2[1]]))
-        split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-        result += f(split_args...)
+        split_args = (j == N_in1[1] ? @view(args[j][cols_in1...]) : (j == N_in2[1] ? @view(args[j][cols_in2...]) : args[j]) for j in 1:length(args))
+        result .+= f(split_args...)
         synchronize(args[1])
     end
 

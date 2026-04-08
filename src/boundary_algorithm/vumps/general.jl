@@ -779,11 +779,10 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     end
 
     ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD...")
+    alg_ad = deepcopy(alg)
+    alg_ad.power_iter = alg.power_iter_ad
     for i in 1:alg.maxiter_ad
-        power_iter_backup = alg.power_iter
-        alg.power_iter = alg.power_iter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
-        alg.power_iter = power_iter_backup
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
