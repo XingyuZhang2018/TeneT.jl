@@ -10,7 +10,7 @@ seed = 88
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 3, 16, 1, 100
+D, χ, χshift, maxiter_restart = 4, 32, 1, 1
 pattern = [1 2;
            2 1]
 # pattern = [1 3;
@@ -28,11 +28,12 @@ folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed
 boundary_alg = VUMPS{General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
+                               ifparallelupdown=true,
                                ifparallel=false,
                                ifcheckpoint=false,
                                forloop_iter=1,
                                maxiter=30, 
-                               miniter=0, 
+                               miniter=30, 
                                maxiter_ad=4,
                                miniter_ad=4,
                                power_iter=1,
@@ -45,7 +46,7 @@ boundary_alg = VUMPS{General}(ifupdown=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg, 
-                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=0, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
                           forloop_iter=1,
                           maxiter_restart=maxiter_restart,
@@ -56,8 +57,8 @@ params = GradientOptimize(model=model,
                           ifprecondition=true,
                           iter_precond=0,
                           reuse_env=true, 
-                          ifsave_env=true,
-                          ifload_env=true,
+                          ifsave_env=false,
+                          ifload_env=false,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
@@ -99,6 +100,6 @@ function restriction_ipeps(A)
    # return A
 end
 
-# observable(A, 23, params; restriction_ipeps)
-optimise_ipeps(A, 16, χshift, params; restriction_ipeps);
+# observable(A, 64, params; restriction_ipeps)
+optimise_ipeps(A, 64, χshift, params; restriction_ipeps);
 # 

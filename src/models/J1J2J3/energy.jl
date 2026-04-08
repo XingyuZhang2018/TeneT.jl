@@ -85,7 +85,7 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
 
         if model.ifrotate
             model.ifrotate = false
-            O1, O2 = atype.(hamiltonian_trunc(model))
+            O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
             model.ifrotate = true
         end
         ir  = mod1(i + 1, Ni)
@@ -202,7 +202,7 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
 
         if model.ifrotate
             model.ifrotate = false
-            O1, O2 = atype.(hamiltonian_trunc(model))
+            O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
             model.ifrotate = true
         end
         ir  = mod1(i + 1, Ni)

@@ -2,7 +2,7 @@ function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPS
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
-    O1, O2 = atype.(hamiltonian_trunc(model))
+    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
     etol = 0
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
@@ -42,7 +42,7 @@ function energy_value(model::Heisenberg{Square}, A, env::PlaquetteVUMPSEnv, para
     AC = ALCtoAC(AL, C)
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
-    O1, O2 = atype.(hamiltonian_trunc(model))
+    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
     etol = 0
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
@@ -82,7 +82,7 @@ function energy_value(model::Heisenberg{Square}, A, env::C4vVUMPSEnv, params::iP
     )
 
     A1 = A[1]
-    O1, O2 = _arraytype(A1).(hamiltonian_trunc(model))
+    O1, O2 = Zygote.@ignore _arraytype(A1).(hamiltonian_trunc(model))
     AC = ALCtoAC_map(AL,C)
 
     e = contract_o_12(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC), O1, O2; ifparallel, forloop_iter)
@@ -104,7 +104,7 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
 
     # Extract site tensor once to avoid repeated StructArray indexing in AD
     A1 = A[1]
-    O1, O2 = _arraytype(A1).(hamiltonian_trunc(model))
+    O1, O2 = Zygote.@ignore _arraytype(A1).(hamiltonian_trunc(model))
 
     To = CTCtoT(C, T)
     e = contract_o_12(To, T, A1, T, To, T, A1, T, O1, O2; ifparallel, forloop_iter)
@@ -204,8 +204,8 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
     h_32H = Jx * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Id[2,8]*Sx[3,9] * Id[4,10]*Sx[5,11]*Id[6,12]), d^3,d^3,d^3,d^3) +
             Jy * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Id[2,8]*Sy[3,9] * Id[4,10]*Sy[5,11]*Id[6,12]), d^3,d^3,d^3,d^3) +
             Jz * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Id[2,8]*Sz[3,9] * Id[4,10]*Sz[5,11]*Id[6,12]), d^3,d^3,d^3,d^3)
-    Oh31_1, Oh31_2 = atype.(hamiltonian_trunc(real(h_31H)))
-    Oh32_1, Oh32_2 = atype.(hamiltonian_trunc(real(h_32H)))
+    Oh31_1, Oh31_2 = Zygote.@ignore atype.(hamiltonian_trunc(real(h_31H)))
+    Oh32_1, Oh32_2 = Zygote.@ignore atype.(hamiltonian_trunc(real(h_32H)))
 
     # Inter-cell vertical operators: site 3@upper ↔ site 1@lower, site 2@upper ↔ site 1@lower
     h_31V = Jx * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Id[2,8]*Sx[3,9] * Sx[4,10]*Id[5,11]*Id[6,12]), d^3,d^3,d^3,d^3) +
@@ -214,8 +214,8 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
     h_21V = Jx * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Sx[2,8]*Id[3,9] * Sx[4,10]*Id[5,11]*Id[6,12]), d^3,d^3,d^3,d^3) +
             Jy * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Sy[2,8]*Id[3,9] * Sy[4,10]*Id[5,11]*Id[6,12]), d^3,d^3,d^3,d^3) +
             Jz * reshape((@tensor o[1,2,3,7,8,9,4,5,6,10,11,12] := Id[1,7]*Sz[2,8]*Id[3,9] * Sz[4,10]*Id[5,11]*Id[6,12]), d^3,d^3,d^3,d^3)
-    Ov31_1, Ov31_2 = atype.(hamiltonian_trunc(real(h_31V)))
-    Ov21_1, Ov21_2 = atype.(hamiltonian_trunc(real(h_21V)))
+    Ov31_1, Ov31_2 = Zygote.@ignore atype.(hamiltonian_trunc(real(h_31V)))
+    Ov21_1, Ov21_2 = Zygote.@ignore atype.(hamiltonian_trunc(real(h_21V)))
 
     e_dict = Dict{String, Dict{String, Any}}(
         "bond_12_energy"  => Dict{String, Any}(),
@@ -288,8 +288,8 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
     )
 
     h_H, h_V = hamiltonian(model)
-    Oh1, Oh2 = atype.(hamiltonian_trunc(h_H))
-    Ov1, Ov2 = atype.(hamiltonian_trunc(h_V))
+    Oh1, Oh2 = Zygote.@ignore atype.(hamiltonian_trunc(h_H))
+    Ov1, Ov2 = Zygote.@ignore atype.(hamiltonian_trunc(h_V))
     h_onsite = atype(hamiltonian_onsite(model))
     for p in 1:len
         i, j = Tuple(findfirst(==(p), A.pattern))

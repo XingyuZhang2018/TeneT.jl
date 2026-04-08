@@ -8,7 +8,7 @@ using Zygote
 
 seed = 88
 Random.seed!(seed)
-atype = CuArray
+atype = Array
 etype = Float64
 D, χ, χshift, maxiter_restart = 3, 25, 4, 100
 # pattern = [1 2;

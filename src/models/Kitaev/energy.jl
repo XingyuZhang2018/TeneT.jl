@@ -6,9 +6,9 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
     Ni, Nj = size(A)
 
     h = hamiltonian(model)
-    Sx1, Sx2 = atype.(hamiltonian_trunc(h[1]))
-    Sy1, Sy2 = atype.(hamiltonian_trunc(h[2]))
-    Sz1, Sz2 = atype.(hamiltonian_trunc(h[3]))
+    Sx1, Sx2 = Zygote.@ignore atype.(hamiltonian_trunc(h[1]))
+    Sy1, Sy2 = Zygote.@ignore atype.(hamiltonian_trunc(h[2]))
+    Sz1, Sz2 = Zygote.@ignore atype.(hamiltonian_trunc(h[3]))
 
     e_dict = Dict{String, Dict{String, Any}}(
         "bond_Jx_energy" => Dict{String, Any}(),

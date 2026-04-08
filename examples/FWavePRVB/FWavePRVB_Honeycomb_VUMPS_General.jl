@@ -25,6 +25,7 @@ folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed
 boundary_alg = VUMPS{General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
+                               ifparallelupdown=false,
                                ifparallel=false,
                                ifcheckpoint=false,
                                forloop_iter=1,

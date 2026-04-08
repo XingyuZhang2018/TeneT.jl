@@ -67,6 +67,7 @@
         @test v.verbosity == Defaults.VERBOSE_WARN
         @test v.ifupdown == true
         @test v.ifdownfromup == false
+        @test v.ifparallelupdown == false
         @test v.ifparallel == false
         @test v.ifsimple_eig == true
         @test v.ifcheckpoint == false

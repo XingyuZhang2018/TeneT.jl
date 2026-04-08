@@ -83,7 +83,7 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
         ir = mod1(i + 1, Ni)
         jr = mod1(j + 1, Nj)
 
-        O1, O2 = atype.(hamiltonian_trunc(model))
+        O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
 
         params.verbosity >= 4 && println("===========$i,$j===========")
         e = contract_o_12(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr], O1, O2; ifparallel, forloop_iter)
@@ -100,7 +100,7 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
 
         if model.ifrotate
             model.ifrotate = false
-            O1, O2 = atype.(hamiltonian_trunc(model))
+            O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
             model.ifrotate = true
         end
         e = contract_o_22_1(FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr], O1, O2; ifparallel, forloop_iter)
@@ -128,7 +128,7 @@ function energy_value(model::J1J2{Square}, A, env::C4vVUMPSEnv, params::iPEPSOpt
 
     A1 = A[1]
     atype = _arraytype(A1)
-    O1, O2 = atype.(hamiltonian_trunc(model))
+    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
     AC = ALCtoAC_map(AL,C)
 
     e = contract_o_12(FL, AL, A1, conj(AL), FL, AC, A1, conj(AC), O1, O2; ifparallel, forloop_iter)
@@ -139,7 +139,7 @@ function energy_value(model::J1J2{Square}, A, env::C4vVUMPSEnv, params::iPEPSOpt
 
     if model.ifrotate
         model.ifrotate = false
-        O1, O2 = atype.(hamiltonian_trunc(model))
+        O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
         model.ifrotate = true
     end
     e = contract_o_22_1(FL, FL, AL, conj(AL), FL, FL, AC, conj(AC), A1, A1, A1, A1, O1, O2; ifparallel, forloop_iter)
@@ -166,7 +166,7 @@ function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize
     
     A1 = A[1]
     atype = _arraytype(A1)
-    O1, O2 = atype.(hamiltonian_trunc(model))
+    O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
 
     To = CTCtoT(C, T)
     e = contract_o_12(To, T, A1, T, To, T, A1, T, O1, O2; ifparallel, forloop_iter)
@@ -177,7 +177,7 @@ function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize
 
     if model.ifrotate
         model.ifrotate = false
-        O1, O2 = atype.(hamiltonian_trunc(model))
+        O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
         model.ifrotate = true
     end
     @tensor Tu[1,3,4,5] := C[1,2] * T[2,3,4,5] 
@@ -236,7 +236,7 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
 
         if model.ifrotate
             model.ifrotate = false
-            O1, O2 = atype.(hamiltonian_trunc(model))
+            O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
             model.ifrotate = true
         end
         ir  = mod1(i + 1, Ni)
@@ -323,7 +323,7 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::PlaquetteVUMPS
 
         if model.ifrotate
             model.ifrotate = false
-            O1, O2 = atype.(hamiltonian_trunc(model))
+            O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
             model.ifrotate = true
         end
         ir  = mod1(i + 1, Ni)

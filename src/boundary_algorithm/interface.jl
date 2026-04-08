@@ -24,6 +24,7 @@ C4v
 
     ifupdown::Bool = true
     ifdownfromup::Bool = false
+    ifparallelupdown = false
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
     ifcheckpoint::Bool = false
