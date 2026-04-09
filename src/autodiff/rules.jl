@@ -258,11 +258,14 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
         synchronize(args[1])
 
         for j in 1:length(args)
-            if j == N_in[1] 
+            if j == N_in[1] && N_in[2] == ndims(args[j])
+                # Split along last dim → contiguous in column-major → Allgatherv
                 element_size = prod(size(dargs[j])) ÷ D_split
                 counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
                 MPI.Allgatherv!(VBuffer(dargs[j], counts), comm)
             else
+                # Non-split arg, or split along non-last dim (e.g. FRmap/ACdmap
+                # N_in[2]=1) where data is strided → Allreduce
                 if dargs[j] isa Tuple
                     for k in 1:length(dargs[j])
                         MPI.Allreduce!(dargs[j][k], +, comm)
