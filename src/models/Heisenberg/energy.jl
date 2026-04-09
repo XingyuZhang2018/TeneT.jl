@@ -195,7 +195,8 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
     len = length(A)
 
     d = Int(2*S + 1)
-    terms = _heisenberg_bond_terms(model, Array)
+    # Kagome merge: no sublattice rotation
+    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
 
     h_12 = _kagome_onsite_op(terms, 1, 2, d, atype)
     h_23 = _kagome_onsite_op(terms, 2, 3, d, atype)
@@ -277,7 +278,8 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
     )
 
     d = Int(2*model.S + 1)
-    terms = _heisenberg_bond_terms(model, Array)
+    # Kagome merge: no sublattice rotation (all sites in same cell)
+    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
 
     h_onsite = _kagome_onsite_op(terms, 1, 2, d, atype) + _kagome_onsite_op(terms, 2, 3, d, atype)
 
@@ -321,4 +323,32 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
     return etol/len, e_dict
+end
+# ── Kagome merge: hamiltonian for SU_parameterization ──
+
+"""
+    hamiltonian(model::Heisenberg{Kagome{:merge}})
+
+Return `(h_H, h_V)` inter-cell Hamiltonians as d³×d³×d³×d³ tensors.
+h_H = bond(3→1) + bond(3→2), h_V = bond(3→1) + bond(2→1).
+"""
+function hamiltonian(model::Heisenberg{Kagome{:merge}})
+    S = model.S
+    d = Int(2*S + 1)
+    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
+
+    function _build_twosite(sublattice_left, sublattice_right)
+        h = zeros(Float64, d^3, d^3, d^3, d^3)
+        for (c, OL, OR) in terms
+            OL_d3 = _kagome_site_op(OL, sublattice_left, d)
+            OR_d3 = _kagome_site_op(OR, sublattice_right, d)
+            @tensor o[a,b,c,d] := OL_d3[a,b] * OR_d3[c,d]
+            h += c * real(o)
+        end
+        return h
+    end
+
+    h_H = _build_twosite(3, 1) + _build_twosite(3, 2)
+    h_V = _build_twosite(3, 1) + _build_twosite(2, 1)
+    return h_H, h_V
 end

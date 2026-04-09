@@ -8,7 +8,7 @@ General
 Plaquette{<:AbstractLattice}
 C4v
 """
-@kwdef mutable struct VUMPS{F} <: Algorithm
+@kwdef mutable struct VUMPS{F <: ContractionMode} <: Algorithm
     tol::Float64 = 1e-10
     maxiter::Int = 10
     miniter::Int = 1

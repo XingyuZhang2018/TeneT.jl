@@ -9,7 +9,7 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 3, 16, 4, 10
+D, χ, χshift, maxiter_restart = 2, 16, 4, 10
 pattern = [1;;]
 # pattern = [1 2;
 #            2 1]

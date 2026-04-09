@@ -114,3 +114,47 @@ function _kagome_intercell_terms(terms, sublattice_left, sublattice_right, d, at
     end
     return result
 end
+
+# ── Generic hamiltonian interface (used by SU_parameterization) ──
+
+"""
+    hamiltonian(model::HamiltonianModel)
+
+Return the two-site Hamiltonian as a d×d×d×d tensor, constructed from bond terms.
+"""
+function hamiltonian(model::HamiltonianModel)
+    S = model.S
+    d = Int(2*S + 1)
+    terms = _heisenberg_bond_terms(model, Array)
+    h = zeros(Float64, d, d, d, d)
+    for (c, OL, OR) in terms
+        @tensor o[i,j,k,l] := OL[i,j] * OR[k,l]
+        h += c * real(o)
+    end
+    return h
+end
+
+"""
+    hamiltonian_onsite(model)
+
+Return the d³×d³ onsite Hamiltonian for Kagome merge (bond 12 + bond 23).
+"""
+function hamiltonian_onsite(model::HamiltonianModel)
+    S = model.S
+    d = Int(2*S + 1)
+    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
+    return _kagome_onsite_op(terms, 1, 2, d, Array) + _kagome_onsite_op(terms, 2, 3, d, Array)
+end
+
+"""
+    _kagome_site_op(O, sublattice, d)
+
+Embed a d×d operator into d³×d³ space at the given sublattice position.
+"""
+function _kagome_site_op(O, sublattice, d)
+    Id = Matrix{Float64}(I, d, d)
+    ops = [Id, Id, Id]
+    ops[sublattice] = Array(O)
+    @tensor out[a,b,c,d,e,f] := ops[1][a,d] * ops[2][b,e] * ops[3][c,f]
+    return reshape(real(out), d^3, d^3)
+end
