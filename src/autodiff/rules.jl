@@ -227,8 +227,8 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     end
 
     element_size = prod(size_out) ÷ D_split
-    counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
-    MPI.Allgatherv!(VBuffer(result, counts), comm)
+    counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+    allgatherv_p2p!(result, counts, comm)
 
     function back(dresult)
         _dresult = unthunk(dresult)
@@ -241,7 +241,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             _, bp = pullback(f, split_args...)
             split_dargs = bp(_dresult[cols_out...])
             for j in 1:length(args)
-                if j == N_in[1] 
+                if j == N_in[1]
                     dargs[j][cols_in...] = split_dargs[j]
                 else
                     if dargs[j] isa Tuple
@@ -259,10 +259,10 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
 
         for j in 1:length(args)
             if j == N_in[1] && N_in[2] == ndims(args[j])
-                # Split along last dim → contiguous in column-major → Allgatherv
+                # Split along last dim → contiguous in column-major → p2p allgather
                 element_size = prod(size(dargs[j])) ÷ D_split
-                counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
-                MPI.Allgatherv!(VBuffer(dargs[j], counts), comm)
+                counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
+                allgatherv_p2p!(dargs[j], counts, comm)
             else
                 # Non-split arg, or split along non-last dim (e.g. FRmap/ACdmap
                 # N_in[2]=1) where data is strided → Allreduce
@@ -275,7 +275,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
                 end
             end
         end
-        
+
         return NoTangent(), NoTangent(), dargs...
     end
 

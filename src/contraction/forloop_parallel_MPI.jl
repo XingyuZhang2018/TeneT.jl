@@ -19,6 +19,30 @@ function split_ranges(N::Integer, n::Integer)
     return split_ranges(counts)
 end
 
+"""
+    allgatherv_p2p!(buf, counts, comm)
+
+Drop-in replacement for `MPI.Allgatherv!(VBuffer(buf, counts), comm)` using
+non-blocking point-to-point (Isend/Irecv).  Works around the poor GPU-collective
+performance of Open MPI 4.x Allgatherv on CUDA buffers.
+"""
+function allgatherv_p2p!(buf, counts, comm)
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)
+    nprocs == 1 && return buf
+    displs = cumsum([0; counts[1:end-1]])
+    reqs = MPI.Request[]
+    for r in 0:nprocs-1
+        r == rank && continue
+        my_view   = view(buf, displs[rank+1]+1 : displs[rank+1]+counts[rank+1])
+        recv_view = view(buf, displs[r+1]+1    : displs[r+1]+counts[r+1])
+        push!(reqs, MPI.Isend(my_view, comm; dest=r, tag=rank))
+        push!(reqs, MPI.Irecv!(recv_view, comm; source=r, tag=r))
+    end
+    MPI.Waitall(reqs)
+    return buf
+end
+
 function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
     if forloop_iter == 1
         return f(args...)
@@ -58,7 +82,7 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
 
     element_size = prod(size_out) ÷ D_split
     counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
-    MPI.Allgatherv!(VBuffer(result, counts), comm)
+    allgatherv_p2p!(result, counts, comm)
 
     return result
 end
