@@ -17,6 +17,7 @@ pattern = [1;;]
 #            2 4]
 model = Heisenberg(lattice=Kagome(:merge),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                   ifrotate=false,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 SUτ = 0.01
