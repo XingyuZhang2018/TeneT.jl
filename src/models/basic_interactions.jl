@@ -115,37 +115,6 @@ function _kagome_intercell_terms(terms, sublattice_left, sublattice_right, d, at
     return result
 end
 
-# ── Generic hamiltonian interface (used by SU_parameterization) ──
-
-"""
-    hamiltonian(model::HamiltonianModel)
-
-Return the two-site Hamiltonian as a d×d×d×d tensor, constructed from bond terms.
-"""
-function hamiltonian(model::HamiltonianModel)
-    S = model.S
-    d = Int(2*S + 1)
-    terms = _heisenberg_bond_terms(model, Array)
-    h = zeros(Float64, d, d, d, d)
-    for (c, OL, OR) in terms
-        @tensor o[i,j,k,l] := OL[i,j] * OR[k,l]
-        h += c * real(o)
-    end
-    return h
-end
-
-"""
-    hamiltonian_onsite(model)
-
-Return the d³×d³ onsite Hamiltonian for Kagome merge (bond 12 + bond 23).
-"""
-function hamiltonian_onsite(model::HamiltonianModel)
-    S = model.S
-    d = Int(2*S + 1)
-    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
-    return _kagome_onsite_op(terms, 1, 2, d, Array) + _kagome_onsite_op(terms, 2, 3, d, Array)
-end
-
 """
     _kagome_site_op(O, sublattice, d)
 

@@ -60,39 +60,3 @@ function const_Sm(S::Real)
     return Sm
 end
 
-"""
-    hamiltonian(model::HamiltonianModel)
-
-Return the Hamiltonian for the given `model` as a two-site operator.
-"""
-function hamiltonian end
-
-function hamiltonian_trunc(model::HamiltonianModel)
-    h = hamiltonian(model)
-    return hamiltonian_trunc(h)
-end
-
-function hamiltonian_trunc(h)
-    d = size(h, 1)
-    U, S, V = svd(reshape(h,d^2,d^2))
-    truc = sum(S .> 1e-10)
-    h1 = U[:,1:truc] * Diagonal(S[1:truc])
-    h2 = V[:,1:truc]'
-    return reshape(h1, d,d,truc), reshape(h2, truc,d,d)
-end
-
-function hamiltonian_trunc(model, direction)
-    if direction=="right"
-        h = hamiltonian_right(model)
-    elseif direction=="down"
-        h = hamiltonian_down(model)
-    else
-        error("Not implemented")
-    end
-    d = size(h, 1)
-    U, S, V = svd(reshape(h,d^2,d^2))
-    truc = sum(S .> 1e-10)
-    h1 = U[:,1:truc] * Diagonal(S[1:truc])
-    h2 = V[:,1:truc]'
-    return reshape(h1, d,d,truc), reshape(h2, truc,d,d)
-end

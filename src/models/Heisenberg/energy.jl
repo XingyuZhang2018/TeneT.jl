@@ -324,31 +324,3 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
     params.verbosity >= 4 && println("energy = $(etol/len)")
     return etol/len, e_dict
 end
-# ── Kagome merge: hamiltonian for SU_parameterization ──
-
-"""
-    hamiltonian(model::Heisenberg{Kagome{:merge}})
-
-Return `(h_H, h_V)` inter-cell Hamiltonians as d³×d³×d³×d³ tensors.
-h_H = bond(3→1) + bond(3→2), h_V = bond(3→1) + bond(2→1).
-"""
-function hamiltonian(model::Heisenberg{Kagome{:merge}})
-    S = model.S
-    d = Int(2*S + 1)
-    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
-
-    function _build_twosite(sublattice_left, sublattice_right)
-        h = zeros(Float64, d^3, d^3, d^3, d^3)
-        for (c, OL, OR) in terms
-            OL_d3 = _kagome_site_op(OL, sublattice_left, d)
-            OR_d3 = _kagome_site_op(OR, sublattice_right, d)
-            @tensor o[a,b,c,d] := OL_d3[a,b] * OR_d3[c,d]
-            h += c * real(o)
-        end
-        return h
-    end
-
-    h_H = _build_twosite(3, 1) + _build_twosite(3, 2)
-    h_V = _build_twosite(3, 1) + _build_twosite(2, 1)
-    return h_H, h_V
-end

@@ -27,13 +27,31 @@ function SU_parameterization(A, params; D_new)
     Ni, Nj = size(A)
     D, d = size(A[1])[[1,5]]
     if params.model.lattice isa Kagome{:merge}
-        h_H, h_V = hamiltonian(params.model)
-        h_onsite = hamiltonian_onsite(params.model)
-        @tensor h_twosite[1,2,3,4] := h_onsite[1,2] * h_onsite[3,4] 
+        terms = _heisenberg_bond_terms(params.model, Array; ifrotate=false)
+        # Inter-cell H = bond(3→1)+bond(3→2), V = bond(3→1)+bond(2→1)
+        function _build_kagome_twosite(sublattice_left, sublattice_right)
+            h = zeros(Float64, d^3, d^3, d^3, d^3)
+            for (c, OL, OR) in terms
+                OL_d3 = _kagome_site_op(OL, sublattice_left, d)
+                OR_d3 = _kagome_site_op(OR, sublattice_right, d)
+                @tensor o[a,b,c,d] := OL_d3[a,b] * OR_d3[c,d]
+                h += c * real(o)
+            end
+            return h
+        end
+        h_H = _build_kagome_twosite(3, 1) + _build_kagome_twosite(3, 2)
+        h_V = _build_kagome_twosite(3, 1) + _build_kagome_twosite(2, 1)
+        h_onsite = _kagome_onsite_op(terms, 1, 2, d, Array) + _kagome_onsite_op(terms, 2, 3, d, Array)
+        @tensor h_twosite[1,2,3,4] := h_onsite[1,2] * h_onsite[3,4]
         h_H += h_twosite
         h_V += h_twosite
     else
-        h = hamiltonian(params.model)
+        terms = _heisenberg_bond_terms(params.model, Array)
+        h = zeros(Float64, d, d, d, d)
+        for (c, OL, OR) in terms
+            @tensor o[i,j,k,l] := OL[i,j] * OR[k,l]
+            h += c * real(o)
+        end
         h_H = h_V = h
     end
 
