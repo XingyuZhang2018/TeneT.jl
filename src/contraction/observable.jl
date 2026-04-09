@@ -32,13 +32,8 @@ function contract_n_12(FLo, ACu, A1, ACd, FRo, ARu, A2, ARd; forloop_iter, ifpar
 end
 
 function contract_o_12(FLo, ACu, A1, ACd, FRo, ARu, A2, ARd, O1, O2; forloop_iter, ifparallel)
-    D1,D2,D3,D4,d = size(A1)
-    Dh = size(O1, 3)
-    @tensor A1u_tmp[a,b,c,i,d,f] := A1[a,b,c,d,e] * O1[e,f,i]
-    A1u = reshape(A1u_tmp, D1,D2,D3*Dh,D4,d)
-    D1,D2,D3,D4,d = size(A2)
-    @tensor A2u_tmp[a,i,b,c,d,f] := A2[a,b,c,d,e] * O2[i,e,f]
-    A2u = reshape(A2u_tmp, D1*Dh,D2,D3,D4,d)
+    @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
+    @tensor A2u[a,b,c,d,f] := A2[a,b,c,d,e] * O2[e,f]
     return oc_12(FLo, ACu, A1u, conj(A1), ACd, FRo, ARu, A2u, conj(A2), ARd; forloop_iter, ifparallel)
 end
 
@@ -47,13 +42,8 @@ function contract_n_21(ACu, FLu, A1, FRu, FLo, A2, FRo, ACd; forloop_iter, ifpar
 end
 
 function contract_o_21(ACu, FLu, A1, FRu, FLo, A2, FRo, ACd, O1, O2; forloop_iter, ifparallel)
-    D1,D2,D3,D4,d = size(A1)
-    Dh = size(O1, 3)
-    @tensor A1u_tmp[a,b,i,c,d,f] := A1[a,b,c,d,e] * O1[e,f,i]
-    A1u = reshape(A1u_tmp, D1,D2*Dh,D3,D4,d)
-    D1,D2,D3,D4,d = size(A2)
-    @tensor A2u_tmp[a,b,c,d,i,f] := A2[a,b,c,d,e] * O2[i,e,f]
-    A2u = reshape(A2u_tmp, D1,D2,D3,D4*Dh,d)
+    @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
+    @tensor A2u[a,b,c,d,f] := A2[a,b,c,d,e] * O2[e,f]
     return oc_21(ACu, FLu, A1u, conj(A1), FRu, FLo, A2u, conj(A2), FRo, ACd; forloop_iter, ifparallel)
 end
 
@@ -133,45 +123,15 @@ function contract_n_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A2
 end
 
 function contract_o_22_1(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22, O1, O2; forloop_iter, ifparallel)
-    Dh = size(O1, 3)
-    atype = _arraytype(O1)
-    IDh = Zygote.@ignore atype(Matrix{Float64}(I, Dh, Dh))
-    D1,D2,D3,D4,d = size(A11)
-    @tensor Au11_tmp[a,b,c,i,d,n] := A11[a,b,c,d,e] * O1[e,n,i]
-    Au11 = reshape(Au11_tmp, D1,D2,D3*Dh,D4,d)
-    Ad11 = conj(A11)
-    D1,D2,D3,D4,_ = size(A12)
-    @tensor Au12_tmp[a,n,b,i,c,d,e] := A12[a,b,c,d,e] * IDh[n,i]
-    Au12 = reshape(Au12_tmp, D1*Dh,D2*Dh,D3,D4,d)
-    Ad12 = conj(A12)
-    Au21 = A21
-    Ad21 = conj(A21)
-    D1,D2,D3,D4,_ = size(A22)
-    @tensor Au22_tmp[a,b,c,d,i,n] := A22[a,b,c,d,e] * O2[i,e,n]
-    Au22 = reshape(Au22_tmp, D1,D2,D3,D4*Dh,d)
-    Ad22 = conj(A22)
-    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
+    @tensor Au11[a,b,c,d,f] := A11[a,b,c,d,e] * O1[e,f]
+    @tensor Au22[a,b,c,d,f] := A22[a,b,c,d,e] * O2[e,f]
+    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, conj(A11), A12, conj(A12), A21, conj(A21), Au22, conj(A22); forloop_iter, ifparallel)
 end
 
 function contract_o_22_2(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22, O1, O2; forloop_iter, ifparallel)
-    Dh = size(O1, 3)
-    atype = _arraytype(O1)
-    IDh = Zygote.@ignore atype(Matrix{Float64}(I, Dh, Dh))
-    D1,D2,D3,D4,d = size(A11)
-    @tensor Au11_tmp[a,b,n,c,i,d,e] := A11[a,b,c,d,e] * IDh[n,i]
-    Au11 = reshape(Au11_tmp, D1,D2*Dh,D3*Dh,D4,d)
-    Ad11 = conj(A11)
-    D1,D2,D3,D4,_ = size(A12)
-    @tensor Au12_tmp[a,i,b,c,d,n] := A12[a,b,c,d,e] * O1[e,n,i]
-    Au12 = reshape(Au12_tmp, D1*Dh,D2,D3,D4,d)
-    Ad12 = conj(A12)
-    D1,D2,D3,D4,_ = size(A21)
-    @tensor Au21_tmp[a,b,c,d,i,n] := A21[a,b,c,d,e] * O2[i,e,n]
-    Au21 = reshape(Au21_tmp, D1,D2,D3,D4*Dh,d)
-    Ad21 = conj(A21)
-    Au22 = A22
-    Ad22 = conj(A22)
-    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
+    @tensor Au12[a,b,c,d,f] := A12[a,b,c,d,e] * O1[e,f]
+    @tensor Au21[a,b,c,d,f] := A21[a,b,c,d,e] * O2[e,f]
+    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, conj(A11), Au12, conj(A12), Au21, conj(A21), A22, conj(A22); forloop_iter, ifparallel)
 end
 
 # ============================================================================
@@ -190,22 +150,9 @@ function contract_n_13(FLo, ACu, ACd, FRo, ARu1, ARd1, ARu2, ARd2, A1, A2, A3; f
 end
 
 function contract_o_13(FLo, ACu, ACd, FRo, ARu1, ARd1, ARu2, ARd2, A1, A2, A3, O1, O2; forloop_iter, ifparallel)
-    Dh = size(O1, 3)
-    atype = _arraytype(O1)
-    IDh = Zygote.@ignore atype(Matrix{Float64}(I, Dh, Dh))
-    D1,D2,D3,D4,d = size(A1)
-    @tensor A1u_tmp[a,b,c,i,d,f] := A1[a,b,c,d,e] * O1[e,f,i]
-    A1u = reshape(A1u_tmp, D1,D2,D3*Dh,D4,d)
-    A1d = conj(A1)
-    D1,D2,D3,D4,_ = size(A2)
-    @tensor A2u_tmp[a,n,b,c,i,d,e] := A2[a,b,c,d,e] * IDh[n,i]
-    A2u = reshape(A2u_tmp, D1*Dh,D2,D3*Dh,D4,d)
-    A2d = conj(A2)
-    D1,D2,D3,D4,_ = size(A3)
-    @tensor A3u_tmp[a,i,b,c,d,f] := A3[a,b,c,d,e] * O2[i,e,f]
-    A3u = reshape(A3u_tmp, D1*Dh,D2,D3,D4,d)
-    A3d = conj(A3)
-    return oc_13(FLo, ACu, ACd, FRo, ARu1, ARd1, ARu2, ARd2, A1u, A1d, A2u, A2d, A3u, A3d; forloop_iter, ifparallel)
+    @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
+    @tensor A3u[a,b,c,d,f] := A3[a,b,c,d,e] * O2[e,f]
+    return oc_13(FLo, ACu, ACd, FRo, ARu1, ARd1, ARu2, ARd2, A1u, conj(A1), A2, conj(A2), A3u, conj(A3); forloop_iter, ifparallel)
 end
 
 function oc_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1u, A1d, A2u, A2d, A3u, A3d; forloop_iter, ifparallel)
@@ -220,22 +167,9 @@ function contract_n3_V(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3; f
 end
 
 function contract_o3_V(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3, O1, O2; forloop_iter, ifparallel)
-    Dh = size(O1, 3)
-    atype = _arraytype(O1)
-    IDh = Zygote.@ignore atype(Matrix{Float64}(I, Dh, Dh))
-    D1,D2,D3,D4,d = size(A1)
-    @tensor A1u_tmp[a,b,i,c,d,f] := A1[a,b,c,d,e] * O1[e,f,i]
-    A1u = reshape(A1u_tmp, D1,D2*Dh,D3,D4,d)
-    A1d = conj(A1)
-    D1,D2,D3,D4,_ = size(A2)
-    @tensor A2u_tmp[a,b,n,c,d,i,e] := A2[a,b,c,d,e] * IDh[n,i]
-    A2u = reshape(A2u_tmp, D1,D2*Dh,D3,D4*Dh,d)
-    A2d = conj(A2)
-    D1,D2,D3,D4,_ = size(A3)
-    @tensor A3u_tmp[a,b,c,d,i,f] := A3[a,b,c,d,e] * O2[i,e,f]
-    A3u = reshape(A3u_tmp, D1,D2,D3,D4*Dh,d)
-    A3d = conj(A3)
-    return oc_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1u, A1d, A2u, A2d, A3u, A3d; forloop_iter, ifparallel)
+    @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
+    @tensor A3u[a,b,c,d,f] := A3[a,b,c,d,e] * O2[e,f]
+    return oc_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1u, conj(A1), A2, conj(A2), A3u, conj(A3); forloop_iter, ifparallel)
 end
 
 # ============================================================================

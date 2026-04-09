@@ -1,3 +1,27 @@
+export FWavePRVB
+
+"""
+    FWavePRVB{L<:AbstractLattice}
+
+Ring exchange model on honeycomb lattice.
+H = J1 Σ_NN S⃗ᵢ·S⃗ⱼ  +  K Σ_hexagons K₆
+
+where K₆ = C₆ + C₆⁻¹ is the ring exchange (cyclic permutation) operator.
+The f-wave pRVB state |f⟩ = (|K₁⟩ - |K₂⟩)/√2 is an eigenstate of K₆
+with eigenvalue -2 (the minimum). With K>0, the +K·K₆ term favors
+the f-wave ground state (E_f = -2K).
+
+Set J1=0 for the pure ring exchange model.
+"""
+@kwdef mutable struct FWavePRVB{L<:AbstractLattice} <: HamiltonianModel
+    lattice::L = Honeycomb(:brickwall)
+    S::Real = 1/2
+    J1::Real = 0.0
+    K::Real = 1.0     # ring exchange coupling
+    couplingtype::Symbol = :uniform
+    bondratio::Real = 1.0
+end
+
 """
     energy_value(model::FWavePRVB, A, env, params::iPEPSOptimize{:brickwall})
 
@@ -26,14 +50,14 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
 
     # ---- J1 Heisenberg term ----
     # if model.J1 != 0
-        O1, O2 = Zygote.@ignore atype.(hamiltonian_trunc(model))
+        terms = _heisenberg_bond_terms(model, atype)
         for p in 1:len
             i, j = Tuple(findfirst(==(p), ACu.pattern))
 
             # Horizontal bond
             ir = Ni + 1 - i
             jr = mod1(j + 1, Nj)
-            e = contract_o_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr], O1, O2; ifparallel, forloop_iter)
+            e = _contract_barebones(contract_o_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), terms; ifparallel, forloop_iter)
             n = contract_n_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
             params.verbosity >= 4 && println("J1_H($i,$j) = $(model.J1 * e/n)")
             etol += model.J1 * e / n
@@ -43,7 +67,7 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
             if (i + j) % 2 != 0
                 ir  = mod1(i + 1, Ni)
                 irr = mod1(Ni - i, Ni)
-                e = contract_o_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j], O1, O2; ifparallel, forloop_iter)
+                e = _contract_barebones(contract_o_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), terms; ifparallel, forloop_iter)
                 n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
                 params.verbosity >= 4 && println("J1_V($i,$j) = $(model.J1 * e/n)")
                 etol += model.J1 * e / n

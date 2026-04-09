@@ -8,6 +8,10 @@
 @non_differentiable hamiltonian(kwargs...)
 @non_differentiable hamiltonian_trunc(kwargs...)
 @non_differentiable hamiltonian_onsite(kwargs...)
+@non_differentiable _heisenberg_bond_terms(kwargs...)
+@non_differentiable _kitaev_bond_terms(kwargs...)
+@non_differentiable _kagome_onsite_op(kwargs...)
+@non_differentiable _kagome_intercell_terms(kwargs...)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
