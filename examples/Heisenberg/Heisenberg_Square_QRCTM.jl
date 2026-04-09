@@ -55,5 +55,5 @@ function restriction_ipeps(A)
     return C4v_restriction(A)
 end
 
-# optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
-observable(A, χ, params; restriction_ipeps)
+optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
+# observable(A, χ, params; restriction_ipeps)

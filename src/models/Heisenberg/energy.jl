@@ -185,6 +185,7 @@ end
 Compute per-bond energies for Kagome merge (6 bonds per unit cell).
 """
 function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+    model.ifrotate && throw(ArgumentError("Kagome merge does not support ifrotate=true"))
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
@@ -263,6 +264,7 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
 end
 
 function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+    model.ifrotate && throw(ArgumentError("Kagome merge does not support ifrotate=true"))
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
