@@ -12,12 +12,12 @@ etype = Float64
 D, χ, χshift = 2, 16, 0
 pattern = [1;;]
 model = Heisenberg(lattice=Square(),
-                   S=0.5, Jx=-1.0, Jy=-1.0, Jz=1.0,
+                   S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
                    ifrotate=true,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_C4v/$etype/seed$seed/")
-boundary_alg = VUMPS{:C4v}(ifsimple_eig=true,
+boundary_alg = VUMPS{C4v}(ifsimple_eig=true,
                            ifparallel=false,
                            ifcheckpoint=false,
                            forloop_iter=1,

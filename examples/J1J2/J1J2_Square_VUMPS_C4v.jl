@@ -21,7 +21,7 @@ model = J1J2(lattice=Square(),
              couplingtype=:uniform, bondratio=1.0)
 No = 15
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_C4v/$etype/seed$seed/")
-boundary_alg = VUMPS{:C4v}(ifsimple_eig=true,
+boundary_alg = VUMPS{C4v}(ifsimple_eig=true,
                            ifparallel=false,
                            ifcheckpoint=false,
                            forloop_iter=1,

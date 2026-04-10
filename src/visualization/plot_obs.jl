@@ -547,6 +547,7 @@ const _BOND_COLORS = Dict(
     # J1J2
     "bond_J1H" => :royalblue, "bond_J1V" => :forestgreen,
     "bond_J2H" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
+    "bond_J3\\" => :gray60, "bond_J3/" => :gray60, "bond_J3|" => :gray40,
     # Heisenberg Kagome
     "bond_onsite" => :gray50,
     "bond_12" => colorant"#FF6666", "bond_23" => colorant"#66BB66",
@@ -711,14 +712,20 @@ Returns ((di1,dj1), (di2,dj2)) as raw offsets from the anchor site (i,j).
 function _bond_offsets_honeycomb(bond_type::String)
     if occursin("_V_", bond_type) || occursin("J1V", bond_type) || occursin("Jy", bond_type)
         return (0, 0), (1, 0)
+    elseif occursin("J3|", bond_type)
+        return (0, 0), (1, 0)           # J3 vertical (even sublattice)
+    elseif occursin("J3\\", bond_type)
+        return (0, 0), (1, 2)           # J3\ : (i,j) → (i+1,j+2)
+    elseif occursin("J3/", bond_type)
+        return (0, 2), (1, 0)           # J3/ : (i,j+2) → (i+1,j)
     elseif occursin("J2H", bond_type)
         return (0, 0), (0, 2)
     elseif occursin("_H_", bond_type) || occursin("J1H", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
         return (0, 0), (0, 1)
     elseif _is_cross_diagonal(bond_type)
-        return (0, 1), (1, 0)    # / direction
+        return (0, 1), (1, 0)           # J2/ : (i,j+1) → (i+1,j)
     elseif _is_forward_diagonal(bond_type)
-        return (0, 0), (1, 1)    # \ direction
+        return (0, 0), (1, 1)           # J2\ : (i,j) → (i+1,j+1)
     else
         return (0, 0), (0, 1)
     end

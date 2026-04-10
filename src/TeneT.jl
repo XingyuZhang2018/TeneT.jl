@@ -77,19 +77,17 @@ include("boundary_algorithm/qrctm.jl")
 # ============================================================================
 
 include("models/basic_op.jl")
-include("models/Heisenberg/hamiltonian.jl")
+include("models/basic_interactions.jl")
 include("models/Heisenberg/energy.jl")
 include("models/Heisenberg/order_init.jl")
-include("models/Kitaev/hamiltonian.jl")
 include("models/Kitaev/energy.jl")
 include("models/Kitaev/order_init.jl")
-include("models/J1J2/hamiltonian.jl")
-include("models/J1J2/order_init.jl")
 include("models/J1J2/energy.jl")
-include("models/J1J2p/hamiltonian.jl")
-include("models/J1J2p/order_init.jl")
+include("models/J1J2/order_init.jl")
 include("models/J1J2p/energy.jl")
-include("models/FWavePRVB/hamiltonian.jl")
+include("models/J1J2p/order_init.jl")
+include("models/J1J2J3/energy.jl")
+include("models/J1J2J3/order_init.jl")
 include("models/FWavePRVB/energy.jl")
 
 # ============================================================================
@@ -122,6 +120,7 @@ export VUMPS
 export QRCTM
 
 export Square, Honeycomb, Kagome
+export General, C4v, Plaquette
 
 export C4v_restriction, local_min_norm
 

@@ -2,10 +2,13 @@
 @non_differentiable VUMPSRuntime(M, χ::Int, alg::VUMPS)
 @non_differentiable randSA(kwargs...)
 @non_differentiable ISA(kwargs...)
-@non_differentiable hamiltonian(kwargs...)
-@non_differentiable hamiltonian_trunc(kwargs...)
-@non_differentiable hamiltonian_onsite(kwargs...)
-@non_differentiable CuArray(kwargs...)
+@non_differentiable set_device_id!(kwargs...)
+@non_differentiable get_device(kwargs...)
+@non_differentiable get_device_id(kwargs...)
+@non_differentiable _heisenberg_bond_terms(kwargs...)
+@non_differentiable _kitaev_bond_terms(kwargs...)
+@non_differentiable _kagome_onsite_op(kwargs...)
+@non_differentiable _kagome_intercell_terms(kwargs...)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
@@ -22,6 +25,19 @@ function ChainRulesCore.rrule(::typeof(Base.sqrt), A::AbstractArray)
         return NoTangent(), @thunk(As' \ unthunk(dAs) ./ 2)
     end
     return As, back
+end
+
+function ChainRulesCore.rrule(::typeof(atype_device!), atype, x, i::Int)
+    id_old = get_device_id(atype)
+    function back(dx)
+        _dx = unthunk(dx)
+        f = pullback(atype, x)[2]
+        set_device_id!(atype, get_device_id(x))
+        _dx = atype(f(_dx)[1])
+        set_device_id!(atype, id_old)
+        return NoTangent(), NoTangent(), _dx, NoTangent()
+    end
+    return atype_device!(atype, x, i), back
 end
 
 # adjoint for QR factorization
@@ -211,8 +227,8 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     end
 
     element_size = prod(size_out) ÷ D_split
-    counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
-    MPI.Allgatherv!(VBuffer(result, counts), comm)
+    counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
+    allgatherv_p2p!(result, counts, comm)
 
     function back(dresult)
         _dresult = unthunk(dresult)
@@ -225,7 +241,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             _, bp = pullback(f, split_args...)
             split_dargs = bp(_dresult[cols_out...])
             for j in 1:length(args)
-                if j == N_in[1] 
+                if j == N_in[1]
                     dargs[j][cols_in...] = split_dargs[j]
                 else
                     if dargs[j] isa Tuple
@@ -242,25 +258,74 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
         synchronize(args[1])
 
         for j in 1:length(args)
-            if j == N_in[1] 
+            if j == N_in[1] && N_in[2] == ndims(args[j])
+                # Split along last dim → contiguous in column-major → p2p allgather
                 element_size = prod(size(dargs[j])) ÷ D_split
-                counts = [sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
-                MPI.Allgatherv!(VBuffer(dargs[j], counts), comm)
+                counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
+                allgatherv_p2p!(dargs[j], counts, comm)
             else
+                # Non-split arg, or split along non-last dim (e.g. FRmap/ACdmap
+                # N_in[2]=1) where data is strided → p2p ring allreduce
                 if dargs[j] isa Tuple
                     for k in 1:length(dargs[j])
-                        MPI.Allreduce!(dargs[j][k], +, comm)
+                        allreduce_p2p!(dargs[j][k], +, comm)
                     end
                 else
-                    MPI.Allreduce!(dargs[j], +, comm)
+                    allreduce_p2p!(dargs[j], +, comm)
                 end
             end
         end
-        
+
         return NoTangent(), NoTangent(), dargs...
     end
 
     return result, back
+end
+
+function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
+    rtup, rtdown = rt
+    atype = _arraytype(M)
+    if alg.ifparallelupdown
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md, _down_M_back = pullback(_down_M, atype(M))
+                (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+            end
+        end
+    else
+        (rtup, errup), vumps_itr_back_up = pullback(vumps_itr, rtup, M, alg)
+        Md, _down_M_back = pullback(_down_M, M)
+        (rtdown, errdown), vumps_itr_back_down = pullback(vumps_itr, rtdown, Md, alg)
+    end
+    function back(((∂rtup, ∂rtdown), ∂err))
+        if alg.ifparallelupdown
+            @sync begin
+                @async begin
+                    set_device_id!(atype, 1)
+                    ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
+                    ∂Mdown = _down_M_back(∂Mddown)[1]
+                end
+            end
+        else
+            ∂Mup = vumps_itr_back_up((∂rtup, ∂err))[2]
+            ∂Mddown = vumps_itr_back_down((∂rtdown, ∂err))[2]
+            ∂Mdown = _down_M_back(∂Mddown)[1]
+        end
+
+        set_device_id!(atype, 1)
+        ∂Mup.data .+= atype(∂Mdown).data
+        return NoTangent(), NoTangent(), ∂Mup, NoTangent()
+    end
+    return ((rtup, rtdown), (errup, errdown)), back
 end
 
 # ─── SVD adjoint ──────────────────────────────────────────────────────────────

@@ -637,7 +637,7 @@ end
 
 Create a single VUMPSRuntime: canonical forms + fixed-point environments.
 """
-function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{:General})
+function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{General})
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
@@ -658,8 +658,38 @@ end
 Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`
 and bond dimension `χ`.
 """
-function init_env(M::StructArray, χ::Int, alg::VUMPS{:General})
+function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
+    alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
+
     Ni, Nj = size(M)
+
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            if alg.ifdownfromup
+                set_device_id!(atype, 1)
+                rtup = init_VUMPSRuntime(M, χ, alg)
+                alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
+                set_device_id!(atype, 2)
+                Md = _down_M(atype(M))
+                rtdown = _down_init_from_up(atype(rtup), Md)
+                alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment")
+            else
+                @async begin
+                    set_device_id!(atype, 1)
+                    rtup = init_VUMPSRuntime(M, χ, alg)
+                    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    Md = _down_M(atype(M))
+                    rtdown = init_VUMPSRuntime(Md, χ, alg)
+                    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment")
+                end
+            end
+        end
+        return rtup, rtdown
+    end
 
     rtup = init_VUMPSRuntime(M, χ, alg)
     alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
@@ -683,12 +713,12 @@ end
 # ── VUMPS step functions ────────────────────────────────────────────
 
 """
-    vumps_step_power(rt, M, alg::VUMPS{:General}{General})
+    vumps_step_power(rt, M, alg::VUMPS{General}{General})
 
 One step of the VUMPS algorithm with the standard (General) contraction mode.
 Uses the power-method variant: update environments first, then re-solve AC/C.
 """
-function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL, C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
@@ -705,7 +735,7 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General}
     return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
 end
 
-function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL,C)
     _, FL =  leftenv(AL, conj(AL), M, FL; alg)
@@ -722,43 +752,44 @@ end
 # ── VUMPS iteration loop ────────────────────────────────────────────
 
 """
-    vumps_itr(rt, M, alg::VUMPS{:General})
+    vumps_itr(rt, M, alg::VUMPS{General})
 
 Run the VUMPS iteration loop: first without AD tracking (warm-up), then with AD.
 Returns the converged runtime and final error.
 """
-function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     t = ChainRulesCore.ignore_derivatives(() -> time())
 
+    atype = _arraytype(M)
+    id = get_device_id(atype)
     local err
-    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration without AD...")
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD...")
     ChainRulesCore.ignore_derivatives() do
         for i in 1:alg.maxiter
         rt, err = vumps_step(rt, M, alg)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
             break
         end
         if i == alg.maxiter
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         end
     end
     end
 
-    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration with AD...")
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD...")
+    alg_ad = deepcopy(alg)
+    alg_ad.power_iter = alg.power_iter_ad
     for i in 1:alg.maxiter_ad
-        power_iter_backup = alg.power_iter
-        alg.power_iter = alg.power_iter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
-        alg.power_iter = power_iter_backup
-        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         end
     end
 
@@ -766,24 +797,41 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
 end
 
 """
-    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS{:General})
+    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS{General})
 
 Run the VUMPS boundary contraction for a single (up) environment.
 Returns the converged runtime and error.
 """
-function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General})
+function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     rt, err = vumps_itr(rt, M, alg)
     return rt, err
 end
 
 """
-    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{:General})
+    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General})
 
 Run the VUMPS boundary contraction for both up and down environments.
 Returns the converged runtimes and errors.
 """
-function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{:General})
+function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General})
     rtup, rtdown = rt
+
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                rtup, errup = vumps_itr(rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md = _down_M(atype(M))
+                rtdown, errdown = vumps_itr(rtdown, Md, alg)
+            end
+        end
+        return (rtup, rtdown), (errup, errdown)
+    end
+
     rtup, errup = vumps_itr(rtup, M, alg)
     Md = _down_M(M)
     rtdown, errdown = vumps_itr(rtdown, Md, alg)
@@ -797,7 +845,7 @@ end
 
 Construct a `VUMPSEnv` observation environment from a single VUMPS runtime.
 """
-function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{:General}, Fo=[rt.FL, rt.FR])
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General}, Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg)
@@ -811,13 +859,16 @@ end
 Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
 Computes mixed (observation) left and right environments.
 """
-function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{:General}, Fo=[rt[1].FL, rt[1].FR])
+function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General}, Fo=[rt[1].FL, rt[1].FR])
+    atype = _arraytype(M)
+    set_device_id!(atype, 1)
     rtup, rtdown = rt
 
     ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR
     ACu = ALCtoAC(ALu, Cu)
 
     ALd, ARd, Cd = rtdown.AL, rtdown.AR, rtdown.C
+    ALd, ARd, Cd = map(x->atype_device!(atype, x, 1), [ALd, ARd, Cd]) # transfer device 2 data to 1
     ACd = ALCtoAC(ALd, Cd)
 
     _, FLo =  leftenv(ALu, ALd, M, Fo[1]; ifobs = true, alg)

@@ -19,6 +19,73 @@ function split_ranges(N::Integer, n::Integer)
     return split_ranges(counts)
 end
 
+"""
+    allgatherv_p2p!(buf, counts, comm)
+
+Drop-in replacement for `MPI.Allgatherv!(VBuffer(buf, counts), comm)` using
+non-blocking point-to-point (Isend/Irecv).  Works around the poor GPU-collective
+performance of Open MPI 4.x Allgatherv on CUDA buffers.
+"""
+function allgatherv_p2p!(buf, counts, comm)
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)
+    nprocs == 1 && return buf
+    displs = cumsum([0; counts[1:end-1]])
+    reqs = MPI.Request[]
+    for r in 0:nprocs-1
+        r == rank && continue
+        my_view   = view(buf, displs[rank+1]+1 : displs[rank+1]+counts[rank+1])
+        recv_view = view(buf, displs[r+1]+1    : displs[r+1]+counts[r+1])
+        push!(reqs, MPI.Isend(my_view, comm; dest=r, tag=rank))
+        push!(reqs, MPI.Irecv!(recv_view, comm; source=r, tag=r))
+    end
+    MPI.Waitall(reqs)
+    return buf
+end
+
+"""
+    allreduce_p2p!(buf, op, comm)
+
+Ring-based Allreduce using point-to-point Isend/Irecv.
+Replaces `MPI.Allreduce!(buf, op, comm)` for GPU buffers where the
+MPI collective path is slow.  Only supports `+` and requires
+`length(buf)` divisible by `nprocs`.
+"""
+function allreduce_p2p!(buf, ::typeof(+), comm)
+    rank = MPI.Comm_rank(comm)
+    P = MPI.Comm_size(comm)
+    P == 1 && return buf
+    chunk = length(buf) ÷ P
+    tmp = similar(buf, chunk)
+    dst = mod(rank + 1, P)
+    src = mod(rank - 1 + P, P)
+
+    # reduce-scatter
+    for k in 0:P-2
+        si = mod(rank - k + P, P)
+        ri = mod(rank - k - 1 + P, P)
+        send_v = view(buf, si*chunk+1:(si+1)*chunk)
+        recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
+        copyto!(tmp, recv_v)
+        req = MPI.Isend(send_v, comm; dest=dst, tag=k)
+        MPI.Recv!(recv_v, comm; source=src, tag=k)
+        recv_v .+= tmp
+        MPI.Wait(req)
+    end
+
+    # allgather
+    for k in 0:P-2
+        si = mod(rank - k + 1 + P, P)
+        ri = mod(rank - k + P, P)
+        send_v = view(buf, si*chunk+1:(si+1)*chunk)
+        recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
+        req = MPI.Isend(send_v, comm; dest=dst, tag=100+k)
+        MPI.Recv!(recv_v, comm; source=src, tag=100+k)
+        MPI.Wait(req)
+    end
+    return buf
+end
+
 function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
     if forloop_iter == 1
         return f(args...)
@@ -30,7 +97,7 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
         for range in D_split_ranges
             cols_in = (j == N_in[2] ? range : (:) for j in 1:ndims(args[N_in[1]]))
             cols_out = (j == N_out ? range : (:) for j in 1: ndims(result))
-            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            split_args = Tuple(j == N_in[1] ? @view(args[j][cols_in...]) : args[j] for j in 1:length(args))
             result[cols_out...] = f(split_args...)
         end
 
@@ -51,14 +118,14 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
         ind = forloop_iter * rank + i
         cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
         cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1: ndims(result))
-        split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+        split_args = Tuple(j == N_in[1] ? @view(args[j][cols_in...]) : args[j] for j in 1:length(args))
         result[cols_out...] = f(split_args...)
         synchronize(args[1])
     end
 
     element_size = prod(size_out) ÷ D_split
     counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
-    MPI.Allgatherv!(VBuffer(result, counts), comm)
+    allgatherv_p2p!(result, counts, comm)
 
     return result
 end
@@ -76,8 +143,8 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         for range in D_split_ranges
             cols_in1 = (j == N_in1[2] ? range : (:) for j in 1:ndims(args[N_in1[1]]))
             cols_in2 = (j == N_in2[2] ? range : (:) for j in 1:ndims(args[N_in2[1]]))
-            split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-            result += f(split_args...)
+            split_args = (j == N_in1[1] ? @view(args[j][cols_in1...]) : (j == N_in2[1] ? @view(args[j][cols_in2...]) : args[j]) for j in 1:length(args))
+            result .+= f(split_args...)
         end
 
         return result
@@ -98,8 +165,8 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         ind = forloop_iter * rank + i
         cols_in1 = (j == N_in1[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in1[1]]))
         cols_in2 = (j == N_in2[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in2[1]]))
-        split_args = (j == N_in1[1] ? args[j][cols_in1...] : (j == N_in2[1] ? args[j][cols_in2...] : args[j]) for j in 1:length(args))
-        result += f(split_args...)
+        split_args = (j == N_in1[1] ? @view(args[j][cols_in1...]) : (j == N_in2[1] ? @view(args[j][cols_in2...]) : args[j]) for j in 1:length(args))
+        result .+= f(split_args...)
         synchronize(args[1])
     end
 

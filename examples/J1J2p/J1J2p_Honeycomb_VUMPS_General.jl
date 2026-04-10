@@ -6,28 +6,29 @@ using LinearAlgebra
 using Zygote
 
 
-seed = 66
+seed = 88
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 2, 16, 1, 4
-pattern = [1 2;
-           2 1]
+D, χ, χshift, maxiter_restart = 3, 8, 0, 100
+# pattern = [1 2;
+#            2 1]
 # pattern = [1 3;
 #            2 4]
-# pattern = [1 3 5 2 4 6;
-#            2 4 6 1 3 5]
+pattern = [1 3 5 2 4 6;
+           2 4 6 1 3 5]
 # pattern = [1 3 5 7  9 11;
 #            2 4 6 8 10 12]
 model = J1J2p(lattice=Honeycomb(:brickwall), 
               S=0.5, J1=1.0, J2p=0.5,
               ifrotate=false, 
-              couplingtype=:plaquette, bondratio=1)
+              couplingtype=:plaquette, bondratio=0.1)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
-boundary_alg = VUMPS{:General}(ifupdown=true,
+boundary_alg = VUMPS{General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
+                               ifparallelupdown=false,
                                ifparallel=false,
                                ifcheckpoint=false,
                                forloop_iter=1,
@@ -54,7 +55,7 @@ params = GradientOptimize(model=model,
                           ifSU=false,
                           SUτ=0,
                           ifprecondition=true,
-                          iter_precond=5,
+                          iter_precond=0,
                           reuse_env=true, 
                           ifsave_env=true,
                           ifload_env=true,
@@ -67,22 +68,20 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 
 function restriction_ipeps(A)
    # A /= norm(A)
-   A = local_min_norm(A, params)
-#    B = Zygote.Buffer(A)
-#    for i in 1:length(A)
-#        if i in [1,6]
-#            B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
-#        elseif i in [2,5]
-#            B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
-#        elseif i in [3,4]
-#            B[:,:,:,:,:,i] = A[:,:,:,:,:,3]
-#        end
-#    end
-#    B = copy(B)
-#    return B/norm(B)
+   # A = local_min_norm(A, params)
+   B = Zygote.Buffer(A)
+   for i in 1:length(A)
+       if i in [1,4,5]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
+       elseif i in [2,3,6]
+           B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
+       end
+   end
+   B = copy(B)
+   return B/norm(B)
    # return A
 end
 
 # observable(A, 16, params; restriction_ipeps)
-optimise_ipeps(A, 16, χshift, params; restriction_ipeps);
+optimise_ipeps(A, 8, χshift, params; restriction_ipeps);
 # 

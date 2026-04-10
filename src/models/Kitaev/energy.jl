@@ -1,3 +1,20 @@
+export Kitaev
+
+"""
+    Kitaev{L<:AbstractLattice}
+
+Kitaev model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
+"""
+@kwdef mutable struct Kitaev{L<:AbstractLattice} <: HamiltonianModel
+    lattice::L = Honeycomb{:brickwall}()
+    S::Real = 1/2
+    Jx::Real = -1.0
+    Jy::Real = -1.0
+    Jz::Real = 1.0
+    couplingtype::Symbol = :uniform # :uniform, :plaquette
+    bondratio::Real = 1.0 # bondratio < 1.0 for plaquette >1.0 for dimer
+end
+
 function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack forloop_iter = params
@@ -5,10 +22,9 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
     atype = _arraytype(A[1])
     Ni, Nj = size(A)
 
-    h = hamiltonian(model)
-    Sx1, Sx2 = atype.(hamiltonian_trunc(h[1]))
-    Sy1, Sy2 = atype.(hamiltonian_trunc(h[2]))
-    Sz1, Sz2 = atype.(hamiltonian_trunc(h[3]))
+    Ox_L, Ox_R = _kitaev_bond_terms(:x, model.S, atype)
+    Oy_L, Oy_R = _kitaev_bond_terms(:y, model.S, atype)
+    Oz_L, Oz_R = _kitaev_bond_terms(:z, model.S, atype)
 
     e_dict = Dict{String, Dict{String, Any}}(
         "bond_Jx_energy" => Dict{String, Any}(),
@@ -22,24 +38,24 @@ function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
         Jx, Jy, Jz = enlarge_coupling(model, i, j)
         if (i + j) % 2 != 0
             ir  = mod1(i + 1, Ni)
-            irr = mod1(Ni - i, Ni) 
-            e = contract_o_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j], Sy1, Sy2; ifparallel, forloop_iter)
+            irr = mod1(Ni - i, Ni)
+            e = contract_o_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j], Oy_L, Oy_R; ifparallel, forloop_iter)
             n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
             params.verbosity >= 4 && println("bond_Jy = $(Jy * e/n)")
             etol += Jy * e/n
             e_dict["bond_Jy_energy"]["$(i),$(j)"] = Jy * e/n
 
-            O_H = (Sx1, Sx2)
+            OH_L, OH_R = Ox_L, Ox_R
         else
-            O_H = (Sz1, Sz2)
+            OH_L, OH_R = Oz_L, Oz_R
         end
 
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        e = contract_o_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr], O_H[1], O_H[2]; ifparallel, forloop_iter)
+        e = contract_o_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr], OH_L, OH_R; ifparallel, forloop_iter)
         n = contract_n_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
-        if (i + j) % 2 != 0 
-            params.verbosity >= 4 && println("bond_Jx = $(Jx * e/n)") 
+        if (i + j) % 2 != 0
+            params.verbosity >= 4 && println("bond_Jx = $(Jx * e/n)")
             etol += Jx * e/n
             e_dict["bond_Jx_energy"]["$(i),$(j)"] = Jx * e/n
         else

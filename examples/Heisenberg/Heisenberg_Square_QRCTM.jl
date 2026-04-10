@@ -12,7 +12,7 @@ etype = Float64
 D, χ, χshift = 2, 16, 0
 pattern = [1;;]
 model = Heisenberg(lattice=Square(),
-                   S=0.5, Jx=-1.0, Jy=-1.0, Jz=1.0,
+                   S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
                    ifrotate=true,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
@@ -56,4 +56,4 @@ function restriction_ipeps(A)
 end
 
 optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
-# observable(A, χ, parasms; restriction_ipeps)
+# observable(A, χ, params; restriction_ipeps)

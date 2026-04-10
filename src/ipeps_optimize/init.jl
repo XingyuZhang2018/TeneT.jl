@@ -39,6 +39,7 @@ function init_ipeps(; atype=Array, etype=Float64, No::Int=0, D::Int, χ::Int, pa
         A /= norm(A)
         @info "generate random ipeps at $(joinpath(params.folder, "D$(D)"))"
     end
+    set_device_id!(atype, 1)
     return atype(A)
 end
 
@@ -83,6 +84,7 @@ function init_ipeps_SU(; atype=Array, No, D::Int, D_new::Int, χ::Int, params::i
         A_new[:,:,:,:,:,i] = A[i][1:D_new, 1:D_new, 1:D_new, 1:D_new, :]
     end
     params.verbosity >= 2 && @info "enlarged iPEPS to D=$D_new, size=$(size(A_new))"
+    set_device_id!(atype, 1)
     return atype(A_new)
 end
 
@@ -113,6 +115,7 @@ function init_ipeps_perturbation(; atype=Array, No, D::Int, D_new::Int, χ::Int,
         A_new[ntuple(k -> 1:old_dims[k], 4)..., :, i] = A[:,:,:,:,:,i]
     end
     params.verbosity >= 2 && @info "perturbed iPEPS to D=$D_new, size=$(size(A_new))"
+    set_device_id!(atype, 1)
     return atype(A_new)
 end
 
@@ -126,5 +129,6 @@ function init_ipeps_from_1x1(;atype = Array, etype=ComplexF64, No, pattern, χ::
         A′[:,:,:,:,:,i] = A[:,:,:,:,:,1]
     end
     A′ += ϵ * randn(etype, D,D,D,D,d, length(unique(pattern)))
+    set_device_id!(atype, 1)
     return atype(A′)
 end

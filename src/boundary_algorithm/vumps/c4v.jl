@@ -48,7 +48,7 @@ end
 
 # ── initialization ─────────────────────────────────────────
 
-function init_env(M::StructArray, χ::Int, alg::VUMPS{:C4v})
+function init_env(M::StructArray, χ::Int, alg::VUMPS{C4v})
     M = M[1][:,:,:,:,:,1]
     D = size(M, 1)  
     if M isa leg4
@@ -65,12 +65,12 @@ function init_env(M::StructArray, χ::Int, alg::VUMPS{:C4v})
 end
 
 """
-    vumps_step(rt::C4vVUMPSEnv, M, alg::VUMPS{:C4v})
+    vumps_step(rt::C4vVUMPSEnv, M, alg::VUMPS{C4v})
 
 One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
-function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{:C4v})
+function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{C4v})
     @unpack AL, C, FL = rt
     AC = ALCtoAC_map(AL, C)
     _, FL = leftenv_c4v(AL, conj(AL), M, FL; alg)
@@ -87,7 +87,7 @@ end
 
 # ── Plaquette iteration + boundary ───────────────────────────────────
 
-function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
+function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     t = ignore_derivatives(() -> time())
     M = M[1]
     local err
@@ -110,11 +110,10 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
     end
 
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
+    alg_ad = deepcopy(alg)
+    alg_ad.power_iter = alg.power_iter_ad
     for i in 1:alg.maxiter_ad
-        power_iter_backup = alg.power_iter
-        alg.power_iter = alg.power_iter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg) : vumps_step(rt, M, alg)
-        alg.power_iter = power_iter_backup
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
@@ -127,4 +126,4 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{:C4v})
     return rt, err
 end
 
-ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{:C4v}) = rt
+ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{C4v}) = rt

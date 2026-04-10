@@ -9,7 +9,7 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 3, 16, 4, 10
+D, χ, χshift, maxiter_restart = 2, 16, 4, 10
 pattern = [1;;]
 # pattern = [1 2;
 #            2 1]
@@ -17,13 +17,15 @@ pattern = [1;;]
 #            2 4]
 model = Heisenberg(lattice=Kagome(:merge),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                   ifrotate=false,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 SUτ = 0.01
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
-boundary_alg = VUMPS{:General}(ifupdown=true,
+boundary_alg = VUMPS{General}(ifupdown=true,
                                ifdownfromup=false,
                                ifsimple_eig=true,
+                               ifparallelupdown=false,
                                ifparallel=false,
                                ifcheckpoint=false,
                                forloop_iter=1,

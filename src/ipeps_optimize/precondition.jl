@@ -101,9 +101,12 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
     @unpack ifparallel = params.boundary_alg
 
     # Precompute normalizations (independent of x, so hoist out of linsolve)
+    lattice = params.model.lattice
+    _plaq_jr(j) = lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
+
     n_map = [begin
         ir = Ni + 1 - i
-        jr = mod1(j + 1, Nj)
+        jr = _plaq_jr(j)
         contract_n_11(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
     end for (i,j) in eachindex(A_prime)]
 
@@ -117,7 +120,7 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
             idx += 1
             A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
             ir = Ni + 1 - i
-            jr = mod1(j + 1, Nj)
+            jr = _plaq_jr(j)
             Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FLo[i,jr], A_prime_x_q; forloop_iter, ifparallel) / n_map[idx]
         end for (i,j) in eachindex(A_prime)]
         T_x = StructArray(T_x_data, A_prime.pattern)

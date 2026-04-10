@@ -28,9 +28,9 @@
 
     # ---- Algorithm types ----
     @testset "Algorithm types" begin
-        @test VUMPS{:General}() isa TeneT.Algorithm
-        @test VUMPS{:Plaquette}() isa TeneT.Algorithm
-        @test VUMPS{:C4v}() isa TeneT.Algorithm
+        @test VUMPS{General}() isa TeneT.Algorithm
+        @test VUMPS{Plaquette{Square}}() isa TeneT.Algorithm
+        @test VUMPS{C4v}() isa TeneT.Algorithm
         @test QRCTM() isa TeneT.Algorithm
     end
 
@@ -53,7 +53,7 @@
 
     # ---- VUMPS default fields ----
     @testset "VUMPS default fields" begin
-        v = VUMPS{:General}()
+        v = VUMPS{General}()
         @test v.tol == 1e-10
         @test v.maxiter == 10
         @test v.miniter == 1
@@ -67,6 +67,7 @@
         @test v.verbosity == Defaults.VERBOSE_WARN
         @test v.ifupdown == true
         @test v.ifdownfromup == false
+        @test v.ifparallelupdown == false
         @test v.ifparallel == false
         @test v.ifsimple_eig == true
         @test v.ifcheckpoint == false

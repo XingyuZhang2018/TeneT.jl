@@ -36,39 +36,27 @@ function const_Sz(S::Real)
     return Sz
 end
 
-"""
-    hamiltonian(model::HamiltonianModel)
-
-Return the Hamiltonian for the given `model` as a two-site operator.
-"""
-function hamiltonian end
-
-function hamiltonian_trunc(model::HamiltonianModel)
-    h = hamiltonian(model)
-    return hamiltonian_trunc(h)
-end
-
-function hamiltonian_trunc(h)
-    d = size(h, 1)
-    U, S, V = svd(reshape(h,d^2,d^2))
-    truc = sum(S .> 1e-10)
-    h1 = U[:,1:truc] * Diagonal(S[1:truc])
-    h2 = V[:,1:truc]'
-    return reshape(h1, d,d,truc), reshape(h2, truc,d,d)
-end
-
-function hamiltonian_trunc(model, direction)
-    if direction=="right"
-        h = hamiltonian_right(model)
-    elseif direction=="down"
-        h = hamiltonian_down(model)
-    else
-        error("Not implemented")
+function const_Sp(S::Real)
+    dims = Int(2*S + 1)
+    ms = [-S+i-1 for i in 1:dims]
+    Sp = zeros(Float64, dims, dims)
+    for j in 1:dims, i in 1:dims
+        if i-j == 1
+            Sp[i,j] = sqrt(S*(S+1)-ms[i]*ms[j])
+        end
     end
-    d = size(h, 1)
-    U, S, V = svd(reshape(h,d^2,d^2))
-    truc = sum(S .> 1e-10)
-    h1 = U[:,1:truc] * Diagonal(S[1:truc])
-    h2 = V[:,1:truc]'
-    return reshape(h1, d,d,truc), reshape(h2, truc,d,d)
+    return Sp
 end
+
+function const_Sm(S::Real)
+    dims = Int(2*S + 1)
+    ms = [-S+i-1 for i in 1:dims]
+    Sm = zeros(Float64, dims, dims)
+    for j in 1:dims, i in 1:dims
+        if j-i == 1
+            Sm[i,j] = sqrt(S*(S+1)-ms[i]*ms[j])
+        end
+    end
+    return Sm
+end
+
