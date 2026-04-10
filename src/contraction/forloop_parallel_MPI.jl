@@ -43,6 +43,49 @@ function allgatherv_p2p!(buf, counts, comm)
     return buf
 end
 
+"""
+    allreduce_p2p!(buf, op, comm)
+
+Ring-based Allreduce using point-to-point Isend/Irecv.
+Replaces `MPI.Allreduce!(buf, op, comm)` for GPU buffers where the
+MPI collective path is slow.  Only supports `+` and requires
+`length(buf)` divisible by `nprocs`.
+"""
+function allreduce_p2p!(buf, ::typeof(+), comm)
+    rank = MPI.Comm_rank(comm)
+    P = MPI.Comm_size(comm)
+    P == 1 && return buf
+    chunk = length(buf) ÷ P
+    tmp = similar(buf, chunk)
+    dst = mod(rank + 1, P)
+    src = mod(rank - 1 + P, P)
+
+    # reduce-scatter
+    for k in 0:P-2
+        si = mod(rank - k + P, P)
+        ri = mod(rank - k - 1 + P, P)
+        send_v = view(buf, si*chunk+1:(si+1)*chunk)
+        recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
+        copyto!(tmp, recv_v)
+        req = MPI.Isend(send_v, comm; dest=dst, tag=k)
+        MPI.Recv!(recv_v, comm; source=src, tag=k)
+        recv_v .+= tmp
+        MPI.Wait(req)
+    end
+
+    # allgather
+    for k in 0:P-2
+        si = mod(rank - k + 1 + P, P)
+        ri = mod(rank - k + P, P)
+        send_v = view(buf, si*chunk+1:(si+1)*chunk)
+        recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
+        req = MPI.Isend(send_v, comm; dest=dst, tag=100+k)
+        MPI.Recv!(recv_v, comm; source=src, tag=100+k)
+        MPI.Wait(req)
+    end
+    return buf
+end
+
 function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
     if forloop_iter == 1
         return f(args...)

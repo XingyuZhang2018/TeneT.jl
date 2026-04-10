@@ -265,13 +265,13 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
                 allgatherv_p2p!(dargs[j], counts, comm)
             else
                 # Non-split arg, or split along non-last dim (e.g. FRmap/ACdmap
-                # N_in[2]=1) where data is strided → Allreduce
+                # N_in[2]=1) where data is strided → p2p ring allreduce
                 if dargs[j] isa Tuple
                     for k in 1:length(dargs[j])
-                        MPI.Allreduce!(dargs[j][k], +, comm)
+                        allreduce_p2p!(dargs[j][k], +, comm)
                     end
                 else
-                    MPI.Allreduce!(dargs[j], +, comm)
+                    allreduce_p2p!(dargs[j], +, comm)
                 end
             end
         end
