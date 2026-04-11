@@ -30,6 +30,7 @@ function allgatherv_p2p!(buf, counts, comm)
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
     nprocs == 1 && return buf
+    synchronize(buf)
     displs = cumsum([0; counts[1:end-1]])
     reqs = MPI.Request[]
     for r in 0:nprocs-1
@@ -60,18 +61,19 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
     dst = mod(rank + 1, P)
     src = mod(rank - 1 + P, P)
 
-    # reduce-scatter
+    # reduce-scatter: recv into tmp, accumulate into buf
     for k in 0:P-2
         si = mod(rank - k + P, P)
         ri = mod(rank - k - 1 + P, P)
         send_v = view(buf, si*chunk+1:(si+1)*chunk)
         recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
-        copyto!(tmp, recv_v)
+        synchronize(buf)
         req = MPI.Isend(send_v, comm; dest=dst, tag=k)
-        MPI.Recv!(recv_v, comm; source=src, tag=k)
+        MPI.Recv!(tmp, comm; source=src, tag=k)
         recv_v .+= tmp
         MPI.Wait(req)
     end
+    synchronize(buf)
 
     # allgather
     for k in 0:P-2
@@ -83,6 +85,8 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
         MPI.Recv!(recv_v, comm; source=src, tag=100+k)
         MPI.Wait(req)
     end
+
+    reclaim(tmp)
     return buf
 end
 

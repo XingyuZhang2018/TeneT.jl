@@ -257,22 +257,34 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
 
         synchronize(args[1])
 
+        # Batch all MPI communication into minimal D2H/H2D round-trips.
+        # Collect non-split gradients → one CPU buffer → one Allreduce → copy back.
+        has_split_gather = N_in[2] == ndims(args[N_in[1]])
+
+        # 1) Allgatherv for split arg (if contiguous)
+        if has_split_gather
+            j = N_in[1]
+            element_size = prod(size(dargs[j])) ÷ D_split
+            counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
+            allgatherv_p2p!(dargs[j], counts, comm)
+        end
+
+        # 2) Allreduce non-split args via CPU staging (avoids CUDA sync overhead
+        #    of GPU ring allreduce; one D2H+Allreduce+H2D per arg)
         for j in 1:length(args)
-            if j == N_in[1] && N_in[2] == ndims(args[j])
-                # Split along last dim → contiguous in column-major → p2p allgather
-                element_size = prod(size(dargs[j])) ÷ D_split
-                counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
-                allgatherv_p2p!(dargs[j], counts, comm)
-            else
-                # Non-split arg, or split along non-last dim (e.g. FRmap/ACdmap
-                # N_in[2]=1) where data is strided → p2p ring allreduce
-                if dargs[j] isa Tuple
-                    for k in 1:length(dargs[j])
-                        allreduce_p2p!(dargs[j][k], +, comm)
-                    end
-                else
-                    allreduce_p2p!(dargs[j], +, comm)
+            if j == N_in[1] && has_split_gather
+                continue
+            end
+            if dargs[j] isa Tuple
+                for k in 1:length(dargs[j])
+                    cpu_tmp = Array(dargs[j][k])
+                    MPI.Allreduce!(cpu_tmp, +, comm)
+                    copyto!(dargs[j][k], cpu_tmp)
                 end
+            else
+                cpu_tmp = Array(dargs[j])
+                MPI.Allreduce!(cpu_tmp, +, comm)
+                copyto!(dargs[j], cpu_tmp)
             end
         end
 
