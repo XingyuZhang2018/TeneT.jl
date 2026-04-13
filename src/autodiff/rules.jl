@@ -179,14 +179,17 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
         function back(dresult)
             _dresult = unthunk(dresult)
             dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+            t_bp = 0.0
             @views for r in ranges
                 in_idx_r  = Base.setindex(in_idx,  r, split_dim)
                 out_idx_r = Base.setindex(out_idx, r, N_out)
                 split_args = ntuple(length(args)) do j
                     j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
                 end
+                t1 = time()
                 _, bp = pullback(f, split_args...)
                 dargs_range = bp(view(_dresult, out_idx_r...))
+                t_bp += time() - t1
                 for i in 1:length(args)
                     if i == N_in[1]
                         dargs[i][in_idx_r...] .= dargs_range[i]
@@ -201,6 +204,7 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
                     end
                 end
             end
+            println("  forloop_back: forloop=$forloop_iter bp=$(round(t_bp*1000,digits=1))ms split=$D_split→$(length(ranges))")
             return NoTangent(), NoTangent(), dargs...
         end
 
@@ -213,16 +217,23 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
 
-    D_split = size(args[N_in[1]])[N_in[2]]
+    Ain = args[N_in[1]]
+    split_dim = N_in[2]
+    D_split = size(Ain, split_dim)
     result = similar(args[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs * forloop_iter)
 
+    in_idx  = ntuple(_ -> (:), ndims(Ain))
+    out_idx = ntuple(_ -> (:), ndims(result))
+
     for i in 1:forloop_iter
         ind = forloop_iter * rank + i
-        cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
-        cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1:ndims(result))
-        split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
-        result[cols_out...] = f(split_args...)
+        in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
+        out_idx_r = Base.setindex(out_idx, D_split_ranges[ind], N_out)
+        split_args = ntuple(length(args)) do j
+            j == N_in[1] ? @view(args[j][in_idx_r...]) : args[j]
+        end
+        result[out_idx_r...] .= f(split_args...)
         synchronize(args[1])
     end
 
@@ -233,16 +244,18 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     function back(dresult)
         _dresult = unthunk(dresult)
         dargs = ntuple(i -> args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
-        for i in 1:forloop_iter
+        @views for i in 1:forloop_iter
             ind = forloop_iter * rank + i
-            cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
-            cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1:ndims(result))
-            split_args = Tuple(j == N_in[1] ? args[j][cols_in...] : args[j] for j in 1:length(args))
+            in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
+            out_idx_r = Base.setindex(out_idx, D_split_ranges[ind], N_out)
+            split_args = ntuple(length(args)) do j
+                j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+            end
             _, bp = pullback(f, split_args...)
-            split_dargs = bp(_dresult[cols_out...])
+            split_dargs = bp(_dresult[out_idx_r...])
             for j in 1:length(args)
                 if j == N_in[1]
-                    dargs[j][cols_in...] = split_dargs[j]
+                    dargs[j][in_idx_r...] .= split_dargs[j]
                 else
                     if dargs[j] isa Tuple
                         for k in 1:length(dargs[j])
@@ -269,8 +282,8 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             allgatherv_p2p!(dargs[j], counts, comm)
         end
 
-        # 2) Allreduce non-split args via CPU staging (avoids CUDA sync overhead
-        #    of GPU ring allreduce; one D2H+Allreduce+H2D per arg)
+        # 2) Allreduce non-split args via CPU staging
+        #    (NCCL ccall causes double-free in AD backward context)
         for j in 1:length(args)
             if j == N_in[1] && has_split_gather
                 continue

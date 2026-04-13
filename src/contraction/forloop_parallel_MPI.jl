@@ -44,49 +44,80 @@ function allgatherv_p2p!(buf, counts, comm)
     return buf
 end
 
-"""
-    allreduce_p2p!(buf, op, comm)
+# ─── NCCL-based Allreduce ─────────────────────────────────────────────────
 
-Ring-based Allreduce using point-to-point Isend/Irecv.
-Replaces `MPI.Allreduce!(buf, op, comm)` for GPU buffers where the
-MPI collective path is slow.  Only supports `+` and requires
-`length(buf)` divisible by `nprocs`.
+using Libdl
+
+const _nccl_state = Ref{Any}(nothing)  # (nccl_comm, libnccl_handle)
+
+const _nccl_dtype = Dict(
+    Float64 => Cint(8),  # ncclFloat64
+    Float32 => Cint(7),  # ncclFloat32
+    Float16 => Cint(6),  # ncclFloat16
+)
+
+function _init_nccl(mpi_comm)
+    isnothing(_nccl_state[]) || return _nccl_state[]
+
+    # Find NCCL library
+    nccl_path = get(ENV, "NCCL_LIB_PATH", "")
+    if isempty(nccl_path)
+        for p in ["/apps/ACC/NCCL/2.24.3-1/lib/libnccl.so",
+                  "/apps/ACC/NCCL/2.20.5/lib/libnccl.so",
+                  "libnccl.so"]
+            isfile(p) && (nccl_path = p; break)
+        end
+    end
+    lib = dlopen(nccl_path)
+
+    rank = MPI.Comm_rank(mpi_comm)
+    nprocs = MPI.Comm_size(mpi_comm)
+
+    # Get unique ID and broadcast
+    uid = Ref{NTuple{128, UInt8}}(ntuple(_ -> UInt8(0), 128))
+    rank == 0 && ccall(dlsym(lib, :ncclGetUniqueId), Cint, (Ref{NTuple{128,UInt8}},), uid)
+    MPI.Bcast!(uid, 0, mpi_comm)
+
+    # Init communicator
+    nccl_comm = Ref{Ptr{Cvoid}}(C_NULL)
+    ret = ccall(dlsym(lib, :ncclCommInitRank), Cint,
+        (Ref{Ptr{Cvoid}}, Cint, NTuple{128,UInt8}, Cint),
+        nccl_comm, nprocs, uid[], rank)
+    ret != 0 && error("ncclCommInitRank failed: ret=$ret")
+
+    _nccl_state[] = (comm=nccl_comm[], lib=lib)
+    return _nccl_state[]
+end
+
 """
-function allreduce_p2p!(buf, ::typeof(+), comm)
-    rank = MPI.Comm_rank(comm)
-    P = MPI.Comm_size(comm)
+    allreduce_p2p!(buf, +, mpi_comm)
+
+GPU-native Allreduce using NCCL. Falls back to CPU staging if NCCL
+is unavailable or buffer type is not supported.
+"""
+function allreduce_p2p!(buf, ::typeof(+), mpi_comm)
+    P = MPI.Comm_size(mpi_comm)
     P == 1 && return buf
-    chunk = length(buf) ÷ P
-    tmp = similar(buf, chunk)
-    dst = mod(rank + 1, P)
-    src = mod(rank - 1 + P, P)
 
-    # reduce-scatter: recv into tmp, accumulate into buf
-    for k in 0:P-2
-        si = mod(rank - k + P, P)
-        ri = mod(rank - k - 1 + P, P)
-        send_v = view(buf, si*chunk+1:(si+1)*chunk)
-        recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
-        synchronize(buf)
-        req = MPI.Isend(send_v, comm; dest=dst, tag=k)
-        MPI.Recv!(tmp, comm; source=src, tag=k)
-        recv_v .+= tmp
-        MPI.Wait(req)
-    end
-    synchronize(buf)
-
-    # allgather
-    for k in 0:P-2
-        si = mod(rank - k + 1 + P, P)
-        ri = mod(rank - k + P, P)
-        send_v = view(buf, si*chunk+1:(si+1)*chunk)
-        recv_v = view(buf, ri*chunk+1:(ri+1)*chunk)
-        req = MPI.Isend(send_v, comm; dest=dst, tag=100+k)
-        MPI.Recv!(recv_v, comm; source=src, tag=100+k)
-        MPI.Wait(req)
+    T = eltype(buf)
+    if haskey(_nccl_dtype, T)
+        nccl = try _init_nccl(mpi_comm) catch; nothing end
+        if !isnothing(nccl)
+            dtype = _nccl_dtype[T]
+            synchronize(buf)  # ensure all pending GPU ops on buf complete before NCCL reads it
+            buf_ptr = reinterpret(Ptr{Cvoid}, pointer(buf))
+            ccall(dlsym(nccl.lib, :ncclAllReduce), Cint,
+                (Ptr{Cvoid}, Ptr{Cvoid}, Csize_t, Cint, Cint, Ptr{Cvoid}, Ptr{Cvoid}),
+                buf_ptr, buf_ptr, length(buf), dtype, Cint(0), nccl.comm, C_NULL)
+            synchronize(buf)  # ensure NCCL write completes before downstream reads
+            return buf
+        end
     end
 
-    reclaim(tmp)
+    # Fallback: CPU staging
+    cpu_buf = Array(buf)
+    MPI.Allreduce!(cpu_buf, +, mpi_comm)
+    copyto!(buf, cpu_buf)
     return buf
 end
 
