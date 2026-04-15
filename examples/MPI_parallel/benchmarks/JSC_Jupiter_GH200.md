@@ -56,6 +56,24 @@
 | 12 | 512 | 288MB | 2775ms | 1606ms | 1111ms | 1168ms | 1.73x | 2.50x | 2.38x |
 | 12 | 1024 | 1152MB | 16724ms | 9004ms | 5140ms | 3650ms | 1.86x | 3.25x | 4.58x |
 
+## Full fg Benchmark (D=10 χ=400, Plaquette VUMPS, with checkpoint)
+
+| GPU | Forward | fg (fwd+bwd) | fg Speedup | Energy | gnorm |
+|-----|---------|-------------|------------|--------|-------|
+| 1   | 80.5s   | 1054s       | 1x         | -0.250016 | 0.01150 |
+| 2   | 42.2s   | 577s        | 1.83x      | -0.250016 | 0.01150 |
+| 4   | 24.9s   | 379s        | 2.78x      | -0.250016 | 0.01150 |
+| 8 (2 nodes) | 14.3s | 262s  | 4.02x      | -0.250016 | 0.01150 |
+
+## Cross-system Comparison: Full fg (D=10 χ=400)
+
+| GPU | JSC GH200 fwd | BSC H100 fwd | JSC fg | BSC fg | JSC fg speedup | BSC fg speedup |
+|-----|---------------|--------------|--------|--------|----------------|----------------|
+| 1   | 80.5s  | 85.2s  | 1054s | 923s | 1x    | 1x    |
+| 2   | 42.2s  | 44.1s  | 577s  | 555s | 1.83x | 1.67x |
+| 4   | 24.9s  | 23.4s  | 379s  | 408s | 2.78x | 2.26x |
+| 8   | 14.3s  | 13.6s  | 262s  | 354s | 4.02x | 2.61x |
+
 ## Cross-system Comparison (122MB, p2p collectives)
 
 | Metric | BSC H100 2GPU | JSC GH200 2GPU | BSC H100 8GPU | JSC GH200 8GPU |
