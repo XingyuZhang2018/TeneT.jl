@@ -19,12 +19,41 @@ function split_ranges(N::Integer, n::Integer)
     return split_ranges(counts)
 end
 
+# ─── Pre-allocated communication buffers ──────────────────────────────────
+
+const _comm_sendbuf = Ref{Any}(nothing)
+const _comm_recvbuf = Ref{Any}(nothing)
+const _comm_local = Ref{Any}(nothing)     # node-local communicator
+const _comm_leaders = Ref{Any}(nothing)   # inter-node leaders communicator
+
+function _ensure_buf!(ref, buf, n)
+    if isnothing(ref[]) || length(ref[]) < n || eltype(ref[]) != eltype(buf)
+        ref[] = similar(buf, n)
+    end
+    return view(ref[], 1:n)
+end
+
+function _get_local_comm(comm)
+    if isnothing(_comm_local[])
+        rank = MPI.Comm_rank(comm)
+        local_comm = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, rank)
+        local_rank = MPI.Comm_rank(local_comm)
+        # All ranks participate in Comm_split; leaders get color=0, others color=1
+        leaders_comm = MPI.Comm_split(comm, local_rank == 0 ? 0 : 1, rank)
+        _comm_local[] = local_comm
+        # Only store leaders_comm for local_rank==0; others don't use it
+        _comm_leaders[] = local_rank == 0 ? leaders_comm : nothing
+    end
+    return _comm_local[], _comm_leaders[]
+end
+
+# ─── Hierarchical Allgatherv ──────────────────────────────────────────────
+
 """
     allgatherv_p2p!(buf, counts, comm)
 
-Drop-in replacement for `MPI.Allgatherv!(VBuffer(buf, counts), comm)` using
-non-blocking point-to-point (Isend/Irecv).  Works around the poor GPU-collective
-performance of Open MPI 4.x Allgatherv on CUDA buffers.
+Hierarchical allgatherv: intra-node p2p (NVLink) + inter-node p2p (IB),
+using pre-allocated send buffer to avoid GPU registration accumulation.
 """
 function allgatherv_p2p!(buf, counts, comm)
     rank = MPI.Comm_rank(comm)
@@ -32,92 +61,131 @@ function allgatherv_p2p!(buf, counts, comm)
     nprocs == 1 && return buf
     synchronize(buf)
     displs = cumsum([0; counts[1:end-1]])
-    reqs = MPI.Request[]
+    my_count = counts[rank+1]
+    max_count = maximum(counts)
+
+    sendbuf = _ensure_buf!(_comm_sendbuf, buf, my_count)
+    copyto!(sendbuf, view(buf, displs[rank+1]+1 : displs[rank+1]+my_count))
+    synchronize(buf)
+
+    # Use pre-allocated recvbuf to avoid GPU registration accumulation on buf
+    _ensure_buf!(_comm_recvbuf, buf, max_count)
+
+    # Send to all peers (non-blocking from fixed sendbuf)
+    send_reqs = MPI.Request[]
     for r in 0:nprocs-1
         r == rank && continue
-        my_view   = view(buf, displs[rank+1]+1 : displs[rank+1]+counts[rank+1])
-        recv_view = view(buf, displs[r+1]+1    : displs[r+1]+counts[r+1])
-        push!(reqs, MPI.Isend(my_view, comm; dest=r, tag=rank))
-        push!(reqs, MPI.Irecv!(recv_view, comm; source=r, tag=r))
+        push!(send_reqs, MPI.Isend(sendbuf, comm; dest=r, tag=rank))
     end
-    MPI.Waitall(reqs)
+
+    # Receive from each peer into pre-allocated recvbuf, then copy to buf
+    for r in 0:nprocs-1
+        r == rank && continue
+        rc = counts[r+1]
+        recvview = view(_comm_recvbuf[], 1:rc)
+        MPI.Recv!(recvview, comm; source=r, tag=r)
+        copyto!(view(buf, displs[r+1]+1 : displs[r+1]+rc), recvview)
+    end
+
+    MPI.Waitall(send_reqs)
     return buf
 end
 
-# ─── NCCL-based Allreduce ─────────────────────────────────────────────────
-
-using Libdl
-
-const _nccl_state = Ref{Any}(nothing)  # (nccl_comm, libnccl_handle)
-
-const _nccl_dtype = Dict(
-    Float64 => Cint(8),  # ncclFloat64
-    Float32 => Cint(7),  # ncclFloat32
-    Float16 => Cint(6),  # ncclFloat16
-)
-
-function _init_nccl(mpi_comm)
-    isnothing(_nccl_state[]) || return _nccl_state[]
-
-    # Find NCCL library
-    nccl_path = get(ENV, "NCCL_LIB_PATH", "")
-    if isempty(nccl_path)
-        for p in ["/apps/ACC/NCCL/2.24.3-1/lib/libnccl.so",
-                  "/apps/ACC/NCCL/2.20.5/lib/libnccl.so",
-                  "libnccl.so"]
-            isfile(p) && (nccl_path = p; break)
-        end
-    end
-    lib = dlopen(nccl_path)
-
-    rank = MPI.Comm_rank(mpi_comm)
-    nprocs = MPI.Comm_size(mpi_comm)
-
-    # Get unique ID and broadcast
-    uid = Ref{NTuple{128, UInt8}}(ntuple(_ -> UInt8(0), 128))
-    rank == 0 && ccall(dlsym(lib, :ncclGetUniqueId), Cint, (Ref{NTuple{128,UInt8}},), uid)
-    MPI.Bcast!(uid, 0, mpi_comm)
-
-    # Init communicator
-    nccl_comm = Ref{Ptr{Cvoid}}(C_NULL)
-    ret = ccall(dlsym(lib, :ncclCommInitRank), Cint,
-        (Ref{Ptr{Cvoid}}, Cint, NTuple{128,UInt8}, Cint),
-        nccl_comm, nprocs, uid[], rank)
-    ret != 0 && error("ncclCommInitRank failed: ret=$ret")
-
-    _nccl_state[] = (comm=nccl_comm[], lib=lib)
-    return _nccl_state[]
-end
+# ─── Hierarchical Allreduce ──────────────────────────────────────────────
 
 """
-    allreduce_p2p!(buf, +, mpi_comm)
+    allreduce_p2p!(buf, +, comm)
 
-GPU-native Allreduce using NCCL. Falls back to CPU staging if NCCL
-is unavailable or buffer type is not supported.
+Hierarchical allreduce: tree reduce within node (NVLink), then between
+node leaders (IB), then broadcast back within node. Uses pre-allocated
+fixed buffers to avoid GPU registration accumulation.
 """
-function allreduce_p2p!(buf, ::typeof(+), mpi_comm)
-    P = MPI.Comm_size(mpi_comm)
+function allreduce_p2p!(buf, ::typeof(+), comm)
+    rank = MPI.Comm_rank(comm)
+    P = MPI.Comm_size(comm)
     P == 1 && return buf
+    synchronize(buf)
+    N = length(buf)
 
-    T = eltype(buf)
-    if haskey(_nccl_dtype, T)
-        nccl = try _init_nccl(mpi_comm) catch; nothing end
-        if !isnothing(nccl)
-            dtype = _nccl_dtype[T]
-            synchronize(buf)  # ensure all pending GPU ops on buf complete before NCCL reads it
-            buf_ptr = reinterpret(Ptr{Cvoid}, pointer(buf))
-            ccall(dlsym(nccl.lib, :ncclAllReduce), Cint,
-                (Ptr{Cvoid}, Ptr{Cvoid}, Csize_t, Cint, Cint, Ptr{Cvoid}, Ptr{Cvoid}),
-                buf_ptr, buf_ptr, length(buf), dtype, Cint(0), nccl.comm, C_NULL)
-            synchronize(buf)  # ensure NCCL write completes before downstream reads
-            return buf
+    local_comm, leaders_comm = _get_local_comm(comm)
+    local_rank = MPI.Comm_rank(local_comm)
+    local_size = MPI.Comm_size(local_comm)
+
+    _ensure_buf!(_comm_recvbuf, buf, N)
+    recvbuf = reshape(view(_comm_recvbuf[], 1:N), size(buf))
+
+    # Phase 1: Tree reduce within node to local_rank 0
+    step = 1
+    while step < local_size
+        if local_rank % (2 * step) == 0
+            partner = local_rank + step
+            if partner < local_size
+                MPI.Recv!(recvbuf, local_comm; source=partner, tag=step)
+                buf .+= recvbuf
+            end
+        elseif local_rank % (2 * step) == step
+            synchronize(buf)
+            sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
+            copyto!(sendbuf, buf)
+            synchronize(buf)
+            MPI.Send(sendbuf, local_comm; dest=local_rank - step, tag=step)
+            # This rank is done reducing, wait for broadcast
+        end
+        step *= 2
+    end
+
+    # Phase 2: Reduce between node leaders (local_rank 0 only)
+    if local_rank == 0 && !isnothing(leaders_comm)
+        leaders_size = MPI.Comm_size(leaders_comm)
+        leaders_rank = MPI.Comm_rank(leaders_comm)
+        if leaders_size > 1
+            synchronize(buf)
+            step = 1
+            while step < leaders_size
+                if leaders_rank % (2 * step) == 0
+                    partner = leaders_rank + step
+                    if partner < leaders_size
+                        MPI.Recv!(recvbuf, leaders_comm; source=partner, tag=100+step)
+                        buf .+= recvbuf
+                    end
+                elseif leaders_rank % (2 * step) == step
+                    synchronize(buf)
+                    sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
+                    copyto!(sendbuf, buf)
+                    synchronize(buf)
+                    MPI.Send(sendbuf, leaders_comm; dest=leaders_rank - step, tag=100+step)
+                end
+                step *= 2
+            end
+            # Broadcast back to all leaders (use pre-allocated buffers to avoid GPU registration accumulation)
+            synchronize(buf)
+            if leaders_rank == 0
+                sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
+                copyto!(sendbuf, buf)
+                synchronize(buf)
+                reqs = [MPI.Isend(sendbuf, leaders_comm; dest=r, tag=200) for r in 1:leaders_size-1]
+                MPI.Waitall(reqs)
+            else
+                MPI.Recv!(recvbuf, leaders_comm; source=0, tag=200)
+                copyto!(buf, recvbuf)
+            end
         end
     end
 
-    # Fallback: CPU staging
-    cpu_buf = Array(buf)
-    MPI.Allreduce!(cpu_buf, +, mpi_comm)
-    copyto!(buf, cpu_buf)
+    # Phase 3: Broadcast within node from local_rank 0 (use pre-allocated buffers)
+    synchronize(buf)
+    if local_size > 1
+        if local_rank == 0
+            sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
+            copyto!(sendbuf, buf)
+            synchronize(buf)
+            reqs = [MPI.Isend(sendbuf, local_comm; dest=r, tag=300) for r in 1:local_size-1]
+            MPI.Waitall(reqs)
+        else
+            MPI.Recv!(recvbuf, local_comm; source=0, tag=300)
+            copyto!(buf, recvbuf)
+        end
+    end
     return buf
 end
 

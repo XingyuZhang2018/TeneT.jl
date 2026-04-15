@@ -282,22 +282,17 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             allgatherv_p2p!(dargs[j], counts, comm)
         end
 
-        # 2) Allreduce non-split args via CPU staging
-        #    (NCCL ccall causes double-free in AD backward context)
+        # 2) Allreduce non-split args via p2p with pre-allocated buffers
         for j in 1:length(args)
             if j == N_in[1] && has_split_gather
                 continue
             end
             if dargs[j] isa Tuple
                 for k in 1:length(dargs[j])
-                    cpu_tmp = Array(dargs[j][k])
-                    MPI.Allreduce!(cpu_tmp, +, comm)
-                    copyto!(dargs[j][k], cpu_tmp)
+                    allreduce_p2p!(dargs[j][k], +, comm)
                 end
             else
-                cpu_tmp = Array(dargs[j])
-                MPI.Allreduce!(cpu_tmp, +, comm)
-                copyto!(dargs[j], cpu_tmp)
+                allreduce_p2p!(dargs[j], +, comm)
             end
         end
 

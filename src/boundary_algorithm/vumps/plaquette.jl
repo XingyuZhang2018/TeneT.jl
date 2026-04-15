@@ -36,13 +36,9 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
         
         if p ∉ processed_indices
-            f(AC1j) = ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter)
+            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λACs, ACs = checkpoint(simple_eig, f, AC[1,j]; power_iter)
-                else
-                    λACs, ACs = simple_eig(f, AC[1,j]; power_iter)
-                end
+                λACs, ACs = simple_eig(f, AC[1,j]; power_iter)
             else
                 λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
@@ -77,6 +73,7 @@ function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
+    ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         jl = mod1(j + 1, Nj)
         if L <: Plaquette{Square}
@@ -88,7 +85,7 @@ function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
         p = C.pattern[1,j]
         if p ∉ processed_indices
-            f(C1j) = Cmap(1, C1j, FL[:,jl], FL[:,jr])
+            f(C1j) = ifcheckpoint ? checkpoint(Cmap, 1, C1j, FL[:,jl], FL[:,jr]) : Cmap(1, C1j, FL[:,jl], FL[:,jr])
             if alg.ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1,j]; power_iter)
             else

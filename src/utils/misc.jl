@@ -6,30 +6,40 @@ const leg5 = Union{<:AbstractArray{T, 5}, Vector{<:AbstractArray{T, 5}}, StructA
 const leg8 = Union{<:AbstractArray{T, 8}, Vector{<:AbstractArray{T, 8}}, StructArray{<:Vector{<:AbstractArray{T, 8}}}} where T
 
 # ─── Simple eigenvalue solver ────────────────────────────────────────────────
-function simple_eig(f, v; power_iter)
-    # λ = 1.0 + 1.0im
-    # Zygote.@ignore begin # this is not correct when VUMPS does not converge
-        # for _ in 1:power_iter
-        #     v = f(v)
-        #     λ′ = norm(v)
-        #     v /= λ′
-        #     abs(λ′ - λ) < 1e-8 && break
-        #     λ = λ′
-        # end
-    # end
-    for _ in 1:power_iter-1
+"""
+    _power_iter_segment(f, v, n)
+
+Run `n` steps of power iteration: v = f(v) / norm(v).
+Used as a checkpoint-able segment inside simple_eig.
+"""
+function _power_iter_segment(f, v, n)
+    for _ in 1:n
         v = f(v)
         v /= norm(v)
+    end
+    return v
+end
+
+function simple_eig(f, v; power_iter, checkpoint_every=5)
+    n = power_iter - 1
+    if n > 0 && checkpoint_every > 0 && checkpoint_every < n
+        # Split into segments, each checkpointed
+        while n > 0
+            seg = min(checkpoint_every, n)
+            v = checkpoint(_power_iter_segment, f, v, seg)
+            n -= seg
+        end
+    else
+        for _ in 1:n
+            v = f(v)
+            v /= norm(v)
+        end
     end
 
     v1 = f(v)
     λ = dot(v, v1)
     v1 /= norm(v1)
     v1 = orth_for_ad(v1)
-    # λ = 0.0 + 0.0im
-    # if ifvalue
-        # λ = dot(v, f(v))
-    # end
     return [λ], [v1]
 end
 

@@ -1,12 +1,8 @@
 function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
     @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint = alg
-    f(FL) = FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter)
+    f(FL) = ifcheckpoint ? checkpoint(FLmap_parallel, FL, ALu, ALd, M; ifparallel, forloop_iter) : FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter)
     if alg.ifsimple_eig
-        if ifcheckpoint
-            λFLs, FLs = checkpoint(simple_eig, f, FL; power_iter)
-        else
-            λFLs, FLs = simple_eig(f, FL; power_iter)
-        end
+        λFLs, FLs = simple_eig(f, FL; power_iter)
     else
         λFLs, FLs, info = eigsolve(f, FL, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
         alg.verbosity >= 1 && info.converged == 0 && @warn "FLenv_c4v not converged"
@@ -17,13 +13,9 @@ end
 
 function ACenv_c4v(AC, FL, M; alg, kwargs...)
     @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint = alg
-    f(AC) = ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter)
+    f(AC) = ifcheckpoint ? checkpoint(ACmap_parallel, AC, FL, FL, M; ifparallel, forloop_iter) : ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter)
     if alg.ifsimple_eig
-        if ifcheckpoint
-            λACs, ACs = checkpoint(simple_eig, f, AC; power_iter)
-        else
-            λACs, ACs = simple_eig(f, AC; power_iter)
-        end
+        λACs, ACs = simple_eig(f, AC; power_iter)
     else
         λACs, ACs, info = eigsolve(f, AC, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
         alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv_c4v not converged"
@@ -33,15 +25,15 @@ function ACenv_c4v(AC, FL, M; alg, kwargs...)
 end
 
 function Cenv_c4v(C, FL; alg, kwargs...)
-    @unpack power_iter = alg
-    f(C) = Cmap(C, FL, FL)
+    @unpack power_iter, ifcheckpoint = alg
+    f(C) = ifcheckpoint ? checkpoint(Cmap, C, FL, FL) : Cmap(C, FL, FL)
     if alg.ifsimple_eig
         λCs, Cs = simple_eig(f, C; power_iter)
     else
         λCs, Cs, info = eigsolve(f,C, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
         alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv_plaq not converged"
     end
-        
+
     return λCs[1], Cs[1]
 end
 

@@ -212,13 +212,9 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
-            f(FLij) = FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter)
+            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λLs, FLi1s = checkpoint(simple_eig, f, FL[i, 1]; power_iter)
-                else
-                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
-                end
+                λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
@@ -274,13 +270,9 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
-            f(FRiNj) = FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter)
+            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λRs, FR1s = checkpoint(simple_eig, f, FR[i, Nj]; power_iter)
-                else
-                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
-                end
+                λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
@@ -456,13 +448,9 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter)
+            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
-                    λACs, ACs = checkpoint(simple_eig, f, AC[1, j]; power_iter)
-                else
-                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
-                end
+                λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
@@ -511,11 +499,12 @@ function Cenv(C, FL, FR; alg, kwargs...)
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
+    ifcheckpoint = alg.ifcheckpoint
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            f(C1j) = Cmap(1, C1j, FL[:, jr], FR[:, j])
+            f(C1j) = ifcheckpoint ? checkpoint(Cmap, 1, C1j, FL[:, jr], FR[:, j]) : Cmap(1, C1j, FL[:, jr], FR[:, j])
             if alg.ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1, j]; power_iter)
             else
