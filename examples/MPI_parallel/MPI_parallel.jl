@@ -1,12 +1,10 @@
 # MPI Multi-GPU Parallel iPEPS Optimization
 #
-# Usage:
-#   mpirun -np $N bash -c 'export CUDA_VISIBLE_DEVICES=$OMPI_COMM_WORLD_LOCAL_RANK; exec julia --project MPI_parallel.jl'
+# Use the provided submit.sh for Slurm clusters, which sets:
+#   - CUDA_VISIBLE_DEVICES=$LOCAL_RANK  (isolates each process to its own GPU)
+#   - UCX_MEMTYPE_CACHE=n               (avoids cudaMalloc interception crash)
 #
-# Or use the provided submit.sh for Slurm clusters.
-#
-# Key settings for multi-GPU:
-#   - CUDA_VISIBLE_DEVICES isolates each process to its own GPU (required)
+# Key code settings for multi-GPU:
 #   - ifparallel=true enables MPI-parallel tensor contractions
 #   - ifcheckpoint=true enables AD checkpointing (required for large D/chi)
 #   - forloop_iter=total_splits/nprocs splits work across GPUs
