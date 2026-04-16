@@ -6,7 +6,7 @@
 #
 # Key code settings for multi-GPU:
 #   - ifparallel=true enables MPI-parallel tensor contractions
-#   - ifcheckpoint=true enables AD checkpointing (required for large D/chi)
+#   - ifcheckpoint=true enables AD checkpointing (required for large D/χ)
 #   - forloop_iter=total_splits/nprocs splits work across GPUs
 
 using Random, CUDA, TeneT, OptimKit, LinearAlgebra, Zygote, MPI
@@ -43,12 +43,12 @@ etype = Float64
 
 D = 10                          # iPEPS bond dimension
 χ = 400                         # boundary bond dimension
-χshift = 16                     # chi increment per restart
-maxiter_restart = 100           # number of restarts with increasing chi
+χshift = 16                     # χ increment per restart
+maxiter_restart = 100           # number of restarts with increasing χ
 total_splits = 128              # total forloop splits (fixed, independent of nprocs)
 forloop_iter = total_splits ÷ nprocs  # each rank processes this many splits
 
-rank == 0 && @info "D=$D chi=$chi forloop_iter=$forloop_iter total_splits=$total_splits"
+rank == 0 && @info "D=$D χ=$χ forloop_iter=$forloop_iter total_splits=$total_splits"
 
 # ── Model ────────────────────────────────────────────────────────────
 pattern = [1 3; 2 4]
@@ -63,7 +63,7 @@ folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/D$
 boundary_alg = VUMPS{Plaquette{Square}}(
     ifsimple_eig  = true,
     ifparallel    = true,          # enable MPI parallel contractions
-    ifcheckpoint  = true,          # required for large D/chi to fit in GPU memory
+    ifcheckpoint  = true,          # required for large D/χ to fit in GPU memory
     forloop_iter  = forloop_iter,
     maxiter       = 30,
     miniter       = 0,
@@ -114,7 +114,7 @@ function restriction_ipeps(A)
 end
 
 # ── Run optimization ────────────────────────────────────────────────
-# Starts at chi, increases by chishift each restart up to maxiter_restart times
+# Starts at χ, increases by χshift each restart up to maxiter_restart times
 A = init_ipeps(; atype, etype, No, D, χ, params)
 optimise_ipeps(A, χ, χshift, params; restriction_ipeps)
 
