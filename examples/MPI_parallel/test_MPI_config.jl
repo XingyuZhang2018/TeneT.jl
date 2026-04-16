@@ -7,7 +7,7 @@
 #   Part 1: MPI collective correctness & performance (allgatherv_p2p!, allreduce_p2p!)
 #   Part 2: FLmap_parallel forward & backward correctness & performance
 
-using MPI, CUDA, LinearAlgebra, Zygote, Printf, Random, TeneT
+using CUDA, MPI, LinearAlgebra, Zygote, Printf, Random, TeneT
 
 MPI.Init()
 comm = MPI.COMM_WORLD
