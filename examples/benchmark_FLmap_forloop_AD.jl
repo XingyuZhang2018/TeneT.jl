@@ -35,6 +35,28 @@ function print_env(env)
     println()
 end
 
+"""
+    linfit(xs, ys) -> (α, β, R²)
+
+Least-squares fit `y ≈ α·x + β`. Returns slope α, intercept β, and
+coefficient of determination R².
+"""
+function linfit(xs::AbstractVector, ys::AbstractVector)
+    n = length(xs)
+    @assert length(ys) == n "xs and ys must have same length"
+    @assert n >= 2 "need >=2 points for linear fit"
+    x̄ = mean(xs); ȳ = mean(ys)
+    Sxx = sum((x - x̄)^2 for x in xs)
+    Sxy = sum((xs[i] - x̄) * (ys[i] - ȳ) for i in eachindex(xs))
+    α = Sxy / Sxx
+    β = ȳ - α * x̄
+    ŷ = α .* xs .+ β
+    SS_res = sum((ys .- ŷ).^2)
+    SS_tot = sum((ys .- ȳ).^2)
+    R² = SS_tot > 0 ? 1 - SS_res / SS_tot : 1.0
+    return (α=α, β=β, R²=R²)
+end
+
 function main()
     CUDA.allowscalar(false)
     Random.seed!(42)
@@ -42,7 +64,12 @@ function main()
     env = env_info()
     print_env(env)
 
-    println("TODO: implement sweep")
+    # sanity check: linfit on synthetic y = 2x + 1
+    f = linfit([1.0, 2.0, 3.0, 4.0], [3.0, 5.0, 7.0, 9.0])
+    @assert abs(f.α - 2.0) < 1e-10 "linfit α failed: got $(f.α)"
+    @assert abs(f.β - 1.0) < 1e-10 "linfit β failed: got $(f.β)"
+    @assert abs(f.R² - 1.0) < 1e-10 "linfit R² failed: got $(f.R²)"
+    println("linfit sanity check OK  (α=$(f.α), β=$(f.β), R²=$(f.R²))")
 end
 
 main()
