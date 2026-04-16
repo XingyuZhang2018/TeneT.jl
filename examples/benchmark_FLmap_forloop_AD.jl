@@ -57,6 +57,54 @@ function linfit(xs::AbstractVector, ys::AbstractVector)
     return (α=α, β=β, R²=R²)
 end
 
+"""
+    run_config(D, χ, forloop_iter; nrep=5, dtype=Float64, d=2)
+
+Measure forward + backward timing of `FLmap_parallel(..., M; forloop_iter,
+ifparallel=false)` with leg5 bilayer tensors. Uses 1 warmup + `nrep` reps,
+GC + CUDA.reclaim between reps, median aggregation. Gradient wrt `FL` only.
+Returns `(D, χ, forloop_iter, t_fwd, t_bwd, ratio)` where times are in
+seconds.
+"""
+function run_config(D::Int, χ::Int, forloop_iter::Int;
+                    nrep::Int=5, dtype::Type=Float64, d::Int=2)
+    FL  = CUDA.rand(dtype, χ, D, D, χ)
+    ALu = CUDA.rand(dtype, χ, D, D, χ)
+    ALd = CUDA.rand(dtype, χ, D, D, χ)
+    M   = CUDA.rand(dtype, D, D, D, D, d)
+
+    fwd() = TeneT.FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter)
+    loss(x) = sum(TeneT.FLmap_parallel(x, ALu, ALd, M; ifparallel=false, forloop_iter))
+
+    # forward warmup + measure
+    _ = fwd(); CUDA.synchronize()
+    t_fwds = Float64[]
+    for _ in 1:nrep
+        GC.gc(); CUDA.reclaim(); CUDA.synchronize()
+        push!(t_fwds, @elapsed begin
+            _ = fwd()
+            CUDA.synchronize()
+        end)
+    end
+
+    # backward warmup + measure
+    _, bp = Zygote.pullback(loss, FL)
+    _ = bp(one(dtype)); CUDA.synchronize()
+    t_bwds = Float64[]
+    for _ in 1:nrep
+        GC.gc(); CUDA.reclaim(); CUDA.synchronize()
+        push!(t_bwds, @elapsed begin
+            _, bp = Zygote.pullback(loss, FL)
+            _ = bp(one(dtype))
+            CUDA.synchronize()
+        end)
+    end
+
+    t_fwd = median(t_fwds); t_bwd = median(t_bwds)
+    return (D=D, χ=χ, forloop_iter=forloop_iter,
+            t_fwd=t_fwd, t_bwd=t_bwd, ratio=t_bwd/t_fwd)
+end
+
 function main()
     CUDA.allowscalar(false)
     Random.seed!(42)
@@ -70,6 +118,13 @@ function main()
     @assert abs(f.β - 1.0) < 1e-10 "linfit β failed: got $(f.β)"
     @assert abs(f.R² - 1.0) < 1e-10 "linfit R² failed: got $(f.R²)"
     println("linfit sanity check OK  (α=$(f.α), β=$(f.β), R²=$(f.R²))")
+
+    # smoke test: tiny config to verify run_config wiring
+    r = run_config(4, 16, 2; nrep=2)
+    @assert r.t_fwd > 0 && isfinite(r.t_fwd) "t_fwd bad: $(r.t_fwd)"
+    @assert r.t_bwd > 0 && isfinite(r.t_bwd) "t_bwd bad: $(r.t_bwd)"
+    @printf("run_config smoke OK: D=%d χ=%d iter=%d  fwd=%.2fms  bwd=%.2fms  ratio=%.2fx\n",
+            r.D, r.χ, r.forloop_iter, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
 end
 
 main()
