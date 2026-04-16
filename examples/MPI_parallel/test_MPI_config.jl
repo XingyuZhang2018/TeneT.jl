@@ -154,4 +154,7 @@ else
 end
 rank == 0 && println("=" ^ 70)
 
+# Clean up GPU resources before MPI finalize to avoid UCX/CUDA teardown crashes
+GC.gc(); CUDA.reclaim()
+MPI.Barrier(comm)
 MPI.Finalize()
