@@ -206,7 +206,7 @@ function write_md(out_path::AbstractString,
         println(io, "| D | χ | α (ms/chunk) | β (ms) | R² | α·128 / (α·128+β) |")
         println(io, "|---|---|--------------|--------|----|--------------------|")
         for f in fits
-            share = f.α*128 / (f.α*128 + f.β)
+            share = (f.α*128 + f.β) > 0 ? f.α*128 / (f.α*128 + f.β) : 0.0
             @printf(io, "| %d | %d | %.3f | %.2f | %.4f | %.1f%% |\n",
                     f.D, f.χ, f.α, f.β, f.R², share*100)
         end
