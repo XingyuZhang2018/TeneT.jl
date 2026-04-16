@@ -105,6 +105,46 @@ function run_config(D::Int, χ::Int, forloop_iter::Int;
             t_fwd=t_fwd, t_bwd=t_bwd, ratio=t_bwd/t_fwd)
 end
 
+"""
+    run_raw(D, χ; nrep=5, dtype=Float64, d=2)
+
+Measure forward + backward timing of a direct `FLmap(FL, ALu, ALd, M)` call
+(no forloop wrapper, no parallel wrapper). Same tensor layout as
+`run_config`. Baseline for isolating rrule(forloop) wrapping overhead.
+"""
+function run_raw(D::Int, χ::Int; nrep::Int=5, dtype::Type=Float64, d::Int=2)
+    FL  = CUDA.rand(dtype, χ, D, D, χ)
+    ALu = CUDA.rand(dtype, χ, D, D, χ)
+    ALd = CUDA.rand(dtype, χ, D, D, χ)
+    M   = CUDA.rand(dtype, D, D, D, D, d)
+
+    fwd() = TeneT.FLmap(FL, ALu, ALd, M)  # leg5 → FLmap(..., M, conj(M)) internally
+    loss(x) = sum(TeneT.FLmap(x, ALu, ALd, M))
+
+    _ = fwd(); CUDA.synchronize()
+    t_fwds = Float64[]
+    for _ in 1:nrep
+        GC.gc(); CUDA.reclaim(); CUDA.synchronize()
+        push!(t_fwds, @elapsed begin
+            _ = fwd(); CUDA.synchronize()
+        end)
+    end
+
+    _, bp = Zygote.pullback(loss, FL); _ = bp(one(dtype)); CUDA.synchronize()
+    t_bwds = Float64[]
+    for _ in 1:nrep
+        GC.gc(); CUDA.reclaim(); CUDA.synchronize()
+        push!(t_bwds, @elapsed begin
+            _, bp = Zygote.pullback(loss, FL)
+            _ = bp(one(dtype))
+            CUDA.synchronize()
+        end)
+    end
+
+    t_fwd = median(t_fwds); t_bwd = median(t_bwds)
+    return (D=D, χ=χ, t_fwd=t_fwd, t_bwd=t_bwd, ratio=t_bwd/t_fwd)
+end
+
 function main()
     CUDA.allowscalar(false)
     Random.seed!(42)
@@ -125,6 +165,12 @@ function main()
     @assert r.t_bwd > 0 && isfinite(r.t_bwd) "t_bwd bad: $(r.t_bwd)"
     @printf("run_config smoke OK: D=%d χ=%d iter=%d  fwd=%.2fms  bwd=%.2fms  ratio=%.2fx\n",
             r.D, r.χ, r.forloop_iter, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+
+    r_raw = run_raw(4, 16; nrep=2)
+    @assert r_raw.t_fwd > 0 && isfinite(r_raw.t_fwd)
+    @assert r_raw.t_bwd > 0 && isfinite(r_raw.t_bwd)
+    @printf("run_raw  smoke OK: D=%d χ=%d          fwd=%.2fms  bwd=%.2fms  ratio=%.2fx\n",
+            r_raw.D, r_raw.χ, r_raw.t_fwd*1000, r_raw.t_bwd*1000, r_raw.ratio)
 end
 
 main()
