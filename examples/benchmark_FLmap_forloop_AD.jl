@@ -234,36 +234,60 @@ function main()
     env = env_info()
     print_env(env)
 
-    # sanity check: linfit on synthetic y = 2x + 1
+    # -------- sanity checks (kept in-script) ----------------------------
     f = linfit([1.0, 2.0, 3.0, 4.0], [3.0, 5.0, 7.0, 9.0])
-    @assert abs(f.α - 2.0) < 1e-10 "linfit α failed: got $(f.α)"
-    @assert abs(f.β - 1.0) < 1e-10 "linfit β failed: got $(f.β)"
-    @assert abs(f.R² - 1.0) < 1e-10 "linfit R² failed: got $(f.R²)"
-    println("linfit sanity check OK  (α=$(f.α), β=$(f.β), R²=$(f.R²))")
+    @assert abs(f.α - 2.0) < 1e-10 && abs(f.β - 1.0) < 1e-10
+    println("linfit sanity OK")
 
-    # smoke test: tiny config to verify run_config wiring
-    r = run_config(4, 16, 2; nrep=2)
-    @assert r.t_fwd > 0 && isfinite(r.t_fwd) "t_fwd bad: $(r.t_fwd)"
-    @assert r.t_bwd > 0 && isfinite(r.t_bwd) "t_bwd bad: $(r.t_bwd)"
-    @printf("run_config smoke OK: D=%d χ=%d iter=%d  fwd=%.2fms  bwd=%.2fms  ratio=%.2fx\n",
-            r.D, r.χ, r.forloop_iter, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+    # -------- config --------------------------------------------------
+    # Dry-run (tiny): uncomment to verify the driver end-to-end quickly.
+    # configs = [(4, 16), (4, 32)]
+    # iters   = [1, 2, 4]
+    # nrep    = 2
 
-    r_raw = run_raw(4, 16; nrep=2)
-    @assert r_raw.t_fwd > 0 && isfinite(r_raw.t_fwd)
-    @assert r_raw.t_bwd > 0 && isfinite(r_raw.t_bwd)
-    @printf("run_raw  smoke OK: D=%d χ=%d          fwd=%.2fms  bwd=%.2fms  ratio=%.2fx\n",
-            r_raw.D, r_raw.χ, r_raw.t_fwd*1000, r_raw.t_bwd*1000, r_raw.ratio)
+    # Real benchmark:
+    configs = [(10, 128), (10, 256), (10, 512), (12, 256)]
+    iters   = [1, 2, 4, 8, 16, 32, 64, 128]
+    nrep    = 5
 
-    # write_md smoke test
-    f_smoke = (D=4, χ=16, α=0.1, β=1.0, R²=0.99)
-    tmp_out = joinpath(@__DIR__, "MPI_parallel", "benchmarks", "_smoke.md")
-    write_md(tmp_out, [r_raw], [r], [r], [f_smoke], env_info())
-    @assert isfile(tmp_out) "write_md did not create file"
-    content = read(tmp_out, String)
-    @assert occursin("Table 1: Raw FLmap baseline", content)
-    @assert occursin("Table 4: Linear fit", content)
-    rm(tmp_out)
-    println("write_md smoke OK")
+    # -------- sweep ---------------------------------------------------
+    println("\n─── Raw baseline ───")
+    rows_raw = NamedTuple[]
+    for (D, χ) in configs
+        r = run_raw(D, χ; nrep)
+        push!(rows_raw, r)
+        @printf("  D=%-2d χ=%-4d        fwd=%8.2fms  bwd=%9.2fms  ratio=%.2fx\n",
+                r.D, r.χ, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+    end
+
+    println("\n─── Main sweep (wrap + forloop_iter) ───")
+    rows_sweep = NamedTuple[]
+    for (D, χ) in configs, n in iters
+        r = run_config(D, χ, n; nrep)
+        push!(rows_sweep, r)
+        @printf("  D=%-2d χ=%-4d iter=%-3d fwd=%8.2fms  bwd=%9.2fms  ratio=%.2fx\n",
+                r.D, r.χ, r.forloop_iter, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+    end
+
+    # wrap1 rows = forloop_iter=1 slice of sweep
+    rows_wrap1 = filter(r -> r.forloop_iter == 1, rows_sweep)
+
+    # -------- fit -----------------------------------------------------
+    println("\n─── Linear fits ───")
+    fits = NamedTuple[]
+    for (D, χ) in configs
+        rows = filter(r -> r.D == D && r.χ == χ, rows_sweep)
+        xs = Float64[r.forloop_iter for r in rows]
+        ys = Float64[r.t_bwd * 1000 for r in rows]  # ms
+        f  = linfit(xs, ys)
+        push!(fits, (D=D, χ=χ, α=f.α, β=f.β, R²=f.R²))
+        @printf("  D=%-2d χ=%-4d  α=%7.3f ms/chunk  β=%7.2f ms  R²=%.4f\n",
+                D, χ, f.α, f.β, f.R²)
+    end
+
+    # -------- write output --------------------------------------------
+    write_md(RESULTS_PATH, rows_raw, rows_wrap1, rows_sweep, fits, env)
+    println("\nResults saved to: $RESULTS_PATH")
 end
 
 main()
