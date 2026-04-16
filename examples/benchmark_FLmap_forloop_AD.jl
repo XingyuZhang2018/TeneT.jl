@@ -254,6 +254,7 @@ function main()
     println("\n─── Raw baseline ───")
     rows_raw = NamedTuple[]
     for (D, χ) in configs
+        GC.gc(); CUDA.reclaim()
         r = run_raw(D, χ; nrep)
         push!(rows_raw, r)
         @printf("  D=%-2d χ=%-4d        fwd=%8.2fms  bwd=%9.2fms  ratio=%.2fx\n",
@@ -263,6 +264,7 @@ function main()
     println("\n─── Main sweep (wrap + forloop_iter) ───")
     rows_sweep = NamedTuple[]
     for (D, χ) in configs, n in iters
+        GC.gc(); CUDA.reclaim()
         r = run_config(D, χ, n; nrep)
         push!(rows_sweep, r)
         @printf("  D=%-2d χ=%-4d iter=%-3d fwd=%8.2fms  bwd=%9.2fms  ratio=%.2fx\n",
