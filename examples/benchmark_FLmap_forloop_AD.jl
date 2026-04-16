@@ -145,6 +145,88 @@ function run_raw(D::Int, χ::Int; nrep::Int=5, dtype::Type=Float64, d::Int=2)
     return (D=D, χ=χ, t_fwd=t_fwd, t_bwd=t_bwd, ratio=t_bwd/t_fwd)
 end
 
+"""
+    write_md(out_path, rows_raw, rows_wrap1, rows_sweep, fits, env)
+
+Emit benchmark results to a Markdown file matching the JSC/BSC benchmark
+style. 4 tables: raw baseline, wrap1 baseline, main sweep, linear fit.
+"""
+function write_md(out_path::AbstractString,
+                  rows_raw::AbstractVector,
+                  rows_wrap1::AbstractVector,
+                  rows_sweep::AbstractVector,
+                  fits::AbstractVector,
+                  env::NamedTuple)
+    mkpath(dirname(out_path))
+    open(out_path, "w") do io
+        println(io, "# Local 4090 FLmap forloop AD Benchmark")
+        println(io)
+        println(io, "- **Date**: $(env.date)")
+        println(io, "- **GPU**: $(env.gpu)  ($(env.mem_gb) GiB)")
+        println(io, "- **Host**: $(env.hostname)")
+        println(io, "- **Julia**: $(env.julia)   **CUDA runtime**: $(env.cuda)")
+        println(io, "- **CUDA.jl**: $(env.cuda_jl)   **Zygote.jl**: $(env.zygote)")
+        println(io, "- **Tensors**: leg5 bilayer, `FL,ALu,ALd: (χ,D,D,χ)`, `M: (D,D,D,D,2)`, Float64")
+        println(io, "- **Protocol**: 1 warmup + 5 reps + median; `GC.gc()` + `CUDA.reclaim()` between reps")
+        println(io, "- **Purpose**: quantify Zygote per-pullback overhead in `rrule(forloop)`")
+        println(io)
+
+        println(io, "## Table 1: Raw FLmap baseline (no wrapper)")
+        println(io)
+        println(io, "| D | χ | fwd (ms) | bwd (ms) | bwd/fwd |")
+        println(io, "|---|---|----------|----------|---------|")
+        for r in rows_raw
+            @printf(io, "| %d | %d | %.2f | %.2f | %.2fx |\n",
+                    r.D, r.χ, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+        end
+        println(io)
+
+        println(io, "## Table 2: rrule wrap baseline (`forloop_iter=1`, early-exit path)")
+        println(io)
+        println(io, "| D | χ | fwd (ms) | bwd (ms) | bwd/fwd |")
+        println(io, "|---|---|----------|----------|---------|")
+        for r in rows_wrap1
+            @printf(io, "| %d | %d | %.2f | %.2f | %.2fx |\n",
+                    r.D, r.χ, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+        end
+        println(io)
+
+        println(io, "## Table 3: Main sweep — `t_fwd`, `t_bwd` vs `forloop_iter`")
+        println(io)
+        println(io, "| D | χ | forloop_iter | fwd (ms) | bwd (ms) | bwd/fwd |")
+        println(io, "|---|---|--------------|----------|----------|---------|")
+        for r in rows_sweep
+            @printf(io, "| %d | %d | %d | %.2f | %.2f | %.2fx |\n",
+                    r.D, r.χ, r.forloop_iter, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
+        end
+        println(io)
+
+        println(io, "## Table 4: Linear fit  `t_bwd(n) ≈ α·n + β`")
+        println(io)
+        println(io, "| D | χ | α (ms/chunk) | β (ms) | R² | α·128 / (α·128+β) |")
+        println(io, "|---|---|--------------|--------|----|--------------------|")
+        for f in fits
+            share = f.α*128 / (f.α*128 + f.β)
+            @printf(io, "| %d | %d | %.3f | %.2f | %.4f | %.1f%% |\n",
+                    f.D, f.χ, f.α, f.β, f.R², share*100)
+        end
+        println(io)
+
+        println(io, "## Diagnosis guide")
+        println(io)
+        println(io, "- If `α·128 ≫ β` (last column large, e.g. >80%): Zygote per-chunk")
+        println(io, "  overhead dominates at high `forloop_iter`. Optimize `rrule(forloop)`")
+        println(io, "  (cache pullback across chunks, preallocate grad buffers, or write a")
+        println(io, "  hand-rolled FLmap rrule).")
+        println(io, "- If `α·128 ≈ β` (last column small, e.g. <30%): most cost is fixed")
+        println(io, "  per-call work. Likely `@tensor` AD itself — hand-roll FLmap rrule.")
+        println(io, "- Compare Table 1 vs Table 2: difference quantifies rrule wrapping cost.")
+        println(io, "- If neither α nor β is large yet full-fg `bwd/fwd` is still ~10x,")
+        println(io, "  the bottleneck is elsewhere (leftenv/rightenv power-iter unrolling).")
+    end
+    return out_path
+end
+
 function main()
     CUDA.allowscalar(false)
     Random.seed!(42)
@@ -171,6 +253,17 @@ function main()
     @assert r_raw.t_bwd > 0 && isfinite(r_raw.t_bwd)
     @printf("run_raw  smoke OK: D=%d χ=%d          fwd=%.2fms  bwd=%.2fms  ratio=%.2fx\n",
             r_raw.D, r_raw.χ, r_raw.t_fwd*1000, r_raw.t_bwd*1000, r_raw.ratio)
+
+    # write_md smoke test
+    f_smoke = (D=4, χ=16, α=0.1, β=1.0, R²=0.99)
+    tmp_out = joinpath(@__DIR__, "MPI_parallel", "benchmarks", "_smoke.md")
+    write_md(tmp_out, [r_raw], [r], [r], [f_smoke], env_info())
+    @assert isfile(tmp_out) "write_md did not create file"
+    content = read(tmp_out, String)
+    @assert occursin("Table 1: Raw FLmap baseline", content)
+    @assert occursin("Table 4: Linear fit", content)
+    rm(tmp_out)
+    println("write_md smoke OK")
 end
 
 main()
