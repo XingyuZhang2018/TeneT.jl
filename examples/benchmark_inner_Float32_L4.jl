@@ -77,32 +77,48 @@ function main()
     println("BLAS threads: ", BLAS.get_num_threads())
 
     # Usage:
-    #   julia benchmark_inner_Float32_L4.jl              -> fine polish N=2 (default)
-    #   julia benchmark_inner_Float32_L4.jl coarse       -> coarse polish N=2
-    #   julia benchmark_inner_Float32_L4.jl fine 3       -> fine polish N=3
-    #   julia benchmark_inner_Float32_L4.jl fine_sweep   -> sweep fine polish N ∈ {2,3,4,5}
+    #   julia benchmark_inner_Float32_L4.jl                    -> fine polish N=2, D=2 (default)
+    #   julia benchmark_inner_Float32_L4.jl coarse             -> coarse polish N=2, D=2
+    #   julia benchmark_inner_Float32_L4.jl fine 3             -> fine polish N=3, D=2
+    #   julia benchmark_inner_Float32_L4.jl fine_sweep         -> sweep fine N ∈ {2,3,4,5}, D=2
+    #   julia benchmark_inner_Float32_L4.jl equiv              -> coarse=1 vs fine=5, D=2
+    #   julia benchmark_inner_Float32_L4.jl coarse_sweep D3    -> coarse N ∈ {1,2} at D=3
+    #   (second ARG = stage: "D2" default, "D3", or "both")
     mode_arg = length(ARGS) >= 1 ? ARGS[1] : "fine"
     sweep = mode_arg == "fine_sweep"
+    coarse_sweep = mode_arg == "coarse_sweep"
     equiv = mode_arg == "equiv"
     if sweep
         steps_list = [2, 3, 4, 5]
         polish_modes = ["fine", "fine", "fine", "fine"]
+        stage_default = "D2"
+    elseif coarse_sweep
+        steps_list = [1, 2]
+        polish_modes = ["coarse", "coarse"]
+        stage_default = "D3"
     elseif equiv
-        # Sanity check: coarse=1 and fine=5 should be strictly equivalent at power_iter_ad=5
-        # (both make the entire last AD iter run in Float64).
         steps_list  = [1,        5]
         polish_modes = ["coarse", "fine"]
+        stage_default = "D2"
     else
-        @assert mode_arg in ("none", "coarse", "fine") "ARGS[1] must be none|coarse|fine|fine_sweep|equiv"
-        step_arg = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 2
+        @assert mode_arg in ("none", "coarse", "fine") "ARGS[1] must be none|coarse|fine|fine_sweep|coarse_sweep|equiv"
+        step_arg = length(ARGS) >= 2 && !(ARGS[2] in ("D2","D3","both")) ? parse(Int, ARGS[2]) : 2
         steps_list = [step_arg]
         polish_modes = [mode_arg]
+        stage_default = "D2"
     end
-    @printf("Sweep: %s  polish_modes=%s  steps_list=%s\n",
-            sweep ? "fine_sweep" : (equiv ? "equiv" : mode_arg),
-            string(polish_modes), string(steps_list))
+    # Stage arg: look for "D2"/"D3"/"both" in ARGS (last such token wins)
+    stage = stage_default
+    for a in ARGS
+        if a in ("D2","D3","both"); stage = a; end
+    end
+    configs = stage == "D2"   ? [(2,16), (2,32)] :
+              stage == "D3"   ? [(3,16), (3,32)] :
+              [(2,16), (2,32), (3,16), (3,32)]
+    @printf("Sweep: %s  polish_modes=%s  steps_list=%s  stage=%s  configs=%s\n",
+            sweep ? "fine_sweep" : (coarse_sweep ? "coarse_sweep" : (equiv ? "equiv" : mode_arg)),
+            string(polish_modes), string(steps_list), stage, string(configs))
 
-    configs = [(2, 16), (2, 32)]
     seeds = [42, 43, 44]
 
     # Build arms: Float64 baseline always + one Float32 arm per polish step count
@@ -123,9 +139,10 @@ function main()
     mkpath(dirname(RESULTS_PATH))
     open(RESULTS_PATH, "a") do io
         label = sweep ? "fine polish sweep N ∈ $(steps_list)" :
+                coarse_sweep ? "coarse polish sweep N ∈ $(steps_list)" :
                 equiv ? "coarse=1 vs fine=5 equivalence check" :
                 "polish mode `$(polish_modes[1])` N=$(steps_list[1])"
-        println(io, "\n## L4 D=2 — $label (", today(), ", CPU)\n")
+        println(io, "\n## L4 $stage — $label (", today(), ", CPU)\n")
         println(io, "BLAS threads: ", BLAS.get_num_threads())
         println(io, "")
         println(io, "| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |")
