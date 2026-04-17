@@ -28,6 +28,8 @@ C4v
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
     ifcheckpoint::Bool = false
+
+    inner_etype::Union{Nothing, Type} = nothing
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
