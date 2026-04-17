@@ -194,6 +194,84 @@
             @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
         end
 
+        @testset "ACmap leg4 — inner_etype=Float32" begin
+            D = 3    # override for index-permutation safety (see Task 2 review)
+            T = ComplexF64
+            AC = atype(randn(T, χ, D, χ))
+            FL = atype(randn(T, χ, D, χ))
+            FR = atype(randn(T, χ, D, χ))
+            M  = atype(randn(T, D, D, D, D))
+            r0 = ACmap(AC, FL, FR, M)
+            r_explicit_nothing = ACmap(AC, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACmap(AC, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACmap leg5 — inner_etype=Float32" begin
+            T = ComplexF64
+            AC = atype(randn(T, χ, D, D, χ))
+            FL = atype(randn(T, χ, D, D, χ))
+            FR = atype(randn(T, χ, D, D, χ))
+            M  = atype(randn(T, D, D, D, D, D))
+            r0 = ACmap(AC, FL, FR, M)
+            r_explicit_nothing = ACmap(AC, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACmap(AC, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACmap leg8 — inner_etype=Float32" begin
+            D = 3    # override for index-permutation safety
+            T = ComplexF64
+            AC = atype(randn(T, χ, D, D, χ))
+            FL = atype(randn(T, χ, D, D, χ))
+            FR = atype(randn(T, χ, D, D, χ))
+            M  = atype(randn(T, D, D, D, D, D, D, D, D))
+            r0 = ACmap(AC, FL, FR, M)
+            r_explicit_nothing = ACmap(AC, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACmap(AC, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACdmap leg4 — inner_etype=Float32" begin
+            D = 3    # override for index-permutation safety
+            T = ComplexF64
+            ACd = atype(randn(T, χ, D, χ))
+            FL  = atype(randn(T, χ, D, χ))
+            FR  = atype(randn(T, χ, D, χ))
+            M   = atype(randn(T, D, D, D, D))
+            r0 = ACdmap(ACd, FL, FR, M)
+            r_explicit_nothing = ACdmap(ACd, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACdmap leg5 — inner_etype=Float32" begin
+            T = ComplexF64
+            ACd = atype(randn(T, χ, D, D, χ))
+            FL  = atype(randn(T, χ, D, D, χ))
+            FR  = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D))
+            r0 = ACdmap(ACd, FL, FR, M)
+            r_explicit_nothing = ACdmap(ACd, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
         @testset "FRmap leg4" begin
             FR  = atype(randn(T, χ, D, χ))
             ARu = atype(randn(T, χ, D, χ))

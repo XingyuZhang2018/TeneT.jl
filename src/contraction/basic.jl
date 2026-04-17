@@ -205,21 +205,54 @@ end
 
 ```
 """
-function ACmap(AC, FL, FR, M::leg4)
-    @tensor result[f,g,h] := AC[a,b,c] * FR[c,e,h] * M[d,g,e,b] * FL[a,d,f]
-    return result
+function ACmap(AC, FL, FR, M::leg4; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(AC))
+        @tensor result[f,g,h] := AC[a,b,c] * FR[c,e,h] * M[d,g,e,b] * FL[a,d,f]
+        return result
+    else
+        T_out = eltype(AC)
+        AC_t = _downcast_eltype(inner_etype, AC)
+        FL_t = _downcast_eltype(inner_etype, FL)
+        FR_t = _downcast_eltype(inner_etype, FR)
+        M_t  = _downcast_eltype(inner_etype, M)
+        @tensor result_t[f,g,h] := AC_t[a,b,c] * FR_t[c,e,h] * M_t[d,g,e,b] * FL_t[a,d,f]
+        return T_out.(result_t)
+    end
 end
-function ACmap(AC, FL, FR, M1::leg5, M2::leg5)
-    @tensor result[i,j,k,l] := AC[a,b,c,d] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
-    return result
+function ACmap(AC, FL, FR, M1::leg5, M2::leg5; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(AC))
+        @tensor result[i,j,k,l] := AC[a,b,c,d] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
+        return result
+    else
+        T_out = eltype(AC)
+        AC_t = _downcast_eltype(inner_etype, AC)
+        FL_t = _downcast_eltype(inner_etype, FL)
+        FR_t = _downcast_eltype(inner_etype, FR)
+        M1_t = _downcast_eltype(inner_etype, M1)
+        M2_t = _downcast_eltype(inner_etype, M2)
+        @tensor result_t[i,j,k,l] := AC_t[a,b,c,d] * FR_t[d,g,h,l] * M1_t[e,j,g,b,p] * M2_t[f,k,h,c,p] * FL_t[a,e,f,i]
+        return T_out.(result_t)
+    end
 end
-function ACmap(AC, FL, FR, M::leg8)
-    @tensor result[i,j,k,l] := AC[a,b,c,d] * FR[d,g,h,l] * M[e,f,j,k,g,h,b,c] * FL[a,e,f,i]
-    return result
+function ACmap(AC, FL, FR, M::leg8; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(AC))
+        @tensor result[i,j,k,l] := AC[a,b,c,d] * FR[d,g,h,l] * M[e,f,j,k,g,h,b,c] * FL[a,e,f,i]
+        return result
+    else
+        T_out = eltype(AC)
+        AC_t = _downcast_eltype(inner_etype, AC)
+        FL_t = _downcast_eltype(inner_etype, FL)
+        FR_t = _downcast_eltype(inner_etype, FR)
+        M_t  = _downcast_eltype(inner_etype, M)
+        @tensor result_t[i,j,k,l] := AC_t[a,b,c,d] * FR_t[d,g,h,l] * M_t[e,f,j,k,g,h,b,c] * FL_t[a,e,f,i]
+        return T_out.(result_t)
+    end
 end
 
-ACmap(AC, FL, FR, M::leg5) = ACmap(AC, FL, FR, M, conj(M))
-ACmap(AC, FL, FR, M::Tuple{leg5,leg5}) = ACmap(AC, FL, FR, M[1], M[2])
+ACmap(AC, FL, FR, M::leg5; inner_etype=nothing) =
+    ACmap(AC, FL, FR, M, conj(M); inner_etype)
+ACmap(AC, FL, FR, M::Tuple{leg5,leg5}; inner_etype=nothing) =
+    ACmap(AC, FL, FR, M[1], M[2]; inner_etype)
 
 """
     Cmap(Cij, FLjp, FRj, II)
@@ -248,17 +281,40 @@ end
     │     g     │
     f ────┴──── h
 """
-function ACdmap(ACd, FL, FR, M::leg4)
-    @tensor result[a,b,c] := ACd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * FL[a,d,f]
-    return result
+function ACdmap(ACd, FL, FR, M::leg4; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(ACd))
+        @tensor result[a,b,c] := ACd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * FL[a,d,f]
+        return result
+    else
+        T_out = eltype(ACd)
+        ACd_t = _downcast_eltype(inner_etype, ACd)
+        FL_t  = _downcast_eltype(inner_etype, FL)
+        FR_t  = _downcast_eltype(inner_etype, FR)
+        M_t   = _downcast_eltype(inner_etype, M)
+        @tensor result_t[a,b,c] := ACd_t[f,g,h] * FR_t[c,e,h] * M_t[d,g,e,b] * FL_t[a,d,f]
+        return T_out.(result_t)
+    end
 end
-function ACdmap(ACd, FL, FR, M1::leg5, M2::leg5)
-    @tensor result[a,b,c,d] := ACd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
-    return result
+function ACdmap(ACd, FL, FR, M1::leg5, M2::leg5; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(ACd))
+        @tensor result[a,b,c,d] := ACd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
+        return result
+    else
+        T_out = eltype(ACd)
+        ACd_t = _downcast_eltype(inner_etype, ACd)
+        FL_t  = _downcast_eltype(inner_etype, FL)
+        FR_t  = _downcast_eltype(inner_etype, FR)
+        M1_t  = _downcast_eltype(inner_etype, M1)
+        M2_t  = _downcast_eltype(inner_etype, M2)
+        @tensor result_t[a,b,c,d] := ACd_t[i,j,k,l] * FR_t[d,g,h,l] * M1_t[e,j,g,b,p] * M2_t[f,k,h,c,p] * FL_t[a,e,f,i]
+        return T_out.(result_t)
+    end
 end
 
-ACdmap(ACd, FL, FR, M::leg5) = ACdmap(ACd, FL, FR, M, conj(M))
-ACdmap(ACd, FL, FR, M::Tuple{leg5,leg5}) = ACdmap(ACd, FL, FR, M[1], M[2])
+ACdmap(ACd, FL, FR, M::leg5; inner_etype=nothing) =
+    ACdmap(ACd, FL, FR, M, conj(M); inner_etype)
+ACdmap(ACd, FL, FR, M::Tuple{leg5,leg5}; inner_etype=nothing) =
+    ACdmap(ACd, FL, FR, M[1], M[2]; inner_etype)
 
 function Mmap(AC, ACd, FL, FR)
     @tensor result[d,g,e,b] := AC[a,b,c] * FR[c,e,h] * FL[a,d,f] * ACd[f,g,h]
