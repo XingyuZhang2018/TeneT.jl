@@ -43,3 +43,22 @@ Environment: Julia 1.11.1, Windows 11, CPU (Array backend). BLAS thread count no
 > Note on the user's original observation (large `FLmap_forloop` differences at `forloop=1` vs
 > `forloop=16`): this was presumably at larger D/χ than tested here, or after VUMPS iteration
 > accumulated the noise. At single-call D≤3, χ≤64, Float64 reordering noise is effectively zero.
+
+## L4 D=2 — full iPEPS optimization (2026-04-17, CPU)
+
+BLAS threads: 4
+
+| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |
+|---|---|------|-----------|---------|---------|----------|-----------|
+| 2 | 16 | 42 | Float64 | -0.660231093480 | 13 | 129.8 | 457 |
+| 2 | 16 | 42 | Float32 | -0.660231080697 | 80 | 33.0 | 90 |
+| 2 | 16 | 43 | Float64 | -0.660231093480 | 18 | 2.5 | 227 |
+| 2 | 16 | 43 | Float32 | -0.660231106837 | 165 | 17.4 | 7 |
+| 2 | 16 | 44 | Float64 | -0.660231093480 | 13 | 2.2 | 1 |
+| 2 | 16 | 44 | Float32 | -0.660231070504 | 200 | 24.3 | 0 |
+| 2 | 32 | 42 | Float64 | -0.660231093474 | 18 | 10.6 | 60 |
+| 2 | 32 | 42 | Float32 | -0.660231167517 | 200 | 108.2 | 0 |
+| 2 | 32 | 43 | Float64 | -0.660231093466 | 24 | 16.2 | 0 |
+| 2 | 32 | 43 | Float32 | -0.660231137510 | 163 | 94.2 | 0 |
+| 2 | 32 | 44 | Float64 | -0.660231093479 | 17 | 10.7 | 0 |
+| 2 | 32 | 44 | Float32 | -0.660231166019 | 200 | 111.8 | 0 |
