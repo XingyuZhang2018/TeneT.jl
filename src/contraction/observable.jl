@@ -13,8 +13,8 @@ n ────┴──q ──┴──── t                        │     
 """
 function oc_12(FLo, ACu, A1u, A1d, ACd, FRo, ARu, A2u, A2d, ARd; forloop_iter, ifparallel)
     l = FLmap_parallel(FLo, ACu, ACd, (A1u, A1d); forloop_iter, ifparallel)
-    r = FRmap_parallel(FRo, ARu, ARd, (A2u, A2d); forloop_iter, ifparallel)
-    return dot(conj(l), r)
+    l = FLmap_parallel(l, ARu, ARd, (A2u, A2d); forloop_iter, ifparallel)
+    return dot(conj(l), FRo)
 end
 
 function oc_21(ACu, FLu, A1u, A1d, FRu, FLo, A2u, A2d, FRo, ACd; forloop_iter, ifparallel)
