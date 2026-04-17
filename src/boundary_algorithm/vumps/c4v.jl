@@ -1,6 +1,6 @@
 function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
-    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint = alg
-    f(FL) = ifcheckpoint ? checkpoint(FLmap_parallel, FL, ALu, ALd, M; ifparallel, forloop_iter) : FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter)
+    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint, inner_etype = alg
+    f(FL) = ifcheckpoint ? checkpoint(FLmap_parallel, FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype) : FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype)
     if alg.ifsimple_eig
         λFLs, FLs = simple_eig(f, FL; power_iter)
     else
@@ -12,8 +12,8 @@ function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
 end
 
 function ACenv_c4v(AC, FL, M; alg, kwargs...)
-    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint = alg
-    f(AC) = ifcheckpoint ? checkpoint(ACmap_parallel, AC, FL, FL, M; ifparallel, forloop_iter) : ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter)
+    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint, inner_etype = alg
+    f(AC) = ifcheckpoint ? checkpoint(ACmap_parallel, AC, FL, FL, M; ifparallel, forloop_iter, inner_etype) : ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter, inner_etype)
     if alg.ifsimple_eig
         λACs, ACs = simple_eig(f, AC; power_iter)
     else
