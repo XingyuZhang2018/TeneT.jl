@@ -135,3 +135,65 @@ BLAS threads: 4
 **Coarse polish wins** — covering the last 2 **entire** AD iterations in Float64 gives the backward pass 2 full Float64 layers to suppress upstream Float32 noise. Fine polish is too narrow.
 
 **Recommendation:** use `inner_etype_final_steps=2` (coarse) for the D=3 stage. Fine polish is retained as a configurable option for future experimentation (e.g. combining with `power_iter_ad` tuning) but is not the default path.
+
+## L4 D=2 — fine polish sweep N ∈ [2, 3, 4, 5] (2026-04-17, CPU)
+
+BLAS threads: 4
+
+| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |
+|---|---|------|-----------|---------|---------|----------|-----------|
+| 2 | 16 | 42 | Float64 | -0.660231093480 | 13 | 74.0 | 399 |
+| 2 | 16 | 42 | Float32/fine=2 | -0.660231093512 | 27 | 16.6 | 100 |
+| 2 | 16 | 42 | Float32/fine=3 | -0.660231093579 | 51 | 3.4 | 219 |
+| 2 | 16 | 42 | Float32/fine=4 | -0.660231093483 | 19 | 1.3 | 6 |
+| 2 | 16 | 42 | Float32/fine=5 | -0.660231093457 | 34 | 2.0 | 1 |
+| 2 | 16 | 43 | Float64 | -0.660231093480 | 18 | 1.3 | 3 |
+| 2 | 16 | 43 | Float32/fine=2 | -0.660231093520 | 20 | 1.3 | 0 |
+| 2 | 16 | 43 | Float32/fine=3 | -0.660231093416 | 45 | 2.8 | 0 |
+| 2 | 16 | 43 | Float32/fine=4 | -0.660231093554 | 30 | 1.7 | 0 |
+| 2 | 16 | 43 | Float32/fine=5 | -0.660231093488 | 19 | 1.2 | 0 |
+| 2 | 16 | 44 | Float64 | -0.660231093480 | 13 | 1.0 | 1 |
+| 2 | 16 | 44 | Float32/fine=2 | -0.660231093541 | 42 | 2.5 | 0 |
+| 2 | 16 | 44 | Float32/fine=3 | -0.660231093469 | 37 | 2.4 | 0 |
+| 2 | 16 | 44 | Float32/fine=4 | -0.660231093511 | 75 | 4.1 | 0 |
+| 2 | 16 | 44 | Float32/fine=5 | -0.660231093487 | 73 | 4.5 | 0 |
+| 2 | 32 | 42 | Float64 | -0.660231093474 | 18 | 4.4 | 61 |
+| 2 | 32 | 42 | Float32/fine=2 | -0.660231093596 | 100 | 19.3 | 0 |
+| 2 | 32 | 42 | Float32/fine=3 | -0.660231093485 | 42 | 7.7 | 0 |
+| 2 | 32 | 42 | Float32/fine=4 | -0.660231093490 | 153 | 27.1 | 0 |
+| 2 | 32 | 42 | Float32/fine=5 | -0.660231093477 | 72 | 14.1 | 0 |
+| 2 | 32 | 43 | Float64 | -0.660231093466 | 24 | 5.9 | 0 |
+| 2 | 32 | 43 | Float32/fine=2 | -0.660231093313 | 51 | 9.3 | 0 |
+| 2 | 32 | 43 | Float32/fine=3 | -0.660231093439 | 23 | 4.5 | 0 |
+| 2 | 32 | 43 | Float32/fine=4 | -0.660231093451 | 37 | 7.2 | 0 |
+| 2 | 32 | 43 | Float32/fine=5 | -0.660231093450 | 53 | 10.1 | 0 |
+| 2 | 32 | 44 | Float64 | -0.660231093479 | 17 | 3.6 | 0 |
+| 2 | 32 | 44 | Float32/fine=2 | -0.660231093534 | 99 | 20.4 | 0 |
+| 2 | 32 | 44 | Float32/fine=3 | -0.660231093339 | 17 | 3.9 | 0 |
+| 2 | 32 | 44 | Float32/fine=4 | -0.660231093457 | 27 | 6.1 | 0 |
+| 2 | 32 | 44 | Float32/fine=5 | -0.660231093387 | 12 | 2.7 | 0 |
+
+**Fine-polish sweep verdict (N ∈ {2, 3, 4, 5}):** All N values PASS `|ΔE| < 1e-7`, but:
+
+| N | \|ΔE\| χ=16 | \|ΔE\| χ=32 | Float32 n_steps χ=16 (per seed) | Float32 n_steps χ=32 (per seed) |
+|---|---:|---:|---:|---:|
+| 2 | 3.97e-11 | 6.07e-11 | 27, 20, 42 | 100, 51, 99 |
+| 3 | 1.05e-11 | 3.46e-11 | 51, 45, 37 | 42, 23, 17 |
+| 4 | 3.06e-11 | 1.67e-11 | 19, 30, 75 | 153, 37, 27 |
+| 5 | 6.75e-12 | 2.40e-11 | 34, 19, 73 | 72, 53, 12 |
+| *coarse=2* | *3.33e-15* | *4.65e-12* | *13, 18, 13* | *21, 22, 20* |
+
+**Analysis:**
+- Accuracy improves weakly with N (fine=5 best ~ 10⁻¹¹), but coarse=2 is still **~10³×** more accurate.
+- n_steps remains highly variable at all fine-N values; none achieves parity with Float64 or coarse=2.
+- `fine=5` (the user's "equivalent to `coarse=1`" point) already underperforms `coarse=2` by 10³
+  on accuracy, confirming that 1 fully-F64 AD layer is insufficient — the gradient still carries
+  Float32 noise from the upstream 3 Float32 AD layers. Two F64 layers (coarse=2) provide the
+  damping needed.
+- Only seed-to-seed variance is comparable to the N-to-N variance (χ=32 seed=44: N=5 → 12 steps,
+  N=4 → 27 steps, N=3 → 17 steps, N=2 → 99 steps — variance dominated by LBFGS starting
+  condition, not by N).
+
+**Takeaway:** coarse polish is the winning strategy. Fine polish is useful mainly as a
+diagnostic showing **how many AD layers need to be F64 to suppress upstream F32 noise**. Answer:
+at least 2 (coarse=2). One (fine=5 ≡ coarse=1) is not enough.
