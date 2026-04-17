@@ -273,7 +273,7 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         synchronize(args[1])
     end
 
-    MPI.Allreduce!(result, +, comm)
+    allreduce_p2p!(result, +, comm)
 
     return result
 end
