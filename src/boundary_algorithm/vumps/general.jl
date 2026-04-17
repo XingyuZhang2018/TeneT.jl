@@ -21,6 +21,23 @@ permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
 permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
+# ── Offload-friendly simple_eig wrappers ────────────────────────────
+# These accept the big neighbourhood tensors as explicit args so that
+# `checkpoint_offload` can move them to host memory during the backward
+# re-compute on GPU runs.
+function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, forloop_iter)
+    f(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter)
+    return simple_eig(f, FLij; power_iter)
+end
+function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel, forloop_iter)
+    f(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter)
+    return simple_eig(f, FRiNj; power_iter)
+end
+function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter)
+    f(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter)
+    return simple_eig(f, AC1j; power_iter)
+end
+
 # ── Helpers ──────────────────────────────────────────────────────────
 """
     λs[1], Fs[1] = selectpos(λs, Fs, N)
@@ -214,7 +231,9 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         if p ∉ processed_indices
             f(FLij) = FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
+                if alg.ifoffload_eig
+                    λLs, FLi1s = checkpoint_offload(_simple_eig_FLmap, FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :]; power_iter, ifparallel, forloop_iter)
+                elseif ifcheckpoint
                     λLs, FLi1s = checkpoint(simple_eig, f, FL[i, 1]; power_iter)
                 else
                     λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
@@ -276,7 +295,9 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
         if p ∉ processed_indices
             f(FRiNj) = FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
+                if alg.ifoffload_eig
+                    λRs, FR1s = checkpoint_offload(_simple_eig_FRmap, FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj; power_iter, ifparallel, forloop_iter)
+                elseif ifcheckpoint
                     λRs, FR1s = checkpoint(simple_eig, f, FR[i, Nj]; power_iter)
                 else
                     λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
@@ -458,7 +479,9 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
         if p ∉ processed_indices
             f(AC1j) = ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter)
             if alg.ifsimple_eig
-                if ifcheckpoint
+                if alg.ifoffload_eig
+                    λACs, ACs = checkpoint_offload(_simple_eig_ACmap, AC[1, j], FL[:, j], FR[:, j], M[:, j]; power_iter, ifparallel, forloop_iter)
+                elseif ifcheckpoint
                     λACs, ACs = checkpoint(simple_eig, f, AC[1, j]; power_iter)
                 else
                     λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
@@ -782,7 +805,9 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     alg_ad = deepcopy(alg)
     alg_ad.power_iter = alg.power_iter_ad
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
+        rt, err = alg.ifoffload_step ? checkpoint_offload(vumps_step, rt, M, alg_ad) :
+                  alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) :
+                                     vumps_step(rt, M, alg_ad)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))

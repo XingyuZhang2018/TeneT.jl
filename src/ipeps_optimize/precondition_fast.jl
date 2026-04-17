@@ -11,7 +11,7 @@ const _precond_cache = Ref{Any}(nothing)   # (iter_last::Int, gradnew::Any)
     precondition_fast(A, grad, rt, params, restriction_ipeps, fδEi, iter_precond; precond_every=1)
 
 Drop-in replacement for `precondition_invese_single_envir` with two speed-ups:
-  1. `contract_n1` (normalization) is hoisted out of the linsolve closure.
+  1. `contract_n_11` (normalization) is hoisted out of the linsolve closure.
   2. When `precond_every > 1`, the expensive preconditioner is recomputed only
      every `precond_every` optimisation steps; in between, the raw gradient is returned.
 """
@@ -50,7 +50,7 @@ function precondition_fast(A, grad, rt::Union{VUMPSRuntime, Tuple{VUMPSRuntime,V
     # ── optimisation 1: precompute normalizations (independent of x) ──
     n_map = [begin
         ir = Ni + 1 - i
-        contract_n1(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
+        contract_n_11(FLo[i,j], ACu[i,j], A_prime[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
     end for (i,j) in eachindex(A_prime)]
 
     gradnew = deepcopy(grad)
@@ -121,7 +121,7 @@ function precondition_fast(A, grad, rt::PlaquetteVUMPSRuntime, params, restricti
     n_map = [begin
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        contract_n1(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
+        contract_n_11(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
     end for (i,j) in eachindex(A_prime)]
 
     gradnew = deepcopy(grad)
@@ -189,7 +189,7 @@ function precondition_fast(A, grad, env::C4vVUMPSEnv, params, restriction_ipeps,
 
     # ── optimisation 1: precompute normalizations ──
     n_map = [begin
-        contract_n1(FL, AC, A_prime[i,j], AC, FL; ifparallel, forloop_iter)
+        contract_n_11(FL, AC, A_prime[i,j], AC, FL; ifparallel, forloop_iter)
     end for (i,j) in eachindex(A_prime)]
 
     gradnew = deepcopy(grad)

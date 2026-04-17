@@ -28,6 +28,14 @@ C4v
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
     ifcheckpoint::Bool = false
+    # Host-memory offload for checkpointed AD. Two granularities:
+    #   ifoffload_eig  — fine:   wraps `simple_eig` in leftenv/rightenv/ACenv;
+    #                             offloads per-row neighbourhood tensors.
+    #   ifoffload_step — coarse: wraps the whole `vumps_step` in ad_leading_boundary;
+    #                             offloads the full VUMPSRuntime snapshots.
+    # Enable both for maximum VRAM savings on GPU. On CPU they are pure overhead.
+    ifoffload_eig::Bool  = false
+    ifoffload_step::Bool = false
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)

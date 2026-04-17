@@ -39,6 +39,69 @@ end
 checkpoint(f, x...; kwargs...) = f(x...; kwargs...)
 Zygote.@adjoint checkpoint(f, args...; kwargs...) = f(args...; kwargs...), ȳ -> Zygote._pullback((args...) -> f(args...; kwargs...), args...)[2](ȳ)
 
+# ─── Checkpointing with host-memory offload ────────────────────────────────
+# Like `checkpoint`, but after the forward pass the differentiable array
+# arguments are transferred to host memory (`Array`). The device copies then
+# become unreferenced and can be freed by GC (or explicit CUDA.reclaim).
+# During backward, the inputs are moved back to the original array type and
+# the forward is re-run under Zygote to produce the pullback.
+#
+# On CPU (Array) this is equivalent to `checkpoint` (the "transfer" is a copy
+# and collapses to the identity); its value is on GPU runs where it trades
+# device VRAM for host RAM + two one-way transfers.
+#
+# Caveat: only the explicit `args` are offloaded. Any large tensors captured
+# inside `f` as a closure still live on the device. To get real VRAM savings
+# the heavy tensors must be passed explicitly as `args`.
+_offload_to_host(x::AbstractArray{<:Number}) = Array(x)
+_offload_to_host(x::AbstractArray) = map(_offload_to_host, x)
+_offload_to_host(x::Tuple) = map(_offload_to_host, x)
+_offload_to_host(x) = x
+
+# Atype detection: returns Array / CuArray / ROCArray, or `nothing` if no
+# array-like could be found in `x`. Specialisations for StructArray and
+# runtime structs live in boundary_algorithm/environment.jl (where those
+# types are defined).
+_atype_of(x::AbstractArray{<:Number}) = _arraytype(x)
+_atype_of(x::AbstractArray) = isempty(x) ? nothing : _atype_of(first(x))
+_atype_of(x::Tuple) = begin
+    for a in x
+        at = _atype_of(a)
+        at === nothing || return at
+    end
+    return nothing
+end
+_atype_of(x) = nothing
+
+function _detect_target_atype(args)
+    for a in args
+        at = _atype_of(a)
+        at === nothing || return at
+    end
+    return Array
+end
+
+# Reconstruct an on-device copy from a CPU copy, given the target atype.
+# The pullback closure captures only `atype` and `args_cpu`, never the
+# original `args`, so the device originals become eligible for GC/free.
+_to_atype(atype, x::Array{<:Number}) = atype(x)
+_to_atype(atype, x::AbstractArray) = map(a -> _to_atype(atype, a), x)
+_to_atype(atype, x::Tuple) = map(a -> _to_atype(atype, a), x)
+_to_atype(_atype, x) = x
+
+checkpoint_offload(f, x...; kwargs...) = f(x...; kwargs...)
+Zygote.@adjoint function checkpoint_offload(f, args...; kwargs...)
+    y = f(args...; kwargs...)
+    atype = _detect_target_atype(args)
+    args_cpu = map(_offload_to_host, args)
+    # NOTE: the returned closure deliberately does NOT reference `args` so
+    # that Julia will not capture it; only `args_cpu` + `atype` survive.
+    return y, function(ȳ)
+        args_dev = map(a -> _to_atype(atype, a), args_cpu)
+        Zygote._pullback((aa...) -> f(aa...; kwargs...), args_dev...)[2](ȳ)
+    end
+end
+
 # ─── Takagi decomposition ───────────────────────────────────────────────────
 
 """

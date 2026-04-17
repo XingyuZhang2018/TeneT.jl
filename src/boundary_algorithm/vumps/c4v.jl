@@ -113,7 +113,9 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     alg_ad = deepcopy(alg)
     alg_ad.power_iter = alg.power_iter_ad
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
+        rt, err = alg.ifoffload_step ? checkpoint_offload(vumps_step, rt, M, alg_ad) :
+                  alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) :
+                                     vumps_step(rt, M, alg_ad)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))

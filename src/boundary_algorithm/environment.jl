@@ -125,6 +125,39 @@ Array(rt::CTMEnv)    = CTMEnv(Array(rt.C), Array(rt.T))
 CuArray(rt::CTMEnv)  = CTMEnv(CuArray(rt.C), CuArray(rt.T))
 ROCArray(rt::CTMEnv) = CTMEnv(ROCArray(rt.C), ROCArray(rt.T))
 
+# ── Host-offload methods for checkpoint_offload (level-2 coarse offload) ──
+# Used by `checkpoint_offload` to evict the captured runtime state to host
+# memory between the outer forward sweep and its backward re-compute, so that
+# `maxiter_ad` snapshots of `rt` and `M` do not all sit on the device at once.
+
+# _atype_of: detect the on-device atype by peeking at a leaf array.
+_atype_of(S::StructArray) = isempty(S.data) ? nothing : _atype_of(S.data[1])
+_atype_of(rt::VUMPSRuntime) = _atype_of(rt.AL)
+_atype_of(rt::PlaquetteVUMPSRuntime) = _atype_of(rt.AL)
+_atype_of(rt::C4vVUMPSEnv) = _atype_of(rt.AL)
+
+# _offload_to_host: walk struct, replace each device leaf with a CPU copy.
+_offload_to_host(S::StructArray) = StructArray(map(_offload_to_host, S.data), S.pattern)
+_offload_to_host(rt::VUMPSRuntime) =
+    VUMPSRuntime(_offload_to_host(rt.AL), _offload_to_host(rt.AR),
+                 _offload_to_host(rt.C),  _offload_to_host(rt.FL), _offload_to_host(rt.FR))
+_offload_to_host(rt::PlaquetteVUMPSRuntime) =
+    PlaquetteVUMPSRuntime(_offload_to_host(rt.AL), _offload_to_host(rt.C), _offload_to_host(rt.FL))
+_offload_to_host(rt::C4vVUMPSEnv) =
+    C4vVUMPSEnv(_offload_to_host(rt.AL), _offload_to_host(rt.C), _offload_to_host(rt.FL))
+
+# _to_atype: rebuild an on-device copy from the CPU snapshot using the
+# detected atype. Takes no `ref` to the original, so the pullback closure
+# of `checkpoint_offload` need not pin the device-side args alive.
+_to_atype(atype, S::StructArray) = StructArray(map(d -> _to_atype(atype, d), S.data), S.pattern)
+_to_atype(atype, rt::VUMPSRuntime) =
+    VUMPSRuntime(_to_atype(atype, rt.AL), _to_atype(atype, rt.AR),
+                 _to_atype(atype, rt.C),  _to_atype(atype, rt.FL), _to_atype(atype, rt.FR))
+_to_atype(atype, rt::PlaquetteVUMPSRuntime) =
+    PlaquetteVUMPSRuntime(_to_atype(atype, rt.AL), _to_atype(atype, rt.C), _to_atype(atype, rt.FL))
+_to_atype(atype, rt::C4vVUMPSEnv) =
+    C4vVUMPSEnv(_to_atype(atype, rt.AL), _to_atype(atype, rt.C), _to_atype(atype, rt.FL))
+
 # ── In-place update helpers ──────────────────────────────────────────
 function update!(env::VUMPSRuntime, env′::VUMPSRuntime)
     env.AL.data .= env′.AL.data
