@@ -38,6 +38,18 @@ C4v
     # precision. Alternative to `inner_etype` which only affects @tensor inside
     # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
     whole_vumps_etype::Union{Nothing, Type} = nothing
+
+    # Host-memory offload for checkpointed AD. Two granularities:
+    #   ifoffload_eig  — fine:   wraps `simple_eig` in leftenv/rightenv/ACenv;
+    #                             offloads per-row neighbourhood tensors.
+    #   ifoffload_step — coarse: wraps the whole `vumps_step` in ad_leading_boundary;
+    #                             offloads the full VUMPSRuntime snapshots.
+    # Enable both for maximum VRAM savings on GPU. On CPU they are pure overhead.
+    # Empirically `ifoffload_step` is the effective lever; `ifoffload_eig`'s
+    # savings are marginal because StructArray slicing is pointer-shared with
+    # the outer rt/M that stays pinned.
+    ifoffload_eig::Bool  = false
+    ifoffload_step::Bool = false
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
