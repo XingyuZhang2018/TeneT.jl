@@ -326,3 +326,30 @@ The Phase-1 CPU experiment hits a methodology limit at D=3: LBFGS non-convergenc
 - (d) More seeds (10+) to average out basin selection noise
 
 Or (e) accept this as "the method works when LBFGS converges cleanly, is contaminated by optimization-landscape issues when it doesn't, and wall-clock savings depend on config." Move to Phase-2 GPU testing where the contrast between F32/F64 per-op speed is higher and the landscape effects are the same.
+
+## L4 D=4 χ=128 — GPU (2026-04-17)
+
+Hardware: NVIDIA GeForce RTX 4090 (25.8 GB)
+Seed: 42, LBFGS maxiter cap: 20, gradtol: 1e-7
+
+| precision | E_final | n_steps | wall (s) | ΔGPU (MB) |
+|-----------|---------|---------|----------|-----------|
+| Float64 | -0.668965524178 | 20 | 772.6 | 13946 |
+| Float32/coarse=2 | -0.668966984124 | 20 | 1585.2 | 12281 |
+
+- **Speedup (F64/F32 wall):** 0.49x
+- **|ΔE|:** 1.460e-06
+
+### D=4 χ=128 GPU interpretation — Float32 is SLOWER
+
+**Surprising result**: `Float32/coarse=2` takes **2.05× longer** than Float64 baseline on RTX 4090.
+
+Initial hypotheses:
+1. **Consumer GPU FP64 throttle doesn't manifest in practice.** RTX 4090 theoretical F64 is 1/64 of F32 (1.3 TFlops vs ~83 TFlops). But memory bandwidth is shared (~1 TB/s). If FLmap at D=4 χ=128 is **memory-bound**, F32's advantage shrinks to at most 2× (half the bytes per op). Observed ΔGPU suggests memory-pressure: F64 uses 13.9 GB, F32 uses 12.3 GB — only 12% less, not 50%.
+2. **Downcast/upcast overhead**: my implementation allocates fresh Float32 buffers at each FLmap call (5 input tensors × ~2 MB each + 1 output → 12 MB of allocation per call). On GPU this is fast per byte (~1 TB/s) but frequent — with ~100 FLmap calls per LBFGS iter × 20 iters = 2000+ conversion allocations.
+3. **Polish penalty**: `coarse=2` runs the LAST 2 AD iters in full F64. So half of the AD compute is F64 anyway, giving only partial speedup even if F32 were faster.
+4. **TensorOperations GPU F32 path not optimal?** Possible but unverified — would need profiling.
+
+The 2× slowdown is the NET after all of these. The experiment does not clearly isolate which factor dominates. Energy fidelity is fine (|ΔE| = 1.5e-6, as expected given maxiter=20 cap prevents full convergence).
+
+**Action:** need a cleaner diagnostic — pure FLmap timing at D=4 χ=128 on GPU, F64 vs F32 (no VUMPS/LBFGS overhead). If F32 is already slower at the single-call level, the issue is in the TensorOperations+CUDA path or the downcast/upcast wrappers; if F32 is faster per call but slower in the full optimization, the overhead accumulates in VUMPS/LBFGS loops or the polish alternation.
