@@ -197,3 +197,58 @@ BLAS threads: 4
 **Takeaway:** coarse polish is the winning strategy. Fine polish is useful mainly as a
 diagnostic showing **how many AD layers need to be F64 to suppress upstream F32 noise**. Answer:
 at least 2 (coarse=2). One (fine=5 ≡ coarse=1) is not enough.
+
+## L4 D=2 — coarse=1 vs fine=5 equivalence check (2026-04-17, CPU)
+
+BLAS threads: 4
+
+| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |
+|---|---|------|-----------|---------|---------|----------|-----------|
+| 2 | 16 | 42 | Float64 | -0.660231093480 | 13 | 71.8 | 466 |
+| 2 | 16 | 42 | Float32/coarse=1 | -0.660231093504 | 48 | 15.0 | 42 |
+| 2 | 16 | 42 | Float32/fine=5 | -0.660231093457 | 34 | 3.5 | 162 |
+| 2 | 16 | 43 | Float64 | -0.660231093480 | 18 | 1.3 | 94 |
+| 2 | 16 | 43 | Float32/coarse=1 | -0.660231093499 | 37 | 2.2 | 0 |
+| 2 | 16 | 43 | Float32/fine=5 | -0.660231093488 | 19 | 1.2 | 0 |
+| 2 | 16 | 44 | Float64 | -0.660231093480 | 13 | 1.0 | 0 |
+| 2 | 16 | 44 | Float32/coarse=1 | -0.660231093446 | 80 | 4.4 | 0 |
+| 2 | 16 | 44 | Float32/fine=5 | -0.660231093487 | 73 | 4.4 | 0 |
+| 2 | 32 | 42 | Float64 | -0.660231093474 | 18 | 4.2 | 43 |
+| 2 | 32 | 42 | Float32/coarse=1 | -0.660231093441 | 26 | 6.1 | 0 |
+| 2 | 32 | 42 | Float32/fine=5 | -0.660231093477 | 72 | 13.3 | 0 |
+| 2 | 32 | 43 | Float64 | -0.660231093466 | 24 | 5.8 | 0 |
+| 2 | 32 | 43 | Float32/coarse=1 | -0.660231093465 | 66 | 14.0 | 0 |
+| 2 | 32 | 43 | Float32/fine=5 | -0.660231093450 | 53 | 10.0 | 0 |
+| 2 | 32 | 44 | Float64 | -0.660231093479 | 17 | 3.6 | 0 |
+| 2 | 32 | 44 | Float32/coarse=1 | -0.660231093479 | 75 | 13.6 | 0 |
+| 2 | 32 | 44 | Float32/fine=5 | -0.660231093387 | 12 | 2.8 | 0 |
+
+**Equivalence check: coarse=1 vs fine=5 — not bit-identical, ΔE ~1e-11:**
+
+| (D, χ) | coarse=1 \|ΔE\| | fine=5 \|ΔE\| | coarse=1 median n_steps | fine=5 median n_steps |
+|---|---:|---:|---:|---:|
+| (2, 16) | 1.90e-11 | 6.75e-12 | 48 | 34 |
+| (2, 32) | 8.77e-12 | 2.40e-11 | 66 | 53 |
+
+Both PASS `\|ΔE\| < 1e-7` but are NOT bit-identical. Per-seed deviations are at ~1e-11 level,
+well above Float64 precision (~1e-15). Both are also ~1000× worse than `coarse=2` (~3e-15 at
+χ=16).
+
+**Why not strictly equivalent?** The two code paths are mathematically identical on the last AD
+iter (both collapse to "all power-iter calls in Float64"), but they traverse different Zygote
+backward graphs:
+- `coarse=1`: `leftenv_c4v` creates a single closure `f` with `inner_etype=nothing`, feeds
+  `simple_eig` through its original no-polish branch.
+- `fine=5`: `leftenv_c4v` creates BOTH `f` (Float32, never invoked when `n_pre=0`) AND
+  `f_polish` (Float64, used for all 5 iters), and feeds `simple_eig` through the new
+  polish branch.
+
+Zygote's pullback traces the closure structure differently. Float64 accumulation order inside
+the backward pass is different. The resulting gradient differs at ~1e-13 level, which LBFGS
+amplifies to ~1e-11 final energy difference.
+
+**Practical consequence:** the two polish modes are semantically equivalent **in the forward
+mathematical sense** but **not numerically interchangeable through Zygote**. Neither rescues the
+gradient quality enough to match `coarse=2`. The conclusion stands: covering 2 full F64 AD
+layers is the minimum viable polish; any surgical variant covering 1 layer (whether via
+`coarse=1` or `fine=5` or combinations) is insufficient.

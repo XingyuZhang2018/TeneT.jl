@@ -83,16 +83,24 @@ function main()
     #   julia benchmark_inner_Float32_L4.jl fine_sweep   -> sweep fine polish N ∈ {2,3,4,5}
     mode_arg = length(ARGS) >= 1 ? ARGS[1] : "fine"
     sweep = mode_arg == "fine_sweep"
+    equiv = mode_arg == "equiv"
     if sweep
         steps_list = [2, 3, 4, 5]
         polish_modes = ["fine", "fine", "fine", "fine"]
+    elseif equiv
+        # Sanity check: coarse=1 and fine=5 should be strictly equivalent at power_iter_ad=5
+        # (both make the entire last AD iter run in Float64).
+        steps_list  = [1,        5]
+        polish_modes = ["coarse", "fine"]
     else
-        @assert mode_arg in ("none", "coarse", "fine") "ARGS[1] must be none|coarse|fine|fine_sweep"
+        @assert mode_arg in ("none", "coarse", "fine") "ARGS[1] must be none|coarse|fine|fine_sweep|equiv"
         step_arg = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 2
         steps_list = [step_arg]
         polish_modes = [mode_arg]
     end
-    @printf("Sweep: %s  steps_list=%s\n", sweep ? "fine_sweep" : mode_arg, string(steps_list))
+    @printf("Sweep: %s  polish_modes=%s  steps_list=%s\n",
+            sweep ? "fine_sweep" : (equiv ? "equiv" : mode_arg),
+            string(polish_modes), string(steps_list))
 
     configs = [(2, 16), (2, 32)]
     seeds = [42, 43, 44]
@@ -115,6 +123,7 @@ function main()
     mkpath(dirname(RESULTS_PATH))
     open(RESULTS_PATH, "a") do io
         label = sweep ? "fine polish sweep N ∈ $(steps_list)" :
+                equiv ? "coarse=1 vs fine=5 equivalence check" :
                 "polish mode `$(polish_modes[1])` N=$(steps_list[1])"
         println(io, "\n## L4 D=2 — $label (", today(), ", CPU)\n")
         println(io, "BLAS threads: ", BLAS.get_num_threads())
