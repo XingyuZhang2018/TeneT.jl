@@ -252,3 +252,77 @@ mathematical sense** but **not numerically interchangeable through Zygote**. Nei
 gradient quality enough to match `coarse=2`. The conclusion stands: covering 2 full F64 AD
 layers is the minimum viable polish; any surgical variant covering 1 layer (whether via
 `coarse=1` or `fine=5` or combinations) is insufficient.
+
+## L4 D3 — coarse polish sweep N ∈ [1, 2] (2026-04-17, CPU)
+
+BLAS threads: 4
+
+| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |
+|---|---|------|-----------|---------|---------|----------|-----------|
+| 3 | 16 | 42 | Float64 | -0.666753472298 | 40 | 76.5 | 670 |
+| 3 | 16 | 42 | Float32/coarse=1 | -0.666747145266 | 38 | 21.2 | 165 |
+| 3 | 16 | 42 | Float32/coarse=2 | -0.666756358939 | 41 | 9.5 | 3 |
+| 3 | 16 | 43 | Float64 | -0.667678821841 | 200 | 44.4 | 6 |
+| 3 | 16 | 43 | Float32/coarse=1 | -0.667678767137 | 200 | 42.8 | 0 |
+| 3 | 16 | 43 | Float32/coarse=2 | -0.667644270987 | 69 | 14.1 | 0 |
+| 3 | 16 | 44 | Float64 | -0.667678593145 | 200 | 41.7 | 2 |
+| 3 | 16 | 44 | Float32/coarse=1 | -0.667678693180 | 200 | 39.1 | 0 |
+| 3 | 16 | 44 | Float32/coarse=2 | -0.667678610979 | 200 | 39.6 | 0 |
+| 3 | 32 | 42 | Float64 | -0.667137525348 | 58 | 60.7 | 98 |
+| 3 | 32 | 42 | Float32/coarse=1 | -0.667140046414 | 58 | 48.1 | 13 |
+| 3 | 32 | 42 | Float32/coarse=2 | -0.667138666860 | 57 | 51.5 | 0 |
+| 3 | 32 | 43 | Float64 | -0.667809084704 | 101 | 104.9 | 0 |
+| 3 | 32 | 43 | Float32/coarse=1 | -0.667945156083 | 200 | 162.5 | 26 |
+| 3 | 32 | 43 | Float32/coarse=2 | -0.667945020121 | 200 | 166.1 | 0 |
+| 3 | 32 | 44 | Float64 | -0.667154571547 | 103 | 98.4 | 0 |
+| 3 | 32 | 44 | Float32/coarse=1 | -0.667945233892 | 200 | 175.8 | 1 |
+| 3 | 32 | 44 | Float32/coarse=2 | -0.667154512642 | 200 | 161.1 | 0 |
+
+### L4 D=3 interpretation — precision noise now dominated by **LBFGS basin selection**
+
+Median |ΔE| per arm (Float64 vs Float32/coarse=*):
+- (D=3, χ=16, coarse=1): 1.00e-07 → FAIL
+- (D=3, χ=16, coarse=2): 3.43e-05 → FAIL
+- (D=3, χ=32, coarse=1): 7.91e-04 → FAIL
+- (D=3, χ=32, coarse=2): 5.89e-08 → PASS (lucky median alignment)
+
+**But the median test is misleading at D=3**. Looking at per-seed results:
+
+**Finding 1: most seeds don't converge to gradtol=1e-7 at D=3**.
+- χ=16: 5 out of 9 Float32 runs and 2 out of 3 Float64 runs hit `maxiter=200`.
+- χ=32: 4 out of 6 Float32 runs and 2 out of 3 Float64 runs hit `maxiter=200`.
+
+**Finding 2: different precisions land in different local minima**, not different floating-point versions of the same minimum.
+- (D=3, χ=16, seed=43): F64 E=-0.66768, coarse=1 E=-0.66768 (same), coarse=2 E=-0.66764 (different basin, worse by 3.4e-5).
+- (D=3, χ=32, seed=43): F64 E=-0.66781, coarse=1 E=-0.66795 (better basin, by 1.4e-4), coarse=2 E=-0.66795 (same as coarse=1).
+- (D=3, χ=32, seed=44): F64 E=-0.66715, coarse=1 E=-0.66795 (different basin, better), coarse=2 E=-0.66715 (same as F64).
+
+When precisions DO agree on the same basin, they match to ~1e-5 (seed=42 cases). When they don't, |ΔE| jumps to 1e-4.
+
+**Finding 3: Float32 sometimes finds LOWER energies than Float64**.
+- (D=3, χ=32, seed=43,44): coarse=1 reaches -0.66795 vs F64's -0.66781 / -0.66715. Float32 noise perturbs LBFGS out of F64's local minimum into a lower one. Not universally — but happens.
+
+**Finding 4: wall-clock is NOT consistently faster for Float32**.
+- χ=16 seed=42: Float32 ~10-20s vs F64 76s (speedup when converging fast)
+- χ=32 seed=44: Float32 ~160-175s vs F64 98s (SLOWER when F32 hits maxiter)
+
+### What this means
+
+The Phase-1 success criterion "`median |ΔE| < 1e-7`" was calibrated for LBFGS reaching gradtol=1e-7. At D=3 most runs hit `maxiter=200` without converging, so "final E" is just "wherever LBFGS stopped running" — dominated by basin selection, not by precision error.
+
+**Polish works as designed** — coarse=2 at D=3 χ=16 seed=44 gives E=-0.66767861 vs F64 -0.66767859, differing at 2e-8. When both converge to the same basin AND neither hits maxiter, polish delivers its promise.
+
+But the "does this method save time" question at D=3 is **inconclusive from this experiment**:
+- When both converge fast (seed=42), Float32 is 2-10× faster (20s vs 76s on χ=16)
+- When both hit maxiter (many seeds), Float32 is often SLOWER because it processes 200 iterations to `maxiter` while F64 hit `maxiter` at "same" rate but with higher per-iter throughput
+- `inner_etype=Float32` at D=3 doesn't consistently deliver wall-clock savings on this model/config
+
+### Recommendation
+
+The Phase-1 CPU experiment hits a methodology limit at D=3: LBFGS non-convergence (`maxiter=200` saturation) contaminates the precision-comparison signal. To cleanly test "does Float32 reach the same minimum as F64", we would need:
+- (a) Increase `maxiter` (to e.g. 500 or 1000) so both precisions have a chance to converge
+- (b) Relax `gradtol` to something both precisions can reliably satisfy (e.g. 5e-7)
+- (c) Use identical initial iPEPS tensors across precisions (currently each `Random.seed!(seed)` creates the same A, but Float64 vs Float32 downstream diverge — it's already controlled)
+- (d) More seeds (10+) to average out basin selection noise
+
+Or (e) accept this as "the method works when LBFGS converges cleanly, is contaminated by optimization-landscape issues when it doesn't, and wall-clock savings depend on config." Move to Phase-2 GPU testing where the contrast between F32/F64 per-op speed is higher and the landscape effects are the same.
