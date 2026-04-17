@@ -118,6 +118,37 @@
             @test eltype(r_r) == Float64
         end
 
+        @testset "FLmap leg4 — inner_etype=Float32" begin
+            D = 3    # override outer D=2 to break index-permutation silent passes (see Task 2 review)
+            T = ComplexF64
+            FL  = atype(randn(T, χ, D, χ))
+            ALu = atype(randn(T, χ, D, χ))
+            ALd = atype(randn(T, χ, D, χ))
+            M   = atype(randn(T, D, D, D, D))
+            r0  = FLmap(FL, ALu, ALd, M)
+            r_explicit_nothing = FLmap(FL, ALu, ALd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FLmap leg8 — inner_etype=Float32" begin
+            D = 3    # same rationale
+            T = ComplexF64
+            FL  = atype(randn(T, χ, D, D, χ))
+            ALu = atype(randn(T, χ, D, D, χ))
+            ALd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D, D, D, D))
+            r0  = FLmap(FL, ALu, ALd, M)
+            r_explicit_nothing = FLmap(FL, ALu, ALd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
         @testset "FRmap leg4" begin
             FR  = atype(randn(T, χ, D, χ))
             ARu = atype(randn(T, χ, D, χ))
