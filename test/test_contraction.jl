@@ -456,6 +456,90 @@
                 par_res  = Mmap_parallel(AC, ACd, FL, FR; ifparallel=false, forloop_iter=1)
                 @test Array(direct) ≈ Array(par_res)
             end
+
+            @testset "FLmap_parallel inner_etype=Float32 forloop_iter=1 matches FLmap(inner_etype)" begin
+                FL  = atype(randn(T, χ, D, χ))
+                ALu = atype(randn(T, χ, D, χ))
+                ALd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+                par_res = FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "FLmap_parallel inner_etype=Float32 forloop_iter=2 close to FLmap(inner_etype)" begin
+                FL  = atype(randn(T, χ, D, χ))
+                ALu = atype(randn(T, χ, D, χ))
+                ALd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+                par_res = FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
+
+            @testset "FRmap_parallel inner_etype=Float32 forloop_iter=1 matches FRmap(inner_etype)" begin
+                FR  = atype(randn(T, χ, D, χ))
+                ARu = atype(randn(T, χ, D, χ))
+                ARd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+                par_res = FRmap_parallel(FR, ARu, ARd, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "FRmap_parallel inner_etype=Float32 forloop_iter=2 close to FRmap(inner_etype)" begin
+                FR  = atype(randn(T, χ, D, χ))
+                ARu = atype(randn(T, χ, D, χ))
+                ARd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+                par_res = FRmap_parallel(FR, ARu, ARd, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
+
+            @testset "ACmap_parallel inner_etype=Float32 forloop_iter=1 matches ACmap(inner_etype)" begin
+                AC = atype(randn(T, χ, D, χ))
+                FL = atype(randn(T, χ, D, χ))
+                FR = atype(randn(T, χ, D, χ))
+                M  = atype(randn(T, D, D, D, D))
+                direct  = ACmap(AC, FL, FR, M; inner_etype=Float32)
+                par_res = ACmap_parallel(AC, FL, FR, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "ACmap_parallel inner_etype=Float32 forloop_iter=2 close to ACmap(inner_etype)" begin
+                AC = atype(randn(T, χ, D, χ))
+                FL = atype(randn(T, χ, D, χ))
+                FR = atype(randn(T, χ, D, χ))
+                M  = atype(randn(T, D, D, D, D))
+                direct  = ACmap(AC, FL, FR, M; inner_etype=Float32)
+                par_res = ACmap_parallel(AC, FL, FR, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
+
+            @testset "ACdmap_parallel inner_etype=Float32 forloop_iter=1 matches ACdmap(inner_etype)" begin
+                ACd = atype(randn(T, χ, D, χ))
+                FL  = atype(randn(T, χ, D, χ))
+                FR  = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+                par_res = ACdmap_parallel(ACd, FL, FR, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "ACdmap_parallel inner_etype=Float32 forloop_iter=2 close to ACdmap(inner_etype)" begin
+                ACd = atype(randn(T, χ, D, χ))
+                FL  = atype(randn(T, χ, D, χ))
+                FR  = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+                par_res = ACdmap_parallel(ACd, FL, FR, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
         end
     end
 end
