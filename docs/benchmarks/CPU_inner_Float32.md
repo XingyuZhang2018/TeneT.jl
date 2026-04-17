@@ -353,3 +353,57 @@ Initial hypotheses:
 The 2× slowdown is the NET after all of these. The experiment does not clearly isolate which factor dominates. Energy fidelity is fine (|ΔE| = 1.5e-6, as expected given maxiter=20 cap prevents full convergence).
 
 **Action:** need a cleaner diagnostic — pure FLmap timing at D=4 χ=128 on GPU, F64 vs F32 (no VUMPS/LBFGS overhead). If F32 is already slower at the single-call level, the issue is in the TensorOperations+CUDA path or the downcast/upcast wrappers; if F32 is faster per call but slower in the full optimization, the overhead accumulates in VUMPS/LBFGS loops or the polish alternation.
+
+## FLmap single-call diagnostic at D=4 χ=128 on GPU
+
+Hardware: NVIDIA GeForce RTX 4090 (25.8 GB)
+
+| call | precision | ms (median of 5) | F32/F64 ratio |
+|------|-----------|------------------|---------------|
+| FLmap forward             | F64       | 8.0 | 1.00 |
+| FLmap forward             | F32-inner | 35.0 | 4.38 |
+| FLmap_parallel forward    | F64       | 7.0 | 1.00 |
+| FLmap_parallel forward    | F32-inner | 5.0 | 0.71 |
+| FLmap forward+backward    | F64       | 26.0 | 1.00 |
+| FLmap forward+backward    | F32-inner | 42.0 | 1.62 |
+
+Single-call F32 rel_err vs F64: 2.790e-06
+
+### FLmap single-call diagnostic interpretation
+
+**Key numbers (D=4, χ=128, RTX 4090, median of 5 reps):**
+
+| path | precision | ms | ratio F32/F64 |
+|------|-----------|---:|---:|
+| FLmap forward (direct) | F64 | 8.0 | 1.00 |
+| FLmap forward (direct) | F32-inner | 35.0 | **4.38× SLOWER** |
+| FLmap_parallel forward | F64 | 7.0 | 1.00 |
+| FLmap_parallel forward | F32-inner | 5.0 | **0.71× (29% FASTER)** |
+| FLmap forward+backward | F64 | 26.0 | 1.00 |
+| FLmap forward+backward | F32-inner | 42.0 | **1.62× slower** |
+
+**Sanity**: F32 single-call relative error vs F64 = 2.8e-6 (consistent with Float32 epsilon).
+
+### What this tells us about the L4 slowdown
+
+1. **Per-call FLmap_parallel forward IS faster in F32** (29% speedup) — the TensorOperations + CUDA F32 path works as expected at the single-call level for the path VUMPS actually uses.
+2. **Per-call forward+backward is 1.62× slower in F32** — the backward pass through downcast+@tensor+upcast adds overhead that eats the forward savings.
+3. **Full L4 run is 2× slower** — an ADDITIONAL ~1.2× factor comes from somewhere else in the stack.
+
+### Suspected causes of the extra slowdown in full L4
+
+- **Polish runs last 2 AD iters in full Float64 on a consumer GPU**. RTX 4090's F64 is throttled to ~1.3 TFlops (1/64 of F32). If those 2 iters dominate when F32 overhead has already reduced the "F32 iters" advantage, the polish iters become the bottleneck. Average AD iter time: F64-all ≈ 9.7s vs F32-coarse=2 ≈ 30s per iter (derived from full L4 wall / 4 AD iters / 20 LBFGS iters), so per-iter F32-with-polish is ~3× slower than F64-baseline — consistent with "F32 forward+backward 1.62× slower + polish-F64-iters adding ~2× on top".
+- **Simple_eig's polish machinery**: my `leftenv_c4v` closure captures both `f` (Float32) and `f_polish` (Float64). Zygote differentiates through this mixed-precision chain. Each AD iter pulls a different rrule tree depending on which closure path was used. Possibly type-instability introduces extra overhead.
+- **Per-call allocation**: 5 input-tensor downcasts + 1 output upcast per FLmap = 6 CuArray allocations/deallocations per call. At ~100 FLmap calls per LBFGS iter × 20 = 2000 alloc/free pairs. CUDA.jl pool handles these but not for free.
+
+### Takeaway for the experiment
+
+On RTX 4090 at D=4 χ=128:
+- **Pure Float64 is the current fastest path** (~773s for 20 LBFGS iters).
+- **Float32/coarse=2 is 2.05× slower**, losing to consumer-GPU F64-throttle-avoidance hypothesis because the polish forces F64 iters back in.
+- The mixed-precision approach as designed **doesn't deliver time savings on this hardware at this scale**.
+
+To realize Float32 speedups we'd likely need:
+- A data-center GPU (H100/A100/GH200) where F64 is not throttled — polish iters cost more reasonably.
+- OR a polish strategy that avoids Float64 altogether (risk: precision degrades).
+- OR BFloat16/FP16 via Tensor Cores for a bigger F32→lower-precision jump.
