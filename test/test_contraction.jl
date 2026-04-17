@@ -2,6 +2,32 @@
     χ = 4
     D = 2
 
+    @testset "_downcast_eltype helper" begin
+        using TeneT: _downcast_eltype
+
+        # Real: Float64 → Float32
+        A64 = randn(Float64, 3, 4)
+        A32 = _downcast_eltype(Float32, A64)
+        @test eltype(A32) == Float32
+        @test size(A32) == size(A64)
+        @test maximum(abs, Float64.(A32) .- A64) < 1e-5
+
+        # Complex: ComplexF64 → ComplexF32
+        Z64 = randn(ComplexF64, 3, 4)
+        Z32 = _downcast_eltype(Float32, Z64)
+        @test eltype(Z32) == ComplexF32
+        @test size(Z32) == size(Z64)
+        @test maximum(abs, ComplexF64.(Z32) .- Z64) < 1e-5
+
+        # Identity: target equals current eltype — return input unchanged (no copy)
+        B64 = randn(Float64, 2, 2)
+        @test _downcast_eltype(Float64, B64) === B64
+
+        # Nothing: pass-through
+        C64 = randn(ComplexF64, 2, 2)
+        @test _downcast_eltype(nothing, C64) === C64
+    end
+
     # =========================================================================
     # basic.jl tests
     # =========================================================================

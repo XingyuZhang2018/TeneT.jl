@@ -1,3 +1,28 @@
+"""
+    _downcast_eltype(T, A) -> A'
+
+Cast `A`'s element type to the smallest type compatible with real scalar type `T`
+while preserving complex-ness. Used to lower precision inside FLmap/FRmap/ACmap
+when `VUMPS.inner_etype` is set.
+
+Rules:
+- `T === nothing`               → return `A` unchanged (identity)
+- `T === real(eltype(A))`       → return `A` unchanged (identity; no copy)
+- `eltype(A) <: Complex`        → cast to `Complex{T}`
+- otherwise                     → cast to `T`
+"""
+_downcast_eltype(::Nothing, A) = A
+function _downcast_eltype(T::Type, A)
+    Ta = eltype(A)
+    if Ta <: Complex
+        T === real(Ta) && return A
+        return Complex{T}.(A)
+    else
+        T === Ta && return A
+        return T.(A)
+    end
+end
+
 ALCtoAC_map(AL::leg3, C) = @tensor result[a,b,d] := AL[a,b,c] * C[c,d]
 ALCtoAC_map(AL::leg4, C) = @tensor result[a,b,c,e] := AL[a,b,c,d] * C[d,e]
 CTtoT(C, T::leg3) = @tensor T[a,c,d] := C[a,b] * T[b,c,d]
