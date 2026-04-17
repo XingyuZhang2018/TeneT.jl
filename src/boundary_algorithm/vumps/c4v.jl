@@ -1,8 +1,13 @@
 function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
-    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint, inner_etype = alg
+    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint, inner_etype, simple_eig_polish_steps = alg
     f(FL) = ifcheckpoint ? checkpoint(FLmap_parallel, FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype) : FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype)
+    # Fine polish: last `simple_eig_polish_steps` power iters use Float64 (inner_etype=nothing)
+    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
+    f_polish(FL) = ifcheckpoint ? checkpoint(FLmap_parallel, FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing) : FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
     if alg.ifsimple_eig
-        λFLs, FLs = simple_eig(f, FL; power_iter)
+        λFLs, FLs = polish_fine ?
+            simple_eig(f, FL; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
+            simple_eig(f, FL; power_iter)
     else
         λFLs, FLs, info = eigsolve(f, FL, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
         alg.verbosity >= 1 && info.converged == 0 && @warn "FLenv_c4v not converged"
@@ -12,10 +17,14 @@ function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
 end
 
 function ACenv_c4v(AC, FL, M; alg, kwargs...)
-    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint, inner_etype = alg
+    @unpack power_iter, ifparallel, forloop_iter, ifcheckpoint, inner_etype, simple_eig_polish_steps = alg
     f(AC) = ifcheckpoint ? checkpoint(ACmap_parallel, AC, FL, FL, M; ifparallel, forloop_iter, inner_etype) : ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter, inner_etype)
+    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
+    f_polish(AC) = ifcheckpoint ? checkpoint(ACmap_parallel, AC, FL, FL, M; ifparallel, forloop_iter, inner_etype=nothing) : ACmap_parallel(AC, FL, FL, M; ifparallel, forloop_iter, inner_etype=nothing)
     if alg.ifsimple_eig
-        λACs, ACs = simple_eig(f, AC; power_iter)
+        λACs, ACs = polish_fine ?
+            simple_eig(f, AC; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
+            simple_eig(f, AC; power_iter)
     else
         λACs, ACs, info = eigsolve(f, AC, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
         alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv_c4v not converged"
@@ -104,15 +113,25 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
     alg_ad = deepcopy(alg)
     alg_ad.power_iter = alg.power_iter_ad
-    # Mixed-precision polish: final `inner_etype_final_steps` AD iterations drop
-    # inner_etype back to `nothing` (full Float64) to give LBFGS a clean gradient.
-    # When alg.inner_etype === nothing (Float64 baseline) this is a no-op.
-    alg_ad_polish = deepcopy(alg_ad)
-    alg_ad_polish.inner_etype = nothing
+    alg_ad.simple_eig_polish_steps = 0   # fine polish fires only on the LAST AD iter via alg_ad_fine
+    # Mixed-precision polish variants (activate only when alg.inner_etype !== nothing):
+    #  - Coarse: final N AD iters drop inner_etype to nothing → full Float64 for those iters.
+    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0 → last N power iters
+    #            of simple_eig use Float64 while the rest of the iter stays Float32.
+    # If both are set, coarse takes precedence on the overlapping iters (stronger polish).
+    alg_ad_coarse = deepcopy(alg_ad)
+    alg_ad_coarse.inner_etype = nothing
+    alg_ad_fine = deepcopy(alg_ad)
+    alg_ad_fine.simple_eig_polish_steps = alg.simple_eig_polish_steps
     for i in 1:alg.maxiter_ad
-        alg_this_iter = (alg.inner_etype !== nothing &&
-                         i > alg.maxiter_ad - alg.inner_etype_final_steps) ?
-                        alg_ad_polish : alg_ad
+        alg_this_iter = alg_ad
+        if alg.inner_etype !== nothing
+            if alg.inner_etype_final_steps > 0 && i > alg.maxiter_ad - alg.inner_etype_final_steps
+                alg_this_iter = alg_ad_coarse
+            elseif alg.simple_eig_polish_steps > 0 && i == alg.maxiter_ad
+                alg_this_iter = alg_ad_fine
+            end
+        end
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad

@@ -105,3 +105,33 @@ BLAS threads: 4
 At D=2 the absolute savings are small because the contraction work is tiny. The real test of
 "does Float32 save time" must be at larger (D, χ) — the polish eliminates the step-count
 blowup so timing now actually reflects the per-call compute-cost difference. D=3 next.
+
+## L4 D=2 — polish mode: `fine` (2026-04-17, CPU)
+
+BLAS threads: 4
+
+| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |
+|---|---|------|-----------|---------|---------|----------|-----------|
+| 2 | 16 | 42 | Float64 | -0.660231093480 | 13 | 66.3 | 460 |
+| 2 | 16 | 42 | Float32/fine | -0.660231093512 | 27 | 15.2 | 105 |
+| 2 | 16 | 43 | Float64 | -0.660231093480 | 18 | 1.2 | 211 |
+| 2 | 16 | 43 | Float32/fine | -0.660231093520 | 20 | 1.3 | 4 |
+| 2 | 16 | 44 | Float64 | -0.660231093480 | 13 | 1.0 | 4 |
+| 2 | 16 | 44 | Float32/fine | -0.660231093541 | 42 | 2.3 | 0 |
+| 2 | 32 | 42 | Float64 | -0.660231093474 | 18 | 3.9 | 59 |
+| 2 | 32 | 42 | Float32/fine | -0.660231093596 | 100 | 18.6 | 0 |
+| 2 | 32 | 43 | Float64 | -0.660231093466 | 24 | 5.5 | 1 |
+| 2 | 32 | 43 | Float32/fine | -0.660231093313 | 51 | 8.7 | 0 |
+| 2 | 32 | 44 | Float64 | -0.660231093479 | 17 | 3.6 | 0 |
+| 2 | 32 | 44 | Float32/fine | -0.660231093534 | 99 | 20.8 | 0 |
+
+**Run 3 verdict (fine polish alone):** energy passes but **both accuracy and step count regress vs coarse polish**.
+- `|ΔE|`: **3.97e-11 (χ=16)** and **6.07e-11 (χ=32)** — PASS (< 1e-7) but ~10⁴× worse than coarse polish.
+- `n_steps`: Float32/fine = [27, 20, 42] (χ=16) and [100, 51, 99] (χ=32) — **1.5–5× MORE steps than Float64**.
+- wall-clock: fine polish worse than Float64 at χ=32 (8.7–20.8s vs 3.6–5.5s).
+
+**Mechanism:** fine polish only polishes the LAST AD iter's `simple_eig` inner power iterations. The first 3 AD iterations run entirely in Float32, so their contributions to the Zygote backward graph carry Float32 noise. Only the last layer is partially polished, which isn't enough to wash out the upstream Float32 error in the gradient.
+
+**Coarse polish wins** — covering the last 2 **entire** AD iterations in Float64 gives the backward pass 2 full Float64 layers to suppress upstream Float32 noise. Fine polish is too narrow.
+
+**Recommendation:** use `inner_etype_final_steps=2` (coarse) for the D=3 stage. Fine polish is retained as a configurable option for future experimentation (e.g. combining with `power_iter_ad` tuning) but is not the default path.
