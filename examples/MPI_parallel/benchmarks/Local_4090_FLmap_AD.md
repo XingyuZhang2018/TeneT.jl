@@ -60,7 +60,62 @@
 | 10 | 512 | -781.120 | 117047.78 | 0.7250 | -585.9% |
 | 12 | 256 | -73.997 | 18827.37 | 0.2977 | -101.2% |
 
-## Diagnosis guide
+## Findings — hypothesis falsified
+
+The original hypothesis was `t_bwd(n) ≈ α·n + β` with positive α (Zygote
+per-chunk overhead). The data rejects this model:
+
+1. **`forloop_iter=1` is a strong outlier.** For `(D=10, χ=128)` the single
+   measured iter=1 point (`bwd=4044 ms`) is **~3.8× slower** than iter=2
+   (`bwd=1119 ms`). The larger configs `(10, 256)`, `(10, 512)`,
+   `(12, 256)` **OOM at low `forloop_iter`** — the `@tensor` backward
+   allocates a rank-7 intermediate of size `~χ²·D⁵·d·8` bytes (10 GB at
+   `(10, 256)`, 30 GB at `(12, 256)`, 40 GB at `(10, 512)`) which exceeds
+   the 24 GB 4090 without chunking.
+
+2. **Chunking *reduces* `t_bwd`, then plateaus.** For every `(D, χ)`, the
+   backward drops sharply from iter=1 to iter=2–4, then plateaus through
+   iter=128. Zygote per-chunk overhead at the plateau is modest — the
+   slope from iter=32 to iter=128 is roughly `+1.7 ms/chunk` at
+   `(10, 128)` and `+2.4 ms/chunk` at `(12, 256)`. Not dominant.
+
+3. **Negative α in Table 4** is an artifact of fitting a straight line
+   through a "big outlier + plateau" shape. Three of four R² values are
+   below 0.30; the linear model should be considered rejected. Only
+   `(10, 512)` has R² = 0.72 and its "slope" is dominated by two
+   out-of-trend points at low iter.
+
+### Implications for Phase 2
+
+- **`rrule(forloop)` chunking already helps** — it is not the bottleneck
+  at `forloop_iter ≥ 4`. Optimising its per-chunk path (cache pullback,
+  preallocate buffers) would save only a few ms per chunk.
+- **The real cost lives in the `@tensor` backward itself** (`FLmap` leg5
+  via `TensorOperations` + `ChainRulesCore`). A hand-rolled `rrule` for
+  `FLmap` that avoids the rank-7 intermediate should be the primary
+  Phase 2 target.
+- **The JSC 10× full-fg `bwd/fwd` ratio is not explained by chunked AD
+  overhead** alone. Combined with the flat plateau, the remaining cost
+  likely lives in: (a) the number of backward invocations in
+  `leftenv`/`rightenv` power-iter Zygote unrolling, or (b) `Mmap`-family
+  ops that still have no rrule for `forloop_sum` (`src/contraction/
+  forloop_parallel_MPI.jl:237`).
+
+### Secondary observations
+
+- **Raw FLmap (Table 1) vs rrule wrap (Table 2)** at `(10, 128)`:
+  `fwd 310 → 299 ms`, `bwd 3791 → 4044 ms`. The `rrule(forloop)`
+  early-exit wrap adds ~250 ms (~7%) of backward overhead — small
+  relative to the chunk-vs-no-chunk gap.
+- **Large configs saw timing noise** (e.g. `(10, 512)` iter=16 forward
+  33 s vs iter=32 forward 18 s). Probably CUDA allocator pressure or
+  memory-pool fragmentation at the upper edge of the 24 GB card. The
+  backward column is cleaner.
+
+## Diagnosis guide (original hypothesis — not observed)
+
+Retained for reference; **see Findings above for what was actually
+observed.**
 
 - If `α·128 ≫ β` (last column large, e.g. >80%): Zygote per-chunk
   overhead dominates at high `forloop_iter`. Optimize `rrule(forloop)`
