@@ -104,6 +104,11 @@
                       maximum(abs, Array(r_default))
             @test rel_err < 1e-5    # generous; typical Float32 @tensor error ~1e-7..1e-6
 
+            # ComplexF64 input + inner_etype=Float64 must skip downcast
+            # (real(ComplexF64) == Float64, so short-circuit triggers → byte-identical to default)
+            r_cf64_skip = FLmap(FL, ALu, ALd, M; inner_etype=Float64)
+            @test Array(r_cf64_skip) == Array(r_default)
+
             # Real-input sanity: Float64 in → Float32 inner → Float64 out
             FLr = atype(randn(Float64, χ, D, D, χ))
             ALur = atype(randn(Float64, χ, D, D, χ))
