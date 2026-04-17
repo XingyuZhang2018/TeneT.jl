@@ -44,7 +44,10 @@ Environment: Julia 1.11.1, Windows 11, CPU (Array backend). BLAS thread count no
 > `forloop=16`): this was presumably at larger D/χ than tested here, or after VUMPS iteration
 > accumulated the noise. At single-call D≤3, χ≤64, Float64 reordering noise is effectively zero.
 
-## L4 D=2 — full iPEPS optimization (2026-04-17, CPU)
+## L4 D=2 — Run 1: no polish (all AD iters in Float32)
+
+**Config:** `inner_etype=Float32`, `inner_etype_final_steps=0` equivalent (field didn't exist yet).
+All 4 AD iterations use Float32 inner contractions.
 
 BLAS threads: 4
 
@@ -62,3 +65,43 @@ BLAS threads: 4
 | 2 | 32 | 43 | Float32 | -0.660231137510 | 163 | 94.2 | 0 |
 | 2 | 32 | 44 | Float64 | -0.660231093479 | 17 | 10.7 | 0 |
 | 2 | 32 | 44 | Float32 | -0.660231166019 | 200 | 111.8 | 0 |
+
+**Run 1 verdict:** energy |ΔE| ~1e-8 PASSES but n_steps blows up from 13–24 (Float64) to 80–200
+(Float32 hitting `maxiter=200`), making Float32 wall-clock **6–10× SLOWER** than Float64 at χ=32.
+Root cause: `gradtol=1e-7` equals Float32 epsilon, so LBFGS's `‖∇f‖` never drops below tol and
+grinds until iteration cap. The clean energy passes because of LBFGS's robustness to small
+gradient noise — not because precision is adequate for the convergence criterion.
+
+## L4 D=2 — Run 2: with polish (`inner_etype_final_steps=2`)
+
+**Config:** `inner_etype=Float32`, `inner_etype_final_steps=2`. First 2 AD iterations use
+Float32 inner contractions; last 2 switch to Float64 to give LBFGS a clean gradient. Warmup
+(non-AD) loop stays Float32 throughout.
+
+BLAS threads: 4
+
+| D | χ | seed | precision | E_final | n_steps | wall (s) | ΔRSS (MB) |
+|---|---|------|-----------|---------|---------|----------|-----------|
+| 2 | 16 | 42 | Float64 | -0.660231093480 | 13 | 62.6 | 439 |
+| 2 | 16 | 42 | Float32 | -0.660231093480 | 13 | 12.5 | 98 |
+| 2 | 16 | 43 | Float64 | -0.660231093480 | 18 | 1.2 | 231 |
+| 2 | 16 | 43 | Float32 | -0.660231093480 | 18 | 1.2 | 13 |
+| 2 | 16 | 44 | Float64 | -0.660231093480 | 13 | 0.9 | 0 |
+| 2 | 16 | 44 | Float32 | -0.660231093480 | 13 | 0.9 | 0 |
+| 2 | 32 | 42 | Float64 | -0.660231093474 | 18 | 3.9 | 58 |
+| 2 | 32 | 42 | Float32 | -0.660231093478 | 21 | 5.3 | 0 |
+| 2 | 32 | 43 | Float64 | -0.660231093466 | 24 | 5.5 | 1 |
+| 2 | 32 | 43 | Float32 | -0.660231093478 | 22 | 4.1 | 0 |
+| 2 | 32 | 44 | Float64 | -0.660231093479 | 17 | 3.6 | 0 |
+| 2 | 32 | 44 | Float32 | -0.660231093479 | 20 | 4.0 | 0 |
+
+**Run 2 verdict:** ✅ **both energy AND n_steps match Float64**.
+- `|ΔE|` drops from 1e-8 → **3.3e-15 (χ=16)** and **4.7e-12 (χ=32)** — indistinguishable from Float64.
+- `n_steps`: Float32-with-polish 13/18/13 (χ=16) and 21/22/20 (χ=32), within ±3 of Float64
+  counterparts — no more `maxiter=200` grinding.
+- wall-clock (excluding first-run JIT): parity with Float64 at χ=16 (~1s each) and near-parity
+  at χ=32 (Float32 ~4-5s vs Float64 ~3.5-5.5s).
+
+At D=2 the absolute savings are small because the contraction work is tiny. The real test of
+"does Float32 save time" must be at larger (D, χ) — the polish eliminates the step-count
+blowup so timing now actually reflects the per-call compute-cost difference. D=3 next.

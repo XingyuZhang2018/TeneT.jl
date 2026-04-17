@@ -104,8 +104,16 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
     alg_ad = deepcopy(alg)
     alg_ad.power_iter = alg.power_iter_ad
+    # Mixed-precision polish: final `inner_etype_final_steps` AD iterations drop
+    # inner_etype back to `nothing` (full Float64) to give LBFGS a clean gradient.
+    # When alg.inner_etype === nothing (Float64 baseline) this is a no-op.
+    alg_ad_polish = deepcopy(alg_ad)
+    alg_ad_polish.inner_etype = nothing
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
+        alg_this_iter = (alg.inner_etype !== nothing &&
+                         i > alg.maxiter_ad - alg.inner_etype_final_steps) ?
+                        alg_ad_polish : alg_ad
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("C4vVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))

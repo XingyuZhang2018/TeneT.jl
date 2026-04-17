@@ -30,6 +30,7 @@ C4v
     ifcheckpoint::Bool = false
 
     inner_etype::Union{Nothing, Type} = nothing
+    inner_etype_final_steps::Int = 2
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
