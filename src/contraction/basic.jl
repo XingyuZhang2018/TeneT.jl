@@ -45,17 +45,30 @@ function FLmap(FL, ALu, ALd, M::leg4)
     @tensor result[c,e,h] := FL[a,d,f] * ALd[f,g,h] * M[d,g,e,b] * ALu[a,b,c]
     return result
 end
-function FLmap(FL, ALu, ALd, M1::leg5, M2::leg5)
-    @tensor result[d,g,h,l] := FL[a,e,f,i] * ALd[i,j,k,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ALu[a,b,c,d]
-    return result
+function FLmap(FL, ALu, ALd, M1::leg5, M2::leg5; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(FL))
+        @tensor result[d,g,h,l] := FL[a,e,f,i] * ALd[i,j,k,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ALu[a,b,c,d]
+        return result
+    else
+        T_out = eltype(FL)
+        FL_t  = _downcast_eltype(inner_etype, FL)
+        ALu_t = _downcast_eltype(inner_etype, ALu)
+        ALd_t = _downcast_eltype(inner_etype, ALd)
+        M1_t  = _downcast_eltype(inner_etype, M1)
+        M2_t  = _downcast_eltype(inner_etype, M2)
+        @tensor result_t[d,g,h,l] := FL_t[a,e,f,i] * ALd_t[i,j,k,l] * M1_t[e,j,g,b,p] * M2_t[f,k,h,c,p] * ALu_t[a,b,c,d]
+        return T_out.(result_t)
+    end
 end
 function FLmap(FL, ALu, ALd, M::leg8)
     @tensor result[d,g,h,l] := FL[a,e,f,i] * ALd[i,j,k,l] * M[e,f,j,k,g,h,b,c] * ALu[a,b,c,d]
     return result
 end
 
-FLmap(FL, ALu, ALd, M::leg5) = FLmap(FL, ALu, ALd, M, conj(M))
-FLmap(FL, ALu, ALd, M::Tuple{leg5,leg5}) = FLmap(FL, ALu, ALd, M[1], M[2])
+FLmap(FL, ALu, ALd, M::leg5; inner_etype=nothing) =
+    FLmap(FL, ALu, ALd, M, conj(M); inner_etype)
+FLmap(FL, ALu, ALd, M::Tuple{leg5,leg5}; inner_etype=nothing) =
+    FLmap(FL, ALu, ALd, M[1], M[2]; inner_etype)
 
 """
     FRm = FRmap(ARu, ARd, M, FR, i)

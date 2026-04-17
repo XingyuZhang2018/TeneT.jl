@@ -83,6 +83,36 @@
             @test size(result) == (χ, D, D, χ)
         end
 
+        @testset "FLmap leg5 — inner_etype=Float32 (bilayer)" begin
+            T = ComplexF64
+            FL  = atype(randn(T, χ, D, D, χ))
+            ALu = atype(randn(T, χ, D, D, χ))
+            ALd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D))
+
+            # Default path (nothing) must byte-match current behavior
+            r_default = FLmap(FL, ALu, ALd, M)
+            r_explicit_nothing = FLmap(FL, ALu, ALd, M; inner_etype=nothing)
+            @test Array(r_default) == Array(r_explicit_nothing)
+
+            # Float32 path: eltype of result must match FL (ComplexF64), but values differ
+            # by at most ~1e-6 relative
+            r_f32 = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+            @test eltype(r_f32) == ComplexF64
+            @test size(r_f32) == size(r_default)
+            rel_err = maximum(abs, Array(r_f32) .- Array(r_default)) /
+                      maximum(abs, Array(r_default))
+            @test rel_err < 1e-5    # generous; typical Float32 @tensor error ~1e-7..1e-6
+
+            # Real-input sanity: Float64 in → Float32 inner → Float64 out
+            FLr = atype(randn(Float64, χ, D, D, χ))
+            ALur = atype(randn(Float64, χ, D, D, χ))
+            ALdr = atype(randn(Float64, χ, D, D, χ))
+            Mr  = atype(randn(Float64, D, D, D, D, D))
+            r_r = FLmap(FLr, ALur, ALdr, Mr; inner_etype=Float32)
+            @test eltype(r_r) == Float64
+        end
+
         @testset "FRmap leg4" begin
             FR  = atype(randn(T, χ, D, χ))
             ARu = atype(randn(T, χ, D, χ))
