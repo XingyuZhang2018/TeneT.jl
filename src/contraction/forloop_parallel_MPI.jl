@@ -270,7 +270,6 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
         cols_in2 = (j == N_in2[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in2[1]]))
         split_args = (j == N_in1[1] ? @view(args[j][cols_in1...]) : (j == N_in2[1] ? @view(args[j][cols_in2...]) : args[j]) for j in 1:length(args))
         result .+= f(split_args...)
-        synchronize(args[1])
     end
 
     allreduce_p2p!(result, +, comm)
