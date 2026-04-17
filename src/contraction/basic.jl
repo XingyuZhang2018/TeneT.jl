@@ -101,21 +101,54 @@ FLmap(FL, ALu, ALd, M::Tuple{leg5,leg5}; inner_etype=nothing) =
     ── ARdᵢᵣⱼ ──┘          ──┘          f ────┴──── h
 ```
 """
-function FRmap(FR, ARu, ARd, M::leg4)
-    @tensor result[a,d,f] := ARd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * ARu[a,b,c]
-    return result
+function FRmap(FR, ARu, ARd, M::leg4; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(FR))
+        @tensor result[a,d,f] := ARd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * ARu[a,b,c]
+        return result
+    else
+        T_out = eltype(FR)
+        FR_t  = _downcast_eltype(inner_etype, FR)
+        ARu_t = _downcast_eltype(inner_etype, ARu)
+        ARd_t = _downcast_eltype(inner_etype, ARd)
+        M_t   = _downcast_eltype(inner_etype, M)
+        @tensor result_t[a,d,f] := ARd_t[f,g,h] * FR_t[c,e,h] * M_t[d,g,e,b] * ARu_t[a,b,c]
+        return T_out.(result_t)
+    end
 end
-function FRmap(FR, ARu, ARd, M1::leg5, M2::leg5)
-    @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ARu[a,b,c,d]
-    return result
+function FRmap(FR, ARu, ARd, M1::leg5, M2::leg5; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(FR))
+        @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ARu[a,b,c,d]
+        return result
+    else
+        T_out = eltype(FR)
+        FR_t  = _downcast_eltype(inner_etype, FR)
+        ARu_t = _downcast_eltype(inner_etype, ARu)
+        ARd_t = _downcast_eltype(inner_etype, ARd)
+        M1_t  = _downcast_eltype(inner_etype, M1)
+        M2_t  = _downcast_eltype(inner_etype, M2)
+        @tensor result_t[a,e,f,i] := ARd_t[i,j,k,l] * FR_t[d,g,h,l] * M1_t[e,j,g,b,p] * M2_t[f,k,h,c,p] * ARu_t[a,b,c,d]
+        return T_out.(result_t)
+    end
 end
-function FRmap(FR, ARu, ARd, M::leg8)
-    @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M[e,f,j,k,g,h,b,c] * ARu[a,b,c,d]
-    return result
+function FRmap(FR, ARu, ARd, M::leg8; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(FR))
+        @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M[e,f,j,k,g,h,b,c] * ARu[a,b,c,d]
+        return result
+    else
+        T_out = eltype(FR)
+        FR_t  = _downcast_eltype(inner_etype, FR)
+        ARu_t = _downcast_eltype(inner_etype, ARu)
+        ARd_t = _downcast_eltype(inner_etype, ARd)
+        M_t   = _downcast_eltype(inner_etype, M)
+        @tensor result_t[a,e,f,i] := ARd_t[i,j,k,l] * FR_t[d,g,h,l] * M_t[e,f,j,k,g,h,b,c] * ARu_t[a,b,c,d]
+        return T_out.(result_t)
+    end
 end
 
-FRmap(FR, ARu, ARd, M::leg5) = FRmap(FR, ARu, ARd, M, conj(M))
-FRmap(FR, ARu, ARd, M::Tuple{leg5,leg5}) = FRmap(FR, ARu, ARd, M[1], M[2])
+FRmap(FR, ARu, ARd, M::leg5; inner_etype=nothing) =
+    FRmap(FR, ARu, ARd, M, conj(M); inner_etype)
+FRmap(FR, ARu, ARd, M::Tuple{leg5,leg5}; inner_etype=nothing) =
+    FRmap(FR, ARu, ARd, M[1], M[2]; inner_etype)
 
 """
     ```

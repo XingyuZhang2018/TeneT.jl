@@ -149,6 +149,51 @@
             @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
         end
 
+        @testset "FRmap leg4 — inner_etype=Float32" begin
+            D = 3
+            T = ComplexF64
+            FR  = atype(randn(T, χ, D, χ))
+            ARu = atype(randn(T, χ, D, χ))
+            ARd = atype(randn(T, χ, D, χ))
+            M   = atype(randn(T, D, D, D, D))
+            r0 = FRmap(FR, ARu, ARd, M)
+            r_explicit_nothing = FRmap(FR, ARu, ARd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FRmap leg5 — inner_etype=Float32" begin
+            T = ComplexF64
+            FR  = atype(randn(T, χ, D, D, χ))
+            ARu = atype(randn(T, χ, D, D, χ))
+            ARd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D))
+            r0 = FRmap(FR, ARu, ARd, M)
+            r_explicit_nothing = FRmap(FR, ARu, ARd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FRmap leg8 — inner_etype=Float32" begin
+            D = 3
+            T = ComplexF64
+            FR  = atype(randn(T, χ, D, D, χ))
+            ARu = atype(randn(T, χ, D, D, χ))
+            ARd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D, D, D, D))
+            r0 = FRmap(FR, ARu, ARd, M)
+            r_explicit_nothing = FRmap(FR, ARu, ARd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
         @testset "FRmap leg4" begin
             FR  = atype(randn(T, χ, D, χ))
             ARu = atype(randn(T, χ, D, χ))
