@@ -241,19 +241,28 @@ function main()
 
     # -------- config --------------------------------------------------
     # Dry-run (tiny): uncomment to verify the driver end-to-end quickly.
-    # configs = [(4, 16), (4, 32)]
-    # iters   = [1, 2, 4]
-    # nrep    = 2
+    # sweep_plan  = [((4, 16), [1, 2, 4]), ((4, 32), [1, 2, 4])]
+    # raw_configs = [(4, 16), (4, 32)]
+    # nrep        = 2
 
     # Real benchmark:
-    configs = [(10, 128), (10, 256), (10, 512), (12, 256)]
-    iters   = [1, 2, 4, 8, 16, 32, 64, 128]
-    nrep    = 5
+    # Per-config iters: skip low forloop_iter on large (D, χ) where the
+    # @tensor backward rank-7 intermediate (~χ²·D⁵·16 bytes) OOMs a 24 GB card.
+    # At (10, 128) everything fits; at (10, 256) iter=1 OOMs; at (10, 512) and
+    # (12, 256) iter<8 OOMs.
+    sweep_plan  = [
+        ((10, 128), [1, 2, 4, 8, 16, 32, 64, 128]),
+        ((10, 256), [2, 4, 8, 16, 32, 64, 128]),
+        ((10, 512), [8, 16, 32, 64, 128]),
+        ((12, 256), [8, 16, 32, 64, 128]),
+    ]
+    raw_configs = [(10, 128)]  # only configs where direct FLmap bwd fits
+    nrep        = 5
 
     # -------- sweep ---------------------------------------------------
     println("\n─── Raw baseline ───")
     rows_raw = NamedTuple[]
-    for (D, χ) in configs
+    for (D, χ) in raw_configs
         GC.gc(); CUDA.reclaim()
         r = run_raw(D, χ; nrep)
         push!(rows_raw, r)
@@ -263,7 +272,7 @@ function main()
 
     println("\n─── Main sweep (wrap + forloop_iter) ───")
     rows_sweep = NamedTuple[]
-    for (D, χ) in configs, n in iters
+    for ((D, χ), iters) in sweep_plan, n in iters
         GC.gc(); CUDA.reclaim()
         r = run_config(D, χ, n; nrep)
         push!(rows_sweep, r)
@@ -271,13 +280,13 @@ function main()
                 r.D, r.χ, r.forloop_iter, r.t_fwd*1000, r.t_bwd*1000, r.ratio)
     end
 
-    # wrap1 rows = forloop_iter=1 slice of sweep
+    # wrap1 rows = forloop_iter=1 slice of sweep (only available for small configs)
     rows_wrap1 = filter(r -> r.forloop_iter == 1, rows_sweep)
 
     # -------- fit -----------------------------------------------------
     println("\n─── Linear fits ───")
     fits = NamedTuple[]
-    for (D, χ) in configs
+    for ((D, χ), _) in sweep_plan
         rows = filter(r -> r.D == D && r.χ == χ, rows_sweep)
         xs = Float64[r.forloop_iter for r in rows]
         ys = Float64[r.t_bwd * 1000 for r in rows]  # ms
