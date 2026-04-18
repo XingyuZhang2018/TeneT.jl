@@ -455,3 +455,66 @@ F64 4.65× speedup vs F32 23.4× speedup:
 - Memory usage is comparable (both arms ~20 GB), so the win is purely throughput.
 
 This also has a practical implication: **production GPU runs at D≥4 should default to `forloop_iter ≥ 2`**, regardless of whether `inner_etype` is set. The forloop parameter was introduced for MPI/memory, but acts as a performance tuning knob at large (D, χ) on single-GPU.
+
+### ⚠️ RETRACTION of earlier D=4 χ=128 GPU timings
+
+The forloop=1 and forloop=2 GPU timings reported in the two previous sections were
+**contaminated** by CUDA memory-pool fragmentation. Both prior runs executed Float64
+and Float32/coarse=2 arms **in the same Julia process**, and the F32 arm (second) was
+systematically slowed down by fragmentation from the F64 arm's leftover allocations.
+
+To verify, I re-ran each (precision, forloop_iter) arm in an **independent Julia invocation**
+(fresh CUDA context per arm; see `examples/benchmark_D4chi128_verify_clean.jl`):
+
+| precision | forloop | wall (s) clean | wall (s) contaminated | inflation |
+|---|---:|---:|---:|---:|
+| Float64 | 1 | 151.5 | 772.6 | 5.10× |
+| Float32/coarse=2 | 1 | 147.2 | 1585.2 | 10.77× |
+| Float64 | 2 | 156.7 | 166.2 | 1.06× |
+| Float32/coarse=2 | 2 | 153.1 | 67.7 | 0.44× |
+
+(Note: the Float32/coarse=2 forloop=2 contaminated measurement was 67.7s — **faster** than
+the true clean 153.1s. This is another side of the same artifact: the second arm in a dual-arm
+script runs against a pool that's already saturated by the first arm, and depending on the
+specific allocation pattern either gets dramatically slower (fl=1) or appears dramatically
+faster (fl=2). Neither extreme reflects true per-call throughput.)
+
+### ✅ Clean D=4 χ=128 RTX 4090 results (each arm its own process)
+
+**Per-20-LBFGS-iter wall-clock at clean state is 147-157s across all 4 combinations**:
+- Float32 vs Float64: ~3% difference (within noise)
+- forloop=1 vs forloop=2: ~3% difference (within noise)
+- `inner_etype=Float32/coarse=2` does **NOT** provide wall-clock speedup at this config
+- `forloop_iter=2` does **NOT** provide wall-clock speedup at this config
+
+|ΔE| between F32/coarse=2 and F64 at forloop=1: **6.6e-7** — slightly above gradtol=1e-7 but
+expected at maxiter=20 cap. At forloop=2 the |ΔE| is 3.4e-8, consistent with polish working.
+
+### Methodology lesson
+
+**Cross-arm CUDA pool fragmentation produces 5-10× measurement artifacts**. Any GPU comparative
+benchmark where multiple precisions / configurations share a Julia process is unreliable. Going
+forward, all GPU benchmarks must launch each arm as a separate process.
+
+This is NOT specific to TeneT.jl — it's inherent to CUDA.jl's memory pool. The pool retains
+large allocations across function calls (for performance), but subsequent allocations with
+different size patterns hit fragmented pool fragments and can trigger catastrophic slowdowns.
+The naive fix `GC.gc(); CUDA.reclaim()` before each arm does NOT reliably prevent this (as
+demonstrated: our benchmark script already called reclaim between arms but still got
+contaminated).
+
+### Revised D=4 χ=128 GPU conclusion
+
+At D=4 χ=128 on RTX 4090, **no time savings from Float32 inner contractions are visible** in
+a clean methodology. The `inner_etype=Float32 + coarse=2 polish` approach works for precision
+(|ΔE| well under LBFGS noise) but doesn't deliver the hoped-for GPU speedup at this model/config.
+
+Potential reasons:
+- Consumer GPU F64 throttle isn't the bottleneck at this problem size (memory-bound?)
+- The polish runs 2/4 AD iters in full F64, limiting any F32 gain
+- Downcast/upcast per FLmap call has its own overhead
+- `ifcheckpoint=true` trades memory for compute via forward re-runs, diluting F32 gain
+
+**Still an open question**: at even larger (D, χ) the F32 advantage might manifest.
+On data-center GPUs (H100, A100) where F64 isn't throttled, the picture would also differ.
+Both are out of scope for Phase-1.
