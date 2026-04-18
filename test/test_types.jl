@@ -73,6 +73,25 @@
         @test v.ifcheckpoint == false
     end
 
+    # ---- VUMPS struct — inner_etype field ----
+    @testset "VUMPS struct — inner_etype field" begin
+        # default
+        alg = VUMPS{C4v}()
+        @test alg.inner_etype === nothing
+
+        # explicit nothing
+        alg2 = VUMPS{C4v}(; inner_etype=nothing)
+        @test alg2.inner_etype === nothing
+
+        # Float32
+        alg3 = VUMPS{C4v}(; inner_etype=Float32)
+        @test alg3.inner_etype === Float32
+
+        # Pattern matches General and Plaquette — struct is generic in F
+        alg4 = VUMPS{General}(; inner_etype=Float32)
+        @test alg4.inner_etype === Float32
+    end
+
     # ---- QRCTM default fields ----
     @testset "QRCTM default fields" begin
         q = QRCTM()

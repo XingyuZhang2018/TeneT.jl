@@ -277,7 +277,7 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
     return result
 end
 
-function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter) 
+function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
     N_in = (3, ndims(ALd))
     N_out = ndims(ALd)
     χ = size(FL, 1)
@@ -292,14 +292,16 @@ function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter)
         D = size(M, 3)
         size_out = (χ,D,χ)
     end
+    f = inner_etype === nothing ? FLmap :
+        (args...) -> FLmap(args...; inner_etype)
     if ifparallel
-        return parallel(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(f, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out)
     else
-        return forloop(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(f, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out)
     end
 end
 
-function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter) 
+function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter, inner_etype=nothing)
     N_in = (3, 1)
     N_out = ndims(ARd)
     χ = size(ARd, 1)
@@ -314,14 +316,16 @@ function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter)
         D = size(M, 1)
         size_out = (χ,D,χ)
     end
+    f = inner_etype === nothing ? FRmap :
+        (args...) -> FRmap(args...; inner_etype)
     if ifparallel
-        return parallel(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(f, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out)
     else
-        return forloop(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(f, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out)
     end
 end
 
-function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter) 
+function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing)
     N_in = (3, ndims(FR))
     N_out = ndims(FR)
     χ = size(FR, 1)
@@ -336,14 +340,16 @@ function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter)
         D = size(M, 2)
         size_out = (χ,D,χ)
     end
+    f = inner_etype === nothing ? ACmap :
+        (args...) -> ACmap(args...; inner_etype)
     if ifparallel
-        return parallel(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(f, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out)
     else
-        return forloop(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(f, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out)
     end
 end
 
-function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter) 
+function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing)
     N_in = (3, 1)
     N_out = ndims(FR)
     χ = size(FR, 1)
@@ -358,10 +364,12 @@ function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter)
         D = size(M, 4)
         size_out = (χ,D,χ)
     end
+    f = inner_etype === nothing ? ACdmap :
+        (args...) -> ACdmap(args...; inner_etype)
     if ifparallel
-        return parallel(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(f, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
     else
-        return forloop(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(f, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
     end
 end
 

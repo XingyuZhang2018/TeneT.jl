@@ -28,6 +28,16 @@ C4v
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
     ifcheckpoint::Bool = false
+
+    inner_etype::Union{Nothing, Type} = nothing
+    inner_etype_final_steps::Int = 0
+    simple_eig_polish_steps::Int = 0
+    # When set (e.g. Float32), leading_boundary converts rt/M to this precision
+    # at entry and runs the WHOLE VUMPS step (FLmap, QR, norm, eigsolve, ...) in
+    # it. Polish iters (inner_etype_final_steps) convert rt back to original
+    # precision. Alternative to `inner_etype` which only affects @tensor inside
+    # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
+    whole_vumps_etype::Union{Nothing, Type} = nothing
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
@@ -69,4 +79,12 @@ QR-based Corner Transfer Matrix algorithm.
     ifparallel::Bool = false
     ifcheckpoint::Bool = false
     forloop_iter::Int = 1
+
+    # Mixed-precision fields (same semantics as VUMPS; see VUMPS struct doc).
+    # QRCTM doesn't use simple_eig, so simple_eig_polish_steps is functionally
+    # inactive but kept for API symmetry.
+    inner_etype::Union{Nothing, Type} = nothing
+    inner_etype_final_steps::Int = 0
+    simple_eig_polish_steps::Int = 0
+    whole_vumps_etype::Union{Nothing, Type} = nothing
 end

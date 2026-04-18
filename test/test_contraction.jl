@@ -2,6 +2,32 @@
     χ = 4
     D = 2
 
+    @testset "_downcast_eltype helper" begin
+        using TeneT: _downcast_eltype
+
+        # Real: Float64 → Float32
+        A64 = randn(Float64, 3, 4)
+        A32 = _downcast_eltype(Float32, A64)
+        @test eltype(A32) == Float32
+        @test size(A32) == size(A64)
+        @test maximum(abs, Float64.(A32) .- A64) < 1e-5
+
+        # Complex: ComplexF64 → ComplexF32
+        Z64 = randn(ComplexF64, 3, 4)
+        Z32 = _downcast_eltype(Float32, Z64)
+        @test eltype(Z32) == ComplexF32
+        @test size(Z32) == size(Z64)
+        @test maximum(abs, ComplexF64.(Z32) .- Z64) < 1e-5
+
+        # Identity: target equals current eltype — return input unchanged (no copy)
+        B64 = randn(Float64, 2, 2)
+        @test _downcast_eltype(Float64, B64) === B64
+
+        # Nothing: pass-through
+        C64 = randn(ComplexF64, 2, 2)
+        @test _downcast_eltype(nothing, C64) === C64
+    end
+
     # =========================================================================
     # basic.jl tests
     # =========================================================================
@@ -55,6 +81,195 @@
             M   = atype(randn(T, D, D, D, D, D))
             result = FLmap(FL, ALu, ALd, M)
             @test size(result) == (χ, D, D, χ)
+        end
+
+        @testset "FLmap leg5 — inner_etype=Float32 (bilayer)" begin
+            T = ComplexF64
+            FL  = atype(randn(T, χ, D, D, χ))
+            ALu = atype(randn(T, χ, D, D, χ))
+            ALd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D))
+
+            # Default path (nothing) must byte-match current behavior
+            r_default = FLmap(FL, ALu, ALd, M)
+            r_explicit_nothing = FLmap(FL, ALu, ALd, M; inner_etype=nothing)
+            @test Array(r_default) == Array(r_explicit_nothing)
+
+            # Float32 path: eltype of result must match FL (ComplexF64), but values differ
+            # by at most ~1e-6 relative
+            r_f32 = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+            @test eltype(r_f32) == ComplexF64
+            @test size(r_f32) == size(r_default)
+            rel_err = maximum(abs, Array(r_f32) .- Array(r_default)) /
+                      maximum(abs, Array(r_default))
+            @test rel_err < 1e-5    # generous; typical Float32 @tensor error ~1e-7..1e-6
+
+            # ComplexF64 input + inner_etype=Float64 must skip downcast
+            # (real(ComplexF64) == Float64, so short-circuit triggers → byte-identical to default)
+            r_cf64_skip = FLmap(FL, ALu, ALd, M; inner_etype=Float64)
+            @test Array(r_cf64_skip) == Array(r_default)
+
+            # Real-input sanity: Float64 in → Float32 inner → Float64 out
+            FLr = atype(randn(Float64, χ, D, D, χ))
+            ALur = atype(randn(Float64, χ, D, D, χ))
+            ALdr = atype(randn(Float64, χ, D, D, χ))
+            Mr  = atype(randn(Float64, D, D, D, D, D))
+            r_r = FLmap(FLr, ALur, ALdr, Mr; inner_etype=Float32)
+            @test eltype(r_r) == Float64
+        end
+
+        @testset "FLmap leg4 — inner_etype=Float32" begin
+            D = 3    # override outer D=2 to break index-permutation silent passes (see Task 2 review)
+            T = ComplexF64
+            FL  = atype(randn(T, χ, D, χ))
+            ALu = atype(randn(T, χ, D, χ))
+            ALd = atype(randn(T, χ, D, χ))
+            M   = atype(randn(T, D, D, D, D))
+            r0  = FLmap(FL, ALu, ALd, M)
+            r_explicit_nothing = FLmap(FL, ALu, ALd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FLmap leg8 — inner_etype=Float32" begin
+            D = 3    # same rationale
+            T = ComplexF64
+            FL  = atype(randn(T, χ, D, D, χ))
+            ALu = atype(randn(T, χ, D, D, χ))
+            ALd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D, D, D, D))
+            r0  = FLmap(FL, ALu, ALd, M)
+            r_explicit_nothing = FLmap(FL, ALu, ALd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FRmap leg4 — inner_etype=Float32" begin
+            D = 3
+            T = ComplexF64
+            FR  = atype(randn(T, χ, D, χ))
+            ARu = atype(randn(T, χ, D, χ))
+            ARd = atype(randn(T, χ, D, χ))
+            M   = atype(randn(T, D, D, D, D))
+            r0 = FRmap(FR, ARu, ARd, M)
+            r_explicit_nothing = FRmap(FR, ARu, ARd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FRmap leg5 — inner_etype=Float32" begin
+            T = ComplexF64
+            FR  = atype(randn(T, χ, D, D, χ))
+            ARu = atype(randn(T, χ, D, D, χ))
+            ARd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D))
+            r0 = FRmap(FR, ARu, ARd, M)
+            r_explicit_nothing = FRmap(FR, ARu, ARd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "FRmap leg8 — inner_etype=Float32" begin
+            D = 3
+            T = ComplexF64
+            FR  = atype(randn(T, χ, D, D, χ))
+            ARu = atype(randn(T, χ, D, D, χ))
+            ARd = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D, D, D, D))
+            r0 = FRmap(FR, ARu, ARd, M)
+            r_explicit_nothing = FRmap(FR, ARu, ARd, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACmap leg4 — inner_etype=Float32" begin
+            D = 3    # override for index-permutation safety (see Task 2 review)
+            T = ComplexF64
+            AC = atype(randn(T, χ, D, χ))
+            FL = atype(randn(T, χ, D, χ))
+            FR = atype(randn(T, χ, D, χ))
+            M  = atype(randn(T, D, D, D, D))
+            r0 = ACmap(AC, FL, FR, M)
+            r_explicit_nothing = ACmap(AC, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACmap(AC, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACmap leg5 — inner_etype=Float32" begin
+            T = ComplexF64
+            AC = atype(randn(T, χ, D, D, χ))
+            FL = atype(randn(T, χ, D, D, χ))
+            FR = atype(randn(T, χ, D, D, χ))
+            M  = atype(randn(T, D, D, D, D, D))
+            r0 = ACmap(AC, FL, FR, M)
+            r_explicit_nothing = ACmap(AC, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACmap(AC, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACmap leg8 — inner_etype=Float32" begin
+            D = 3    # override for index-permutation safety
+            T = ComplexF64
+            AC = atype(randn(T, χ, D, D, χ))
+            FL = atype(randn(T, χ, D, D, χ))
+            FR = atype(randn(T, χ, D, D, χ))
+            M  = atype(randn(T, D, D, D, D, D, D, D, D))
+            r0 = ACmap(AC, FL, FR, M)
+            r_explicit_nothing = ACmap(AC, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACmap(AC, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACdmap leg4 — inner_etype=Float32" begin
+            D = 3    # override for index-permutation safety
+            T = ComplexF64
+            ACd = atype(randn(T, χ, D, χ))
+            FL  = atype(randn(T, χ, D, χ))
+            FR  = atype(randn(T, χ, D, χ))
+            M   = atype(randn(T, D, D, D, D))
+            r0 = ACdmap(ACd, FL, FR, M)
+            r_explicit_nothing = ACdmap(ACd, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
+        end
+
+        @testset "ACdmap leg5 — inner_etype=Float32" begin
+            T = ComplexF64
+            ACd = atype(randn(T, χ, D, D, χ))
+            FL  = atype(randn(T, χ, D, D, χ))
+            FR  = atype(randn(T, χ, D, D, χ))
+            M   = atype(randn(T, D, D, D, D, D))
+            r0 = ACdmap(ACd, FL, FR, M)
+            r_explicit_nothing = ACdmap(ACd, FL, FR, M; inner_etype=nothing)
+            @test Array(r0) == Array(r_explicit_nothing)
+            r32 = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+            @test eltype(r32) == ComplexF64
+            @test size(r32) == size(r0)
+            @test maximum(abs, Array(r32) .- Array(r0)) / maximum(abs, Array(r0)) < 1e-5
         end
 
         @testset "FRmap leg4" begin
@@ -240,6 +455,90 @@
                 direct   = Mmap(AC, ACd, FL, FR)
                 par_res  = Mmap_parallel(AC, ACd, FL, FR; ifparallel=false, forloop_iter=1)
                 @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "FLmap_parallel inner_etype=Float32 forloop_iter=1 matches FLmap(inner_etype)" begin
+                FL  = atype(randn(T, χ, D, χ))
+                ALu = atype(randn(T, χ, D, χ))
+                ALd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+                par_res = FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "FLmap_parallel inner_etype=Float32 forloop_iter=2 close to FLmap(inner_etype)" begin
+                FL  = atype(randn(T, χ, D, χ))
+                ALu = atype(randn(T, χ, D, χ))
+                ALd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FLmap(FL, ALu, ALd, M; inner_etype=Float32)
+                par_res = FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
+
+            @testset "FRmap_parallel inner_etype=Float32 forloop_iter=1 matches FRmap(inner_etype)" begin
+                FR  = atype(randn(T, χ, D, χ))
+                ARu = atype(randn(T, χ, D, χ))
+                ARd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+                par_res = FRmap_parallel(FR, ARu, ARd, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "FRmap_parallel inner_etype=Float32 forloop_iter=2 close to FRmap(inner_etype)" begin
+                FR  = atype(randn(T, χ, D, χ))
+                ARu = atype(randn(T, χ, D, χ))
+                ARd = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = FRmap(FR, ARu, ARd, M; inner_etype=Float32)
+                par_res = FRmap_parallel(FR, ARu, ARd, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
+
+            @testset "ACmap_parallel inner_etype=Float32 forloop_iter=1 matches ACmap(inner_etype)" begin
+                AC = atype(randn(T, χ, D, χ))
+                FL = atype(randn(T, χ, D, χ))
+                FR = atype(randn(T, χ, D, χ))
+                M  = atype(randn(T, D, D, D, D))
+                direct  = ACmap(AC, FL, FR, M; inner_etype=Float32)
+                par_res = ACmap_parallel(AC, FL, FR, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "ACmap_parallel inner_etype=Float32 forloop_iter=2 close to ACmap(inner_etype)" begin
+                AC = atype(randn(T, χ, D, χ))
+                FL = atype(randn(T, χ, D, χ))
+                FR = atype(randn(T, χ, D, χ))
+                M  = atype(randn(T, D, D, D, D))
+                direct  = ACmap(AC, FL, FR, M; inner_etype=Float32)
+                par_res = ACmap_parallel(AC, FL, FR, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
+            end
+
+            @testset "ACdmap_parallel inner_etype=Float32 forloop_iter=1 matches ACdmap(inner_etype)" begin
+                ACd = atype(randn(T, χ, D, χ))
+                FL  = atype(randn(T, χ, D, χ))
+                FR  = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+                par_res = ACdmap_parallel(ACd, FL, FR, M; ifparallel=false, forloop_iter=1, inner_etype=Float32)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
+            @testset "ACdmap_parallel inner_etype=Float32 forloop_iter=2 close to ACdmap(inner_etype)" begin
+                ACd = atype(randn(T, χ, D, χ))
+                FL  = atype(randn(T, χ, D, χ))
+                FR  = atype(randn(T, χ, D, χ))
+                M   = atype(randn(T, D, D, D, D))
+                direct  = ACdmap(ACd, FL, FR, M; inner_etype=Float32)
+                par_res = ACdmap_parallel(ACd, FL, FR, M; ifparallel=false, forloop_iter=2, inner_etype=Float32)
+                @test maximum(abs, Array(direct) .- Array(par_res)) /
+                      maximum(abs, Array(direct)) < 1e-5
             end
         end
     end

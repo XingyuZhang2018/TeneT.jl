@@ -146,6 +146,62 @@
                 env = ObsEnv(rt, M_c4v, alg_c4v)
                 @test env isa C4vVUMPSEnv
             end
+
+            @testset "inner_etype=Float32 threads through leftenv_c4v / ACenv_c4v" begin
+                # Setup: same MPO/chi as the outer testset; we drive one vumps_step
+                # twice — once with inner_etype=Float32, once with =nothing — from
+                # identical seeds, and check the FL tensors diverge by a small
+                # amount consistent with Float32 round-off. The `@unpack` line in
+                # leftenv_c4v/ACenv_c4v must include `inner_etype` and pass it to
+                # FLmap_parallel/ACmap_parallel for this to produce a visible
+                # difference. The raw M passed to vumps_step is the rank-5
+                # tensor (matching leading_boundary's `M = M[1]` convention).
+                M_raw = M_c4v[1]
+
+                alg_f32 = VUMPS{C4v}(; verbosity=0, forloop_iter=1, power_iter=1,
+                                        maxiter=1, miniter=0, maxiter_ad=1, miniter_ad=1,
+                                        tol=1e-10, inner_etype=Float32)
+                alg_base = VUMPS{C4v}(; verbosity=0, forloop_iter=1, power_iter=1,
+                                         maxiter=1, miniter=0, maxiter_ad=1, miniter_ad=1,
+                                         tol=1e-10, inner_etype=nothing)
+
+                Random.seed!(42)
+                rt_f32 = init_env(M_c4v, chi, alg_f32)
+                rt_f32_new, err_f32 = vumps_step(rt_f32, M_raw, alg_f32)
+
+                Random.seed!(42)
+                rt_base = init_env(M_c4v, chi, alg_base)
+                rt_base_new, err_base = vumps_step(rt_base, M_raw, alg_base)
+
+                # Environments stay Float64 (outer precision preserved).
+                @test eltype(rt_f32_new.AL) == Float64
+                @test eltype(rt_f32_new.C)  == Float64
+                @test eltype(rt_f32_new.FL) == Float64
+                @test isfinite(err_f32)
+
+                # Sanity: same seed on the baseline gives the same result as
+                # itself (rules out environmental RNG drift confusing the test).
+                @test Array(rt_base_new.FL) == Array(rt_base_new.FL)
+
+                # Strengthened precision-bound check only on CPU: on GPU, `rand!`
+                # uses CUDA's own RNG which `Random.seed!(42)` does not seed, so
+                # the two init_env calls start from different random FLs and the
+                # divergence is not a pure Float32 rounding effect.
+                if atype == Array
+                    # Thread-through check: inner_etype=Float32 must change the
+                    # FLmap/ACmap contraction path, so FL should differ from baseline
+                    # (both start from identical seeds). The pre-Task-8 state
+                    # ignores inner_etype in leftenv_c4v → would be byte-equal.
+                    FL_f32_arr  = Array(rt_f32_new.FL)
+                    FL_base_arr = Array(rt_base_new.FL)
+                    @test FL_f32_arr != FL_base_arr
+
+                    # Divergence should be small (Float32 precision-bounded).
+                    rel = maximum(abs, FL_f32_arr .- FL_base_arr) /
+                          max(maximum(abs, FL_base_arr), eps())
+                    @test rel < 1e-4
+                end
+            end
         end
 
         # ==================================================================

@@ -25,6 +25,10 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     ifparallel = alg.ifparallel
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
+    inner_etype = alg.inner_etype
+    simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Fine polish: last `simple_eig_polish_steps` power iters use Float64 (inner_etype=nothing)
+    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
         p = AC.pattern[1,j]
         if L <: Plaquette{Square}
@@ -34,11 +38,14 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         else
             error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")
         end
-        
+
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter)
+            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype)
+            f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λACs, ACs = simple_eig(f, AC[1,j]; power_iter)
+                λACs, ACs = polish_fine ?
+                    simple_eig(f, AC[1,j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
+                    simple_eig(f, AC[1,j]; power_iter)
             else
                 λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
@@ -50,7 +57,7 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; ifparallel, forloop_iter)
+                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; ifparallel, forloop_iter, inner_etype)
                 AC′[i,j] = ACij / norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
@@ -147,10 +154,34 @@ end
 function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     t = ignore_derivatives(() -> time())
     local err
+
+    # Whole-VUMPS precision mode (alternative to `inner_etype`):
+    # pre-cast rt and M to alg.whole_vumps_etype; run whole VUMPS (FLmap, QR,
+    # norm, eigsolve, ...) in that precision; polish iters cast back to original.
+    # Original eltype is taken from the first data array of rt.AL (StructArrays
+    # have eltype = Any, so inspect the underlying data tensor).
+    T_orig = eltype(rt.AL.data[1])
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        rt = PlaquetteVUMPSRuntime(_downcast_eltype(W, rt.AL),
+                                   _downcast_eltype(W, rt.C),
+                                   _downcast_eltype(W, rt.FL))
+        M  = _downcast_eltype(W, M)
+    end
+    # For whole-VUMPS mode we pass alg with inner_etype=nothing (FLmap etc.
+    # should run natively on the already-downcasted tensors, no per-call conversion).
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+        alg_wholemode.simple_eig_polish_steps = 0
+    end
+
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration without AD...")
     ignore_derivatives() do
         for i in 1:alg.maxiter
-        rt, err = vumps_step(rt, M, alg)
+        rt, err = vumps_step(rt, M, alg_wholemode)
         alg.verbosity >= 3 && i % alg.show_every == 0 &&
             ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
@@ -165,10 +196,38 @@ function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaqu
     end
 
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
-    alg_ad = deepcopy(alg)
+    alg_ad = deepcopy(alg_wholemode)
     alg_ad.power_iter = alg.power_iter_ad
+    alg_ad.simple_eig_polish_steps = 0   # fine polish fires only on the LAST AD iter via alg_ad_fine
+    # Mixed-precision polish variants (activate only when mixed-precision mode is on):
+    #  - Coarse: final N AD iters run in ORIGINAL precision (Float64).
+    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0.
+    # If both set, coarse takes precedence.
+    alg_ad_coarse = deepcopy(alg_ad)
+    alg_ad_coarse.inner_etype = nothing
+    alg_ad_fine = deepcopy(alg_ad)
+    alg_ad_fine.simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Is ANY mixed-precision mode active that the polish machinery should react to?
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
+        alg_this_iter = alg_ad
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active
+            if in_polish
+                alg_this_iter = alg_ad_coarse
+            elseif alg.simple_eig_polish_steps > 0 && i == alg.maxiter_ad
+                alg_this_iter = alg_ad_fine
+            end
+        end
+        # For whole-VUMPS mode: on the FIRST polish iter, cast rt and M back to T_orig.
+        if want_whole && in_polish && eltype(rt.AL.data[1]) != T_orig
+            rt = PlaquetteVUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                                       _downcast_eltype(real(T_orig), rt.C),
+                                       _downcast_eltype(real(T_orig), rt.FL))
+            M = _downcast_eltype(real(T_orig), M)
+        end
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
@@ -177,6 +236,14 @@ function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaqu
         if i == alg.maxiter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
+    end
+    # Exit guard: if whole-VUMPS mode is active and we never hit polish (e.g.
+    # inner_etype_final_steps==0 or early break before polish started), cast
+    # rt back to original precision so downstream AD flows correctly.
+    if want_whole && eltype(rt.AL.data[1]) != T_orig
+        rt = PlaquetteVUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                                   _downcast_eltype(real(T_orig), rt.C),
+                                   _downcast_eltype(real(T_orig), rt.FL))
     end
     return rt, err
 end

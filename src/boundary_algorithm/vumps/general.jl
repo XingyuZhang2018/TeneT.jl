@@ -184,11 +184,11 @@ end
 
 # ── Fixed-point environments ────────────────────────────────────────
 
-function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifparallel, forloop_iter)
+function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifparallel, forloop_iter, inner_etype=nothing)
     Nj = length(ALui)
     for j in J:(J + Nj - 1)
         jr = mod1(j, Nj)
-        FLij = FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter)
+        FLij = FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter, inner_etype)
     end
     return FLij
 end
@@ -208,13 +208,20 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     ifparallel = alg.ifparallel
+    inner_etype = alg.inner_etype
+    simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Fine polish: last `simple_eig_polish_steps` power iters use Float64 (inner_etype=nothing)
+    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
-            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter)
+            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype)
+            f_polish(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
+                λLs, FLi1s = polish_fine ?
+                    simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
+                    simple_eig(f, FL[i, 1]; power_iter)
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
@@ -229,7 +236,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         for j in 2:Nj
             p = FL.pattern[i, j]
             if p ∉ processed_indices
-                FL′[i, j] = FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter)
+                FL′[i, j] = FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter, inner_etype)
                 λL[i, j] = λL[i, 1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -242,11 +249,11 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     return copy(λL), copy(FL′)
 end
 
-function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifparallel, forloop_iter)
+function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifparallel, forloop_iter, inner_etype=nothing)
     Nj = length(ARui)
     for j in J:-1:(J - Nj + 1)
         jr = mod1(j, Nj)
-        FRij = FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter)
+        FRij = FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter, inner_etype)
     end
     return FRij
 end
@@ -266,13 +273,19 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     ifparallel = alg.ifparallel
+    inner_etype = alg.inner_etype
+    simple_eig_polish_steps = alg.simple_eig_polish_steps
+    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
-            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter)
+            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype)
+            f_polish(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
+                λRs, FR1s = polish_fine ?
+                    simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
+                    simple_eig(f, FR[i, Nj]; power_iter)
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
@@ -287,7 +300,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
         for j in Nj-1:-1:1
             p = FR.pattern[i, j]
             if p ∉ processed_indices
-                FR′[i, j] = FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter)
+                FR′[i, j] = FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter, inner_etype)
                 λR[i, j] = λR[i, Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -421,11 +434,11 @@ end
 
 # ── AC and C environment updates ────────────────────────────────────
 
-function ACmap(I::Int, ACij, FLj, FRj, Mj; ifparallel, forloop_iter)
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifparallel, forloop_iter, inner_etype=nothing)
     Ni = length(FLj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
-        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter)
+        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter, inner_etype)
     end
     return ACij
 end
@@ -445,12 +458,18 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     ifparallel = alg.ifparallel
+    inner_etype = alg.inner_etype
+    simple_eig_polish_steps = alg.simple_eig_polish_steps
+    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter)
+            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype)
+            f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
+                λACs, ACs = polish_fine ?
+                    simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
+                    simple_eig(f, AC[1, j]; power_iter)
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
@@ -465,7 +484,7 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i, j]
             if p ∉ processed_indices
-                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter)
+                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter, inner_etype)
                 AC′[i, j] = ACij / norm(ACij)
                 λAC[i, j] = λAC[1, j]
                 push!(processed_indices, p)
@@ -752,10 +771,36 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     atype = _arraytype(M)
     id = get_device_id(atype)
     local err
+
+    # Whole-VUMPS precision mode (alternative to `inner_etype`):
+    # pre-cast rt and M to alg.whole_vumps_etype; run whole VUMPS (FLmap, QR,
+    # norm, eigsolve, ...) in that precision; polish iters cast back to original.
+    # Original eltype is taken from the first data array of rt.AL (StructArrays
+    # have eltype = Any, so inspect the underlying data tensor).
+    T_orig = eltype(rt.AL.data[1])
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        rt = VUMPSRuntime(_downcast_eltype(W, rt.AL),
+                          _downcast_eltype(W, rt.AR),
+                          _downcast_eltype(W, rt.C),
+                          _downcast_eltype(W, rt.FL),
+                          _downcast_eltype(W, rt.FR))
+        M  = _downcast_eltype(W, M)
+    end
+    # For whole-VUMPS mode we pass alg with inner_etype=nothing (FLmap etc.
+    # should run natively on the already-downcasted tensors, no per-call conversion).
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+        alg_wholemode.simple_eig_polish_steps = 0
+    end
+
     ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD...")
     ChainRulesCore.ignore_derivatives() do
         for i in 1:alg.maxiter
-        rt, err = vumps_step(rt, M, alg)
+        rt, err = vumps_step(rt, M, alg_wholemode)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
@@ -768,10 +813,40 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     end
 
     ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD...")
-    alg_ad = deepcopy(alg)
+    alg_ad = deepcopy(alg_wholemode)
     alg_ad.power_iter = alg.power_iter_ad
+    alg_ad.simple_eig_polish_steps = 0   # fine polish fires only on the LAST AD iter via alg_ad_fine
+    # Mixed-precision polish variants (activate only when mixed-precision mode is on):
+    #  - Coarse: final N AD iters run in ORIGINAL precision (Float64).
+    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0.
+    # If both set, coarse takes precedence.
+    alg_ad_coarse = deepcopy(alg_ad)
+    alg_ad_coarse.inner_etype = nothing
+    alg_ad_fine = deepcopy(alg_ad)
+    alg_ad_fine.simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Is ANY mixed-precision mode active that the polish machinery should react to?
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
     for i in 1:alg.maxiter_ad
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_ad) : vumps_step(rt, M, alg_ad)
+        alg_this_iter = alg_ad
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active
+            if in_polish
+                alg_this_iter = alg_ad_coarse
+            elseif alg.simple_eig_polish_steps > 0 && i == alg.maxiter_ad
+                alg_this_iter = alg_ad_fine
+            end
+        end
+        # For whole-VUMPS mode: on the FIRST polish iter, cast rt and M back to T_orig.
+        if want_whole && in_polish && eltype(rt.AL.data[1]) != T_orig
+            rt = VUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                              _downcast_eltype(real(T_orig), rt.AR),
+                              _downcast_eltype(real(T_orig), rt.C),
+                              _downcast_eltype(real(T_orig), rt.FL),
+                              _downcast_eltype(real(T_orig), rt.FR))
+            M = _downcast_eltype(real(T_orig), M)
+        end
+        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
@@ -780,6 +855,16 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
         if i == alg.maxiter_ad
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         end
+    end
+    # Exit guard: if whole-VUMPS mode is active and we never hit polish (e.g.
+    # inner_etype_final_steps==0 or early break before polish started), cast
+    # rt back to original precision so downstream AD flows correctly.
+    if want_whole && eltype(rt.AL.data[1]) != T_orig
+        rt = VUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                          _downcast_eltype(real(T_orig), rt.AR),
+                          _downcast_eltype(real(T_orig), rt.C),
+                          _downcast_eltype(real(T_orig), rt.FL),
+                          _downcast_eltype(real(T_orig), rt.FR))
     end
 
     return rt, err

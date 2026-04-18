@@ -20,23 +20,53 @@ function _power_iter_segment(f, v, n)
     return v
 end
 
-function simple_eig(f, v; power_iter, checkpoint_every=5)
-    n = power_iter - 1
-    if n > 0 && checkpoint_every > 0 && checkpoint_every < n
-        # Split into segments, each checkpointed
-        while n > 0
-            seg = min(checkpoint_every, n)
-            v = checkpoint(_power_iter_segment, f, v, seg)
-            n -= seg
+function simple_eig(f, v; power_iter, checkpoint_every=5,
+                    f_final=nothing, final_polish_steps=0)
+    polish_active = f_final !== nothing && final_polish_steps > 0
+    n_polish = polish_active ? min(final_polish_steps, power_iter) : 0
+    n_pre = power_iter - n_polish    # total f-calls using `f` (pre-polish)
+
+    if !polish_active
+        # Original path — single f, all `power_iter` calls go to f
+        n = power_iter - 1
+        if n > 0 && checkpoint_every > 0 && checkpoint_every < n
+            while n > 0
+                seg = min(checkpoint_every, n)
+                v = checkpoint(_power_iter_segment, f, v, seg)
+                n -= seg
+            end
+        else
+            for _ in 1:n
+                v = f(v)
+                v /= norm(v)
+            end
         end
+        v1 = f(v)
     else
-        for _ in 1:n
-            v = f(v)
+        # Pre-polish: n_pre normalizing iters using `f`
+        # Polish:     (n_polish - 1) normalizing iters + 1 final iter, all using `f_final`
+        if n_pre > 0
+            np = n_pre
+            if checkpoint_every > 0 && checkpoint_every < np
+                while np > 0
+                    seg = min(checkpoint_every, np)
+                    v = checkpoint(_power_iter_segment, f, v, seg)
+                    np -= seg
+                end
+            else
+                for _ in 1:np
+                    v = f(v)
+                    v /= norm(v)
+                end
+            end
+        end
+        for _ in 1:(n_polish - 1)
+            v = f_final(v)
             v /= norm(v)
         end
+        v1 = f_final(v)
     end
 
-    v1 = f(v)
     λ = dot(v, v1)
     v1 /= norm(v1)
     v1 = orth_for_ad(v1)
