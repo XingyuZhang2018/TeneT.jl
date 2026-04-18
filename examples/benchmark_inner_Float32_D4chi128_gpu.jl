@@ -20,6 +20,7 @@ end
 function run_D4chi128_gpu(seed, inner_etype;
                          polish_steps::Int = 2,
                          maxiter_lbfgs::Int = 20,
+                         forloop_iter::Int = 1,
                          D::Int = 4, χ::Int = 128)
     Random.seed!(seed)
     CUDA.seed!(seed)    # independent CUDA RNG seeding so runs are reproducible
@@ -29,12 +30,13 @@ function run_D4chi128_gpu(seed, inner_etype;
     model = Heisenberg(lattice=Square(), S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
                        ifrotate=true, couplingtype=:uniform, bondratio=1.0)
     inner_etype_final_steps = (inner_etype !== nothing && polish_steps > 0) ? polish_steps : 0
-    tag = inner_etype === nothing ? "f64_gpu" :
-          string(inner_etype) * "_coarse" * string(polish_steps) * "_gpu"
+    tag = (inner_etype === nothing ? "f64_gpu" :
+           string(inner_etype) * "_coarse" * string(polish_steps) * "_gpu") *
+          "_fl$(forloop_iter)"
     folder = joinpath(pkgdir(TeneT), "data/bench_D4chi128/$tag/s$(seed)/")
 
     boundary_alg = VUMPS{C4v}(; ifsimple_eig=true, ifparallel=false, ifcheckpoint=true,
-                              forloop_iter=1, maxiter=3, miniter=0,
+                              forloop_iter=forloop_iter, maxiter=3, miniter=0,
                               maxiter_ad=4, miniter_ad=4, power_iter=1,
                               power_iter_ad=5, power_iter_obs=40,
                               show_every=10, tol=1e-10, verbosity=1,
@@ -46,7 +48,7 @@ function run_D4chi128_gpu(seed, inner_etype;
                               optimizer=LBFGS(200; maxiter=maxiter_lbfgs, verbosity=1,
                                               gradtol=1e-7,
                                               linesearch=HagerZhangLineSearch(maxfg=5)),
-                              ifcheckpoint=false, forloop_iter=1,
+                              ifcheckpoint=false, forloop_iter=forloop_iter,
                               maxiter_restart=1, verbosity=1, folder=folder,
                               ifSU=false, SUτ=0, ifprecondition=true,
                               iter_precond=0, reuse_env=true,
@@ -87,18 +89,19 @@ function main()
 
     seed = 42
     maxiter_lbfgs = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 20
-    @printf("Seed: %d, LBFGS maxiter: %d\n\n", seed, maxiter_lbfgs)
+    forloop_iter  = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 1
+    @printf("Seed: %d, LBFGS maxiter: %d, forloop_iter: %d\n\n", seed, maxiter_lbfgs, forloop_iter)
 
-    @printf(">>> Float64 baseline, seed=%d, maxiter=%d\n", seed, maxiter_lbfgs)
+    @printf(">>> Float64 baseline, seed=%d, maxiter=%d, forloop=%d\n", seed, maxiter_lbfgs, forloop_iter)
     flush(stdout)
-    r64 = run_D4chi128_gpu(seed, nothing; maxiter_lbfgs, D, χ)
+    r64 = run_D4chi128_gpu(seed, nothing; maxiter_lbfgs, forloop_iter, D, χ)
     @printf("    E=%.12f  n_steps=%d  wall=%.1fs  ΔGPU=%.0fMB\n\n",
             r64.E, r64.n_steps, r64.wall, r64.gpu_delta_mb)
     flush(stdout)
 
-    @printf(">>> Float32/coarse=2, seed=%d, maxiter=%d\n", seed, maxiter_lbfgs)
+    @printf(">>> Float32/coarse=2, seed=%d, maxiter=%d, forloop=%d\n", seed, maxiter_lbfgs, forloop_iter)
     flush(stdout)
-    r32 = run_D4chi128_gpu(seed, Float32; polish_steps=2, maxiter_lbfgs, D, χ)
+    r32 = run_D4chi128_gpu(seed, Float32; polish_steps=2, maxiter_lbfgs, forloop_iter, D, χ)
     @printf("    E=%.12f  n_steps=%d  wall=%.1fs  ΔGPU=%.0fMB\n\n",
             r32.E, r32.n_steps, r32.wall, r32.gpu_delta_mb)
     flush(stdout)
@@ -109,9 +112,10 @@ function main()
 
     mkpath(dirname(RESULTS_PATH))
     open(RESULTS_PATH, "a") do io
-        println(io, "\n## L4 D=4 χ=128 — GPU (", today(), ")\n")
+        println(io, "\n## L4 D=4 χ=128 — GPU, forloop=$forloop_iter (", today(), ")\n")
         println(io, "Hardware: ", CUDA.name(CUDA.device()), " (", round(CUDA.total_memory()/1e9, digits=1), " GB)")
-        println(io, "Seed: ", seed, ", LBFGS maxiter cap: ", maxiter_lbfgs, ", gradtol: 1e-7")
+        println(io, "Seed: ", seed, ", LBFGS maxiter cap: ", maxiter_lbfgs,
+                    ", gradtol: 1e-7, forloop_iter: ", forloop_iter)
         println(io, "")
         println(io, "| precision | E_final | n_steps | wall (s) | ΔGPU (MB) |")
         println(io, "|-----------|---------|---------|----------|-----------|")

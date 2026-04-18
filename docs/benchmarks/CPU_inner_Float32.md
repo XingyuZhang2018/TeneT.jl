@@ -407,3 +407,51 @@ To realize Float32 speedups we'd likely need:
 - A data-center GPU (H100/A100/GH200) where F64 is not throttled — polish iters cost more reasonably.
 - OR a polish strategy that avoids Float64 altogether (risk: precision degrades).
 - OR BFloat16/FP16 via Tensor Cores for a bigger F32→lower-precision jump.
+
+## L4 D=4 χ=128 — GPU, forloop=2 (2026-04-18)
+
+Hardware: NVIDIA GeForce RTX 4090 (25.8 GB)
+Seed: 42, LBFGS maxiter cap: 20, gradtol: 1e-7, forloop_iter: 2
+
+| precision | E_final | n_steps | wall (s) | ΔGPU (MB) |
+|-----------|---------|---------|----------|-----------|
+| Float64 | -0.668965385303 | 20 | 166.2 | 20490 |
+| Float32/coarse=2 | -0.668967088177 | 20 | 67.7 | 19959 |
+
+- **Speedup (F64/F32 wall):** 2.45x
+- **|ΔE|:** 1.703e-06
+
+### forloop=2 reverses the D=4 χ=128 GPU result
+
+| config | forloop=1 wall | forloop=2 wall | forloop=2 speedup |
+|---|---:|---:|---:|
+| Float64 | 772.6s | **166.2s** | **4.65×** |
+| Float32/coarse=2 | 1585.2s | **67.7s** | **23.4×** |
+
+**Speedup F64/F32:** forloop=1 → 0.49× (F32 slower); **forloop=2 → 2.45× (F32 faster, as originally hypothesized)**.
+
+**|ΔE| forloop=2:** 1.70e-6 (comparable to forloop=1, consistent with LBFGS maxiter=20 cap, NOT a precision degradation).
+
+### What forloop=2 changes
+
+`forloop_iter=2` splits the FLmap/FRmap/ACmap `@tensor` contraction along one input dimension (χ by default) into 2 chunks, computes each chunk separately, then concatenates/sums the results. At D=4 χ=128 with 128×4×4×128 tensors, this is a memory-blocking technique:
+
+1. **Intermediate tensor size drops** — TensorOperations may produce intermediate tensors of shape up to `χ³D⁴` during contraction (hundreds of MB in F64). With forloop=2 those intermediates are halved along one axis.
+2. **L2 cache fit** — RTX 4090 has ~72 MB L2. Smaller intermediates may fit in L2 → compute-bound instead of bandwidth-bound.
+3. **Memory pool hygiene** — fewer simultaneous large allocations → less pool fragmentation → fewer deep-pool pauses.
+
+### Why F32 scales 5× better with forloop=2 than F64 does
+
+F64 4.65× speedup vs F32 23.4× speedup:
+- F64 was already working "OK" at forloop=1 (ΔGPU 13.9 GB, within card's 24 GB). forloop=2 gives a modest memory-blocking win.
+- F32 at forloop=1 was 2× slower than F64 — suggesting it was hitting a performance cliff (possibly TensorOperations GPU F32 path spilling or falling back to slow kernels at those intermediate sizes). forloop=2 brings intermediate sizes below that cliff, restoring the expected F32 throughput advantage.
+
+### Implication for the experiment
+
+**The "polish + inner_etype=Float32" approach DOES deliver GPU speedup — but only with `forloop_iter ≥ 2`.**
+
+- At D=4 χ=128 RTX 4090 with forloop=2: **F32/coarse=2 = 67.7s vs F64 = 166.2s → 2.45× faster, |ΔE| = 1.7e-6** (within LBFGS-maxiter-cap tolerance).
+- The forloop=1 slowdown was an **implementation-specific pathology**, not a fundamental limit of the approach.
+- Memory usage is comparable (both arms ~20 GB), so the win is purely throughput.
+
+This also has a practical implication: **production GPU runs at D≥4 should default to `forloop_iter ≥ 2`**, regardless of whether `inner_etype` is set. The forloop parameter was introduced for MPI/memory, but acts as a performance tuning knob at large (D, χ) on single-GPU.
