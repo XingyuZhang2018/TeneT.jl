@@ -79,4 +79,12 @@ QR-based Corner Transfer Matrix algorithm.
     ifparallel::Bool = false
     ifcheckpoint::Bool = false
     forloop_iter::Int = 1
+
+    # Mixed-precision fields (same semantics as VUMPS; see VUMPS struct doc).
+    # QRCTM doesn't use simple_eig, so simple_eig_polish_steps is functionally
+    # inactive but kept for API symmetry.
+    inner_etype::Union{Nothing, Type} = nothing
+    inner_etype_final_steps::Int = 0
+    simple_eig_polish_steps::Int = 0
+    whole_vumps_etype::Union{Nothing, Type} = nothing
 end
