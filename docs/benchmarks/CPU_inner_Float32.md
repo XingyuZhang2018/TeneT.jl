@@ -518,3 +518,27 @@ Potential reasons:
 **Still an open question**: at even larger (D, χ) the F32 advantage might manifest.
 On data-center GPUs (H100, A100) where F64 isn't throttled, the picture would also differ.
 Both are out of scope for Phase-1.
+
+### Diagnostic: F64 throttle is NOT the bottleneck at D=4 χ=128
+
+Added `F32/coarse=1 forloop=1 clean` to the sweep:
+
+| polish config | wall (s) | F64 AD iters / 4 | \|ΔE\| |
+|---|---:|---:|---:|
+| F64 pure | 151.5 | 4 | — |
+| F32/coarse=2 | 147.2 | 2 | 6.6e-7 |
+| F32/coarse=1 | 144.1 | 1 | 1.6e-6 |
+
+Reducing F64 AD iters from 4 → 2 → 1 saves only **~4s per step** (~3% per F64 iter removed).
+If consumer-GPU F64 throttle (1/64 F32 on RTX 4090) were the bottleneck, each removed F64
+AD iter would save tens of seconds. It doesn't.
+
+**Conclusion:** the time at D=4 χ=128 on RTX 4090 is NOT spent in Float64 @tensor contractions.
+Most wall-clock goes to:
+- LBFGS linesearch forward passes (re-runs forward many times per step)
+- Zygote pullback traversal through the VUMPS AD graph
+- CUDA kernel launch + host-side dispatch overhead
+- Checkpointing's forward re-computation in backward
+
+The F32 inner optimization reduces kernel *compute* time but kernel compute is a small fraction
+of wall. Net result: no meaningful wall-clock improvement from F32.

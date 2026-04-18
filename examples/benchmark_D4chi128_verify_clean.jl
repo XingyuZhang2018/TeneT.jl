@@ -3,10 +3,11 @@
 # contamination.
 #
 # Usage:
-#   julia examples/benchmark_D4chi128_verify_clean.jl <f64|f32> <forloop_iter>
+#   julia examples/benchmark_D4chi128_verify_clean.jl <f64|f32> <forloop_iter> [polish_steps]
 # e.g.
 #   julia examples/benchmark_D4chi128_verify_clean.jl f64 1
-#   julia examples/benchmark_D4chi128_verify_clean.jl f32 2
+#   julia examples/benchmark_D4chi128_verify_clean.jl f32 2        # coarse=2 (default)
+#   julia examples/benchmark_D4chi128_verify_clean.jl f32 1 1      # coarse=1
 
 using TeneT, OptimKit, LinearAlgebra, Random, Zygote, Printf, CUDA, Dates
 
@@ -15,12 +16,17 @@ function gpu_used_bytes()
 end
 
 function main()
-    @assert length(ARGS) == 2 "Usage: julia ... <f64|f32> <forloop_iter>"
+    @assert length(ARGS) >= 2 "Usage: julia ... <f64|f32> <forloop_iter> [polish_steps]"
     precision_arg = lowercase(ARGS[1])
     forloop_iter = parse(Int, ARGS[2])
     @assert precision_arg in ("f64", "f32") "precision must be f64 or f32"
     inner_etype = precision_arg == "f32" ? Float32 : nothing
-    polish_steps = inner_etype === nothing ? 0 : 2
+    # Default polish_steps=2 for f32, 0 for f64. Override with ARGS[3].
+    polish_steps = if length(ARGS) >= 3
+        parse(Int, ARGS[3])
+    else
+        inner_etype === nothing ? 0 : 2
+    end
 
     D, χ = 4, 128
     seed = 42
@@ -43,7 +49,9 @@ function main()
     model = Heisenberg(lattice=Square(), S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
                        ifrotate=true, couplingtype=:uniform, bondratio=1.0)
     inner_etype_final_steps = polish_steps
-    tag = "clean_" * precision_arg * "_fl" * string(forloop_iter)
+    tag = "clean_" * precision_arg *
+          (inner_etype === nothing ? "" : "_c" * string(polish_steps)) *
+          "_fl" * string(forloop_iter)
     folder = joinpath(pkgdir(TeneT), "data/bench_D4chi128/$tag/s$(seed)/")
 
     boundary_alg = VUMPS{C4v}(; ifsimple_eig=true, ifparallel=false, ifcheckpoint=true,
