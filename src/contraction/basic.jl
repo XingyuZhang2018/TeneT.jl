@@ -23,6 +23,16 @@ function _downcast_eltype(T::Type, A)
     end
 end
 
+# Specialization for StructArray: broadcast cast over the underlying data.
+# `eltype(S::StructArray) = Any` so we cannot rely on the generic branch, and
+# `T.(S)` fails because StructArray does not implement Broadcast. Cast every
+# unique data entry and rebuild the StructArray with the same pattern.
+_downcast_eltype(::Nothing, S::StructArray) = S
+function _downcast_eltype(T::Type, S::StructArray)
+    new_data = [_downcast_eltype(T, d) for d in S.data]
+    return StructArray(new_data, S.pattern)
+end
+
 ALCtoAC_map(AL::leg3, C) = @tensor result[a,b,d] := AL[a,b,c] * C[c,d]
 ALCtoAC_map(AL::leg4, C) = @tensor result[a,b,c,e] := AL[a,b,c,d] * C[d,e]
 CTtoT(C, T::leg3) = @tensor T[a,c,d] := C[a,b] * T[b,c,d]
