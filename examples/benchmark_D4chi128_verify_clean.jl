@@ -3,11 +3,13 @@
 # contamination.
 #
 # Usage:
-#   julia examples/benchmark_D4chi128_verify_clean.jl <f64|f32> <forloop_iter> [polish_steps]
+#   julia examples/benchmark_D4chi128_verify_clean.jl <f64|f32|whole> <forloop_iter> [polish_steps]
 # e.g.
 #   julia examples/benchmark_D4chi128_verify_clean.jl f64 1
-#   julia examples/benchmark_D4chi128_verify_clean.jl f32 2        # coarse=2 (default)
+#   julia examples/benchmark_D4chi128_verify_clean.jl f32 2        # coarse=2 (default, inner_etype)
 #   julia examples/benchmark_D4chi128_verify_clean.jl f32 1 1      # coarse=1
+#   julia examples/benchmark_D4chi128_verify_clean.jl whole 1      # whole-VUMPS F32, coarse=2
+#   julia examples/benchmark_D4chi128_verify_clean.jl whole 1 1    # whole-VUMPS F32, coarse=1
 
 using TeneT, OptimKit, LinearAlgebra, Random, Zygote, Printf, CUDA, Dates
 
@@ -16,16 +18,21 @@ function gpu_used_bytes()
 end
 
 function main()
-    @assert length(ARGS) >= 2 "Usage: julia ... <f64|f32> <forloop_iter> [polish_steps]"
+    @assert length(ARGS) >= 2 "Usage: julia ... <f64|f32|whole> <forloop_iter> [polish_steps]"
     precision_arg = lowercase(ARGS[1])
     forloop_iter = parse(Int, ARGS[2])
-    @assert precision_arg in ("f64", "f32") "precision must be f64 or f32"
-    inner_etype = precision_arg == "f32" ? Float32 : nothing
-    # Default polish_steps=2 for f32, 0 for f64. Override with ARGS[3].
+    @assert precision_arg in ("f64", "f32", "whole") "precision must be f64|f32|whole"
+    # Mode decoding:
+    #   f64   → inner_etype=nothing, whole_vumps_etype=nothing (pure Float64)
+    #   f32   → inner_etype=Float32, whole_vumps_etype=nothing (per-call downcast)
+    #   whole → inner_etype=nothing, whole_vumps_etype=Float32 (state-level Float32)
+    inner_etype       = precision_arg == "f32"   ? Float32 : nothing
+    whole_vumps_etype = precision_arg == "whole" ? Float32 : nothing
+    precision_active  = inner_etype !== nothing || whole_vumps_etype !== nothing
     polish_steps = if length(ARGS) >= 3
         parse(Int, ARGS[3])
     else
-        inner_etype === nothing ? 0 : 2
+        precision_active ? 2 : 0
     end
 
     D, χ = 4, 128
@@ -36,10 +43,15 @@ function main()
             CUDA.name(CUDA.device()),
             CUDA.total_memory()/1e9,
             CUDA.available_memory()/1e9)
-    @printf("Setup: D=%d χ=%d seed=%d forloop=%d maxiter=%d  precision=%s polish=%d\n",
-            D, χ, seed, forloop_iter, maxiter_lbfgs,
-            inner_etype === nothing ? "Float64" : string(inner_etype),
-            polish_steps)
+    mode_label = if whole_vumps_etype !== nothing
+        "whole_vumps_" * string(whole_vumps_etype)
+    elseif inner_etype !== nothing
+        "inner_" * string(inner_etype)
+    else
+        "Float64"
+    end
+    @printf("Setup: D=%d χ=%d seed=%d forloop=%d maxiter=%d  mode=%s polish=%d\n",
+            D, χ, seed, forloop_iter, maxiter_lbfgs, mode_label, polish_steps)
 
     Random.seed!(seed)
     CUDA.seed!(seed)
@@ -50,7 +62,7 @@ function main()
                        ifrotate=true, couplingtype=:uniform, bondratio=1.0)
     inner_etype_final_steps = polish_steps
     tag = "clean_" * precision_arg *
-          (inner_etype === nothing ? "" : "_c" * string(polish_steps)) *
+          (precision_active ? "_c" * string(polish_steps) : "") *
           "_fl" * string(forloop_iter)
     folder = joinpath(pkgdir(TeneT), "data/bench_D4chi128/$tag/s$(seed)/")
 
@@ -61,7 +73,8 @@ function main()
                               show_every=10, tol=1e-10, verbosity=1,
                               inner_etype=inner_etype,
                               inner_etype_final_steps=inner_etype_final_steps,
-                              simple_eig_polish_steps=0)
+                              simple_eig_polish_steps=0,
+                              whole_vumps_etype=whole_vumps_etype)
     params = GradientOptimize(; model=model, pattern=pattern,
                               boundary_alg=boundary_alg,
                               optimizer=LBFGS(200; maxiter=maxiter_lbfgs, verbosity=1,
@@ -104,10 +117,16 @@ function main()
             println(io, "|-----------|---------|----------|---------|---------|-----------|")
         end
     end
+    row_label = if whole_vumps_etype !== nothing
+        "wholeF32/coarse=$polish_steps"
+    elseif inner_etype !== nothing
+        "innerF32/coarse=$polish_steps"
+    else
+        "Float64"
+    end
     open(summary_path, "a") do io
         @printf(io, "| %s | %d | %.1f | %.12f | %d | %.0f |\n",
-                inner_etype === nothing ? "Float64" : "Float32/coarse=$polish_steps",
-                forloop_iter, wall, result[2], size(result[5], 1) - 1,
+                row_label, forloop_iter, wall, result[2], size(result[5], 1) - 1,
                 (gpu_after - gpu_before)/1e6)
     end
 end

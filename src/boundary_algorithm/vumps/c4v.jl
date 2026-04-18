@@ -93,10 +93,31 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     M = M[1]
     local err
 
+    # Whole-VUMPS precision mode (alternative to `inner_etype`):
+    # pre-cast rt and M to alg.whole_vumps_etype; run whole VUMPS (FLmap, QR,
+    # norm, eigsolve, ...) in that precision; polish iters cast back to original.
+    T_orig = eltype(rt.AL)
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        rt = C4vVUMPSEnv(_downcast_eltype(W, rt.AL),
+                         _downcast_eltype(W, rt.C),
+                         _downcast_eltype(W, rt.FL))
+        M  = _downcast_eltype(W, M)
+    end
+    # For whole-VUMPS mode we pass alg with inner_etype=nothing (FLmap should
+    # run natively on the already-downcasted tensors, no per-call conversion).
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+        alg_wholemode.simple_eig_polish_steps = 0
+    end
+
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start C4v VUMPS iteration without AD...")
     ignore_derivatives() do
         for i in 1:alg.maxiter
-        rt, err = vumps_step(rt, M, alg)
+        rt, err = vumps_step(rt, M, alg_wholemode)
         alg.verbosity >= 3 && i % alg.show_every == 0 &&
             ignore_derivatives(() -> @info @sprintf("C4vVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
@@ -111,26 +132,36 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     end
 
     ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
-    alg_ad = deepcopy(alg)
+    alg_ad = deepcopy(alg_wholemode)
     alg_ad.power_iter = alg.power_iter_ad
     alg_ad.simple_eig_polish_steps = 0   # fine polish fires only on the LAST AD iter via alg_ad_fine
-    # Mixed-precision polish variants (activate only when alg.inner_etype !== nothing):
-    #  - Coarse: final N AD iters drop inner_etype to nothing → full Float64 for those iters.
-    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0 → last N power iters
-    #            of simple_eig use Float64 while the rest of the iter stays Float32.
-    # If both are set, coarse takes precedence on the overlapping iters (stronger polish).
+    # Mixed-precision polish variants (activate only when mixed-precision mode is on):
+    #  - Coarse: final N AD iters run in ORIGINAL precision (Float64).
+    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0.
+    # If both set, coarse takes precedence.
     alg_ad_coarse = deepcopy(alg_ad)
     alg_ad_coarse.inner_etype = nothing
     alg_ad_fine = deepcopy(alg_ad)
     alg_ad_fine.simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Is ANY mixed-precision mode active that the polish machinery should react to?
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
     for i in 1:alg.maxiter_ad
         alg_this_iter = alg_ad
-        if alg.inner_etype !== nothing
-            if alg.inner_etype_final_steps > 0 && i > alg.maxiter_ad - alg.inner_etype_final_steps
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active
+            if in_polish
                 alg_this_iter = alg_ad_coarse
             elseif alg.simple_eig_polish_steps > 0 && i == alg.maxiter_ad
                 alg_this_iter = alg_ad_fine
             end
+        end
+        # For whole-VUMPS mode: on the FIRST polish iter, cast rt and M back to T_orig.
+        if want_whole && in_polish && eltype(rt.AL) != T_orig
+            rt = C4vVUMPSEnv(_downcast_eltype(real(T_orig), rt.AL),
+                             _downcast_eltype(real(T_orig), rt.C),
+                             _downcast_eltype(real(T_orig), rt.FL))
+            M = _downcast_eltype(real(T_orig), M)
         end
         rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
@@ -141,6 +172,14 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
         if i == alg.maxiter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("C4vVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
+    end
+    # Exit guard: if whole-VUMPS mode is active and we never hit polish (e.g.
+    # inner_etype_final_steps==0 or early break before polish started), cast
+    # rt back to original precision so downstream AD flows correctly.
+    if want_whole && eltype(rt.AL) != T_orig
+        rt = C4vVUMPSEnv(_downcast_eltype(real(T_orig), rt.AL),
+                         _downcast_eltype(real(T_orig), rt.C),
+                         _downcast_eltype(real(T_orig), rt.FL))
     end
     return rt, err
 end

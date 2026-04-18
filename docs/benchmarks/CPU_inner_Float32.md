@@ -542,3 +542,51 @@ Most wall-clock goes to:
 
 The F32 inner optimization reduces kernel *compute* time but kernel compute is a small fraction
 of wall. Net result: no meaningful wall-clock improvement from F32.
+
+### Whole-VUMPS Float32 mode (boundary ii): tests state-level F32
+
+Added `VUMPS.whole_vumps_etype::Union{Nothing,Type}=nothing`. When set (e.g. to Float32),
+`leading_boundary` casts `rt` and `M` to that precision at entry and runs the whole
+vumps_step (FLmap, QR, norm, eigsolve, ...) in it. The last `inner_etype_final_steps`
+AD iters cast back to the original precision for polish.
+
+**Implementation note:** required fixing the `qrpos`/`qr_for_ad`/`lqpos` rrules — they
+had a hardcoded `I * 1e-12` regularization term that promoted Float32 operands to
+Float64 mid-backward, triggering scalar-indexing fallbacks. Changed to
+`I * real(T)(1e-12)` to match input eltype.
+
+**Clean D=4 χ=128 RTX 4090 result, forloop=1, coarse=2 polish:**
+
+| mode | wall (s) | ΔGPU (MB) | \|ΔE\| vs F64 |
+|---|---:|---:|---:|
+| pure Float64 | 151.5 | 14013 | — |
+| innerF32/coarse=2 (per-call downcast) | 147.2 | 17536 | 6.6e-7 |
+| **wholeF32/coarse=2 (state-level F32)** | **157.3** | **13678** | **1.65e-5** |
+
+**Three-way tradeoff:**
+1. **Memory**: wholeF32 saves **3.8 GB (22%) vs innerF32** — the per-call downcast buffers
+   inside innerF32 were a real memory cost, and wholeF32 eliminates them entirely.
+2. **Time**: wholeF32 is **4% slower than innerF32, ~4% slower than F64** — no wall-clock
+   benefit. Expected savings from removing per-FLmap downcast didn't materialize; the
+   F32 QR/norm/eigsolve host-side launch overhead cancels out the saved conversions.
+3. **Precision**: wholeF32 is **25× less accurate than innerF32/coarse=2** (1.65e-5 vs
+   6.6e-7). Root cause: in wholeF32 the state tensors AL/FL/C are stored as F32 between
+   steps, so Float32 noise ACCUMULATES over 3 warmup + 2 F32 AD iters before polish
+   has a chance to correct. In innerF32 the state is always F64; only the @tensor
+   contraction output carries F32-scale error for microseconds before being re-stored.
+
+**When is wholeF32 useful?**
+- Memory-constrained scenarios where the 22% savings lets you fit a larger (D, χ) that
+  otherwise OOMs. Precision loss (1.65e-5) is acceptable if L4 optimization hasn't
+  converged to gradtol anyway (which is the case for D=3+ at maxiter_lbfgs≤20-50).
+- As a diagnostic for "where does time go": confirms that the VUMPS kernel compute is
+  NOT the bottleneck on consumer GPU at D=4 χ=128 — both F32 and F64 paths hit the
+  same ~147-157s wall-clock floor dominated by LBFGS + Zygote + host-side overhead.
+
+**When is wholeF32 NOT useful?**
+- When accuracy matters and LBFGS would converge to gradtol: the 25× precision penalty
+  directly affects final energy and convergence behavior.
+- When wall-clock is the goal: innerF32/coarse=2 is slightly faster.
+
+The **innerF32/coarse=2** remains the best default for precision; **wholeF32/coarse=2**
+is a memory-pressure relief valve.

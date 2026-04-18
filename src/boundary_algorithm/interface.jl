@@ -32,6 +32,12 @@ C4v
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0
     simple_eig_polish_steps::Int = 0
+    # When set (e.g. Float32), leading_boundary converts rt/M to this precision
+    # at entry and runs the WHOLE VUMPS step (FLmap, QR, norm, eigsolve, ...) in
+    # it. Polish iters (inner_etype_final_steps) convert rt back to original
+    # precision. Alternative to `inner_etype` which only affects @tensor inside
+    # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
+    whole_vumps_etype::Union{Nothing, Type} = nothing
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)

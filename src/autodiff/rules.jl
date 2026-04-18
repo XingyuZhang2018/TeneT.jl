@@ -44,12 +44,13 @@ end
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
 function ChainRulesCore.rrule(::typeof(qr_for_ad), A::AbstractArray{T,2}) where {T}
     Q, R = qr_for_ad(A)
+    ε = real(T)(1e-12)   # eltype-matched regularization to avoid Float64 upcast on F32 inputs
     function back((dQ, dR))
         dA = @thunk begin
             _dQ = unthunk(dQ)
             _dR = unthunk(dR)
             M = R * _dR' - _dQ' * Q
-            _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)')
+            _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * ε)')
         end
         return NoTangent(), dA
     end
@@ -58,12 +59,13 @@ end
 
 function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     Q, R = qrpos(A)
+    ε = real(T)(1e-12)
     function back((dQ, dR))
         dA = @thunk begin
             _dQ = unthunk(dQ)
             _dR = unthunk(dR)
             M = R * _dR' - _dQ' * Q
-            _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * 1e-12)')
+            _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * ε)')
         end
         return NoTangent(), dA
     end
@@ -72,12 +74,13 @@ end
 
 function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     L, Q = lqpos(A)
+    ε = real(T)(1e-12)
     function back((dL, dQ))
         dA = @thunk begin
             _dL = unthunk(dL)
             _dQ = unthunk(dQ)
             M = L' * _dL - _dQ * Q'
-            _arraytype(A)(LowerTriangular(L + I * 1e-12)' \ (_dQ + Hermitian(M, :L) * Q))
+            _arraytype(A)(LowerTriangular(L + I * ε)' \ (_dQ + Hermitian(M, :L) * Q))
         end
         return NoTangent(), dA
     end
