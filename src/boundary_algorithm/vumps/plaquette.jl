@@ -227,7 +227,9 @@ function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaqu
                                        _downcast_eltype(real(T_orig), rt.FL))
             M = _downcast_eltype(real(T_orig), M)
         end
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
+        rt, err = alg.ifoffload_step ? checkpoint_offload(vumps_step, rt, M, alg_this_iter) :
+                  alg.ifcheckpoint    ? checkpoint(vumps_step, rt, M, alg_this_iter) :
+                                        vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))

@@ -21,6 +21,23 @@ permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
 permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
+# ── Offload-friendly simple_eig wrappers ────────────────────────────
+# These accept the big neighbourhood tensors as explicit args so that
+# `checkpoint_offload` can move them to host memory during the backward
+# re-compute on GPU runs.
+function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, forloop_iter)
+    f(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter)
+    return simple_eig(f, FLij; power_iter)
+end
+function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel, forloop_iter)
+    f(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter)
+    return simple_eig(f, FRiNj; power_iter)
+end
+function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter)
+    f(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter)
+    return simple_eig(f, AC1j; power_iter)
+end
+
 # ── Helpers ──────────────────────────────────────────────────────────
 """
     λs[1], Fs[1] = selectpos(λs, Fs, N)
@@ -219,9 +236,15 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
             f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype)
             f_polish(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λLs, FLi1s = polish_fine ?
-                    simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
-                    simple_eig(f, FL[i, 1]; power_iter)
+                # NOTE: ifoffload_eig is mutually exclusive with polish_fine and inner_etype
+                # (the `_simple_eig_FLmap` helper doesn't thread those kwargs through).
+                if alg.ifoffload_eig
+                    λLs, FLi1s = checkpoint_offload(_simple_eig_FLmap, FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :]; power_iter, ifparallel, forloop_iter)
+                elseif polish_fine
+                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                else
+                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
+                end
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
@@ -283,9 +306,13 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
             f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype)
             f_polish(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λRs, FR1s = polish_fine ?
-                    simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
-                    simple_eig(f, FR[i, Nj]; power_iter)
+                if alg.ifoffload_eig
+                    λRs, FR1s = checkpoint_offload(_simple_eig_FRmap, FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj; power_iter, ifparallel, forloop_iter)
+                elseif polish_fine
+                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                else
+                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
+                end
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
@@ -467,9 +494,13 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
             f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype)
             f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                λACs, ACs = polish_fine ?
-                    simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
-                    simple_eig(f, AC[1, j]; power_iter)
+                if alg.ifoffload_eig
+                    λACs, ACs = checkpoint_offload(_simple_eig_ACmap, AC[1, j], FL[:, j], FR[:, j], M[:, j]; power_iter, ifparallel, forloop_iter)
+                elseif polish_fine
+                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                else
+                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
+                end
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
@@ -846,7 +877,9 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
                               _downcast_eltype(real(T_orig), rt.FR))
             M = _downcast_eltype(real(T_orig), M)
         end
-        rt, err = alg.ifcheckpoint ? checkpoint(vumps_step, rt, M, alg_this_iter) : vumps_step(rt, M, alg_this_iter)
+        rt, err = alg.ifoffload_step ? checkpoint_offload(vumps_step, rt, M, alg_this_iter) :
+                  alg.ifcheckpoint    ? checkpoint(vumps_step, rt, M, alg_this_iter) :
+                                        vumps_step(rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
