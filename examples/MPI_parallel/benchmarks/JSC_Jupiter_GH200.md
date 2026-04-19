@@ -114,3 +114,35 @@ export CUDA_LAUNCH_BLOCKING=1
 
 Float32 mixed-precision may still benefit consumer GPUs or systems with
 significantly lower FP64 throughput.
+
+## Feature Comparison (D=10 χ=400, 4 GPU, Plaquette VUMPS, with checkpoint)
+
+Exhaustive sweep of new features: `whole_vumps_etype` (whole-VUMPS Float32),
+`ifoffload_eig` (fine-grain host-memory offload of eigen-solver states),
+`ifoffload_step` (coarse-grain offload of full VUMPS step checkpoints).
+
+| Config | Forward | fg | gnorm | Status |
+|--------|---------|-----|-------|--------|
+| baseline (Float64)    | 17.1s | 304s    | 0.01150 | ✓ reference |
+| whole_f32             | 20s   | 271-275s | **1e18** | BROKEN (AD) |
+| offload_eig           | 17s   | 302-304s | 0.01150 | ✓ zero overhead |
+| offload_step          | 17s   | 318-326s | 0.01150 | ✓ 4-7% overhead |
+| offload_both          | 17s   | 327-329s | 0.01150 | ✓ 8% overhead |
+| whole_f32_offload     | 20s   | 283-286s | **1e18** | BROKEN (AD) |
+
+**Findings**:
+- **`ifoffload_eig` is free on GH200** — matches baseline 304s within noise.
+  Pure VRAM savings, recommended whenever VRAM is constrained.
+- **`ifoffload_step` costs 4-7%** for additional VRAM savings on top of `ifoffload_eig`.
+  Worthwhile when pushing χ to the VRAM limit.
+- **`ifoffload_both` costs ~8%** (stacks the two offload modes).
+- **`whole_vumps_etype=Float32` has broken AD**: forward energy is correct to 1e-10,
+  but backward `gnorm` explodes to ~1e18 (should be ~0.01150). Same bug appears in
+  `whole_f32_offload`. Forward-only speed is ~19% faster (20s vs 17.1s is misleading;
+  actually the f32 fwd is faster per-iter but whole fg is only marginally faster because
+  AD backward is unusable). **Upstream bug — do not use until fixed.**
+- **Recommendation on GH200**:
+  - Default: Float64, no offload.
+  - VRAM-constrained: enable `ifoffload_eig=true` (free).
+  - Extreme VRAM-constrained: add `ifoffload_step=true` (4-7% slowdown).
+  - Do NOT enable `whole_vumps_etype=Float32` until AD is fixed.
