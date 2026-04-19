@@ -99,3 +99,18 @@ export CUDA_LAUNCH_BLOCKING=1
 - **UCX_TLS excludes cuda_ipc and gdr_copy**: Incompatible with `CUDA_VISIBLE_DEVICES` isolation.
 - **NVHPC system cuBLAS crashes**: `JULIA_CUDA_USE_BINARYBUILDER=false` causes `CUBLAS_STATUS_INVALID_VALUE` in VUMPS. Use CUDA.jl artifacts instead.
 - **GPFS O_TMPFILE**: First-time `Pkg.instantiate()` fails. Workaround: `JULIA_DEPOT_PATH=/tmp/julia_depot:$HOME/.julia`.
+
+## Mixed-Precision Test (D=10 χ=400, 4 GPU)
+
+| inner_etype | polish | Forward | fg | energy diff |
+|-------------|--------|---------|-----|-------------|
+| Float64     | —      | 17.1s   | 304s | baseline   |
+| Float32     | 2      | 24.0s (+41%) | 330s (+8%) | 3e-14 |
+
+**Finding**: Mixed-precision (Float32 inner_etype) is SLOWER on GH200, not faster.
+- GH200 has high FP64 throughput (tensor cores), so Float32 speedup is minimal
+- Per-call Float64↔Float32 conversion overhead exceeds computation savings
+- Recommendation: use default Float64 on GH200/H100-class GPUs
+
+Float32 mixed-precision may still benefit consumer GPUs or systems with
+significantly lower FP64 throughput.
