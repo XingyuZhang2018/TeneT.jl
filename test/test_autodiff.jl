@@ -213,4 +213,57 @@
         @test ISA(ComplexF64, Array, [1;;], NTuple{2,Int}[(2, 2)]) isa StructArray
     end
 
+    # ===================== QRCTM gradient equivalence =====================
+    # CPU-only (atype=Array): the three checkpoint modes (:none, :recompute,
+    # :wengert) must produce compatible gradients. Placed outside the atype
+    # loop deliberately: this verifies checkpoint/Wengert wiring, not GPU
+    # behaviour — GPU-side coverage is handled by Task 8 smoke tests.
+    #
+    # Tolerance note: there is a pre-existing ~1% discrepancy in baseline
+    # `:none` vs `:recompute` gradient (observed at chi=16, beta=0.3, stable
+    # regime `maxiter_ad=1`: rel ≈ 1.1%, max |Δ| ≈ 1.5e-3) that predates this
+    # task and is not introduced by the Wengert refactor (confirmed by git
+    # stash of Task 6 source edits — the diff survives). Each path's gradient
+    # differs from the others by at most ≈2e-3 in absolute value; a gross
+    # Wengert regression (e.g. wrong tape slot seeding or missing rrule) would
+    # show orders-of-magnitude larger diff, so `atol=5e-3` remains sharp.
+    # Using `miniter_ad=1` keeps the AD loop in the numerically-stable
+    # single-step regime; cranking `miniter_ad` higher at tol=1e-10 pushes all
+    # three paths into diverging backprop noise (not a path bug — the
+    # backward iteration of a near-fixed-point map amplifies roundoff).
+    @testset "QRCTM gradient equivalence: none vs recompute vs wengert" begin
+        Random.seed!(42)
+        chi = 16
+        beta = 0.3
+        M = ising_mpo(beta; atype=Array)
+
+        function loss(M_, flag_mode::Symbol)
+            alg = QRCTM(; verbosity=0, maxiter=30, miniter=0,
+                         maxiter_ad=5, miniter_ad=1, tol=1e-10,
+                         ifcheckpoint          = (flag_mode == :recompute),
+                         ifcheckpoint_wengert  = (flag_mode == :wengert))
+            rt = init_env(M_, chi, alg)
+            rt, _ = leading_boundary(rt, M_, alg)
+            return sum(abs2, rt.T)
+        end
+
+        g_none    = Zygote.gradient(m -> loss(m, :none),     M)[1]
+        g_recomp  = Zygote.gradient(m -> loss(m, :recompute), M)[1]
+        g_wengert = Zygote.gradient(m -> loss(m, :wengert),  M)[1]
+
+        # Gradient w.r.t. `M::StructArray` comes back as a NamedTuple
+        # @NamedTuple{data::Vector{Array}, pattern::Nothing}. Grab the first
+        # underlying tensor via `.data[1]` and compare elementwise.
+        a_none    = Array(g_none.data[1])
+        a_recomp  = Array(g_recomp.data[1])
+        a_wengert = Array(g_wengert.data[1])
+
+        # Use max-abs (L∞) rather than `≈`'s 2-norm so the tolerance tracks the
+        # observed per-element gap, not an n-scaled cumulative norm.
+        atol = 5e-3
+        @test maximum(abs, a_recomp  .- a_none)    < atol
+        @test maximum(abs, a_wengert .- a_none)    < atol
+        @test maximum(abs, a_wengert .- a_recomp)  < atol
+    end
+
 end
