@@ -331,10 +331,10 @@ function Mmap(AC, ACd, FL, FR)
     return result
 end
 function Mumap(AC, ACd, FL, FR, Mu)
-    @tensor result[f,k,h,c,p] := AC[a,b,c,d] * FR[d,g,h,l] * FL[a,e,f,i] * ACd[i,j,k,l] * Mu[e,j,g,b,p]
+    @tensor result[f,k,h,c,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Mu[e,j,g,b,p])
     return result
 end
 function Mdmap(AC, ACd, FL, FR, Md)
-    @tensor result[e,j,g,b,p] := AC[a,b,c,d] * FR[d,g,h,l] * FL[a,e,f,i] * ACd[i,j,k,l] * Md[f,k,h,c,p]
+    @tensor result[e,j,g,b,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Md[f,k,h,c,p])
     return result
 end
