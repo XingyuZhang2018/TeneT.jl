@@ -2,12 +2,12 @@ function save_rt(folder, rt; file::String)
     p = joinpath(folder, file)
     rt_save = Array(rt)
     @info "save a $(typeof(rt)) environment to $p"
-    save(p, "rt", rt_save)
+    save(p, "rt", rt_save; iotype=IOStream)
 end
 
 function load_rt(folder, atype, ifparallelupdown=false; file::String)
     p = joinpath(folder, file)
-    rt = load(p, "rt")
+    rt = load(p, "rt"; iotype=IOStream)
     if ifparallelupdown
         rtup, rtdown = rt
         @sync begin

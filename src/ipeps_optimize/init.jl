@@ -31,7 +31,7 @@ function init_ipeps(; atype=Array, etype=Float64, No::Int=0, D::Int, χ::Int, pa
     if No != 0
         file = joinpath(params.folder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
         @info "load ipeps from file: $file"
-        A = load(file, "bcipeps")
+        A = load(file, "bcipeps"; iotype=IOStream)
     else
         lattice = params.model.lattice
         d = Int(2*params.model.S + 1)
@@ -71,7 +71,7 @@ into a larger tensor (using SU parameterization for the existing part).
 """
 function init_ipeps_SU(; atype=Array, No, D::Int, D_new::Int, χ::Int, params::iPEPSOptimize)
     file = joinpath(params.folder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
-    A = load(file, "bcipeps")
+    A = load(file, "bcipeps"; iotype=IOStream)
     d = size(A, 5)
     params.verbosity >= 2 && @info "load ipeps from $file"
 
@@ -101,7 +101,7 @@ tensor, filling the new entries with a small random perturbation of magnitude
 """
 function init_ipeps_perturbation(; atype=Array, No, D::Int, D_new::Int, χ::Int, ϵ=1e-1, params::iPEPSOptimize)
     file = joinpath(params.folder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
-    A = load(file, "bcipeps")
+    A = load(file, "bcipeps"; iotype=IOStream)
     params.verbosity >= 2 && @info "load ipeps from $file"
 
     # Preserve the original tensor shape per bond dimension
@@ -121,7 +121,7 @@ end
 
 function init_ipeps_from_1x1(;atype = Array, etype=ComplexF64, No, pattern, χ::Int, D::Int, ϵ::Real=1e-1, infolder)
     file = joinpath(infolder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
-    A = load(file, "bcipeps")
+    A = load(file, "bcipeps"; iotype=IOStream)
     @info "load ipeps from $file"
     d = size(A, 5)
     A′ = zeros(etype, D,D,D,D,d, length(unique(pattern)))

@@ -62,7 +62,7 @@ end
 # Save LBFGS state to file
 function save_lbfgs_state(alg, state::LBFGSState, filename::String="lbfgs_state.jld2")
     try
-        save(filename, "state", state)  
+        save(filename, "state", state; iotype=IOStream)
         alg.verbosity >= 2 && @info "LBFGS state saved to $filename"
         return true
     catch e
@@ -74,7 +74,7 @@ end
 # Load LBFGS state from file
 function load_lbfgs_state(alg, filename::String="lbfgs_state.jld2")
     try
-        state = load(filename, "state")
+        state = load(filename, "state"; iotype=IOStream)
         alg.verbosity >= 2 && @info "LBFGS state loaded from $filename"
         return state
     catch e
