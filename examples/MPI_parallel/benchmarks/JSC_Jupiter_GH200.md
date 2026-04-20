@@ -146,3 +146,45 @@ Exhaustive sweep of new features: `whole_vumps_etype` (whole-VUMPS Float32),
   - VRAM-constrained: enable `ifoffload_eig=true` (free).
   - Extreme VRAM-constrained: add `ifoffload_step=true` (4-7% slowdown).
   - Do NOT enable `whole_vumps_etype=Float32` until AD is fixed.
+
+## Parallel-level Mixed-Precision (D=10 χ=400, Plaquette VUMPS, with checkpoint)
+
+Branch `feat/parallel-level-mixed-precision` (commit `ee048bc`) moves the
+`inner_etype` Float32 cast from every FLmap/ACmap kernel call to the
+`parallel()` / `forloop()` boundary. Cast happens once per parallel() call;
+MPI allgatherv/allreduce travel in Float32 (2× bandwidth).
+
+| GPU | Prec | Forward | fg | gnorm | fg vs F64 |
+|-----|------|---------|-----|-------|-----------|
+| 1 | F64 | 59.8s | 849s | 0.011496 | — |
+| 1 | F32 | 72.1s (+20%) | 833s | 0.011496 | **-2%** ✓ |
+| 2 | F64 | 35.4s | 531s | 0.011496 | — |
+| 4 | F64 | 17.0s | 304s | 0.011496 | — |
+| 4 | F32 | 21.1s (+24%) | **298s** | 0.011496 | **-2%** ✓ |
+
+**Comparison old kernel-level F32 vs new parallel-level F32 (4 GPU):**
+
+| Approach | Forward | fg | AD |
+|----------|---------|-----|-----|
+| kernel-level (commit `a15c18f`) | 24.0s (+41%) | 330s (+8%) | ✓ |
+| **parallel-level (commit `ee048bc`)** | **21.1s (+24%)** | **298s (-2%)** | ✓ |
+
+**Findings**:
+- **AD correctness preserved**: gnorm = 0.011496 matches F64 baseline
+  to ~1e-8, unlike `whole_vumps_etype=Float32` which explodes to 1e18.
+- **fg turns net-positive**: +8% overhead → -2% speedup by moving cast
+  to boundary. Backward chain amortizes cast overhead better (longer
+  rrule nesting + F32 MPI bandwidth savings on partial gradients).
+- **Forward still slower than F64** (+24%) but significantly better
+  than old kernel-level (+41%). GH200 FP64 tensor cores are fast enough
+  that F32 compute savings are marginal; cast memory bandwidth is a
+  real cost that can't fully hide.
+- **Per parallel() call cast count**: old = 2 × forloop_iter (=64 at
+  4 GPU, forloop_iter=32); new = 2. 32× reduction in casts.
+
+**Recommendation**:
+- For pure forward VUMPS (observable eval, no AD): keep F64.
+- For fg optimization workloads: enable `inner_etype=Float32` +
+  `inner_etype_final_steps=2` — 2% faster, gradient correct.
+- `whole_vumps_etype=Float32` remains broken (upstream AD bug).
+
