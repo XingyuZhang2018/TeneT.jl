@@ -105,6 +105,8 @@ struct CTMEnv{CT<:AbstractArray{<:Number,2}, ET<:Union{AbstractArray{<:Number,3}
     T::ET
 end
 
+Functors.@functor CTMEnv
+
 # ── GPU/CPU array conversions ────────────────────────────────────────
 Array(rt::VUMPSRuntime)    = VUMPSRuntime(Array(rt.AL), Array(rt.AR), Array(rt.C), Array(rt.FL), Array(rt.FR))
 CuArray(rt::VUMPSRuntime)  = VUMPSRuntime(CuArray(rt.AL), CuArray(rt.AR), CuArray(rt.C), CuArray(rt.FL), CuArray(rt.FR))

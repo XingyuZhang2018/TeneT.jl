@@ -1,3 +1,5 @@
+using TeneT: Functors
+
 @testset "types.jl & defaults.jl" begin
 
     # ---- Lattice type hierarchy ----
@@ -107,6 +109,16 @@
         @test q.ifparallel == false
         @test q.ifcheckpoint == false
         @test q.forloop_iter == 1
+    end
+
+    @testset "Functors CTMEnv" begin
+        C = rand(4, 4); T = rand(4, 2, 4)
+        env = CTMEnv(C, T)
+        children, re = Functors.functor(typeof(env), env)
+        @test children === (C = C, T = T) || (children.C === C && children.T === T)
+        env2 = re(children)
+        @test env2.C === env.C
+        @test env2.T === env.T
     end
 
 end

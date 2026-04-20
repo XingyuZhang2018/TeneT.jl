@@ -12,6 +12,7 @@ using TensorOperations
 using Zygote, ChainRulesCore, ForwardDiff
 using ChainRulesCore: ignore_derivatives
 import Wengert
+using Functors
 using KrylovKit, VectorInterface
 
 using OptimKit, LineSearches
