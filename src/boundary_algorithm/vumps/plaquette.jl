@@ -17,6 +17,17 @@ AC environment for plaquette mode.  Uses `FL` on both sides of the
 column transfer matrix (no FR).
 """
 function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
+    inner_etype = alg.inner_etype
+    # Env-level boundary cast — see leftenv for rationale.
+    T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        AC = _downcast_eltype(inner_etype, AC)
+        FL = _downcast_eltype(inner_etype, FL)
+        M  = _downcast_eltype(inner_etype, M)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
     Ni, Nj = size(M)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
@@ -25,10 +36,8 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     ifparallel = alg.ifparallel
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
-    inner_etype = alg.inner_etype
-    simple_eig_polish_steps = alg.simple_eig_polish_steps
-    # Fine polish: last `simple_eig_polish_steps` power iters use Float64 (inner_etype=nothing)
-    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
         p = AC.pattern[1,j]
         if L <: Plaquette{Square}
@@ -40,7 +49,7 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
 
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype)
+            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
             f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
                 λACs, ACs = polish_fine ?
@@ -57,13 +66,16 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         for i in 2:Ni
             p = AC.pattern[i,j]
             if p ∉ processed_indices
-                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; ifparallel, forloop_iter, inner_etype)
+                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
                 AC′[i,j] = ACij / norm(ACij)
                 λAC[i,j] = λAC[1,j]
                 push!(processed_indices, p)
                 length(processed_indices) == length(AC.data) && break
             end
         end
+    end
+    if do_env_cast
+        return copy(λAC), _downcast_eltype(real(T_orig), copy(AC′))
     end
     return copy(λAC), copy(AC′)
 end

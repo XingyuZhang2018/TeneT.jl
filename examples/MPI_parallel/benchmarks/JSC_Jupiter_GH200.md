@@ -114,3 +114,171 @@ export CUDA_LAUNCH_BLOCKING=1
 
 Float32 mixed-precision may still benefit consumer GPUs or systems with
 significantly lower FP64 throughput.
+
+## Feature Comparison (D=10 χ=400, 4 GPU, Plaquette VUMPS, with checkpoint)
+
+Exhaustive sweep of new features: `whole_vumps_etype` (whole-VUMPS Float32),
+`ifoffload_eig` (fine-grain host-memory offload of eigen-solver states),
+`ifoffload_step` (coarse-grain offload of full VUMPS step checkpoints).
+
+| Config | Forward | fg | gnorm | Status |
+|--------|---------|-----|-------|--------|
+| baseline (Float64)    | 17.1s | 304s    | 0.01150 | ✓ reference |
+| whole_f32             | 20s   | 271-275s | **1e18** | BROKEN (AD) |
+| offload_eig           | 17s   | 302-304s | 0.01150 | ✓ zero overhead |
+| offload_step          | 17s   | 318-326s | 0.01150 | ✓ 4-7% overhead |
+| offload_both          | 17s   | 327-329s | 0.01150 | ✓ 8% overhead |
+| whole_f32_offload     | 20s   | 283-286s | **1e18** | BROKEN (AD) |
+
+**Findings**:
+- **`ifoffload_eig` is free on GH200** — matches baseline 304s within noise.
+  Pure VRAM savings, recommended whenever VRAM is constrained.
+- **`ifoffload_step` costs 4-7%** for additional VRAM savings on top of `ifoffload_eig`.
+  Worthwhile when pushing χ to the VRAM limit.
+- **`ifoffload_both` costs ~8%** (stacks the two offload modes).
+- **`whole_vumps_etype=Float32` has broken AD**: forward energy is correct to 1e-10,
+  but backward `gnorm` explodes to ~1e18 (should be ~0.01150). Same bug appears in
+  `whole_f32_offload`. Forward-only speed is ~19% faster (20s vs 17.1s is misleading;
+  actually the f32 fwd is faster per-iter but whole fg is only marginally faster because
+  AD backward is unusable). **Upstream bug — do not use until fixed.**
+- **Recommendation on GH200**:
+  - Default: Float64, no offload.
+  - VRAM-constrained: enable `ifoffload_eig=true` (free).
+  - Extreme VRAM-constrained: add `ifoffload_step=true` (4-7% slowdown).
+  - Do NOT enable `whole_vumps_etype=Float32` until AD is fixed.
+
+## Parallel-level Mixed-Precision (D=10 χ=400, Plaquette VUMPS, with checkpoint)
+
+Branch `feat/parallel-level-mixed-precision` (commit `ee048bc`) moves the
+`inner_etype` Float32 cast from every FLmap/ACmap kernel call to the
+`parallel()` / `forloop()` boundary. Cast happens once per parallel() call;
+MPI allgatherv/allreduce travel in Float32 (2× bandwidth).
+
+| GPU | Prec | Forward | fg | gnorm | fg vs F64 |
+|-----|------|---------|-----|-------|-----------|
+| 1 | F64 | 59.8s | 849s | 0.011496 | — |
+| 1 | F32 | 72.1s (+20%) | 833s | 0.011496 | **-2%** ✓ |
+| 2 | F64 | 35.4s | 531s | 0.011496 | — |
+| 4 | F64 | 17.0s | 304s | 0.011496 | — |
+| 4 | F32 | 21.1s (+24%) | **298s** | 0.011496 | **-2%** ✓ |
+
+**Comparison old kernel-level F32 vs new parallel-level F32 (4 GPU):**
+
+| Approach | Forward | fg | AD |
+|----------|---------|-----|-----|
+| kernel-level (commit `a15c18f`) | 24.0s (+41%) | 330s (+8%) | ✓ |
+| **parallel-level (commit `ee048bc`)** | **21.1s (+24%)** | **298s (-2%)** | ✓ |
+
+**Findings**:
+- **AD correctness preserved**: gnorm = 0.011496 matches F64 baseline
+  to ~1e-8, unlike `whole_vumps_etype=Float32` which explodes to 1e18.
+- **fg turns net-positive**: +8% overhead → -2% speedup by moving cast
+  to boundary. Backward chain amortizes cast overhead better (longer
+  rrule nesting + F32 MPI bandwidth savings on partial gradients).
+- **Forward still slower than F64** (+24%) but significantly better
+  than old kernel-level (+41%). GH200 FP64 tensor cores are fast enough
+  that F32 compute savings are marginal; cast memory bandwidth is a
+  real cost that can't fully hide.
+- **Per parallel() call cast count**: old = 2 × forloop_iter (=64 at
+  4 GPU, forloop_iter=32); new = 2. 32× reduction in casts.
+
+**Recommendation**:
+- For pure forward VUMPS (observable eval, no AD): keep F64.
+- For fg optimization workloads: enable `inner_etype=Float32` +
+  `inner_etype_final_steps=2` — 2% faster, gradient correct.
+- `whole_vumps_etype=Float32` remains broken (upstream AD bug).
+
+## Env-level Mixed-Precision + Deep Investigation (D=10 χ=400)
+
+Commit `dcecb98` moves the cast **one more level up** — from `parallel()`
+boundary to the env solvers (`leftenv`, `rightenv`, `ACenv`, `ACenv_plaq`).
+Rationale: Plaquette envs drive multiple `parallel()` calls per invocation
+(2 simple_eig × FLmap-wrapper Nj-loop + Nj-1 naked inner-loop = ~6 calls
+per env at pattern=[1 3; 2 4]), so parallel-level cast casts the same
+tensors repeatedly. Env-level cast collapses this to 1 cast per env.
+
+### Probed `vumps_step` breakdowns (single iter, 10 medians)
+
+**C4v** (1 parallel() per env, baseline):
+| step | F64 ms | F32 ms | ratio | F32 saving |
+|------|--------|--------|-------|-----------|
+| leftenv_c4v | 213.36 | 167.54 | 0.785 | -46 ms |
+| ACenv_c4v | 216.35 | 163.56 | 0.756 | -53 ms |
+| TOTAL | 465.23 | 366.28 | **0.787** | -99 ms ✓ F32 快 21% |
+
+**Plaquette with env-level cast** (dcecb98):
+| step | F64 ms | F32 ms | ratio | F32 saving |
+|------|--------|--------|-------|-----------|
+| leftenv | 500.13 | 507.96 | 1.016 | +8 ms |
+| ACenv_plaq | 502.53 | 496.51 | 0.988 | -6 ms |
+| TOTAL | 1092.75 | 1094.43 | **1.002** | +2 ms ≈ 持平 |
+
+C4v gets full 21% F32 speedup. Plaquette doesn't budge despite the
+same kernel, with either parallel-level OR env-level cast.
+
+### Root cause — cuTENSOR warm-cache fast-path
+
+Single-call ACmap_parallel at production size (Real Float64, D=10 χ=400,
+warmed up, 10× median):
+| Variant | Time | Ratio |
+|---------|------|-------|
+| Real F64 (Test 3, pure baseline) | 101.89 ms | 1.000 |
+| Real F64 + inner_etype=Float32 (parallel-cast, Test 1) | 84.20 ms | 0.826 |
+| Real F32 + inner_etype=nothing (env-cast equiv, Test 2) | 82.81 ms | **0.813** |
+
+**Real F32 IS 19% faster than Real F64 at the isolated-call level.**
+The 22% Complex-F32 speedup seen in mbmpi_380627 generalizes to Real.
+
+But in Plaquette env loops, F64 per-call averages to ~83 ms/call
+(500ms / 6 calls) — exactly the F32 isolated time. **F64 in Plaquette's
+sequential same-shape call pattern is already running at fast-path
+speed**, leaving no headroom for F32.
+
+Hypothesis (unverified): cuTENSOR JIT plan cache warms up over
+consecutive same-shape calls in a stream. Isolated tests with per-call
+`CUDA.synchronize()+MPI.Barrier()` may interrupt this, keeping F64 on
+a colder path (~100 ms) while Plaquette's uninterrupted flow hits the
+fast-path (~83 ms).
+
+### Dead-end findings (documented for future reference)
+
+- **CUDA_LAUNCH_BLOCKING=1 costs 15-18%** on both F64 and F32
+  (removing it dropped F64 vumps_step from 1092 to 914 ms, F32 from 1094
+  to 902 ms). Worth a separate follow-up to see if safe to disable.
+- **Cast overhead is trivial (<1%)**: env-level cast only marginally
+  beats parallel-level cast (1.002 vs 1.009 ratio), confirming the
+  cast cost was never the bottleneck.
+- **Zygote.checkpoint is innocent**: identical F32 speedup in C4v
+  probed test with `ifcheckpoint` on and off.
+- **A bug in a preliminary diagnostic**: casting Real Float64 →
+  ComplexF32 via `ComplexF32.(…)` inflates flops 2×, producing a
+  spurious 86% F32 slowdown. The correct `_downcast_eltype` path
+  preserves realness and was always operating correctly.
+
+### Recommendation
+
+- Keep `dcecb98` env-level cast implementation as the preferred F32
+  pathway — cleanest code and marginally better than parallel-level.
+  Benefits are hardware-dependent; other systems (H100, A100, consumer
+  GPUs) may still see speedup when F64 hasn't saturated the fast-path.
+- On **GH200 specifically** for Plaquette J1J2 VUMPS: **F32 mixed-precision
+  does not accelerate wall-clock time**. F64 already runs fast. Prefer
+  default Float64 + offload_eig for VRAM savings.
+- **Can we drop CUDA_LAUNCH_BLOCKING=1 for the 15-18% speedup?**
+  **No.** Tested at 4-GPU with `test_MPI_config.jl` (job 381094):
+  - MPI collectives (allgatherv_p2p!, allreduce_p2p!) **pass correctness**
+    and run at similar speed (~0-5% difference, not the 15-18% hoped for).
+  - FLmap forward D=14 χ=256 **fails correctness check** (result ≠ serial
+    reference), followed by `synchronization_worker` segfault:
+    ```
+    jlcapi_synchronization_worker_16635 ...
+    CUDA/Il00B/lib/cudadrv/synchronization.jl:119
+    ```
+  - This is the documented GH200 ARM CUDA.jl bug: without CLB=1, kernel
+    results race with downstream readers at large tensor sizes.
+  - Shorter (~30-60s) microbenches do not trigger the segfault, but FLmap
+    at production shapes (D≥14, χ≥256) does.
+  - **Conclusion**: CLB=1 is a mandatory ~15-18% tax on GH200 ARM. It
+    guarantees FLmap kernel correctness and prevents segfault during long
+    runs. Revisit when CUDA.jl fixes the ARM synchronization_worker bug.
+

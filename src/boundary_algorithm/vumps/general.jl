@@ -241,6 +241,25 @@ Compute the left environment tensor for MPS `ALu`, `ALd` and MPO `M`, by finding
 of ALu - M - ALd contracted along the physical dimension.
 """
 function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
+    inner_etype = alg.inner_etype
+    # Env-level boundary cast: Plaquette/General leftenv makes multiple
+    # `parallel()` calls per invocation (2 simple_eig each calling FLmap's
+    # internal Nj-loop + Nj-1 naked FLmap_parallel inner-loop calls). If we
+    # let each parallel() cast at its own boundary, the per-call cast
+    # overhead accumulates and cancels the F32 kernel savings (measured:
+    # Plaquette 4-GPU leftenv F32=+12ms vs F64, while isolated FLmap_parallel
+    # F32 is -47ms). Cast once at env entry, run all sub-calls on already-cast
+    # tensors (inner_etype_pass=nothing), cast FL' back at exit.
+    T_orig = ALu isa StructArray ? eltype(ALu.data[1]) : eltype(ALu)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        ALu = _downcast_eltype(inner_etype, ALu)
+        ALd = _downcast_eltype(inner_etype, ALd)
+        M   = _downcast_eltype(inner_etype, M)
+        FL  = _downcast_eltype(inner_etype, FL)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
     λL = Zygote.Buffer(randSA(Array, M.pattern))
     FL′ = Zygote.Buffer(FL)
     Ni, Nj = size(M)
@@ -249,21 +268,22 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     ifparallel = alg.ifparallel
-    inner_etype = alg.inner_etype
-    simple_eig_polish_steps = alg.simple_eig_polish_steps
-    # Fine polish: last `simple_eig_polish_steps` power iters use Float64 (inner_etype=nothing)
-    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
+    # polish_fine (last N power iters in F64) is tricky when tensors are already
+    # cast at env-level; disable within env-level cast mode. Coarse polish via
+    # `inner_etype_final_steps` at the AD-loop level is unaffected.
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
-            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype)
+            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
             f_polish(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
                 if alg.ifoffload_eig
                     λLs, FLi1s = checkpoint_offload(_simple_eig_FLmap, FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
                                                      power_iter, ifparallel, forloop_iter,
-                                                     inner_etype,
+                                                     inner_etype=inner_etype_pass,
                                                      final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 elseif polish_fine
                     λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
@@ -284,7 +304,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         for j in 2:Nj
             p = FL.pattern[i, j]
             if p ∉ processed_indices
-                FL′[i, j] = FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter, inner_etype)
+                FL′[i, j] = FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
                 λL[i, j] = λL[i, 1]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FL.data)
@@ -294,6 +314,11 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         end
     end
 
+    # Upcast FL' back to original precision at env exit. λL is a scalar-per-cell
+    # container (eigenvalues); callers typically discard with `_`, so skip cast.
+    if do_env_cast
+        return copy(λL), _downcast_eltype(real(T_orig), copy(FL′))
+    end
     return copy(λL), copy(FL′)
 end
 
@@ -313,6 +338,18 @@ Compute the right environment tensor for MPS `ARu`, `ARd` and MPO `M`, by findin
 of AR - M - conj(AR) contracted along the physical dimension.
 """
 function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
+    inner_etype = alg.inner_etype
+    # Env-level boundary cast — see leftenv for rationale.
+    T_orig = ARu isa StructArray ? eltype(ARu.data[1]) : eltype(ARu)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        ARu = _downcast_eltype(inner_etype, ARu)
+        ARd = _downcast_eltype(inner_etype, ARd)
+        M   = _downcast_eltype(inner_etype, M)
+        FR  = _downcast_eltype(inner_etype, FR)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
     Ni, Nj = size(M)
     λR = Zygote.Buffer(randSA(Array, M.pattern))
     FR′ = Zygote.Buffer(FR)
@@ -321,20 +358,19 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     ifparallel = alg.ifparallel
-    inner_etype = alg.inner_etype
-    simple_eig_polish_steps = alg.simple_eig_polish_steps
-    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
-            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype)
+            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
             f_polish(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
                 if alg.ifoffload_eig
                     λRs, FR1s = checkpoint_offload(_simple_eig_FRmap, FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
                                                     power_iter, ifparallel, forloop_iter,
-                                                    inner_etype,
+                                                    inner_etype=inner_etype_pass,
                                                     final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 elseif polish_fine
                     λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
@@ -355,7 +391,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
         for j in Nj-1:-1:1
             p = FR.pattern[i, j]
             if p ∉ processed_indices
-                FR′[i, j] = FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter, inner_etype)
+                FR′[i, j] = FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
                 λR[i, j] = λR[i, Nj]
                 push!(processed_indices, p)
                 if length(processed_indices) == length(FR.data)
@@ -363,6 +399,9 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
                 end
             end
         end
+    end
+    if do_env_cast
+        return copy(λR), _downcast_eltype(real(T_orig), copy(FR′))
     end
     return copy(λR), copy(FR′)
 end
@@ -505,6 +544,18 @@ Compute the up environment tensor for MPS `FL`, `FR` and MPO `M`, by finding the
 of `FL - M - FR` contracted along the physical dimension.
 """
 function ACenv(AC, FL, M, FR; alg, kwargs...)
+    inner_etype = alg.inner_etype
+    # Env-level boundary cast — see leftenv for rationale.
+    T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        AC = _downcast_eltype(inner_etype, AC)
+        FL = _downcast_eltype(inner_etype, FL)
+        FR = _downcast_eltype(inner_etype, FR)
+        M  = _downcast_eltype(inner_etype, M)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
     Ni, Nj = size(M)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
@@ -513,19 +564,18 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
     forloop_iter = alg.forloop_iter
     ifcheckpoint = alg.ifcheckpoint
     ifparallel = alg.ifparallel
-    inner_etype = alg.inner_etype
-    simple_eig_polish_steps = alg.simple_eig_polish_steps
-    polish_fine = inner_etype !== nothing && simple_eig_polish_steps > 0
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype)
+            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
             f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
                 if alg.ifoffload_eig
                     λACs, ACs = checkpoint_offload(_simple_eig_ACmap, AC[1, j], FL[:, j], FR[:, j], M[:, j];
                                                     power_iter, ifparallel, forloop_iter,
-                                                    inner_etype,
+                                                    inner_etype=inner_etype_pass,
                                                     final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 elseif polish_fine
                     λACs, ACs = simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
@@ -546,7 +596,7 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i, j]
             if p ∉ processed_indices
-                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter, inner_etype)
+                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
                 AC′[i, j] = ACij / norm(ACij)
                 λAC[i, j] = λAC[1, j]
                 push!(processed_indices, p)
@@ -555,6 +605,9 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
                 end
             end
         end
+    end
+    if do_env_cast
+        return copy(λAC), _downcast_eltype(real(T_orig), copy(AC′))
     end
     return copy(λAC), copy(AC′)
 end

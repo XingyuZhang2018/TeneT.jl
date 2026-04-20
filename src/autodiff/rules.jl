@@ -149,65 +149,84 @@ end
 # These provide chunked backprop through loop iterations and MPI-aware gradient
 # accumulation, rather than hand-written per-map adjoints.
 
-function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in, N_out, size_out)
+function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
+    # Boundary cast: run the whole forward+backward in `inner_etype` when set.
+    # Upcast/downcast happens at the rrule boundary, not inside each kernel call.
+    T_orig = eltype(args[1])
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    args_c = do_cast ? map(a -> _boundary_cast(inner_etype, a), args) : args
+
     if forloop_iter == 1
-        result, back = pullback(f, args...)
+        result_c, back = pullback(f, args_c...)
+        result = do_cast ? T_orig.(result_c) : result_c
         function realback(dresult)
-            dargs = back(unthunk(dresult))
+            _dresult = unthunk(dresult)
+            _dresult_c = do_cast ? _boundary_cast(inner_etype, _dresult) : _dresult
+            dargs_c = back(_dresult_c)
+            # Zygote's pullback returns one tangent per positional arg (no d_f).
+            # Upcast to original precision at boundary exit.
+            dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+                              dargs_c
             return NoTangent(), NoTangent(), dargs...
         end
         return result, realback
     else
-        Ain = args[N_in[1]]
+        Ain = args_c[N_in[1]]
         split_dim = N_in[2]
         D_split = size(Ain, split_dim)
 
-        result = similar(args[1], size_out)
+        result_c = similar(args_c[1], size_out)
 
         in_idx  = ntuple(_ -> (:), ndims(Ain))
-        out_idx = ntuple(_ -> (:), ndims(result))
+        out_idx = ntuple(_ -> (:), ndims(result_c))
 
         ranges = split_ranges(D_split, forloop_iter)
 
         @views for r in ranges
             in_idx_r  = Base.setindex(in_idx,  r, split_dim)
             out_idx_r = Base.setindex(out_idx, r, N_out)
-            split_args = ntuple(length(args)) do j
-                j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+            split_args = ntuple(length(args_c)) do j
+                j == N_in[1] ? view(args_c[j], in_idx_r...) : args_c[j]
             end
 
-            result[out_idx_r...] .= f(split_args...)
+            result_c[out_idx_r...] .= f(split_args...)
         end
+
+        result = do_cast ? T_orig.(result_c) : result_c
 
         function back(dresult)
             _dresult = unthunk(dresult)
-            dargs = ntuple(i->args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+            _dresult_c = do_cast ? _boundary_cast(inner_etype, _dresult) : _dresult
+            dargs_c = ntuple(i->args_c[i] isa Tuple ? zero.(args_c[i]) : zero(args_c[i]), length(args_c))
             t_bp = 0.0
             @views for r in ranges
                 in_idx_r  = Base.setindex(in_idx,  r, split_dim)
                 out_idx_r = Base.setindex(out_idx, r, N_out)
-                split_args = ntuple(length(args)) do j
-                    j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+                split_args = ntuple(length(args_c)) do j
+                    j == N_in[1] ? view(args_c[j], in_idx_r...) : args_c[j]
                 end
                 t1 = time()
                 _, bp = pullback(f, split_args...)
-                dargs_range = bp(view(_dresult, out_idx_r...))
+                dargs_range = bp(view(_dresult_c, out_idx_r...))
                 t_bp += time() - t1
-                for i in 1:length(args)
+                for i in 1:length(args_c)
                     if i == N_in[1]
-                        dargs[i][in_idx_r...] .= dargs_range[i]
+                        dargs_c[i][in_idx_r...] .= dargs_range[i]
                     else
                         if dargs_range[i] isa Tuple
                             for j in 1:length(dargs_range[i])
-                                dargs[i][j] .+= dargs_range[i][j]
+                                dargs_c[i][j] .+= dargs_range[i][j]
                             end
                         else
-                            dargs[i] .+= dargs_range[i]
+                            dargs_c[i] .+= dargs_range[i]
                         end
                     end
                 end
             end
             # println("  forloop_back: forloop=$forloop_iter bp=$(round(t_bp*1000,digits=1))ms split=$D_split→$(length(ranges))")
+            # Upcast partial gradients back to original precision at boundary exit
+            dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+                              dargs_c
             return NoTangent(), NoTangent(), dargs...
         end
 
@@ -215,90 +234,103 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     end
 end
 
-function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out)
+function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
 
-    Ain = args[N_in[1]]
+    # Boundary cast: cast inputs once, run the whole rrule (forward AND MPI
+    # allgatherv/allreduce) in `inner_etype`, then cast result and partial
+    # gradients back to original precision at the boundary exit. The MPI
+    # collectives travel in the lower precision (e.g. Float32 → 2× bandwidth).
+    T_orig = eltype(args[1])
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    args_c = do_cast ? map(a -> _boundary_cast(inner_etype, a), args) : args
+
+    Ain = args_c[N_in[1]]
     split_dim = N_in[2]
     D_split = size(Ain, split_dim)
-    result = similar(args[1], size_out)
+    result_c = similar(args_c[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs * forloop_iter)
 
     in_idx  = ntuple(_ -> (:), ndims(Ain))
-    out_idx = ntuple(_ -> (:), ndims(result))
+    out_idx = ntuple(_ -> (:), ndims(result_c))
 
     for i in 1:forloop_iter
         ind = forloop_iter * rank + i
         in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
         out_idx_r = Base.setindex(out_idx, D_split_ranges[ind], N_out)
-        split_args = ntuple(length(args)) do j
-            j == N_in[1] ? @view(args[j][in_idx_r...]) : args[j]
+        split_args = ntuple(length(args_c)) do j
+            j == N_in[1] ? @view(args_c[j][in_idx_r...]) : args_c[j]
         end
-        result[out_idx_r...] .= f(split_args...)
-        synchronize(args[1])
+        result_c[out_idx_r...] .= f(split_args...)
+        synchronize(args_c[1])
     end
 
     element_size = prod(size_out) ÷ D_split
     counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
-    allgatherv_p2p!(result, counts, comm)
+    allgatherv_p2p!(result_c, counts, comm)
+
+    result = do_cast ? T_orig.(result_c) : result_c
 
     function back(dresult)
         _dresult = unthunk(dresult)
-        dargs = ntuple(i -> args[i] isa Tuple ? zero.(args[i]) : zero(args[i]), length(args))
+        _dresult_c = do_cast ? _boundary_cast(inner_etype, _dresult) : _dresult
+        dargs_c = ntuple(i -> args_c[i] isa Tuple ? zero.(args_c[i]) : zero(args_c[i]), length(args_c))
         @views for i in 1:forloop_iter
             ind = forloop_iter * rank + i
             in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
             out_idx_r = Base.setindex(out_idx, D_split_ranges[ind], N_out)
-            split_args = ntuple(length(args)) do j
-                j == N_in[1] ? view(args[j], in_idx_r...) : args[j]
+            split_args = ntuple(length(args_c)) do j
+                j == N_in[1] ? view(args_c[j], in_idx_r...) : args_c[j]
             end
             _, bp = pullback(f, split_args...)
-            split_dargs = bp(_dresult[out_idx_r...])
-            for j in 1:length(args)
+            split_dargs = bp(_dresult_c[out_idx_r...])
+            for j in 1:length(args_c)
                 if j == N_in[1]
-                    dargs[j][in_idx_r...] .= split_dargs[j]
+                    dargs_c[j][in_idx_r...] .= split_dargs[j]
                 else
-                    if dargs[j] isa Tuple
-                        for k in 1:length(dargs[j])
-                            dargs[j][k] .+= split_dargs[j][k]
+                    if dargs_c[j] isa Tuple
+                        for k in 1:length(dargs_c[j])
+                            dargs_c[j][k] .+= split_dargs[j][k]
                         end
                     else
-                        dargs[j] .+= split_dargs[j]
+                        dargs_c[j] .+= split_dargs[j]
                     end
                 end
             end
         end
 
-        synchronize(args[1])
+        synchronize(args_c[1])
 
-        # Batch all MPI communication into minimal D2H/H2D round-trips.
-        # Collect non-split gradients → one CPU buffer → one Allreduce → copy back.
-        has_split_gather = N_in[2] == ndims(args[N_in[1]])
+        # MPI collectives on dargs_c (still in inner_etype — 2× bandwidth).
+        has_split_gather = N_in[2] == ndims(args_c[N_in[1]])
 
         # 1) Allgatherv for split arg (if contiguous)
         if has_split_gather
             j = N_in[1]
-            element_size = prod(size(dargs[j])) ÷ D_split
+            element_size = prod(size(dargs_c[j])) ÷ D_split
             counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
-            allgatherv_p2p!(dargs[j], counts, comm)
+            allgatherv_p2p!(dargs_c[j], counts, comm)
         end
 
         # 2) Allreduce non-split args via p2p with pre-allocated buffers
-        for j in 1:length(args)
+        for j in 1:length(args_c)
             if j == N_in[1] && has_split_gather
                 continue
             end
-            if dargs[j] isa Tuple
-                for k in 1:length(dargs[j])
-                    allreduce_p2p!(dargs[j][k], +, comm)
+            if dargs_c[j] isa Tuple
+                for k in 1:length(dargs_c[j])
+                    allreduce_p2p!(dargs_c[j][k], +, comm)
                 end
             else
-                allreduce_p2p!(dargs[j], +, comm)
+                allreduce_p2p!(dargs_c[j], +, comm)
             end
         end
 
+        # Upcast partial gradients back to original precision at boundary exit.
+        dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+                          dargs_c
         return NoTangent(), NoTangent(), dargs...
     end
 

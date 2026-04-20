@@ -189,9 +189,32 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
     return buf
 end
 
-function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
+# ─── Boundary cast helpers for mixed-precision at the parallel/forloop level ───
+#
+# Strategy: cast args to `inner_etype` ONCE at function entry, run the whole
+# for-loop body (kernel contractions + MPI gather) in that precision, cast the
+# result back ONCE at function exit. This is equivalent to the per-kernel
+# `inner_etype` threading but:
+#  - does 1 down-cast + 1 up-cast per `parallel()` call (vs `2*forloop_iter`
+#    at the kernel level),
+#  - halves the MPI allgatherv/allreduce payload (Float32 = 2× bandwidth),
+#  - halves the intermediate `result` VRAM footprint,
+#  - keeps QR, eigsolve, norm and the outer VUMPS loop in native precision
+#    (avoids the AD breakage that `whole_vumps_etype` exhibits).
+_boundary_cast(::Nothing, a)            = a
+_boundary_cast(T::Type, a::Tuple)       = map(t -> _downcast_eltype(T, t), a)
+_boundary_cast(T::Type, a::StructArray) = _downcast_eltype(T, a)
+_boundary_cast(T::Type, a::AbstractArray) = _downcast_eltype(T, a)
+
+function forloop(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
+    T_orig = eltype(args[1])
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        args = map(a -> _boundary_cast(inner_etype, a), args)
+    end
+
     if forloop_iter == 1
-        return f(args...)
+        result = f(args...)
     else
         D_split = size(args[N_in[1]])[N_in[2]]
         result = similar(args[1], size_out)
@@ -203,15 +226,21 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out)
             split_args = Tuple(j == N_in[1] ? @view(args[j][cols_in...]) : args[j] for j in 1:length(args))
             result[cols_out...] = f(split_args...)
         end
-
-        return result
     end
+
+    return do_cast ? T_orig.(result) : result
 end
 
-function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
+function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
+
+    T_orig = eltype(args[1])
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        args = map(a -> _boundary_cast(inner_etype, a), args)
+    end
 
     D_split = size(args[N_in[1]])[N_in[2]]
     result = similar(args[1], size_out)
@@ -230,13 +259,19 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out)
     counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter]) * element_size for i in 1:nprocs]
     allgatherv_p2p!(result, counts, comm)
 
-    return result
+    return do_cast ? T_orig.(result) : result
 end
 
 
-function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
+function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_etype=nothing)
+    T_orig = eltype(args[1])
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        args = map(a -> _boundary_cast(inner_etype, a), args)
+    end
+
     if forloop_iter == 1
-        return f(args...)
+        result = f(args...)
     else
         D_split = size(args[N_in1[1]])[N_in1[2]]
         result = similar(args[1], size_out)
@@ -249,15 +284,21 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
             split_args = (j == N_in1[1] ? @view(args[j][cols_in1...]) : (j == N_in2[1] ? @view(args[j][cols_in2...]) : args[j]) for j in 1:length(args))
             result .+= f(split_args...)
         end
-
-        return result
     end
+
+    return do_cast ? T_orig.(result) : result
 end
 
-function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
+function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_etype=nothing)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
+
+    T_orig = eltype(args[1])
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        args = map(a -> _boundary_cast(inner_etype, a), args)
+    end
 
     D_split = size(args[N_in1[1]])[N_in1[2]]
     result = similar(args[1], size_out)
@@ -274,7 +315,7 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out)
 
     allreduce_p2p!(result, +, comm)
 
-    return result
+    return do_cast ? T_orig.(result) : result
 end
 
 function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
@@ -292,12 +333,13 @@ function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=n
         D = size(M, 3)
         size_out = (χ,D,χ)
     end
-    f = inner_etype === nothing ? FLmap :
-        (args...) -> FLmap(args...; inner_etype)
+    # inner_etype is threaded to parallel/forloop (boundary cast), NOT to the
+    # kernel. This reduces F64↔F32 conversion to once per parallel() call and
+    # lets MPI allgatherv run in the lower precision (2× bandwidth).
     if ifparallel
-        return parallel(f, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     else
-        return forloop(f, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
@@ -316,12 +358,10 @@ function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter, inner_etype=n
         D = size(M, 1)
         size_out = (χ,D,χ)
     end
-    f = inner_etype === nothing ? FRmap :
-        (args...) -> FRmap(args...; inner_etype)
     if ifparallel
-        return parallel(f, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     else
-        return forloop(f, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
@@ -340,12 +380,10 @@ function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=not
         D = size(M, 2)
         size_out = (χ,D,χ)
     end
-    f = inner_etype === nothing ? ACmap :
-        (args...) -> ACmap(args...; inner_etype)
     if ifparallel
-        return parallel(f, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     else
-        return forloop(f, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
@@ -364,12 +402,10 @@ function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter, inner_etype=n
         D = size(M, 4)
         size_out = (χ,D,χ)
     end
-    f = inner_etype === nothing ? ACdmap :
-        (args...) -> ACdmap(args...; inner_etype)
     if ifparallel
-        return parallel(f, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return parallel(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     else
-        return forloop(f, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out)
+        return forloop(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
