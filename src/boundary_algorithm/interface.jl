@@ -90,6 +90,7 @@ QR-based Corner Transfer Matrix algorithm.
     ifsimple_eig::Bool = true
     ifparallel::Bool = false
     ifcheckpoint::Bool = false
+    ifcheckpoint_wengert::Bool = false
     forloop_iter::Int = 1
 
     # Mixed-precision fields (same semantics as VUMPS; see VUMPS struct doc).

@@ -230,6 +230,13 @@
                 env = ObsEnv(rt, M1, alg_qr)
                 @test env isa CTMEnv
             end
+
+            @testset "ifcheckpoint_wengert mutual exclusion" begin
+                alg_bad = QRCTM(; verbosity=0, maxiter=1, maxiter_ad=1,
+                                  ifcheckpoint=true, ifcheckpoint_wengert=true)
+                rt = init_env(M1, chi, alg_bad)
+                @test_throws ArgumentError leading_boundary(rt, M1, alg_bad)
+            end
         end
 
         # ==================================================================

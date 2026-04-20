@@ -58,6 +58,9 @@ end
 # Core implementation operating on plain tensors (avoids StructArray overhead in AD)
 function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
     M = M[1]
+    if alg.ifcheckpoint && alg.ifcheckpoint_wengert
+        throw(ArgumentError("QRCTM: ifcheckpoint and ifcheckpoint_wengert are mutually exclusive"))
+    end
     t = ignore_derivatives(() -> time())
     local err
 
