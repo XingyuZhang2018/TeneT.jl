@@ -112,7 +112,7 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
     if params.save_every  != 0 && iter % params.save_every  == 0
         ipeps_dir = joinpath(folder0, "ipeps", "χ$χ")
         !ispath(ipeps_dir) && mkpath(ipeps_dir)
-        save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x))
+        save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x); iotype=IOStream)
     end
 
     if abs(fδEierr[2]) < 1e-12 || abs(fδEierr[4]) > 1e-8
