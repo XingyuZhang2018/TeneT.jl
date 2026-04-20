@@ -69,15 +69,15 @@ function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     T = env.T
 
     CT    = Wengert.barrier((c, t) -> _to_front(CTtoT(c, t)),
-                            Zygote.pullback, C, T)
-    U, R  = Wengert.barrier(qr_for_ad, Zygote.pullback, CT)
-    U     = Wengert.barrier(u -> reshape(u, size(T)), Zygote.pullback, U)
+                            Zygote.pullback, C, T; checkpoint=:recompute)
+    U, R  = Wengert.barrier(qr_for_ad, Zygote.pullback, CT; checkpoint=:recompute)
+    U     = Wengert.barrier(u -> reshape(u, size(T)), Zygote.pullback, U; checkpoint=:recompute)
     T_new = Wengert.barrier(
         (t, u1, u2, m) -> FLmap_parallel(t, u1, u2, m;
             ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter,
             inner_etype=alg.inner_etype),
-        Zygote.pullback, T, U, U, M)
-    C_new = Wengert.barrier(Cmap, Zygote.pullback, R, T_new, U)
+        Zygote.pullback, T, U, U, M; checkpoint=:recompute)
+    C_new = Wengert.barrier(Cmap, Zygote.pullback, R, T_new, U; checkpoint=:recompute)
 
     # Normalise through a barrier: `TrackedArray / Number` is ambiguous with
     # `AbstractArray / Number` (Base); wrapping the `/` inside Wengert.barrier
@@ -85,9 +85,9 @@ function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     # `T /= norm(T)` semantics (scale is treated as a constant via
     # ignore_derivatives inside the closure).
     T_new = Wengert.barrier(t -> t / ignore_derivatives(() -> norm(t)),
-                            Zygote.pullback, T_new)
+                            Zygote.pullback, T_new; checkpoint=:recompute)
     C_new = Wengert.barrier(c -> c / ignore_derivatives(() -> norm(c)),
-                            Zygote.pullback, C_new)
+                            Zygote.pullback, C_new; checkpoint=:recompute)
     err    = ignore_derivatives() do
         norm(Wengert.deep_untrack(C_new) - Wengert.deep_untrack(C))
     end
