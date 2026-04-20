@@ -142,6 +142,36 @@ Zygote.@adjoint function checkpoint_offload(f, args...; kwargs...)
     end
 end
 
+# ─── Wengert CPU-offload checkpoint ────────────────────────────────────────
+# Wraps a whole AD-phase loop inside a single Wengert.pullback with
+# @checkpoint enabled. Inside the loop body, each iteration is expected to
+# call `qrctm_step_split` (or analogous) which uses Wengert.barrier to bring
+# Zygote-owned sub-ops onto the Wengert tape as TapeEntries. This causes
+# inter-step env slots (and inter-barrier intermediates within a step) to be
+# offloaded to host RAM, dramatically cutting device VRAM peak during the
+# outer Zygote backward pass.
+checkpoint_wengert_loop(loop_body_fn, env, M, args...) =
+    loop_body_fn(env, M, args...)
+
+Zygote.@adjoint function checkpoint_wengert_loop(loop_body_fn, env, M, args...)
+    local err_captured
+    env_final, wback = Wengert.pullback(env, M) do e, m
+        env_r, err_r = Wengert.@checkpoint loop_body_fn(e, m, args...)
+        err_captured = err_r
+        env_r
+    end
+    function back(Δ)
+        zero_out = (nothing, nothing, nothing,
+                    ntuple(_ -> nothing, length(args))...)
+        Δ === nothing && return zero_out
+        Δenv = Δ isa Tuple ? Δ[1] : Δ
+        Δenv === nothing && return zero_out
+        genv, gM = wback(Δenv)
+        return (nothing, genv, gM, ntuple(_ -> nothing, length(args))...)
+    end
+    return (env_final, err_captured), back
+end
+
 # ─── Takagi decomposition ───────────────────────────────────────────────────
 
 """

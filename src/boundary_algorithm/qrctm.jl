@@ -140,6 +140,37 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
         alg_ad_coarse.inner_etype = nothing
     end
     mixed_active = (alg.inner_etype !== nothing) || want_whole
+
+    env, err = if alg.ifcheckpoint_wengert
+        checkpoint_wengert_loop(_qrctm_ad_loop_body,
+            env, M, alg, alg_ad, alg_ad_coarse,
+            mixed_active, want_whole, T_orig, t, qrctm_step_split)
+    else
+        step_fn = alg.ifcheckpoint ? (e, m, a) -> checkpoint(qrctm_step, e, m, a) :
+                                      qrctm_step
+        _qrctm_ad_loop_body(env, M, alg, alg_ad, alg_ad_coarse,
+                            mixed_active, want_whole, T_orig, t, step_fn)
+    end
+
+    # Exit guard: if whole-VUMPS mode active and we never hit polish, cast back.
+    if want_whole && eltype(env.T) != T_orig
+        env = CTMEnv(_downcast_eltype(real(T_orig), env.C),
+                     _downcast_eltype(real(T_orig), env.T))
+    end
+    return env, err
+end
+
+# Inner AD-phase loop body, parametrised by `step_fn` (qrctm_step, checkpoint-
+# wrapped qrctm_step, or qrctm_step_split). Structurally identical to the
+# inline loop it replaced — factored out so `leading_boundary` can dispatch on
+# `ifcheckpoint_wengert` and route the whole loop through `checkpoint_wengert_loop`.
+function _qrctm_ad_loop_body(env::CTMEnv, M::AbstractArray, alg::QRCTM,
+                             alg_ad::QRCTM, alg_ad_coarse::QRCTM,
+                             mixed_active::Bool, want_whole::Bool,
+                             T_orig::Type, t::Float64,
+                             step_fn::Function)
+    local err
+    err = zero(real(eltype(env.T)))
     for i in 1:alg.maxiter_ad
         alg_this_iter = alg_ad
         in_polish = alg.inner_etype_final_steps > 0 &&
@@ -151,22 +182,20 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
         if want_whole && in_polish && eltype(env.T) != T_orig
             env = CTMEnv(_downcast_eltype(real(T_orig), env.C),
                          _downcast_eltype(real(T_orig), env.T))
-            M = _downcast_eltype(real(T_orig), M)
+            M   = _downcast_eltype(real(T_orig), M)
         end
-        env, err = alg.ifcheckpoint ? checkpoint(qrctm_step, env, M, alg_this_iter) : qrctm_step(env, M, alg_this_iter)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        env, err = step_fn(env, M, alg_this_iter)
+        alg.verbosity >= 3 && i % alg.show_every == 0 &&
+            ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 &&
+                ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 &&
+                ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
-    end
-    # Exit guard: if whole-VUMPS mode active and we never hit polish, cast back.
-    if want_whole && eltype(env.T) != T_orig
-        env = CTMEnv(_downcast_eltype(real(T_orig), env.C),
-                     _downcast_eltype(real(T_orig), env.T))
     end
     return env, err
 end
