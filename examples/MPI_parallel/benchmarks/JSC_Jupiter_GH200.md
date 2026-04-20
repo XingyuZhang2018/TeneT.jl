@@ -264,7 +264,21 @@ fast-path (~83 ms).
 - On **GH200 specifically** for Plaquette J1J2 VUMPS: **F32 mixed-precision
   does not accelerate wall-clock time**. F64 already runs fast. Prefer
   default Float64 + offload_eig for VRAM savings.
-- Next avenue if chasing speed: disable CUDA_LAUNCH_BLOCKING=1 in
-  production (15-18% headroom). Needs validation that the GH200 ARM
-  synchronization_worker segfault doesn't come back for long runs.
+- **Can we drop CUDA_LAUNCH_BLOCKING=1 for the 15-18% speedup?**
+  **No.** Tested at 4-GPU with `test_MPI_config.jl` (job 381094):
+  - MPI collectives (allgatherv_p2p!, allreduce_p2p!) **pass correctness**
+    and run at similar speed (~0-5% difference, not the 15-18% hoped for).
+  - FLmap forward D=14 χ=256 **fails correctness check** (result ≠ serial
+    reference), followed by `synchronization_worker` segfault:
+    ```
+    jlcapi_synchronization_worker_16635 ...
+    CUDA/Il00B/lib/cudadrv/synchronization.jl:119
+    ```
+  - This is the documented GH200 ARM CUDA.jl bug: without CLB=1, kernel
+    results race with downstream readers at large tensor sizes.
+  - Shorter (~30-60s) microbenches do not trigger the segfault, but FLmap
+    at production shapes (D≥14, χ≥256) does.
+  - **Conclusion**: CLB=1 is a mandatory ~15-18% tax on GH200 ARM. It
+    guarantees FLmap kernel correctness and prevents segfault during long
+    runs. Revisit when CUDA.jl fixes the ARM synchronization_worker bug.
 
