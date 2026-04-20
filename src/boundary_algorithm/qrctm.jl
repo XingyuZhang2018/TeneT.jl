@@ -88,7 +88,9 @@ function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
                             Zygote.pullback, T_new)
     C_new = Wengert.barrier(c -> c / ignore_derivatives(() -> norm(c)),
                             Zygote.pullback, C_new)
-    err    = ignore_derivatives(() -> norm(C_new - C))
+    err    = ignore_derivatives() do
+        norm(Wengert.deep_untrack(C_new) - Wengert.deep_untrack(C))
+    end
 
     return CTMEnv(C_new, T_new), err
 end
