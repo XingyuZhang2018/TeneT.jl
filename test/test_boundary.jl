@@ -237,6 +237,20 @@
                 rt = init_env(M1, chi, alg_bad)
                 @test_throws ArgumentError leading_boundary(rt, M1, alg_bad)
             end
+
+            @testset "qrctm_step_split forward equivalence" begin
+                alg_qr = QRCTM(; verbosity=0, maxiter=1, maxiter_ad=1, tol=1e-8)
+                rt = init_env(M1, chi, alg_qr)
+                # Run a few iterations of plain qrctm_step to get non-trivial env
+                for _ in 1:3
+                    rt, _ = TeneT.qrctm_step(rt, M1[1], alg_qr)
+                end
+                env_orig, err_orig   = TeneT.qrctm_step(rt, M1[1], alg_qr)
+                env_split, err_split = TeneT.qrctm_step_split(rt, M1[1], alg_qr)
+                @test Array(env_split.C) ≈ Array(env_orig.C) atol=1e-12
+                @test Array(env_split.T) ≈ Array(env_orig.T) atol=1e-12
+                @test err_split ≈ err_orig atol=1e-12
+            end
         end
 
         # ==================================================================

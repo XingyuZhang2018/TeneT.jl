@@ -53,6 +53,39 @@ function qrctm_step(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     return CTMEnv(C_new, T), err
 end
 
+"""
+    qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
+
+Same numerical result as `qrctm_step`, but every memory-heavy sub-op is
+wrapped in `Wengert.barrier(…, Zygote.pullback, …)`. When called inside
+`Wengert.pullback` under `@checkpoint`, each barrier output becomes a tape
+slot that Wengert can offload to CPU RAM. Outside a Wengert tape,
+`Wengert.barrier` detects no tracked args and transparently degrades to
+plain `f(args...)`, so this function is a drop-in replacement for
+`qrctm_step` in non-AD contexts.
+"""
+function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
+    C = env.C
+    T = env.T
+
+    CT    = Wengert.barrier((c, t) -> _to_front(CTtoT(c, t)),
+                            Zygote.pullback, C, T)
+    U, R  = Wengert.barrier(qr_for_ad, Zygote.pullback, CT)
+    U     = Wengert.barrier(u -> reshape(u, size(T)), Zygote.pullback, U)
+    T_new = Wengert.barrier(
+        (t, u1, u2, m) -> FLmap_parallel(t, u1, u2, m;
+            ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter,
+            inner_etype=alg.inner_etype),
+        Zygote.pullback, T, U, U, M)
+    C_new = Wengert.barrier(Cmap, Zygote.pullback, R, T_new, U)
+
+    T_new /= ignore_derivatives(() -> norm(T_new))
+    C_new /= ignore_derivatives(() -> norm(C_new))
+    err    = ignore_derivatives(() -> norm(C_new - C))
+
+    return CTMEnv(C_new, T_new), err
+end
+
 # ── iteration + boundary ───────────────────────────────────
 
 # Core implementation operating on plain tensors (avoids StructArray overhead in AD)
