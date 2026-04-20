@@ -79,8 +79,15 @@ function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
         Zygote.pullback, T, U, U, M)
     C_new = Wengert.barrier(Cmap, Zygote.pullback, R, T_new, U)
 
-    T_new /= ignore_derivatives(() -> norm(T_new))
-    C_new /= ignore_derivatives(() -> norm(C_new))
+    # Normalise through a barrier: `TrackedArray / Number` is ambiguous with
+    # `AbstractArray / Number` (Base); wrapping the `/` inside Wengert.barrier
+    # routes it through Zygote.pullback cleanly and mirrors qrctm_step's
+    # `T /= norm(T)` semantics (scale is treated as a constant via
+    # ignore_derivatives inside the closure).
+    T_new = Wengert.barrier(t -> t / ignore_derivatives(() -> norm(t)),
+                            Zygote.pullback, T_new)
+    C_new = Wengert.barrier(c -> c / ignore_derivatives(() -> norm(c)),
+                            Zygote.pullback, C_new)
     err    = ignore_derivatives(() -> norm(C_new - C))
 
     return CTMEnv(C_new, T_new), err

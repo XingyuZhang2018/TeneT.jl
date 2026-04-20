@@ -143,30 +143,131 @@ Zygote.@adjoint function checkpoint_offload(f, args...; kwargs...)
 end
 
 # ─── Wengert CPU-offload checkpoint ────────────────────────────────────────
-# Wraps a whole AD-phase loop inside a single Wengert.pullback with
-# @checkpoint enabled. Inside the loop body, each iteration is expected to
-# call `qrctm_step_split` (or analogous) which uses Wengert.barrier to bring
+# Wraps a whole AD-phase loop inside a single Wengert tape with @checkpoint
+# enabled. Inside the loop body, each iteration is expected to call
+# `qrctm_step_split` (or analogous) which uses Wengert.barrier to bring
 # Zygote-owned sub-ops onto the Wengert tape as TapeEntries. This causes
 # inter-step env slots (and inter-barrier intermediates within a step) to be
 # offloaded to host RAM, dramatically cutting device VRAM peak during the
 # outer Zygote backward pass.
+#
+# Note: we can't use `Wengert.pullback` directly because its return value must
+# be a single `AnyTracked` scalar/array, whereas our loop body returns a
+# `CTMEnv{TrackedArray, TrackedArray}` struct. Instead we manually open the
+# tape, seed tangents into multiple output slots, and extract input gradients
+# — mirroring the internals of `Wengert.pullback` but handling struct output.
 checkpoint_wengert_loop(loop_body_fn, env, M, args...) =
     loop_body_fn(env, M, args...)
 
-Zygote.@adjoint function checkpoint_wengert_loop(loop_body_fn, env, M, args...)
-    local err_captured
-    env_final, wback = Wengert.pullback(env, M) do e, m
-        env_r, err_r = Wengert.@checkpoint loop_body_fn(e, m, args...)
-        err_captured = err_r
-        env_r
+# Walk a struct tangent and collect (slot, tangent) pairs for every TrackedArray
+# leaf, matching Functors children. Nothing / ZeroTangent children are skipped.
+_collect_tracked_seeds!(pairs, tracked::Wengert.AnyTracked, tangent) = begin
+    tangent === nothing && return pairs
+    tangent isa ChainRulesCore.NoTangent && return pairs
+    tangent isa ChainRulesCore.ZeroTangent && return pairs
+    push!(pairs, (tracked.slot, tangent))
+    return pairs
+end
+function _collect_tracked_seeds!(pairs, tracked, tangent)
+    tangent === nothing && return pairs
+    tangent isa ChainRulesCore.NoTangent && return pairs
+    tangent isa ChainRulesCore.ZeroTangent && return pairs
+    # Walk struct children on the tracked side; pair by fieldname on tangent side.
+    children_t, _ = Functors.functor(typeof(tracked), tracked)
+    children_t === tracked && return pairs
+    tangent_children = if tangent isa NamedTuple
+        tangent
+    elseif tangent isa ChainRulesCore.Tangent
+        ChainRulesCore.backing(tangent)
+    else
+        # Struct — extract via fieldnames
+        NamedTuple{fieldnames(typeof(tangent))}(
+            ntuple(i -> getfield(tangent, i), fieldcount(typeof(tangent))))
     end
+    for fname in fieldnames(typeof(children_t))
+        child_t = getfield(children_t, fname)
+        child_Δ = hasproperty(tangent_children, fname) ?
+                  getproperty(tangent_children, fname) : nothing
+        _collect_tracked_seeds!(pairs, child_t, child_Δ)
+    end
+    return pairs
+end
+
+# NamedTuple-returning analogue of `Wengert._extract_grads`. The upstream
+# Zygote rrules (e.g. CTMEnv's) destructure env tangents as `∂C, ∂T = ∂env`,
+# which only works if the tangent is a Tuple / NamedTuple — NOT a reconstructed
+# struct. Wengert's default `_extract_grads` tries `re(nt)` first and can
+# rebuild a CTMEnv, which then fails to iterate. Force NamedTuple recursively.
+function _extract_grads_as_nt(original_arg, tracked_arg, grad_accum)
+    if tracked_arg isa Wengert.AnyTracked
+        return get(grad_accum, tracked_arg.slot, nothing)
+    elseif original_arg isa AbstractArray
+        return nothing
+    end
+    children, _ = Functors.functor(typeof(original_arg), original_arg)
+    children === original_arg && return nothing
+    tracked_children, _ = Functors.functor(typeof(tracked_arg), tracked_arg)
+    tracked_children === tracked_arg && (tracked_children = tracked_arg)
+    fnames = fieldnames(typeof(children))
+    grad_children = map(fnames) do fname
+        orig_child  = getfield(children, fname)
+        track_child = getfield(tracked_children, fname)
+        _extract_grads_as_nt(orig_child, track_child, grad_accum)
+    end
+    return NamedTuple{fnames}(grad_children)
+end
+
+Zygote.@adjoint function checkpoint_wengert_loop(loop_body_fn, env, M, args...)
+    # ── Forward: build Wengert tape by hand (analogue of Wengert.pullback) ──
+    tape = Wengert.Tape(Wengert.TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
+    tracked_env = Wengert._wrap_for_tracking(env, tape)
+    tracked_M   = Wengert._wrap_for_tracking(M,   tape)
+
+    local env_final_tracked, err_captured
+    Wengert.with_tape(tape) do
+        env_r, err_r = Wengert.@checkpoint loop_body_fn(tracked_env, tracked_M, args...)
+        env_final_tracked = env_r
+        err_captured = err_r
+    end
+
+    env_final = Wengert.deep_untrack(env_final_tracked)
+
     function back(Δ)
         zero_out = (nothing, nothing, nothing,
                     ntuple(_ -> nothing, length(args))...)
         Δ === nothing && return zero_out
-        Δenv = Δ isa Tuple ? Δ[1] : Δ
+        # Outer Δ is (Δenv, Δerr); unwrap to the env tangent
+        Δenv = if Δ isa Tuple
+            Δ[1]
+        elseif Δ isa ChainRulesCore.Tangent
+            ChainRulesCore.backing(Δ)[1]
+        else
+            Δ
+        end
         Δenv === nothing && return zero_out
-        genv, gM = wback(Δenv)
+
+        # Seed every tracked leaf in env_final_tracked with the matching tangent
+        # component, then run backward! once over the tape.
+        pairs = Tuple{Int, Any}[]
+        _collect_tracked_seeds!(pairs, env_final_tracked, Δenv)
+        isempty(pairs) && return zero_out
+
+        # Accumulate each seed, then sweep the tape once.
+        for (slot, g) in pairs
+            Wengert.accumulate!(tape, slot, g)
+        end
+        # Iterate tape entries in reverse, but without re-seeding any slot.
+        for entry in Iterators.reverse(tape.entries)
+            g_out = get(tape.grad_accum, entry.output_slot, nothing)
+            g_out === nothing && continue
+            raw_grads = entry.pullback(g_out)
+            for (slot, g) in zip(entry.input_slots, Iterators.drop(raw_grads, 1))
+                Wengert.accumulate!(tape, slot, g)
+            end
+        end
+
+        genv = _extract_grads_as_nt(env, tracked_env, tape.grad_accum)
+        gM   = _extract_grads_as_nt(M,   tracked_M,   tape.grad_accum)
         return (nothing, genv, gM, ntuple(_ -> nothing, length(args))...)
     end
     return (env_final, err_captured), back
