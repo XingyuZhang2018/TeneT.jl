@@ -156,6 +156,14 @@ end
 # `CTMEnv{TrackedArray, TrackedArray}` struct. Instead we manually open the
 # tape, seed tangents into multiple output slots, and extract input gradients
 # — mirroring the internals of `Wengert.pullback` but handling struct output.
+#
+# This implementation couples to Wengert internals — specifically:
+#   Wengert.Tape constructor, Wengert._wrap_for_tracking (api.jl ~29),
+#   Wengert.with_tape (tape_ops.jl ~6), Wengert.accumulate! (backward.jl ~3),
+#   Wengert.deep_untrack (api.jl ~7), Wengert.TapeEntry and tape.grad_accum.
+# These are not in Wengert's exported public API; if Wengert refactors any
+# of them, this adjoint breaks silently. The [sources] entry in Project.toml
+# pins Wengert to a specific SHA to guard against such silent breakage.
 checkpoint_wengert_loop(loop_body_fn, env, M, args...) =
     loop_body_fn(env, M, args...)
 
@@ -198,6 +206,8 @@ end
 # which only works if the tangent is a Tuple / NamedTuple — NOT a reconstructed
 # struct. Wengert's default `_extract_grads` tries `re(nt)` first and can
 # rebuild a CTMEnv, which then fails to iterate. Force NamedTuple recursively.
+# (See `ChainRulesCore.rrule(::Type{<:CTMEnv}, C, T)` at src/autodiff/rules.jl:110
+# — the destructuring `∂C, ∂T = Δ` requires iterable tangent.)
 function _extract_grads_as_nt(original_arg, tracked_arg, grad_accum)
     if tracked_arg isa Wengert.AnyTracked
         return get(grad_accum, tracked_arg.slot, nothing)

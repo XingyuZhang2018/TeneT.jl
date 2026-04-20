@@ -232,6 +232,10 @@
     # three paths into diverging backprop noise (not a path bug — the
     # backward iteration of a near-fixed-point map amplifies roundoff).
     @testset "QRCTM gradient equivalence: none vs recompute vs wengert" begin
+        # Regression detector, not bit-equivalence: `:none` vs `:recompute` differ
+        # at ~1.5e-3 max-abs on this 5-AD-iter CTM problem due to iteration-order
+        # sensitivity near the near-fixed-point, observed on stash-removed code
+        # before the Wengert patch landed. The 5e-3 bound is ~3× that noise floor.
         Random.seed!(42)
         chi = 16
         beta = 0.3

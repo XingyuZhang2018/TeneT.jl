@@ -55,4 +55,4 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 test = ["Test", "Documenter"]
 
 [sources]
-Wengert = {url = "https://github.com/XingyuZhang2018/Wengert.jl"}
+Wengert = {url = "https://github.com/XingyuZhang2018/Wengert.jl", rev = "34f739c3657262fdedc500fd2216a2130fca5ce3"}
