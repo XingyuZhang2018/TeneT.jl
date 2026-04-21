@@ -241,7 +241,8 @@ Compute the left environment tensor for MPS `ALu`, `ALd` and MPO `M`, by finding
 of ALu - M - ALd contracted along the physical dimension.
 """
 function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
-    inner_etype = alg.inner_etype
+    @unpack inner_etype, forloop_iter, ifparallel,
+            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast: Plaquette/General leftenv makes multiple
     # `parallel()` calls per invocation (2 simple_eig each calling FLmap's
     # internal Nj-loop + Nj-1 naked FLmap_parallel inner-loop calls). If we
@@ -265,9 +266,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     Ni, Nj = size(M)
     processed_indices = Set{Int}()
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
-    forloop_iter = alg.forloop_iter
-    _assert_inner_method(alg.inner_checkpoint)
-    ifparallel = alg.ifparallel
+    _assert_inner_method(inner_checkpoint)
     # polish_fine (last N power iters in F64) is tricky when tensors are already
     # cast at env-level; disable within env-level cast mode. Coarse polish via
     # `inner_etype_final_steps` at the AD-loop level is unaffected.
@@ -277,15 +276,15 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
-            f(FLij) = checkpoint(alg.inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(FLij) = checkpoint(alg.inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
-            if alg.ifsimple_eig
-                if alg.eig_checkpoint isa Plain && polish_fine
+            f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
+            if ifsimple_eig
+                if eig_checkpoint isa Plain && polish_fine
                     λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif alg.eig_checkpoint isa Plain
+                elseif eig_checkpoint isa Plain
                     λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
                 else
-                    λLs, FLi1s = checkpoint(alg.eig_checkpoint, _simple_eig_FLmap,
+                    λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
                                              FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
                                              power_iter, ifparallel, forloop_iter,
                                              inner_etype=inner_etype_pass,
@@ -293,7 +292,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
                 end
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
             end
             λL[i, 1], FL′[i, 1] = selectpos(λLs, FLi1s, Nj)
 
@@ -339,7 +338,8 @@ Compute the right environment tensor for MPS `ARu`, `ARd` and MPO `M`, by findin
 of AR - M - conj(AR) contracted along the physical dimension.
 """
 function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
-    inner_etype = alg.inner_etype
+    @unpack inner_etype, forloop_iter, ifparallel,
+            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
     T_orig = ARu isa StructArray ? eltype(ARu.data[1]) : eltype(ARu)
     do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -356,24 +356,22 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     FR′ = Zygote.Buffer(FR)
     processed_indices = Set{Int}()
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
-    forloop_iter = alg.forloop_iter
-    _assert_inner_method(alg.inner_checkpoint)
-    ifparallel = alg.ifparallel
+    _assert_inner_method(inner_checkpoint)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
-            f(FRiNj) = checkpoint(alg.inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(FRiNj) = checkpoint(alg.inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
-            if alg.ifsimple_eig
-                if alg.eig_checkpoint isa Plain && polish_fine
+            f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
+            if ifsimple_eig
+                if eig_checkpoint isa Plain && polish_fine
                     λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif alg.eig_checkpoint isa Plain
+                elseif eig_checkpoint isa Plain
                     λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
                 else
-                    λRs, FR1s = checkpoint(alg.eig_checkpoint, _simple_eig_FRmap,
+                    λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
                                             FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
                                             power_iter, ifparallel, forloop_iter,
                                             inner_etype=inner_etype_pass,
@@ -381,7 +379,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
                 end
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
             end
             λR[i, Nj], FR′[i, Nj] = selectpos(λRs, FR1s, Nj)
 
@@ -546,7 +544,8 @@ Compute the up environment tensor for MPS `FL`, `FR` and MPO `M`, by finding the
 of `FL - M - FR` contracted along the physical dimension.
 """
 function ACenv(AC, FL, M, FR; alg, kwargs...)
-    inner_etype = alg.inner_etype
+    @unpack inner_etype, power_iter, forloop_iter, ifparallel,
+            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
     T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
     do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -562,24 +561,21 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
     processed_indices = Set{Int}()
-    power_iter = alg.power_iter
-    forloop_iter = alg.forloop_iter
-    _assert_inner_method(alg.inner_checkpoint)
-    ifparallel = alg.ifparallel
+    _assert_inner_method(inner_checkpoint)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
-            if alg.ifsimple_eig
-                if alg.eig_checkpoint isa Plain && polish_fine
+            f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
+            if ifsimple_eig
+                if eig_checkpoint isa Plain && polish_fine
                     λACs, ACs = simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif alg.eig_checkpoint isa Plain
+                elseif eig_checkpoint isa Plain
                     λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
                 else
-                    λACs, ACs = checkpoint(alg.eig_checkpoint, _simple_eig_ACmap,
+                    λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
                                             AC[1, j], FL[:, j], FR[:, j], M[:, j];
                                             power_iter, ifparallel, forloop_iter,
                                             inner_etype=inner_etype_pass,
@@ -587,7 +583,7 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
                 end
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
             end
             λAC[1, j], AC′[1, j] = selectpos(λACs, ACs, Ni)
 
@@ -631,22 +627,24 @@ Compute the up environment tensor for MPS `FL` and `FR`, by finding the up fixed
 of `FL - FR` contracted along the physical dimension.
 """
 function Cenv(C, FL, FR; alg, kwargs...)
+    # Note: eig_checkpoint is intentionally NOT applied to Cenv — Cmap is much
+    # cheaper than FLmap/ACmap so the forward tape savings are negligible.
+    @unpack power_iter, inner_checkpoint, ifsimple_eig, verbosity = alg
     Ni, Nj = size(C)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
-    power_iter = alg.power_iter
-    _assert_inner_method(alg.inner_checkpoint)
+    _assert_inner_method(inner_checkpoint)
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            f(C1j) = checkpoint(alg.inner_checkpoint, Cmap, 1, C1j, FL[:, jr], FR[:, j])
-            if alg.ifsimple_eig
+            f(C1j) = checkpoint(inner_checkpoint, Cmap, 1, C1j, FL[:, jr], FR[:, j])
+            if ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1, j]; power_iter)
             else
                 λCs, Cs, info = eigsolve(f, C[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
             end
             λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
 

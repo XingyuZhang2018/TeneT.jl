@@ -9,6 +9,21 @@
 #   - PlaquetteVUMPSEnv(AL, C, FLu, FLo) — 4 fields for observables
 # ============================================================================
 
+# ── Offload-friendly simple_eig wrapper (Plaquette) ──────────────────
+# Mirror `_simple_eig_ACmap` in general.jl: take per-column neighbourhood
+# slices as explicit args so `checkpoint(Recompute()/Offload(), ...)`
+# can capture / offload them cleanly, avoiding closure-pinned refs.
+function _simple_eig_ACmap_plaq(AC1j, FLj, FLjr, Mj; power_iter, ifparallel, forloop_iter,
+                                  inner_etype=nothing, final_polish_steps=0)
+    f(x) = ACmap(1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype)
+    if final_polish_steps > 0
+        f_final(x) = ACmap(1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype=nothing)
+        return simple_eig(f, AC1j; power_iter, f_final, final_polish_steps)
+    else
+        return simple_eig(f, AC1j; power_iter)
+    end
+end
+
 # ── Plaquette-specific environment solvers ────────────────────────────
 """
     ACenv_plaq(AC, FL, M; kwargs...)
@@ -17,7 +32,8 @@ AC environment for plaquette mode.  Uses `FL` on both sides of the
 column transfer matrix (no FR).
 """
 function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
-    inner_etype = alg.inner_etype
+    @unpack inner_etype, power_iter, ifparallel, forloop_iter,
+            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
     T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
     do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -32,10 +48,7 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC)
     processed_indices = Set{Int}()
-    power_iter = alg.power_iter
-    ifparallel = alg.ifparallel
-    forloop_iter = alg.forloop_iter
-    _assert_inner_method(alg.inner_checkpoint)
+    _assert_inner_method(inner_checkpoint)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
@@ -49,15 +62,23 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
 
         if p ∉ processed_indices
-            f(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
-            if alg.ifsimple_eig
-                λACs, ACs = polish_fine ?
-                    simple_eig(f, AC[1,j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
-                    simple_eig(f, AC[1,j]; power_iter)
+            f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
+            if ifsimple_eig
+                if eig_checkpoint isa Plain && polish_fine
+                    λACs, ACs = simple_eig(f, AC[1,j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                elseif eig_checkpoint isa Plain
+                    λACs, ACs = simple_eig(f, AC[1,j]; power_iter)
+                else
+                    λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_plaq,
+                                            AC[1,j], FL[:,j], FL[:,jr], M[:,j];
+                                            power_iter, ifparallel, forloop_iter,
+                                            inner_etype=inner_etype_pass,
+                                            final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+                end
             else
                 λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
             end
             λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
             push!(processed_indices, p)
@@ -87,12 +108,14 @@ C environment for plaquette mode.  Uses `FL` on both sides:
 `Cmap(C, FL[:,jr], FL[:,jr])`.
 """
 function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
+    # Note: eig_checkpoint is intentionally NOT applied to Cenv — Cmap is much
+    # cheaper than FLmap/ACmap so the forward tape savings are negligible.
+    @unpack power_iter, inner_checkpoint, ifsimple_eig, verbosity = alg
     Ni, Nj = size(C)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
-    power_iter = alg.power_iter
-    _assert_inner_method(alg.inner_checkpoint)
+    _assert_inner_method(inner_checkpoint)
     for j in 1:Nj
         jl = mod1(j + 1, Nj)
         if L <: Plaquette{Square}
@@ -104,12 +127,12 @@ function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
         p = C.pattern[1,j]
         if p ∉ processed_indices
-            f(C1j) = checkpoint(alg.inner_checkpoint, Cmap, 1, C1j, FL[:,jl], FL[:,jr])
-            if alg.ifsimple_eig
+            f(C1j) = checkpoint(inner_checkpoint, Cmap, 1, C1j, FL[:,jl], FL[:,jr])
+            if ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1,j]; power_iter)
             else
                 λCs, Cs, info = eigsolve(f, C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "Cenv_plaq not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "Cenv_plaq not converged"
             end
             λC[1,j], C′[1,j] = selectpos(λCs, Cs, Ni)
             push!(processed_indices, p)
