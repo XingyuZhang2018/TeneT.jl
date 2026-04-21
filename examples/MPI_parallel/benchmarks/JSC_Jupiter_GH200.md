@@ -74,6 +74,74 @@
 | 16 | 512 | 512MB | 9829ms | 5049ms | 2965ms | 2193ms | 1.95x | 3.31x | 4.48x |
 | 16 | 1024 | 2048MB | 85680ms | 48034ms | 23759ms | 13923ms | 1.78x | 3.61x | 6.15x |
 
+## Part 3: checkpoint() Method Comparison (FLmap_parallel, 2026-04-21)
+
+Gradient-equivalence + wall-clock cost for the unified `CheckpointMethod`
+singletons (`Plain()` / `Recompute()` / `Offload()`) wrapping `FLmap_parallel`
+under MPI multi-GPU (job `384613`, `test_MPI_checkpoint.jl`).
+
+**Correctness (all 16 configs = 4 sizes × 4 GPU counts)**:
+- All three methods produce **identical gradients**: `‖g_method - g_plain‖ / ‖g_plain‖ < 1e-10`.
+- **No MPI deadlock** in any run — Offload's host-copy + device-restore
+  brackets around FLmap_parallel's internal allgatherv / allreduce
+  collectives execute correctly.
+- Offload gradient lands on the correct per-rank `CuArray`
+  (not rank-0's device).
+
+Times below are **backward-pass milliseconds** (forward is bit-identical
+across methods: only adjoints differ, primals are identical). D≥8 only —
+D=4/6 hit a cuTENSOR JIT edge case on JSC (job 384563 CUTENSOR_STATUS_INVALID_VALUE).
+
+### 1 GPU
+| D | χ | Plain | Recompute | Offload | Off/Plain |
+|---|---|-------|-----------|---------|-----------|
+| 8  | 128 |  462 ms |  551 ms |  556 ms | 1.20× |
+| 8  | 256 |  616 ms |  769 ms |  775 ms | 1.26× |
+| 10 | 256 |  884 ms | 1023 ms | 1035 ms | 1.17× |
+| 10 | 512 | 1888 ms | 2308 ms | 2805 ms | 1.49× |
+
+### 2 GPU
+| D | χ | Plain | Recompute | Offload | Off/Plain |
+|---|---|-------|-----------|---------|-----------|
+| 8  | 128 |  296 ms |  343 ms |  345 ms | 1.17× |
+| 8  | 256 |  326 ms |  405 ms |  410 ms | 1.26× |
+| 10 | 256 |  509 ms |  626 ms |  637 ms | 1.25× |
+| 10 | 512 | 1078 ms | 1327 ms | 1386 ms | 1.29× |
+
+### 4 GPU
+| D | χ | Plain | Recompute | Offload | Off/Plain |
+|---|---|-------|-----------|---------|-----------|
+| 8  | 128 |  307 ms |  382 ms |  327 ms | 1.07× |
+| 8  | 256 |  332 ms |  396 ms |  412 ms | 1.24× |
+| 10 | 256 |  484 ms |  574 ms |  591 ms | 1.22× |
+| 10 | 512 | 1167 ms | 1333 ms | 1476 ms | 1.26× |
+
+### 8 GPU (2 nodes)
+| D | χ | Plain | Recompute | Offload | Off/Plain |
+|---|---|-------|-----------|---------|-----------|
+| 8  | 128 |  245 ms |  277 ms |  275 ms | 1.12× |
+| 8  | 256 |  262 ms |  359 ms |  380 ms | 1.45× |
+| 10 | 256 |  505 ms |  695 ms |  699 ms | 1.38× |
+| 10 | 512 | 1492 ms | 1809 ms | 1821 ms | 1.22× |
+
+### Findings
+
+- **Multi-GPU Offload is correct**: the concern that Offload's
+  host↔device bracket might race with `FLmap_parallel`'s internal MPI
+  collectives turned out unfounded. All 16 configs produce matching
+  gradients; no hangs, no device-residency errors.
+- **Offload overhead ≈ 1.1–1.5× vs Plain**, tracking Recompute closely.
+  Extra cost comes from host-copy + copy-back of args (FL + ALu + ALd
+  + M = 4× per-arg size). On GH200 with NVLink the transfer penalty
+  stays under ~25% for most sizes.
+- **Worst case D=10 χ=512 @ 1 GPU = 1.49×**: host allocator pressure
+  (800 MB × 4 = 3.2 GB per backward) is likely the dominant cost.
+  Gets better at 2/4/8 GPU because per-rank size shrinks (tiling).
+- **Recommendation**: use `step_checkpoint=Offload()` on VRAM-constrained
+  runs. Expect ~20-30% extra backward time for the VRAM savings
+  described in the "Feature Comparison" section; correctness and
+  MPI-safety verified up to 8 GPU / 2 nodes.
+
 ## JSC-specific Environment
 
 ```bash
