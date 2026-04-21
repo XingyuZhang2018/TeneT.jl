@@ -17,10 +17,15 @@ model = Heisenberg(lattice=Square(),
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTM/$etype/seed$seed/")
+# forloop_iter=2: chunks FLmap_parallel (QRCTM) and contract_o_12 (energy
+# observable backward) by 2 on each inner loop. Without this, D=7 χ=256 OOMs
+# at ~2.3 GiB alloc in contract_o_12's Zygote pullback on 24 GB 4090 even with
+# ifcheckpoint_wengert=true — the observable backward, not QRCTM, is the
+# bottleneck. forloop_iter=2 chunks the row-contraction intermediates by 2x.
 boundary_alg = QRCTM(ifparallel=false,
                      ifcheckpoint=false,
                      ifcheckpoint_wengert=true,
-                     forloop_iter=1,
+                     forloop_iter=2,
                      maxiter=30,
                      miniter=0,
                      maxiter_ad=20,
@@ -34,7 +39,7 @@ params = GradientOptimize(model=model,
                           boundary_alg=boundary_alg,
                           optimizer=LBFGS(200; maxiter=2, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           ifcheckpoint=false,
-                          forloop_iter=1,
+                          forloop_iter=2,
                           maxiter_restart=1,
                           verbosity=4,
                           folder=folder,
