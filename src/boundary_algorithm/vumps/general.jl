@@ -32,33 +32,36 @@ permute_fronttail(t::AbstractZero) = t
 # iterations — mirroring the non-offload `polish_fine` branch in leftenv /
 # rightenv / ACenv below.
 function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, forloop_iter,
-                            inner_etype=nothing, final_polish_steps=0)
+                            inner_etype=nothing, final_polish_steps=0,
+                            segment_checkpoint::CheckpointMethod=Recompute())
     f(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
-        return simple_eig(f, FLij; power_iter, f_final, final_polish_steps)
+        return simple_eig(f, FLij; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
-        return simple_eig(f, FLij; power_iter)
+        return simple_eig(f, FLij; power_iter, segment_checkpoint)
     end
 end
 function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel, forloop_iter,
-                            inner_etype=nothing, final_polish_steps=0)
+                            inner_etype=nothing, final_polish_steps=0,
+                            segment_checkpoint::CheckpointMethod=Recompute())
     f(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
-        return simple_eig(f, FRiNj; power_iter, f_final, final_polish_steps)
+        return simple_eig(f, FRiNj; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
-        return simple_eig(f, FRiNj; power_iter)
+        return simple_eig(f, FRiNj; power_iter, segment_checkpoint)
     end
 end
 function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter,
-                            inner_etype=nothing, final_polish_steps=0)
+                            inner_etype=nothing, final_polish_steps=0,
+                            segment_checkpoint::CheckpointMethod=Recompute())
     f(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing)
-        return simple_eig(f, AC1j; power_iter, f_final, final_polish_steps)
+        return simple_eig(f, AC1j; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
-        return simple_eig(f, AC1j; power_iter)
+        return simple_eig(f, AC1j; power_iter, segment_checkpoint)
     end
 end
 
@@ -242,7 +245,7 @@ of ALu - M - ALd contracted along the physical dimension.
 """
 function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     @unpack inner_etype, forloop_iter, ifparallel,
-            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast: Plaquette/General leftenv makes multiple
     # `parallel()` calls per invocation (2 simple_eig each calling FLmap's
     # internal Nj-loop + Nj-1 naked FLmap_parallel inner-loop calls). If we
@@ -280,14 +283,15 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
             f_polish(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
                 if eig_checkpoint isa Plain && polish_fine
-                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
                 elseif eig_checkpoint isa Plain
-                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
+                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, segment_checkpoint)
                 else
                     λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
                                              FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
                                              power_iter, ifparallel, forloop_iter,
                                              inner_etype=inner_etype_pass,
+                                             segment_checkpoint,
                                              final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 end
             else
@@ -339,7 +343,7 @@ of AR - M - conj(AR) contracted along the physical dimension.
 """
 function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     @unpack inner_etype, forloop_iter, ifparallel,
-            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
     T_orig = ARu isa StructArray ? eltype(ARu.data[1]) : eltype(ARu)
     do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -367,14 +371,15 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
             f_polish(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
                 if eig_checkpoint isa Plain && polish_fine
-                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
                 elseif eig_checkpoint isa Plain
-                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
+                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, segment_checkpoint)
                 else
                     λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
                                             FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
                                             power_iter, ifparallel, forloop_iter,
                                             inner_etype=inner_etype_pass,
+                                            segment_checkpoint,
                                             final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 end
             else
@@ -427,6 +432,7 @@ function leftCenv(ALu::StructArray,
                   L::StructArray=cellones(ALu);
                   ifobs=false, alg, kwargs...)
 
+    @unpack segment_checkpoint, ifsimple_eig, verbosity = alg
     Ni, Nj = size(L)
     λL = Zygote.Buffer(randSA(Array, ALu.pattern))
     L′ = Zygote.Buffer(L)
@@ -437,11 +443,11 @@ function leftCenv(ALu::StructArray,
         p = L.pattern[i, 1]
         if p ∉ processed_indices
             f(Lij) = Lmap(1, Lij, ALu[i, :], ALd[ir, :])
-            if alg.ifsimple_eig
-                λLs, Li1s = simple_eig(f, L[i, 1]; power_iter)
+            if ifsimple_eig
+                λLs, Li1s = simple_eig(f, L[i, 1]; power_iter, segment_checkpoint)
             else
                 λLs, Li1s, info = eigsolve(f, L[i, 1], 1, :LM; maxiter=100, ishermitian=false, kwargs...)
-                alg.verbosity >= 1 && info.converged == 0 && @warn "leftCenv not converged"
+                verbosity >= 1 && info.converged == 0 && @warn "leftCenv not converged"
             end
             λL[i, 1], L′[i, 1] = selectpos(λLs, Li1s, Nj)
 
@@ -486,6 +492,7 @@ function rightCenv(ARu::StructArray,
                    R::StructArray=cellones(ARu);
                    ifobs=false, alg, kwargs...)
 
+    @unpack segment_checkpoint, ifsimple_eig, verbosity = alg
     λR = Zygote.Buffer(randSA(Array, ARu.pattern))
     R′ = Zygote.Buffer(R)
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
@@ -496,11 +503,11 @@ function rightCenv(ARu::StructArray,
         p = R.pattern[i, Nj]
         if p ∉ processed_indices
             f(RiNj) = Rmap(Ni, RiNj, ARu[i, :], ARd[ir, :])
-            if alg.ifsimple_eig
-                λLs, Li1s = simple_eig(f, R[i, Nj]; power_iter)
+            if ifsimple_eig
+                λLs, Li1s = simple_eig(f, R[i, Nj]; power_iter, segment_checkpoint)
             else
                 λLs, Li1s, info = eigsolve(f, R[i, Nj], 1, :LM; maxiter=100, ishermitian=false, kwargs...)
-                alg.verbosity >= Nj && info.converged == 0 && @warn "rightCenv not converged"
+                verbosity >= Nj && info.converged == 0 && @warn "rightCenv not converged"
             end
             λR[i, Nj], R′[i, Nj] = selectpos(λLs, Li1s, Nj)
 
@@ -545,7 +552,7 @@ of `FL - M - FR` contracted along the physical dimension.
 """
 function ACenv(AC, FL, M, FR; alg, kwargs...)
     @unpack inner_etype, power_iter, forloop_iter, ifparallel,
-            inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
     T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
     do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -571,14 +578,15 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
             f_polish(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
                 if eig_checkpoint isa Plain && polish_fine
-                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
+                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
                 elseif eig_checkpoint isa Plain
-                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
+                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter, segment_checkpoint)
                 else
                     λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
                                             AC[1, j], FL[:, j], FR[:, j], M[:, j];
                                             power_iter, ifparallel, forloop_iter,
                                             inner_etype=inner_etype_pass,
+                                            segment_checkpoint,
                                             final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 end
             else
@@ -629,7 +637,7 @@ of `FL - FR` contracted along the physical dimension.
 function Cenv(C, FL, FR; alg, kwargs...)
     # Note: eig_checkpoint is intentionally NOT applied to Cenv — Cmap is much
     # cheaper than FLmap/ACmap so the forward tape savings are negligible.
-    @unpack power_iter, inner_checkpoint, ifsimple_eig, verbosity = alg
+    @unpack power_iter, segment_checkpoint, inner_checkpoint, ifsimple_eig, verbosity = alg
     Ni, Nj = size(C)
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
@@ -641,7 +649,7 @@ function Cenv(C, FL, FR; alg, kwargs...)
         if p ∉ processed_indices
             f(C1j) = checkpoint(inner_checkpoint, Cmap, 1, C1j, FL[:, jr], FR[:, j])
             if ifsimple_eig
-                λCs, Cs = simple_eig(f, C[1, j]; power_iter)
+                λCs, Cs = simple_eig(f, C[1, j]; power_iter, segment_checkpoint)
             else
                 λCs, Cs, info = eigsolve(f, C[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"

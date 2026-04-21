@@ -70,9 +70,10 @@
         @test v.ifparallelupdown == false
         @test v.ifparallel == false
         @test v.ifsimple_eig == true
-        @test v.inner_checkpoint === TeneT.Plain()
-        @test v.eig_checkpoint   === TeneT.Plain()
-        @test v.step_checkpoint  === TeneT.Plain()
+        @test v.segment_checkpoint === TeneT.Recompute()  # Default: preserve prior behaviour
+        @test v.inner_checkpoint   === TeneT.Plain()
+        @test v.eig_checkpoint     === TeneT.Plain()
+        @test v.step_checkpoint    === TeneT.Plain()
     end
 
     # ---- VUMPS struct — inner_etype field ----

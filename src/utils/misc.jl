@@ -21,6 +21,7 @@ function _power_iter_segment(f, v, n)
 end
 
 function simple_eig(f, v; power_iter, checkpoint_every=5,
+                    segment_checkpoint::CheckpointMethod=Recompute(),
                     f_final=nothing, final_polish_steps=0)
     polish_active = f_final !== nothing && final_polish_steps > 0
     n_polish = polish_active ? min(final_polish_steps, power_iter) : 0
@@ -32,7 +33,7 @@ function simple_eig(f, v; power_iter, checkpoint_every=5,
         if n > 0 && checkpoint_every > 0 && checkpoint_every < n
             while n > 0
                 seg = min(checkpoint_every, n)
-                v = checkpoint(Recompute(), _power_iter_segment, f, v, seg)
+                v = checkpoint(segment_checkpoint, _power_iter_segment, f, v, seg)
                 n -= seg
             end
         else
@@ -50,7 +51,7 @@ function simple_eig(f, v; power_iter, checkpoint_every=5,
             if checkpoint_every > 0 && checkpoint_every < np
                 while np > 0
                     seg = min(checkpoint_every, np)
-                    v = checkpoint(Recompute(), _power_iter_segment, f, v, seg)
+                    v = checkpoint(segment_checkpoint, _power_iter_segment, f, v, seg)
                     np -= seg
                 end
             else

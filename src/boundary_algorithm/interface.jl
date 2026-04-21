@@ -38,21 +38,28 @@ C4v
     # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
     whole_vumps_etype::Union{Nothing, Type} = nothing
 
-    # Checkpointing for AD, three granularities (fine → coarse):
-    #   inner_checkpoint — wraps each FLmap/FRmap/ACmap/Cmap call inside
-    #                      power iteration. Supports Plain/Recompute only
-    #                      (Offload rejected at runtime).
-    #   eig_checkpoint   — wraps the per-row `simple_eig` in leftenv /
-    #                      rightenv / ACenv. Plain keeps the fast closure
-    #                      path; Recompute/Offload go through the
-    #                      `_simple_eig_*map` explicit-args wrappers.
-    #   step_checkpoint  — wraps the whole `vumps_step`. Coarsest; typically
-    #                      the biggest VRAM lever (memory says so).
+    # Checkpointing for AD, four granularities (fine → coarse):
+    #   segment_checkpoint — wraps each `_power_iter_segment` chunk inside
+    #                         `simple_eig` (`checkpoint_every` power iters per
+    #                         segment). Bounds the tape peak during a single
+    #                         simple_eig execution. Default `Recompute()`
+    #                         preserves prior behaviour; `Plain()` disables
+    #                         (faster but full tape during backward).
+    #   inner_checkpoint   — wraps each FLmap/FRmap/ACmap/Cmap call inside
+    #                         power iteration. Supports Plain/Recompute only
+    #                         (Offload rejected at runtime).
+    #   eig_checkpoint     — wraps the per-row `simple_eig` in leftenv /
+    #                         rightenv / ACenv. Plain keeps the fast closure
+    #                         path; Recompute/Offload go through the
+    #                         `_simple_eig_*map` explicit-args wrappers.
+    #   step_checkpoint    — wraps the whole `vumps_step`. Coarsest; typically
+    #                         the biggest VRAM lever (memory says so).
     # Accepts `Plain()`/`Recompute()`/`Offload()` singletons, or a Symbol
     # (`:plain`, `:recompute`, `:offload`) via `Base.convert`.
-    inner_checkpoint::CheckpointMethod = Plain()
-    eig_checkpoint::CheckpointMethod   = Plain()
-    step_checkpoint::CheckpointMethod  = Plain()
+    segment_checkpoint::CheckpointMethod = Recompute()
+    inner_checkpoint::CheckpointMethod   = Plain()
+    eig_checkpoint::CheckpointMethod     = Plain()
+    step_checkpoint::CheckpointMethod    = Plain()
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
