@@ -33,7 +33,7 @@ permute_fronttail(t::AbstractZero) = t
 # rightenv / ACenv below.
 function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, forloop_iter,
                             inner_etype=nothing, final_polish_steps=0,
-                            segment_checkpoint::CheckpointMethod=Recompute())
+                            segment_checkpoint::CheckpointMethod=Plain())
     f(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
@@ -44,7 +44,7 @@ function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, for
 end
 function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel, forloop_iter,
                             inner_etype=nothing, final_polish_steps=0,
-                            segment_checkpoint::CheckpointMethod=Recompute())
+                            segment_checkpoint::CheckpointMethod=Plain())
     f(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
@@ -55,7 +55,7 @@ function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel
 end
 function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter,
                             inner_etype=nothing, final_polish_steps=0,
-                            segment_checkpoint::CheckpointMethod=Recompute())
+                            segment_checkpoint::CheckpointMethod=Plain())
     f(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing)

@@ -95,7 +95,7 @@
     # ---- Integration: VUMPS struct new fields ----
     @testset "VUMPS struct new checkpoint fields" begin
         v = VUMPS{General}()
-        @test v.segment_checkpoint === TeneT.Recompute()  # default preserves prior behaviour
+        @test v.segment_checkpoint === TeneT.Plain()
         @test v.inner_checkpoint   === TeneT.Plain()
         @test v.eig_checkpoint     === TeneT.Plain()
         @test v.step_checkpoint    === TeneT.Plain()
@@ -126,17 +126,17 @@
         v0 = rand(ComplexF64, 8); v0 /= norm(v0)
         f(v) = H * v
 
-        # Default (Recompute) — existing behaviour
+        # Default (Plain) — no per-segment checkpoint
         vals_ref, vecs_ref = TeneT.simple_eig(f, v0; power_iter=20)
 
-        # Explicit Plain: no per-segment checkpoint; must give same eigenvalue
+        # Explicit Plain: must equal default
         vals_p, vecs_p = TeneT.simple_eig(f, v0; power_iter=20,
                                           segment_checkpoint=TeneT.Plain())
-        @test abs(vals_p[1]) ≈ abs(vals_ref[1]) atol=1e-10
+        @test vals_p[1] == vals_ref[1]
 
-        # Explicit Recompute (should match default exactly)
+        # Explicit Recompute: same eigenvalue up to floating-point ordering
         vals_r, vecs_r = TeneT.simple_eig(f, v0; power_iter=20,
                                           segment_checkpoint=TeneT.Recompute())
-        @test vals_r[1] == vals_ref[1]
+        @test abs(vals_r[1]) ≈ abs(vals_ref[1]) atol=1e-10
     end
 end

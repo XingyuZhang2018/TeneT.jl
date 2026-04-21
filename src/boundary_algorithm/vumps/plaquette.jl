@@ -15,7 +15,7 @@
 # can capture / offload them cleanly, avoiding closure-pinned refs.
 function _simple_eig_ACmap_plaq(AC1j, FLj, FLjr, Mj; power_iter, ifparallel, forloop_iter,
                                   inner_etype=nothing, final_polish_steps=0,
-                                  segment_checkpoint::CheckpointMethod=Recompute())
+                                  segment_checkpoint::CheckpointMethod=Plain())
     f(x) = ACmap(1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = ACmap(1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype=nothing)

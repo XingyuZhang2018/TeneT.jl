@@ -4,7 +4,7 @@
 # can capture / offload them cleanly, avoiding closure-pinned refs.
 function _simple_eig_FLmap_parallel(FL, ALu, ALd, M; power_iter, ifparallel, forloop_iter,
                                       inner_etype=nothing, final_polish_steps=0,
-                                      segment_checkpoint::CheckpointMethod=Recompute())
+                                      segment_checkpoint::CheckpointMethod=Plain())
     f(x) = FLmap_parallel(x, ALu, ALd, M; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = FLmap_parallel(x, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
@@ -16,7 +16,7 @@ end
 
 function _simple_eig_ACmap_parallel_c4v(AC, FL, M; power_iter, ifparallel, forloop_iter,
                                           inner_etype=nothing, final_polish_steps=0,
-                                          segment_checkpoint::CheckpointMethod=Recompute())
+                                          segment_checkpoint::CheckpointMethod=Plain())
     f(x) = ACmap_parallel(x, FL, FL, M; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
         f_final(x) = ACmap_parallel(x, FL, FL, M; ifparallel, forloop_iter, inner_etype=nothing)

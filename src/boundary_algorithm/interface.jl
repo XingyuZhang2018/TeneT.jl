@@ -38,13 +38,12 @@ C4v
     # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
     whole_vumps_etype::Union{Nothing, Type} = nothing
 
-    # Checkpointing for AD, four granularities (fine → coarse):
+    # Checkpointing for AD, four granularities (fine → coarse), all default
+    # to `Plain()` (no checkpointing — fast, full tape). Opt in per level.
     #   segment_checkpoint — wraps each `_power_iter_segment` chunk inside
     #                         `simple_eig` (`checkpoint_every` power iters per
     #                         segment). Bounds the tape peak during a single
-    #                         simple_eig execution. Default `Recompute()`
-    #                         preserves prior behaviour; `Plain()` disables
-    #                         (faster but full tape during backward).
+    #                         simple_eig execution. Set `Recompute()` to enable.
     #   inner_checkpoint   — wraps each FLmap/FRmap/ACmap/Cmap call inside
     #                         power iteration. Supports Plain/Recompute only
     #                         (Offload rejected at runtime).
@@ -56,7 +55,7 @@ C4v
     #                         the biggest VRAM lever (memory says so).
     # Accepts `Plain()`/`Recompute()`/`Offload()` singletons, or a Symbol
     # (`:plain`, `:recompute`, `:offload`) via `Base.convert`.
-    segment_checkpoint::CheckpointMethod = Recompute()
+    segment_checkpoint::CheckpointMethod = Plain()
     inner_checkpoint::CheckpointMethod   = Plain()
     eig_checkpoint::CheckpointMethod     = Plain()
     step_checkpoint::CheckpointMethod    = Plain()
