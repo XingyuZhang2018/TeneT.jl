@@ -50,13 +50,15 @@ end
 Random.seed!(42 + 0)  # rank-independent
 
 # ═══════════════════════════════════════════════════════════════════════
-# Test matrix: small + medium sizes. Small verifies correctness; medium
-# probes whether Offload's host-copy cost is manageable per rank.
+# Test matrix: align with test_MPI_config.jl sizes so cuTENSOR has
+# code-paths we know work on JSC (D<8 hits cuTENSOR JIT edge cases).
+# Correctness is independent of size; timings scale up naturally.
 # ═══════════════════════════════════════════════════════════════════════
 configs = [
-    (D=4,  χ=32),
-    (D=6,  χ=64),
     (D=8,  χ=128),
+    (D=8,  χ=256),
+    (D=10, χ=256),
+    (D=10, χ=512),
 ]
 
 for (D, χ) in configs
