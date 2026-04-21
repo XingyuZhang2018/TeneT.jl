@@ -6,7 +6,7 @@
 #
 # Key code settings for multi-GPU:
 #   - ifparallel=true enables MPI-parallel tensor contractions
-#   - ifcheckpoint=true enables AD checkpointing (required for large D/χ)
+#   - step_checkpoint=Recompute() enables AD checkpointing (required for large D/χ)
 #   - forloop_iter=total_splits/nprocs splits work across GPUs
 
 using Random, CUDA, TeneT, OptimKit, LinearAlgebra, Zygote, MPI
@@ -63,7 +63,9 @@ folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/D$
 boundary_alg = VUMPS{Plaquette{Square}}(
     ifsimple_eig  = true,
     ifparallel    = true,          # enable MPI parallel contractions
-    ifcheckpoint  = true,          # required for large D/χ to fit in GPU memory
+    inner_checkpoint = Recompute(),
+    step_checkpoint  = Recompute(),  # required for large D/χ to fit in GPU memory
+
     forloop_iter  = forloop_iter,
     maxiter       = 30,
     miniter       = 0,

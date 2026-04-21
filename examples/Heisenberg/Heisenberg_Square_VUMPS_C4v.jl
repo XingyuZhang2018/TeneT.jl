@@ -19,7 +19,8 @@ No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_C4v/$etype/seed$seed/")
 boundary_alg = VUMPS{C4v}(ifsimple_eig=true,
                            ifparallel=false,
-                           ifcheckpoint=true,
+                           inner_checkpoint = Recompute(),
+                           step_checkpoint  = Recompute(),
                            forloop_iter=1,
                            maxiter=3, 
                            miniter=0, 

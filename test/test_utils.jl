@@ -143,15 +143,15 @@
             @test norm(v1) ≈ 1.0 atol=1e-10
         end
 
-        @testset "checkpoint" begin
+        @testset "checkpoint (legacy smoke — see test_checkpoint.jl for full API)" begin
             f(x) = 2 * x .+ 1
             x = rand(5)
-            @test f(x) == checkpoint(f, x)
+            @test f(x) == checkpoint(TeneT.Recompute(), f, x)
 
             # With kwargs
             g(x; scale=1.0) = scale * x
             y = rand(3)
-            @test g(y; scale=2.0) == checkpoint(g, y; scale=2.0)
+            @test g(y; scale=2.0) == checkpoint(TeneT.Recompute(), g, y; scale=2.0)
         end
 
         @testset "takagi_decomposition" begin

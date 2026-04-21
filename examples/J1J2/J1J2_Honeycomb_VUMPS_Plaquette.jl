@@ -28,7 +28,6 @@ No = 2
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_Plaquette/$etype/seed$seed/")
 boundary_alg = VUMPS(Plaquette(lattice); ifsimple_eig=true,
                                          ifparallel=false,
-                                         ifcheckpoint=false,
                                          forloop_iter=1,
                                          maxiter=30, 
                                          miniter=0, 

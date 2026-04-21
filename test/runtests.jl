@@ -166,6 +166,7 @@ end
     include("test_types.jl")
     include("test_structarray.jl")
     include("test_utils.jl")
+    include("test_checkpoint.jl")
     include("test_contraction.jl")
     include("test_boundary.jl")
     include("test_autodiff.jl")

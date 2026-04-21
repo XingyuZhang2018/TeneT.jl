@@ -27,7 +27,6 @@ C4v
     ifparallelupdown = false
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
-    ifcheckpoint::Bool = false
 
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0
@@ -39,17 +38,21 @@ C4v
     # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
     whole_vumps_etype::Union{Nothing, Type} = nothing
 
-    # Host-memory offload for checkpointed AD. Two granularities:
-    #   ifoffload_eig  — fine:   wraps `simple_eig` in leftenv/rightenv/ACenv;
-    #                             offloads per-row neighbourhood tensors.
-    #   ifoffload_step — coarse: wraps the whole `vumps_step` in ad_leading_boundary;
-    #                             offloads the full VUMPSRuntime snapshots.
-    # Enable both for maximum VRAM savings on GPU. On CPU they are pure overhead.
-    # Empirically `ifoffload_step` is the effective lever; `ifoffload_eig`'s
-    # savings are marginal because StructArray slicing is pointer-shared with
-    # the outer rt/M that stays pinned.
-    ifoffload_eig::Bool  = false
-    ifoffload_step::Bool = false
+    # Checkpointing for AD, three granularities (fine → coarse):
+    #   inner_checkpoint — wraps each FLmap/FRmap/ACmap/Cmap call inside
+    #                      power iteration. Supports Plain/Recompute only
+    #                      (Offload rejected at runtime).
+    #   eig_checkpoint   — wraps the per-row `simple_eig` in leftenv /
+    #                      rightenv / ACenv. Plain keeps the fast closure
+    #                      path; Recompute/Offload go through the
+    #                      `_simple_eig_*map` explicit-args wrappers.
+    #   step_checkpoint  — wraps the whole `vumps_step`. Coarsest; typically
+    #                      the biggest VRAM lever (memory says so).
+    # Accepts `Plain()`/`Recompute()`/`Offload()` singletons, or a Symbol
+    # (`:plain`, `:recompute`, `:offload`) via `Base.convert`.
+    inner_checkpoint::CheckpointMethod = Plain()
+    eig_checkpoint::CheckpointMethod   = Plain()
+    step_checkpoint::CheckpointMethod  = Plain()
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)

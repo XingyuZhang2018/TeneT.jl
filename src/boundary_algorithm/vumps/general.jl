@@ -23,7 +23,7 @@ permute_fronttail(t::AbstractZero) = t
 
 # ── Offload-friendly simple_eig wrappers ────────────────────────────
 # These accept the big neighbourhood tensors as explicit args so that
-# `checkpoint_offload` can move them to host memory during the backward
+# `checkpoint(Offload(), ...)` can move them to host memory during the backward
 # re-compute on GPU runs.
 #
 # Mixed-precision + polish support: the helpers thread `inner_etype` into
@@ -266,7 +266,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     processed_indices = Set{Int}()
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
     forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
+    _assert_inner_method(alg.inner_checkpoint)
     ifparallel = alg.ifparallel
     # polish_fine (last N power iters in F64) is tricky when tensors are already
     # cast at env-level; disable within env-level cast mode. Coarse polish via
@@ -277,18 +277,19 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
-            f(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(FLij) = ifcheckpoint ? checkpoint(FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FLmap(1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
+            f(FLij) = checkpoint(alg.inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(FLij) = checkpoint(alg.inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                if alg.ifoffload_eig
-                    λLs, FLi1s = checkpoint_offload(_simple_eig_FLmap, FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
-                                                     power_iter, ifparallel, forloop_iter,
-                                                     inner_etype=inner_etype_pass,
-                                                     final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                elseif polish_fine
+                if alg.eig_checkpoint isa Plain && polish_fine
                     λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                else
+                elseif alg.eig_checkpoint isa Plain
                     λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter)
+                else
+                    λLs, FLi1s = checkpoint(alg.eig_checkpoint, _simple_eig_FLmap,
+                                             FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
+                                             power_iter, ifparallel, forloop_iter,
+                                             inner_etype=inner_etype_pass,
+                                             final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 end
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
@@ -356,7 +357,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     processed_indices = Set{Int}()
     power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
     forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
+    _assert_inner_method(alg.inner_checkpoint)
     ifparallel = alg.ifparallel
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
@@ -364,18 +365,19 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
         ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
-            f(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(FRiNj) = ifcheckpoint ? checkpoint(FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing) : FRmap(Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
+            f(FRiNj) = checkpoint(alg.inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(FRiNj) = checkpoint(alg.inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                if alg.ifoffload_eig
-                    λRs, FR1s = checkpoint_offload(_simple_eig_FRmap, FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
-                                                    power_iter, ifparallel, forloop_iter,
-                                                    inner_etype=inner_etype_pass,
-                                                    final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                elseif polish_fine
+                if alg.eig_checkpoint isa Plain && polish_fine
                     λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                else
+                elseif alg.eig_checkpoint isa Plain
                     λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter)
+                else
+                    λRs, FR1s = checkpoint(alg.eig_checkpoint, _simple_eig_FRmap,
+                                            FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
+                                            power_iter, ifparallel, forloop_iter,
+                                            inner_etype=inner_etype_pass,
+                                            final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 end
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
@@ -562,25 +564,26 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
     forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
+    _assert_inner_method(alg.inner_checkpoint)
     ifparallel = alg.ifparallel
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
+            f(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
-                if alg.ifoffload_eig
-                    λACs, ACs = checkpoint_offload(_simple_eig_ACmap, AC[1, j], FL[:, j], FR[:, j], M[:, j];
-                                                    power_iter, ifparallel, forloop_iter,
-                                                    inner_etype=inner_etype_pass,
-                                                    final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                elseif polish_fine
+                if alg.eig_checkpoint isa Plain && polish_fine
                     λACs, ACs = simple_eig(f, AC[1, j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                else
+                elseif alg.eig_checkpoint isa Plain
                     λACs, ACs = simple_eig(f, AC[1, j]; power_iter)
+                else
+                    λACs, ACs = checkpoint(alg.eig_checkpoint, _simple_eig_ACmap,
+                                            AC[1, j], FL[:, j], FR[:, j], M[:, j];
+                                            power_iter, ifparallel, forloop_iter,
+                                            inner_etype=inner_etype_pass,
+                                            final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
                 end
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
@@ -633,12 +636,12 @@ function Cenv(C, FL, FR; alg, kwargs...)
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
-    ifcheckpoint = alg.ifcheckpoint
+    _assert_inner_method(alg.inner_checkpoint)
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            f(C1j) = ifcheckpoint ? checkpoint(Cmap, 1, C1j, FL[:, jr], FR[:, j]) : Cmap(1, C1j, FL[:, jr], FR[:, j])
+            f(C1j) = checkpoint(alg.inner_checkpoint, Cmap, 1, C1j, FL[:, jr], FR[:, j])
             if alg.ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1, j]; power_iter)
             else
@@ -961,9 +964,7 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
                               _downcast_eltype(real(T_orig), rt.FR))
             M = _downcast_eltype(real(T_orig), M)
         end
-        rt, err = alg.ifoffload_step ? checkpoint_offload(vumps_step, rt, M, alg_this_iter) :
-                  alg.ifcheckpoint    ? checkpoint(vumps_step, rt, M, alg_this_iter) :
-                                        vumps_step(rt, M, alg_this_iter)
+        rt, err = checkpoint(alg.step_checkpoint, vumps_step, rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))

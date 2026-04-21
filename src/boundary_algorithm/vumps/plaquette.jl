@@ -35,7 +35,7 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     power_iter = alg.power_iter
     ifparallel = alg.ifparallel
     forloop_iter = alg.forloop_iter
-    ifcheckpoint = alg.ifcheckpoint
+    _assert_inner_method(alg.inner_checkpoint)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for j in 1:Nj
@@ -49,8 +49,8 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
 
         if p ∉ processed_indices
-            f(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(AC1j) = ifcheckpoint ? checkpoint(ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing) : ACmap(1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
+            f(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f_polish(AC1j) = checkpoint(alg.inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
             if alg.ifsimple_eig
                 λACs, ACs = polish_fine ?
                     simple_eig(f, AC[1,j]; power_iter, f_final=f_polish, final_polish_steps=simple_eig_polish_steps) :
@@ -92,7 +92,7 @@ function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     power_iter = alg.power_iter
-    ifcheckpoint = alg.ifcheckpoint
+    _assert_inner_method(alg.inner_checkpoint)
     for j in 1:Nj
         jl = mod1(j + 1, Nj)
         if L <: Plaquette{Square}
@@ -104,7 +104,7 @@ function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         end
         p = C.pattern[1,j]
         if p ∉ processed_indices
-            f(C1j) = ifcheckpoint ? checkpoint(Cmap, 1, C1j, FL[:,jl], FL[:,jr]) : Cmap(1, C1j, FL[:,jl], FL[:,jr])
+            f(C1j) = checkpoint(alg.inner_checkpoint, Cmap, 1, C1j, FL[:,jl], FL[:,jr])
             if alg.ifsimple_eig
                 λCs, Cs = simple_eig(f, C[1,j]; power_iter)
             else
@@ -239,9 +239,7 @@ function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaqu
                                        _downcast_eltype(real(T_orig), rt.FL))
             M = _downcast_eltype(real(T_orig), M)
         end
-        rt, err = alg.ifoffload_step ? checkpoint_offload(vumps_step, rt, M, alg_this_iter) :
-                  alg.ifcheckpoint    ? checkpoint(vumps_step, rt, M, alg_this_iter) :
-                                        vumps_step(rt, M, alg_this_iter)
+        rt, err = checkpoint(alg.step_checkpoint, vumps_step, rt, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))

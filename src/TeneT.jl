@@ -44,6 +44,7 @@ include("structarray/buffer.jl")
 # ============================================================================
 
 include("utils/gpu.jl")
+include("utils/checkpoint.jl")
 include("utils/io.jl")
 include("utils/misc.jl")
 
@@ -120,6 +121,8 @@ export QRCTM
 
 export Square, Honeycomb, Kagome
 export General, C4v, Plaquette
+
+export CheckpointMethod, Plain, Recompute, Offload
 
 export C4v_restriction, local_min_norm
 
