@@ -68,16 +68,26 @@ function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     C = env.C
     T = env.T
 
+    # Pick barrier checkpoint mode at runtime. On GPU we want `:cpu` (offload
+    # raw_args to host, freeing device memory pinned in zpb closures across the
+    # AD loop). On CPU, `:cpu` is both pointless and unsound under the current
+    # Wengert+WengertCUDAExt combo: the backward path calls
+    # `to_gpu(a::Array) = CuArray(a)` unconditionally when CUDA is functional,
+    # which silently promotes CPU tensors to GPU and crashes `tensorcontract!`
+    # on Array↔CuArray mixtures. `:recompute` has the same functional effect
+    # on CPU without the memory overhead, so it's the right default there.
+    cp = Wengert.is_gpu(C) ? :cpu : :recompute
+
     CT    = Wengert.barrier((c, t) -> _to_front(CTtoT(c, t)),
-                            Zygote.pullback, C, T; checkpoint=:recompute)
-    U, R  = Wengert.barrier(qr_for_ad, Zygote.pullback, CT; checkpoint=:recompute)
-    U     = Wengert.barrier(u -> reshape(u, size(T)), Zygote.pullback, U; checkpoint=:recompute)
+                            Zygote.pullback, C, T; checkpoint=cp)
+    U, R  = Wengert.barrier(qr_for_ad, Zygote.pullback, CT; checkpoint=cp)
+    U     = Wengert.barrier(u -> reshape(u, size(T)), Zygote.pullback, U; checkpoint=cp)
     T_new = Wengert.barrier(
         (t, u1, u2, m) -> FLmap_parallel(t, u1, u2, m;
             ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter,
             inner_etype=alg.inner_etype),
-        Zygote.pullback, T, U, U, M; checkpoint=:recompute)
-    C_new = Wengert.barrier(Cmap, Zygote.pullback, R, T_new, U; checkpoint=:recompute)
+        Zygote.pullback, T, U, U, M; checkpoint=cp)
+    C_new = Wengert.barrier(Cmap, Zygote.pullback, R, T_new, U; checkpoint=cp)
 
     # Normalise through a barrier: `TrackedArray / Number` is ambiguous with
     # `AbstractArray / Number` (Base); wrapping the `/` inside Wengert.barrier
@@ -85,9 +95,9 @@ function qrctm_step_split(env::CTMEnv, M::AbstractArray, alg::QRCTM)
     # `T /= norm(T)` semantics (scale is treated as a constant via
     # ignore_derivatives inside the closure).
     T_new = Wengert.barrier(t -> t / ignore_derivatives(() -> norm(t)),
-                            Zygote.pullback, T_new; checkpoint=:recompute)
+                            Zygote.pullback, T_new; checkpoint=cp)
     C_new = Wengert.barrier(c -> c / ignore_derivatives(() -> norm(c)),
-                            Zygote.pullback, C_new; checkpoint=:recompute)
+                            Zygote.pullback, C_new; checkpoint=cp)
     err    = ignore_derivatives() do
         norm(Wengert.deep_untrack(C_new) - Wengert.deep_untrack(C))
     end
