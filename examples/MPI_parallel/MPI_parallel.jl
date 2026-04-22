@@ -85,7 +85,6 @@ params = GradientOptimize(
     boundary_alg    = boundary_alg,
     optimizer       = LBFGS(200; maxiter=10, verbosity=verbosity_optim, gradtol=1e-7,
                             linesearch=HagerZhangLineSearch(maxfg=5)),
-    ifcheckpoint    = false,         # outer checkpoint for energy (separate from boundary_alg checkpoint)
     forloop_iter    = forloop_iter,  # must match boundary_alg setting
     maxiter_restart = maxiter_restart,
     verbosity       = verbosity_optim,

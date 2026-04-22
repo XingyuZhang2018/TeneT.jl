@@ -46,9 +46,6 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     # Tensor layout
     forloop_iter::Int = 1
 
-    # Checkpointing (Zygote checkpoint for memory saving)
-    ifcheckpoint::Bool = false
-
     # ── AD checkpointing on the energy/gradient side (coarse → fine) ────
     # See src/utils/checkpoint.jl for Plain/Recompute/Offload semantics.
     # Note: a map-level option is intentionally absent — rrule(parallel) in

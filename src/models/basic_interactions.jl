@@ -27,7 +27,7 @@ function _contract_barebones(contract_fn, args, terms,
                              params::iPEPSOptimize; kwargs...)
     bond_ckpt    = params.bond_checkpoint
     ifparallel   = params.boundary_alg.ifparallel
-    forloop_iter = params.forloop_iter
+    forloop_iter = params.boundary_alg.forloop_iter
     return sum(c * checkpoint(bond_ckpt, contract_fn, args..., OL, OR;
                               ifparallel, forloop_iter, kwargs...)
                for (c, OL, OR) in terms)
@@ -36,15 +36,15 @@ end
 """
     _contract_one(contract_fn, args, params::iPEPSOptimize; kwargs...)
 
-Single-contraction checkpointed wrapper, for norm contractions such as
-`contract_n_12` that are not summed over terms but still contribute a
-large tape entry.
+Single-contraction checkpointed wrapper, for norms and one-off
+observables (`contract_n_12`, `contract_o_11`, ...) that are not summed
+over terms but still contribute a large tape entry.
 """
 function _contract_one(contract_fn, args::Tuple, params::iPEPSOptimize;
                        kwargs...)
     return checkpoint(params.bond_checkpoint, contract_fn, args...;
                       ifparallel   = params.boundary_alg.ifparallel,
-                      forloop_iter = params.forloop_iter,
+                      forloop_iter = params.boundary_alg.forloop_iter,
                       kwargs...)
 end
 

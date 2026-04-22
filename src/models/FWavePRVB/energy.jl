@@ -35,8 +35,6 @@ Each term is evaluated via contract_o_23 with 6 one-site projectors.
 """
 function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
-    @unpack ifparallel = params.boundary_alg
-    @unpack forloop_iter = params.boundary_alg
     atype = _arraytype(ACu[1])
     Ni, Nj = size(ACu)
     len = length(ACu.data)
@@ -57,8 +55,8 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
             # Horizontal bond
             ir = Ni + 1 - i
             jr = mod1(j + 1, Nj)
-            e = _contract_barebones(contract_o_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), terms; ifparallel, forloop_iter)
-            n = contract_n_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
+            e = _contract_barebones(contract_o_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), terms, params)
+            n = _contract_one(contract_n_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), params)
             params.verbosity >= 4 && println("J1_H($i,$j) = $(model.J1 * e/n)")
             etol += model.J1 * e / n
             e_dict["bond_J1H_energy"]["$(i),$(j)"] = model.J1 * e / n
@@ -67,8 +65,8 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
             if (i + j) % 2 != 0
                 ir  = mod1(i + 1, Ni)
                 irr = mod1(Ni - i, Ni)
-                e = _contract_barebones(contract_o_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), terms; ifparallel, forloop_iter)
-                n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
+                e = _contract_barebones(contract_o_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), terms, params)
+                n = _contract_one(contract_n_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), params)
                 params.verbosity >= 4 && println("J1_V($i,$j) = $(model.J1 * e/n)")
                 etol += model.J1 * e / n
                 e_dict["bond_J1V_energy"]["$(i),$(j)"] = model.J1 * e / n
@@ -91,11 +89,10 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
             jr  = mod1(j + 1, Nj)
             jrr = mod1(j + 2, Nj)
 
-            n = contract_n_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j],
+            n = _contract_one(contract_n_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j],
                               FRu[i,jrr], FRo[ir,jrr],
                               ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr],
-                              A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr];
-                              ifparallel, forloop_iter)
+                              A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]), params)
 
             C6_val = ComplexF64(0)
             for idx in 0:63
@@ -107,7 +104,7 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
                 s6 = ((idx >> 5) & 1) + 1
                 s = (s1, s2, s3, s4, s5, s6)
 
-                o = contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j],
+                o = _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j],
                                   FRu[i,jrr], FRo[ir,jrr],
                                   ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr],
                                   A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr],
@@ -116,8 +113,7 @@ function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::i
                                   proj[s[c6_src[3]], s[3]],
                                   proj[s[c6_src[4]], s[4]],
                                   proj[s[c6_src[5]], s[5]],
-                                  proj[s[c6_src[6]], s[6]];
-                                  ifparallel, forloop_iter)
+                                  proj[s[c6_src[6]], s[6]]), params)
                 C6_val += o
             end
             return 2 * real(C6_val / n)

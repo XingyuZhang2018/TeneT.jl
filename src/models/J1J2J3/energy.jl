@@ -20,9 +20,6 @@ end
 function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack J2, J3 = model
-    @unpack forloop_iter = params
-    @unpack ifparallel = params.boundary_alg
-
     atype = _arraytype(ACu[1])
     terms = _heisenberg_bond_terms(model, atype)
     terms_norot = _heisenberg_bond_terms(model, atype; ifrotate=false)
@@ -61,8 +58,8 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
         J1h, J1v = enlarge_coupling(model, i, j)
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
-        e = _contract_barebones(contract_o_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), terms; ifparallel, forloop_iter)
-        n = contract_n_21(ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]; ifparallel, forloop_iter)
+        e = _contract_barebones(contract_o_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), terms, params)
+        n = _contract_one(contract_n_21, (ACu[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],ACd[irr,j]), params)
         if (i + j) % 2 != 0
             params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
             etol += J1v * e/n
@@ -73,20 +70,20 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
             jr = mod1(j + 1, Nj)
             jrr = mod1(j + 2, Nj)
 
-            n = contract_n_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]; ifparallel, forloop_iter)
+            n = _contract_one(contract_n_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]), params)
 
             # J3\\ bond: site 1=(i,j) unrotated, site 6=(ir,jrr) on rotated sublattice
-            e = 1/2 * contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sp, Id, Id, Id, Id, rSm; ifparallel, forloop_iter) +
-            1/2 * contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sm, Id, Id, Id, Id, rSp; ifparallel, forloop_iter) +
-            contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sz, Id, Id, Id, Id, rSz; ifparallel, forloop_iter)
+            e = 1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sp, Id, Id, Id, Id, rSm), params) +
+            1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sm, Id, Id, Id, Id, rSp), params) +
+            _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sz, Id, Id, Id, Id, rSz), params)
             params.verbosity >= 4 && println("bond_J3\\ = $(J3 * e/n)")
             etol += J3 * e/n
             e_dict["bond_J3\\_energy"]["$(i),$(j)"] = J3 * e/n
 
             # J3/ bond: site 3=(i,jr) on rotated sublattice, site 4=(ir,jr) unrotated
-            e = 1/2 * contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSp, Sm, Id, Id; ifparallel, forloop_iter) +
-            1/2 * contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSm, Sp, Id, Id; ifparallel, forloop_iter) +
-            contract_o_23(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSz, Sz, Id, Id; ifparallel, forloop_iter)
+            e = 1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSp, Sm, Id, Id), params) +
+            1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSm, Sp, Id, Id), params) +
+            _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[id,j], FRu[i,jrr], FRo[ir,jrr], ARu[i,jr], ARd[id,jr], ARu[i,jrr], ARd[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSz, Sz, Id, Id), params)
             params.verbosity >= 4 && println("bond_J3/ = $(J3 * e/n)")
             etol += J3 * e/n
             e_dict["bond_J3/_energy"]["$(i),$(j)"] = J3 * e/n
@@ -98,8 +95,8 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
 
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        e = _contract_barebones(contract_o_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), terms; ifparallel, forloop_iter)
-        n = contract_n_12(FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]; ifparallel, forloop_iter)
+        e = _contract_barebones(contract_o_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), terms, params)
+        n = _contract_one(contract_n_12, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,jr],ARu[i,jr],A[i,jr],ARd[ir,jr]), params)
         params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
         e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
@@ -107,9 +104,9 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
         jr = mod1(j + 1, Nj)
-        e1 = _contract_barebones(contract_o_22_1, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot; ifparallel, forloop_iter)
-        e2 = _contract_barebones(contract_o_22_2, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot; ifparallel, forloop_iter)
-        n =  contract_n_22(FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
+        e1 = _contract_barebones(contract_o_22_1, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot, params)
+        e2 = _contract_barebones(contract_o_22_2, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot, params)
+        n =  _contract_one(contract_n_22, (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), params)
         params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e1/n)")
         params.verbosity >= 4 && println("bond_J2/ = $(J2 * e2/n)")
         etol += J2 * (e1 + e2)/n
@@ -119,8 +116,8 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
         jrr = mod1(j + 2, Nj)
-        e = _contract_barebones(contract_o_13, (FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr]), terms_norot; ifparallel, forloop_iter)
-        n = contract_n_13(FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr]; ifparallel, forloop_iter)
+        e = _contract_barebones(contract_o_13, (FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr]), terms_norot, params)
+        n = _contract_one(contract_n_13, (FLo[i,j], ACu[i,j], ACd[ir,j], FRo[i,jrr], ARu[i,jr], ARd[ir,jr], ARu[i,jrr], ARd[ir,jrr], A[i,j], A[i,jr], A[i,jrr]), params)
         params.verbosity >= 4 && println("bond_J2H = $(J2 * e/n)")
         etol += J2 * e/n
         e_dict["bond_J2H_energy"]["$(i),$(j)"] = J2 * e/n
@@ -135,8 +132,6 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
 
     @unpack AL, C, FLu, FLo = env
     @unpack J2, J3 = model
-    @unpack forloop_iter = params
-    @unpack ifparallel = params.boundary_alg
     AC = ALCtoAC(AL, C)
 
     atype = _arraytype(A[1])
@@ -174,8 +169,8 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
         jo = mod1(Nj - j, Nj)
-        e = _contract_barebones(contract_o_21, (AC[i,j],FLu[i,j],A[i,j],FLu[i,jo],FLo[ir,j],A[ir,j],FLo[ir,jo],AC[irr,j]), terms; ifparallel, forloop_iter)
-        n = contract_n_21(AC[i,j],FLu[i,j],A[i,j],FLu[i,jo],FLo[ir,j],A[ir,j],FLo[ir,jo],AC[irr,j]; ifparallel, forloop_iter)
+        e = _contract_barebones(contract_o_21, (AC[i,j],FLu[i,j],A[i,j],FLu[i,jo],FLo[ir,j],A[ir,j],FLo[ir,jo],AC[irr,j]), terms, params)
+        n = _contract_one(contract_n_21, (AC[i,j],FLu[i,j],A[i,j],FLu[i,jo],FLo[ir,j],A[ir,j],FLo[ir,jo],AC[irr,j]), params)
         if (i + j) % 2 != 0
             params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
             etol += J1v * e/n
@@ -186,20 +181,20 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
             jr = mod1(j + 1, Nj)
             jrr = mod1(j + 2, Nj)
             jo = mod1(Nj - (j+2), Nj)
-            n = contract_n_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]; ifparallel, forloop_iter)
+            n = _contract_one(contract_n_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr]), params)
 
             # J3\\ bond: site 1=(i,j) unrotated, site 6=(ir,jrr) on rotated sublattice
-            e = 1/2 * contract_o_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sp, Id, Id, Id, Id, rSm; ifparallel, forloop_iter) +
-            1/2 * contract_o_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sm, Id, Id, Id, Id, rSp; ifparallel, forloop_iter) +
-            contract_o_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sz, Id, Id, Id, Id, rSz; ifparallel, forloop_iter)
+            e = 1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sp, Id, Id, Id, Id, rSm), params) +
+            1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sm, Id, Id, Id, Id, rSp), params) +
+            _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Sz, Id, Id, Id, Id, rSz), params)
             params.verbosity >= 4 && println("bond_J3\\ = $(J3 * e/n)")
             etol += J3 * e/n
             e_dict["bond_J3\\_energy"]["$(i),$(j)"] = J3 * e/n
 
             # J3/ bond: site 3=(i,jr) on rotated sublattice, site 4=(ir,jr) unrotated
-            e = 1/2 * contract_o_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSp, Sm, Id, Id; ifparallel, forloop_iter) +
-            1/2 * contract_o_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSm, Sp, Id, Id; ifparallel, forloop_iter) +
-            contract_o_23(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSz, Sz, Id, Id; ifparallel, forloop_iter)
+            e = 1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSp, Sm, Id, Id), params) +
+            1/2 * _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSm, Sp, Id, Id), params) +
+            _contract_one(contract_o_23, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AL[i,jr], AL[id,jr], AC[i,jrr], AC[id,jrr], A[i,j], A[i,jr], A[i,jrr], A[ir,j], A[ir,jr], A[ir,jrr], Id, Id, rSz, Sz, Id, Id), params)
             params.verbosity >= 4 && println("bond_J3/ = $(J3 * e/n)")
             etol += J3 * e/n
             e_dict["bond_J3/_energy"]["$(i),$(j)"] = J3 * e/n
@@ -212,8 +207,8 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
         jo = mod1(Nj - (j+1), Nj)
-        e = _contract_barebones(contract_o_12, (FLo[i,j],AL[i,j],A[i,j],AL[ir,j],FLo[i,jo],AC[i,jr],A[i,jr],AC[ir,jr]), terms; ifparallel, forloop_iter)
-        n = contract_n_12(FLo[i,j],AL[i,j],A[i,j],AL[ir,j],FLo[i,jo],AC[i,jr],A[i,jr],AC[ir,jr]; ifparallel, forloop_iter)
+        e = _contract_barebones(contract_o_12, (FLo[i,j],AL[i,j],A[i,j],AL[ir,j],FLo[i,jo],AC[i,jr],A[i,jr],AC[ir,jr]), terms, params)
+        n = _contract_one(contract_n_12, (FLo[i,j],AL[i,j],A[i,j],AL[ir,j],FLo[i,jo],AC[i,jr],A[i,jr],AC[ir,jr]), params)
         params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
         e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
@@ -222,9 +217,9 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
         id = mod1(Ni - i, Ni)
         jr = mod1(j + 1, Nj)
         jo = mod1(Nj - (j+1), Nj)
-        e1 = _contract_barebones(contract_o_22_1, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AC[i,jr], AC[id,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot; ifparallel, forloop_iter)
-        e2 = _contract_barebones(contract_o_22_2, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AC[i,jr], AC[id,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot; ifparallel, forloop_iter)
-        n =  contract_n_22(FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AC[i,jr], AC[id,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
+        e1 = _contract_barebones(contract_o_22_1, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AC[i,jr], AC[id,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot, params)
+        e2 = _contract_barebones(contract_o_22_2, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AC[i,jr], AC[id,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot, params)
+        n =  _contract_one(contract_n_22, (FLu[i,j], FLo[ir,j], AL[i,j], AL[id,j], FLu[i,jo], FLo[ir,jo], AC[i,jr], AC[id,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), params)
         params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e1/n)")
         params.verbosity >= 4 && println("bond_J2/ = $(J2 * e2/n)")
         etol += J2 * (e1 + e2)/n
@@ -235,8 +230,8 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUM
         jr = mod1(j + 1, Nj)
         jrr = mod1(j + 2, Nj)
         jo = mod1(Nj - (j+2), Nj)
-        e = _contract_barebones(contract_o_13, (FLo[i,j], AL[i,j], AL[ir,j], FLo[i,jo], AL[i,jr], AL[ir,jr], AC[i,jrr], AC[ir,jrr], A[i,j], A[i,jr], A[i,jrr]), terms_norot; ifparallel, forloop_iter)
-        n = contract_n_13(FLo[i,j], AL[i,j], AL[ir,j], FLo[i,jo], AL[i,jr], AL[ir,jr], AC[i,jrr], AC[ir,jrr], A[i,j], A[i,jr], A[i,jrr]; ifparallel, forloop_iter)
+        e = _contract_barebones(contract_o_13, (FLo[i,j], AL[i,j], AL[ir,j], FLo[i,jo], AL[i,jr], AL[ir,jr], AC[i,jrr], AC[ir,jrr], A[i,j], A[i,jr], A[i,jrr]), terms_norot, params)
+        n = _contract_one(contract_n_13, (FLo[i,j], AL[i,j], AL[ir,j], FLo[i,jo], AL[i,jr], AL[ir,jr], AC[i,jrr], AC[ir,jrr], A[i,j], A[i,jr], A[i,jrr]), params)
         params.verbosity >= 4 && println("bond_J2H = $(J2 * e/n)")
         etol += J2 * e/n
         e_dict["bond_J2H_energy"]["$(i),$(j)"] = J2 * e/n
