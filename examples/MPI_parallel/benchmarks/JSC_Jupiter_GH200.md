@@ -183,6 +183,11 @@ export CUDA_LAUNCH_BLOCKING=1
 Float32 mixed-precision may still benefit consumer GPUs or systems with
 significantly lower FP64 throughput.
 
+*(See "Root cause refined — Hopper FP32/FP64 Tensor Core parity" below
+for the hardware reason: Hopper Tensor Cores do not accept IEEE FP32
+input. cuBLAS/cuTENSOR in the default math mode runs F32 on CUDA cores
+at the same ~67 TFLOPS peak as F64 Tensor Cores.)*
+
 ## Feature Comparison (D=10 χ=400, 4 GPU, Plaquette VUMPS, with checkpoint)
 
 Exhaustive sweep of new features: `whole_vumps_etype` (whole-VUMPS Float32),
@@ -307,6 +312,63 @@ consecutive same-shape calls in a stream. Isolated tests with per-call
 `CUDA.synchronize()+MPI.Barrier()` may interrupt this, keeping F64 on
 a colder path (~100 ms) while Plaquette's uninterrupted flow hits the
 fast-path (~83 ms).
+
+### Root cause refined — Hopper FP32/FP64 Tensor Core parity (job 384939, 2026-04-21)
+
+Direct cuBLAS GEMM sweep on the same GH200 card, strict IEEE FP32
+(`CUDA.math_mode!(CUDA.DEFAULT_MATH)` — matches cuTENSOR's default).
+
+**Real GEMM** (`mul!(C, A, B)`, 10× median, CUDA_LAUNCH_BLOCKING=1):
+| n | F64 TFLOPS | F32 TFLOPS | F32/F64 |
+|---|-----------|-----------|---------|
+| 2048  | 44.79 | 43.40 | 0.97× |
+| 4096  | 46.61 | 46.63 | 1.00× |
+| 8192  | 46.39 | 48.32 | 1.04× |
+| 16384 | 44.61 | 47.94 | 1.07× |
+
+**Complex GEMM** (iPEPS primary dtype):
+| n | F64 TFLOPS | F32 TFLOPS | F32/F64 |
+|---|-----------|-----------|---------|
+| 4096  | 10.75 | 12.12 | 1.13× |
+| 8192  | 10.61 | 11.86 | 1.12× |
+| 16384 | 11.05 | 11.90 | 1.08× |
+
+**Control — TF32 enabled** (`CUDA.FAST_MATH`, 10-bit mantissa, not
+used by cuTENSOR default):
+| n | F64 | F32 (TF32) | speedup |
+|---|-----|-----------|---------|
+| 4096  | 46.1 | **272** | 5.9× |
+| 8192  | 46.9 | **307** | 6.5× |
+| 16384 | 44.0 | **293** | 6.7× |
+
+**Hopper hardware reality**: Hopper Tensor Cores do **not** accept IEEE
+FP32 input. cuBLAS/cuTENSOR with the default math mode dispatches
+Float32 contractions to the **CUDA cores** (~67 TFLOPS peak), while
+Float64 contractions go through the **FP64 Tensor Cores**, which NVIDIA
+tuned to the same ~67 TFLOPS peak. The two paths are deliberately
+matched. Only TF32 unlocks the ~989 TFLOPS TC fast path, and TF32's
+10-bit mantissa is not accurate enough for iPEPS fixed-point iteration.
+
+Achieved in this bench: F64 and F32 real both plateau at ~44–48 TFLOPS
+(≈70% peak); complex both at ~11 TFLOPS (≈64% of their respective
+real peaks × efficiency). **Compute side is already a tie.**
+
+**What the earlier warm-cache hypothesis was actually seeing**: the
+19% Real F32 advantage in isolated ACmap_parallel (101.89 → 82.81 ms)
+correlates almost exactly with the 13% Complex-GEMM bandwidth headroom
+measured here (1.13×). The ~20% match is memory bandwidth: F32 halves
+HBM traffic and doubles effective cache residency, which shows up when
+the kernel is not already saturated. In Plaquette's long sequential
+same-shape flow, cuTENSOR fusion and cache reuse appear to already
+absorb this headroom in F64, collapsing the F32 advantage to noise.
+
+So the GH200 answer is: **on Hopper, IEEE-FP32 and FP64 Tensor Cores
+deliver the same TFLOPS by design**. Mixed-precision on this hardware
+can only harvest memory-bandwidth savings, which vanish when the
+contraction is already bandwidth-efficient. A100 (FP32 = 2× FP64 on
+CUDA cores, no FP64 TC) and consumer GPUs (no FP64 TC at all) still
+stand to benefit significantly — the parallel-level/env-level cast
+code path is worth keeping for those platforms.
 
 ### Dead-end findings (documented for future reference)
 
