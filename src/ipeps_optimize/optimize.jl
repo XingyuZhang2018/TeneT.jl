@@ -8,6 +8,15 @@
 # ============================================================================
 
 """
+    _energy_value_scalar(model, A, env, params)
+
+Helper that extracts only the scalar energy from `energy_value(...)`'s
+`(etol, e_dict)` return, so it can be wrapped in `checkpoint(...)` (which
+requires a differentiable output — `e_dict` is not).
+"""
+_energy_value_scalar(model, A, env, params) = energy_value(model, A, env, params)[1]
+
+"""
     energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
 
 Compute the energy of iPEPS tensors `A` using boundary environment `rt`.
@@ -19,7 +28,8 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
     A = build_A(A, params)
     rt, err = leading_boundary(rt, A, params.boundary_alg)
     env = ObsEnv(rt, A, params.boundary_alg)
-    e = energy_value(params.model, A, env, params)[1]
+    e = checkpoint(params.obs_checkpoint, _energy_value_scalar,
+                   params.model, A, env, params)
 
     ignore_derivatives() do
         update!(rt′, rt)

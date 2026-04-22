@@ -87,8 +87,6 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
     atype = _arraytype(A[1])
 
     etol = 0.0
-    @unpack forloop_iter = params
-    @unpack ifparallel = params.boundary_alg
     len = length(A)
     e_dict = Dict{String, Dict{String, Any}}(
         "bond_J1H_energy" => Dict{String, Any}(),
@@ -106,22 +104,25 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
         jr = mod1(j + 1, Nj)
 
         params.verbosity >= 4 && println("===========$i,$j===========")
-        e = _contract_barebones(contract_o_12, (FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr]), terms; ifparallel, forloop_iter)
-        n = contract_n_12(FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr]; ifparallel, forloop_iter)
+        args12 = (FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr])
+        e = _contract_barebones(contract_o_12, args12, terms, params)
+        n = _contract_one(contract_n_12, args12, params)
         params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
         e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
 
-        e = _contract_barebones(contract_o_21, (AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j]), terms; ifparallel, forloop_iter)
-        n = contract_n_21(AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j]; ifparallel, forloop_iter)
+        args21 = (AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j])
+        e = _contract_barebones(contract_o_21, args21, terms, params)
+        n = _contract_one(contract_n_21, args21, params)
         params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
         etol += J1v * e/n
         e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
 
         # J2 diagonal bonds connect same sublattice → no rotation
         _terms_j2 = model.ifrotate ? terms_norot : terms
-        e = _contract_barebones(contract_o_22_1, (FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), _terms_j2; ifparallel, forloop_iter)
-        n = contract_n_22(FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]; ifparallel, forloop_iter)
+        args22 = (FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr])
+        e = _contract_barebones(contract_o_22_1, args22, _terms_j2, params)
+        n = _contract_one(contract_n_22, args22, params)
         params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e/n)")
         etol += J2 * e/n * 2 # factor of 2 for the two diagonals in the plaquette
         e_dict["bond_J2\\_energy"]["$(i),$(j)"] = J2 * e/n

@@ -49,6 +49,26 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     # Checkpointing (Zygote checkpoint for memory saving)
     ifcheckpoint::Bool = false
 
+    # ── AD checkpointing on the energy/gradient side (coarse → fine) ────
+    # See src/utils/checkpoint.jl for Plain/Recompute/Offload semantics.
+    # Note: a map-level option is intentionally absent — rrule(parallel) in
+    # src/autodiff/rules.jl already does per-chunk Recompute, so wrapping
+    # each *map_parallel in checkpoint() would be redundant.
+    #
+    #   obs_checkpoint  — wraps `energy_value(model, A, env, params)` as a
+    #                      whole. Recompute alone does NOT reduce peak
+    #                      (only defers tape construction to backward).
+    #                      Offload is the useful mode: moves the ObsEnv
+    #                      tape to host RAM so later phases have more VRAM.
+    #   bond_checkpoint — wraps each bond term inside `_contract_barebones`
+    #                      and each norm contraction (via `_contract_one`).
+    #                      THE main lever for multi-bond models: peak drops
+    #                      from (N_terms × bond_tape) to (1 × bond_tape).
+    #                      Use Recompute() — Offload is overkill at this
+    #                      granularity.
+    obs_checkpoint::CheckpointMethod  = Plain()
+    bond_checkpoint::CheckpointMethod = Plain()
+
     # Preconditioning
     ifprecondition::Bool = false
     iter_precond::Int = 20
@@ -79,6 +99,11 @@ without requiring a full environment contraction.
     folder::String = joinpath(pwd(), "data", "ipeps")
     show_every::Int = 10
     save_every::Int = 100
+
+    # Present so that `energy_value` / `_contract_barebones(..., params::iPEPSOptimize)`
+    # can read them uniformly; Plain() is a no-op (checkpoint becomes identity).
+    obs_checkpoint::CheckpointMethod  = Plain()
+    bond_checkpoint::CheckpointMethod = Plain()
 end
 
 """

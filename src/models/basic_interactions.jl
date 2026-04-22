@@ -8,6 +8,46 @@ function _contract_barebones(contract_fn, args, terms; kwargs...)
     return sum(c * contract_fn(args..., OL, OR; kwargs...) for (c, OL, OR) in terms)
 end
 
+# ────────────────────────────────────────────────────────────────────────────
+# Checkpointed overloads — pass `params::iPEPSOptimize` to enable
+# `params.bond_checkpoint`. Each term's contract_fn call is wrapped in
+# `checkpoint(...)` so that during backward only one term's tape is live.
+# ifparallel and forloop_iter are read from params, not passed as kwargs.
+# ────────────────────────────────────────────────────────────────────────────
+
+"""
+    _contract_barebones(contract_fn, args, terms, params::iPEPSOptimize; kwargs...)
+
+Bond-checkpointed `_contract_barebones`. Each `(c, OL, OR)` term is
+evaluated under `checkpoint(params.bond_checkpoint, contract_fn, ...)`,
+so during backward Zygote re-runs one term's forward at a time, keeping
+peak VRAM to a single term's tape instead of the whole sum's tape.
+"""
+function _contract_barebones(contract_fn, args, terms,
+                             params::iPEPSOptimize; kwargs...)
+    bond_ckpt    = params.bond_checkpoint
+    ifparallel   = params.boundary_alg.ifparallel
+    forloop_iter = params.forloop_iter
+    return sum(c * checkpoint(bond_ckpt, contract_fn, args..., OL, OR;
+                              ifparallel, forloop_iter, kwargs...)
+               for (c, OL, OR) in terms)
+end
+
+"""
+    _contract_one(contract_fn, args, params::iPEPSOptimize; kwargs...)
+
+Single-contraction checkpointed wrapper, for norm contractions such as
+`contract_n_12` that are not summed over terms but still contribute a
+large tape entry.
+"""
+function _contract_one(contract_fn, args::Tuple, params::iPEPSOptimize;
+                       kwargs...)
+    return checkpoint(params.bond_checkpoint, contract_fn, args...;
+                      ifparallel   = params.boundary_alg.ifparallel,
+                      forloop_iter = params.forloop_iter,
+                      kwargs...)
+end
+
 # Term-by-term interaction decompositions using d×d spin operators (Sp, Sm, Sz).
 # Each function returns a list of (coefficient, O_left, O_right) tuples.
 """
