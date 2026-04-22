@@ -40,6 +40,25 @@ _assert_inner_method(::Offload) = throw(ArgumentError(
     "inner-map checkpoint only supports Plain/Recompute; " *
     "use eig_checkpoint=Offload() or step_checkpoint=Offload() for offload"))
 
+# ── Bond-checkpoint granularity constraint ──────────────────────────────────
+# Bond-level checkpoint (wrapping each term inside `_contract_barebones` and
+# each single observable in `_contract_one`) only supports Plain and
+# Recompute. Offload at this level makes an independent CPU copy of the
+# env args *per closure* — for a multi-site multi-term model (e.g. J1J2
+# Plaquette: 4 plaquettes × 3 bond directions × 3 Heisenberg terms = 36
+# closures, each holding 8 env tensors ≈ 2.4 GB) that reaches ~100 GB host
+# RAM with zero GPU peak savings over Recompute (which shares env refs by
+# pointer). Reject it to avoid silently blowing up host memory.
+_assert_bond_method(::Union{Plain,Recompute}) = nothing
+_assert_bond_method(::Offload) = throw(ArgumentError(
+    "bond_checkpoint=Offload() is not supported: bond-level closures share " *
+    "env tensors by reference under Recompute() (zero extra GPU or CPU " *
+    "cost), but Offload() makes independent CPU copies per closure — " *
+    "typically 100+ GB host RAM for multi-site multi-term models — with no " *
+    "GPU peak savings over Recompute. Use bond_checkpoint=Recompute() " *
+    "(main memory lever); if you need additional host-offload headroom, " *
+    "set obs_checkpoint=Offload() at the outer level instead."))
+
 # ── Symbol dispatcher ────────────────────────────────────────────────────────
 checkpoint(m::Symbol, f, args...; kwargs...) = checkpoint(_ckpt_method(m), f, args...; kwargs...)
 

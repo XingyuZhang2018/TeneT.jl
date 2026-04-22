@@ -25,7 +25,8 @@ peak VRAM to a single term's tape instead of the whole sum's tape.
 """
 function _contract_barebones(contract_fn, args, terms,
                              params::iPEPSOptimize; kwargs...)
-    bond_ckpt    = params.bond_checkpoint
+    bond_ckpt = params.bond_checkpoint
+    _assert_bond_method(bond_ckpt)
     ifparallel   = params.boundary_alg.ifparallel
     forloop_iter = params.boundary_alg.forloop_iter
     return sum(c * checkpoint(bond_ckpt, contract_fn, args..., OL, OR;
@@ -42,6 +43,7 @@ over terms but still contribute a large tape entry.
 """
 function _contract_one(contract_fn, args::Tuple, params::iPEPSOptimize;
                        kwargs...)
+    _assert_bond_method(params.bond_checkpoint)
     return checkpoint(params.bond_checkpoint, contract_fn, args...;
                       ifparallel   = params.boundary_alg.ifparallel,
                       forloop_iter = params.boundary_alg.forloop_iter,
