@@ -98,7 +98,13 @@ QR-based Corner Transfer Matrix algorithm.
 
     ifsimple_eig::Bool = true
     ifparallel::Bool = false
-    ifcheckpoint::Bool = false
+    # Per-step checkpoint method wrapping `qrctm_step` inside the AD loop.
+    # Plain()            — no checkpointing (default)
+    # Recompute()        — rerun qrctm_step on backward (trades compute for memory)
+    # OffloadRecompute() — copy args to host after forward, copy back + rerun on backward
+    # Offload()          — pb-capture walker swaps GPU captures for CPU copies; on
+    #                      backward reload + run original pb (no forward recompute).
+    step_checkpoint::CheckpointMethod = Plain()
     forloop_iter::Int = 1
 
     # Mixed-precision fields (same semantics as VUMPS; see VUMPS struct doc).

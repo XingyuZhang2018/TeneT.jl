@@ -2,34 +2,39 @@
 
     # ---- Type hierarchy ----
     @testset "CheckpointMethod type hierarchy" begin
-        @test TeneT.Plain() isa TeneT.CheckpointMethod
-        @test TeneT.Recompute() isa TeneT.CheckpointMethod
-        @test TeneT.Offload() isa TeneT.CheckpointMethod
+        @test TeneT.Plain()            isa TeneT.CheckpointMethod
+        @test TeneT.Recompute()        isa TeneT.CheckpointMethod
+        @test TeneT.OffloadRecompute() isa TeneT.CheckpointMethod
+        @test TeneT.Offload()          isa TeneT.CheckpointMethod
         # Singleton uniqueness
-        @test TeneT.Plain() === TeneT.Plain()
-        @test TeneT.Recompute() === TeneT.Recompute()
-        @test TeneT.Offload() === TeneT.Offload()
+        @test TeneT.Plain()            === TeneT.Plain()
+        @test TeneT.Recompute()        === TeneT.Recompute()
+        @test TeneT.OffloadRecompute() === TeneT.OffloadRecompute()
+        @test TeneT.Offload()          === TeneT.Offload()
     end
 
     # ---- Symbol normalization ----
     @testset "_ckpt_method Symbol normalization" begin
-        @test TeneT._ckpt_method(:plain)     === TeneT.Plain()
-        @test TeneT._ckpt_method(:none)      === TeneT.Plain()
-        @test TeneT._ckpt_method(:recompute) === TeneT.Recompute()
-        @test TeneT._ckpt_method(:offload)   === TeneT.Offload()
+        @test TeneT._ckpt_method(:plain)             === TeneT.Plain()
+        @test TeneT._ckpt_method(:none)              === TeneT.Plain()
+        @test TeneT._ckpt_method(:recompute)         === TeneT.Recompute()
+        @test TeneT._ckpt_method(:offload_recompute) === TeneT.OffloadRecompute()
+        @test TeneT._ckpt_method(:offload)           === TeneT.Offload()
         # Identity on instances
-        @test TeneT._ckpt_method(TeneT.Plain())     === TeneT.Plain()
-        @test TeneT._ckpt_method(TeneT.Recompute()) === TeneT.Recompute()
-        @test TeneT._ckpt_method(TeneT.Offload())   === TeneT.Offload()
+        @test TeneT._ckpt_method(TeneT.Plain())            === TeneT.Plain()
+        @test TeneT._ckpt_method(TeneT.Recompute())        === TeneT.Recompute()
+        @test TeneT._ckpt_method(TeneT.OffloadRecompute()) === TeneT.OffloadRecompute()
+        @test TeneT._ckpt_method(TeneT.Offload())          === TeneT.Offload()
         # Unknown symbol throws
         @test_throws ArgumentError TeneT._ckpt_method(:foobar)
     end
 
     # ---- Base.convert integration ----
     @testset "Base.convert(CheckpointMethod, Symbol)" begin
-        @test convert(TeneT.CheckpointMethod, :plain)     === TeneT.Plain()
-        @test convert(TeneT.CheckpointMethod, :recompute) === TeneT.Recompute()
-        @test convert(TeneT.CheckpointMethod, :offload)   === TeneT.Offload()
+        @test convert(TeneT.CheckpointMethod, :plain)             === TeneT.Plain()
+        @test convert(TeneT.CheckpointMethod, :recompute)         === TeneT.Recompute()
+        @test convert(TeneT.CheckpointMethod, :offload_recompute) === TeneT.OffloadRecompute()
+        @test convert(TeneT.CheckpointMethod, :offload)           === TeneT.Offload()
     end
 
     # ---- checkpoint(Plain(), f, args...) — identity, no adjoint override ----
@@ -56,14 +61,27 @@
         @test g_direct ≈ g_ckpt
     end
 
+    # ---- checkpoint(OffloadRecompute(), f, args...) — identity + gradient ----
+    @testset "checkpoint(OffloadRecompute(), f, args...)" begin
+        f(x) = sum(x .^ 2)
+        x = rand(4)
+        @test checkpoint(TeneT.OffloadRecompute(), f, x) == f(x)
+
+        # Gradient must match direct Zygote gradient (CPU: OffloadRecompute
+        # is Recompute + host-copy roundtrip, should be numerically identical)
+        g_direct = Zygote.gradient(f, x)[1]
+        g_ckpt   = Zygote.gradient(x -> checkpoint(TeneT.OffloadRecompute(), f, x), x)[1]
+        @test g_direct ≈ g_ckpt
+    end
+
     # ---- checkpoint(Offload(), f, args...) — identity + gradient ----
     @testset "checkpoint(Offload(), f, args...)" begin
         f(x) = sum(x .^ 2)
         x = rand(4)
         @test checkpoint(TeneT.Offload(), f, x) == f(x)
 
-        # Gradient must match direct Zygote gradient (CPU: Offload is
-        # Recompute + CPU copy roundtrip, should be numerically identical)
+        # Gradient must match direct Zygote gradient (CPU: Offload walker
+        # short-circuits since no GPU leaves are found; pb runs unchanged.)
         g_direct = Zygote.gradient(f, x)[1]
         g_ckpt   = Zygote.gradient(x -> checkpoint(TeneT.Offload(), f, x), x)[1]
         @test g_direct ≈ g_ckpt
@@ -73,23 +91,26 @@
     @testset "checkpoint(::Symbol, f, args...)" begin
         f(x) = 2 * x .+ 1
         x = rand(5)
-        @test checkpoint(:plain,     f, x) == f(x)
-        @test checkpoint(:recompute, f, x) == f(x)
-        @test checkpoint(:offload,   f, x) == f(x)
+        @test checkpoint(:plain,             f, x) == f(x)
+        @test checkpoint(:recompute,         f, x) == f(x)
+        @test checkpoint(:offload_recompute, f, x) == f(x)
+        @test checkpoint(:offload,           f, x) == f(x)
 
         # Gradient via Symbol entry
         g(x) = sum(x .^ 2)
         y = rand(3)
         g_direct = Zygote.gradient(g, y)[1]
-        @test Zygote.gradient(y -> checkpoint(:recompute, g, y), y)[1] ≈ g_direct
-        @test Zygote.gradient(y -> checkpoint(:offload,   g, y), y)[1] ≈ g_direct
+        @test Zygote.gradient(y -> checkpoint(:recompute,         g, y), y)[1] ≈ g_direct
+        @test Zygote.gradient(y -> checkpoint(:offload_recompute, g, y), y)[1] ≈ g_direct
+        @test Zygote.gradient(y -> checkpoint(:offload,           g, y), y)[1] ≈ g_direct
     end
 
-    # ---- _assert_inner_method: Offload rejected, others OK ----
+    # ---- _assert_inner_method: Offload/OffloadRecompute rejected, others OK ----
     @testset "_assert_inner_method" begin
         @test TeneT._assert_inner_method(TeneT.Plain())     === nothing
         @test TeneT._assert_inner_method(TeneT.Recompute()) === nothing
         @test_throws ArgumentError TeneT._assert_inner_method(TeneT.Offload())
+        @test_throws ArgumentError TeneT._assert_inner_method(TeneT.OffloadRecompute())
     end
 
     # ---- Integration: VUMPS struct new fields ----

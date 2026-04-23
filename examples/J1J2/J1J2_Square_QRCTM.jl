@@ -22,7 +22,6 @@ model = J1J2(lattice=Square(),
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTM/$etype/seed$seed/")
 boundary_alg = QRCTM(ifparallel=false,
-                     ifcheckpoint=false,
                      forloop_iter=1,
                      maxiter=3, 
                      miniter=0, 

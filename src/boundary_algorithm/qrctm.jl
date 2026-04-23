@@ -117,7 +117,7 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
                          _downcast_eltype(real(T_orig), env.T))
             M = _downcast_eltype(real(T_orig), M)
         end
-        env, err = checkpoint(alg.ifcheckpoint ? Recompute() : Plain(), qrctm_step, env, M, alg_this_iter)
+        env, err = checkpoint(alg.step_checkpoint, qrctm_step, env, M, alg_this_iter)
         alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
             alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))

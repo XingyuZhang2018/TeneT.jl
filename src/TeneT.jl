@@ -122,7 +122,7 @@ export QRCTM
 export Square, Honeycomb, Kagome
 export General, C4v, Plaquette
 
-export CheckpointMethod, Plain, Recompute, Offload
+export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
 
 export C4v_restriction, local_min_norm
 

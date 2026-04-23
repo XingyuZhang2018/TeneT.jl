@@ -108,7 +108,7 @@
         @test q.maxiter_power == 1
         @test q.ifsimple_eig == true
         @test q.ifparallel == false
-        @test q.ifcheckpoint == false
+        @test q.step_checkpoint === TeneT.Plain()
         @test q.forloop_iter == 1
     end
 
