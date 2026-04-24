@@ -46,6 +46,20 @@ using MPI
         end
     end
 
+    @testset "ring neighbors + node-range helpers" begin
+        prev, next = TeneT._ring_neighbors(rank, nprocs)
+        @test prev == mod(rank - 1, nprocs)
+        @test next == mod(rank + 1, nprocs)
+
+        # Single-node invocation: local_size == nprocs, so one node range
+        # spanning the whole buf.
+        N_test = 1000
+        counts_test = Cint.(split_count(N_test, nprocs))
+        ranges1 = TeneT._node_ranges(counts_test, nprocs, 1)
+        @test length(ranges1) == 1
+        @test ranges1[1] == (1, N_test)
+    end
+
     @testset "allreduce_p2p! correctness" begin
         for atype in ATYPES, T in (Float64, ComplexF64), N in (1023, 8192, 262144)
             # Pattern 1: all-ones, reduce to nprocs

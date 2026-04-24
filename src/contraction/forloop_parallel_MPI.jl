@@ -25,6 +25,11 @@ const _comm_sendbuf = Ref{Any}(nothing)
 const _comm_recvbuf = Ref{Any}(nothing)
 const _comm_local = Ref{Any}(nothing)     # node-local communicator
 const _comm_leaders = Ref{Any}(nothing)   # inter-node leaders communicator
+const _comm_siblings = Ref{Any}(nothing)  # inter-node comm split by local_rank
+
+# MPI tag namespace for internal p2p collectives. Keep well above any tag the
+# caller might use (current callers use tag = rank ∈ 0..nprocs-1).
+const _TAG_BASE = 1000
 
 function _ensure_buf!(ref, buf, n)
     if isnothing(ref[]) || length(ref[]) < n || eltype(ref[]) != eltype(buf)
@@ -47,47 +52,169 @@ function _get_local_comm(comm)
     return _comm_local[], _comm_leaders[]
 end
 
+# Sibling communicator: groups ranks with the same local_rank across nodes.
+# Used for Phase 2 of allreduce to do per-slice cross-node rings in parallel.
+function _per_local_rank_comm(comm, local_comm)
+    if _comm_siblings[] === nothing
+        local_rank = MPI.Comm_rank(local_comm)
+        rank = MPI.Comm_rank(comm)
+        _comm_siblings[] = MPI.Comm_split(comm, local_rank, rank)
+    end
+    return _comm_siblings[]
+end
+
+# ─── Ring topology + node-layout helpers ─────────────────────────────────
+
+"""
+    _ring_neighbors(rank, size) -> (prev, next)
+
+Cyclic predecessor/successor under the standard ring ordering `0..size-1`.
+"""
+_ring_neighbors(rank, size) = (mod(rank - 1, size), mod(rank + 1, size))
+
+"""
+    _node_ranges(counts, local_size, n_nodes)
+
+Given per-global-rank `counts` and a symmetric layout of `local_size` ranks on
+each of `n_nodes` nodes, return `n_nodes`-long vector of `(first, last)` index
+tuples (1-indexed, inclusive) spanning each node's contiguous slab of the
+allgatherv buffer.
+"""
+function _node_ranges(counts, local_size, n_nodes)
+    displs = cumsum([0; counts[1:end-1]])
+    ranges = Vector{Tuple{Int,Int}}(undef, n_nodes)
+    for k in 1:n_nodes
+        first_global = (k - 1) * local_size + 1
+        last_global  = k * local_size
+        first_idx = displs[first_global] + 1
+        last_idx  = displs[last_global] + counts[last_global]
+        ranges[k] = (first_idx, last_idx)
+    end
+    return ranges
+end
+
 # ─── Hierarchical Allgatherv ──────────────────────────────────────────────
 
 """
     allgatherv_p2p!(buf, counts, comm)
 
-Hierarchical allgatherv: intra-node p2p (NVLink) + inter-node p2p (IB),
-using pre-allocated send buffer to avoid GPU registration accumulation.
+Bandwidth-optimal hierarchical allgatherv via three phases:
+
+1. Intra-node: concurrent `Irecv!`/`Isend` all-to-all (NVSwitch saturates
+   pairwise transfers).
+2. Leader inter-node: ring allgatherv across node leaders over IB.
+3. Intra-node: leader broadcasts the other-node chunks (local chunks are
+   already in place from Phase 1).
+
+Degenerates cleanly to Phase 1 only when `n_nodes == 1`. Pre-allocated
+`_comm_sendbuf` keeps GPU memory registrations from accumulating.
 """
 function allgatherv_p2p!(buf, counts, comm)
-    rank = MPI.Comm_rank(comm)
+    rank   = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
     nprocs == 1 && return buf
     synchronize(buf)
-    displs = cumsum([0; counts[1:end-1]])
-    my_count = counts[rank+1]
-    max_count = maximum(counts)
+
+    local_comm, _ = _get_local_comm(comm)
+    local_rank = MPI.Comm_rank(local_comm)
+    local_size = MPI.Comm_size(local_comm)
+    n_nodes    = nprocs ÷ local_size
+    @assert nprocs == n_nodes * local_size "allgatherv_p2p! requires symmetric node layout; got nprocs=$nprocs, local_size=$local_size"
+
+    displs   = cumsum([0; counts[1:end-1]])
+    my_count = counts[rank + 1]
 
     sendbuf = _ensure_buf!(_comm_sendbuf, buf, my_count)
     copyto!(sendbuf, view(buf, displs[rank+1]+1 : displs[rank+1]+my_count))
     synchronize(buf)
 
-    # Use pre-allocated recvbuf to avoid GPU registration accumulation on buf
-    _ensure_buf!(_comm_recvbuf, buf, max_count)
+    # ── Phase 1: intra-node concurrent all-to-all ──
+    node_of_me = rank ÷ local_size
+    reqs = MPI.Request[]
+    for lr in 0:local_size-1
+        lr == local_rank && continue
+        peer = node_of_me * local_size + lr
+        rc   = counts[peer + 1]
+        rview = view(buf, displs[peer+1]+1 : displs[peer+1]+rc)
+        push!(reqs, MPI.Irecv!(rview, comm; source=peer, tag=_TAG_BASE + peer))
+    end
+    for lr in 0:local_size-1
+        lr == local_rank && continue
+        peer = node_of_me * local_size + lr
+        push!(reqs, MPI.Isend(sendbuf, comm; dest=peer, tag=_TAG_BASE + rank))
+    end
+    MPI.Waitall(reqs)
 
-    # Send to all peers (non-blocking from fixed sendbuf)
-    send_reqs = MPI.Request[]
-    for r in 0:nprocs-1
-        r == rank && continue
-        push!(send_reqs, MPI.Isend(sendbuf, comm; dest=r, tag=rank))
+    # ── Phase 2: leader inter-node ring allgatherv ──
+    if n_nodes > 1 && local_rank == 0
+        _allgatherv_ring_leaders!(buf, counts, local_size, n_nodes, comm)
     end
 
-    # Receive from each peer into pre-allocated recvbuf, then copy to buf
-    for r in 0:nprocs-1
-        r == rank && continue
-        rc = counts[r+1]
-        recvview = view(_comm_recvbuf[], 1:rc)
-        MPI.Recv!(recvview, comm; source=r, tag=r)
-        copyto!(view(buf, displs[r+1]+1 : displs[r+1]+rc), recvview)
+    # ── Phase 3: intra-node broadcast of other-node chunks ──
+    if n_nodes > 1 && local_size > 1
+        _allgatherv_broadcast_other_nodes!(buf, counts, local_comm,
+                                           local_rank, local_size,
+                                           node_of_me, n_nodes)
     end
 
-    MPI.Waitall(send_reqs)
+    return buf
+end
+
+# Phase 2: leaders only. Walks a ring of `leaders_comm`, at step s sending the
+# node range the leader received s-1 steps ago (step 1 sends own node range).
+function _allgatherv_ring_leaders!(buf, counts, local_size, n_nodes, comm)
+    _, leaders_comm = _get_local_comm(comm)
+    leaders_comm === nothing && return buf
+    leaders_size = MPI.Comm_size(leaders_comm)
+    leaders_size <= 1 && return buf
+    leaders_rank = MPI.Comm_rank(leaders_comm)
+
+    prev, next = _ring_neighbors(leaders_rank, leaders_size)
+    ranges     = _node_ranges(counts, local_size, n_nodes)
+
+    for step in 1:leaders_size-1
+        send_idx = mod(leaders_rank - step + 1, leaders_size) + 1
+        recv_idx = mod(leaders_rank - step,     leaders_size) + 1
+        fs, ls = ranges[send_idx]
+        fr, lr_ = ranges[recv_idx]
+        synchronize(buf)
+        req_send = MPI.Isend(view(buf, fs:ls),   leaders_comm;
+                             dest=next, tag=_TAG_BASE + 100 + step)
+        req_recv = MPI.Irecv!(view(buf, fr:lr_), leaders_comm;
+                              source=prev, tag=_TAG_BASE + 100 + step)
+        MPI.Waitall([req_send, req_recv])
+    end
+    return buf
+end
+
+# Phase 3: intra-node broadcast. Leader sends every other-node slab to each
+# local peer; peers Irecv into buf. Local-node slab is already correct from
+# Phase 1, so we skip it and save ~1/n_nodes of broadcast bandwidth.
+function _allgatherv_broadcast_other_nodes!(buf, counts, local_comm,
+                                            local_rank, local_size,
+                                            node_of_me, n_nodes)
+    ranges = _node_ranges(counts, local_size, n_nodes)
+    synchronize(buf)
+    reqs = MPI.Request[]
+    if local_rank == 0
+        for k in 1:n_nodes
+            k - 1 == node_of_me && continue
+            fs, ls = ranges[k]
+            sub = view(buf, fs:ls)
+            for peer in 1:local_size-1
+                push!(reqs, MPI.Isend(sub, local_comm;
+                                      dest=peer, tag=_TAG_BASE + 200 + k))
+            end
+        end
+    else
+        for k in 1:n_nodes
+            k - 1 == node_of_me && continue
+            fs, ls = ranges[k]
+            push!(reqs, MPI.Irecv!(view(buf, fs:ls), local_comm;
+                                   source=0, tag=_TAG_BASE + 200 + k))
+        end
+    end
+    MPI.Waitall(reqs)
     return buf
 end
 
