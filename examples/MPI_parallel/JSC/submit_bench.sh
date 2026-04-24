@@ -17,13 +17,7 @@ module load Stages/2026 NVHPC/25.9-CUDA-13 OpenMPI/5.0.8
 JULIA=$HOME/tools/julia-1.11.1/bin/julia
 MAX_GPU=${SLURM_NTASKS}
 
-# Strip NVHPC math_libs to use CUDA.jl artifacts (faster + no cuBLAS crash)
-CLEAN_LD=$(echo $LD_LIBRARY_PATH | tr ":" "\n" | \
-    grep -v "math_libs\|CUDA/13/targets\|CUDA/13/nvvm\|CUDA/13/extras\|CUDA/13/stubs" | \
-    tr "\n" ":" | sed "s/:$//")
-
 ENVS="export CUDA_VISIBLE_DEVICES=\$SLURM_LOCALID; \
-export LD_LIBRARY_PATH=$CLEAN_LD; \
 export UCX_MEMTYPE_CACHE=n; \
 export UCX_TLS=rc_x,self,sm,cuda_copy; \
 export UCX_WARN_UNUSED_ENV_VARS=n; \
