@@ -22,7 +22,7 @@ MAX_GPU=${SLURM_NTASKS}
 # Strip NVHPC math_libs to use CUDA.jl artifacts (required on JSC — see
 # submit_test.sh for context)
 CLEAN_LD=$(echo $LD_LIBRARY_PATH | tr ":" "\n" | \
-    grep -v "math_libs\|compilers/lib\|CUDA/13/targets\|CUDA/13/nvvm\|CUDA/13/extras\|CUDA/13/stubs" | \
+    grep -v "math_libs\|CUDA/13/targets\|CUDA/13/nvvm\|CUDA/13/extras\|CUDA/13/stubs" | \
     tr "\n" ":" | sed "s/:$//")
 
 ENVS="export CUDA_VISIBLE_DEVICES=\$SLURM_LOCALID;\
