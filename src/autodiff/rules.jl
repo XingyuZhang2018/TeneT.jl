@@ -10,6 +10,10 @@
 @non_differentiable _kagome_onsite_op(kwargs...)
 @non_differentiable _kagome_intercell_terms(kwargs...)
 
+# p2p collectives — pure data-movement primitives, no AD through them.
+@non_differentiable allgatherv_p2p!(buf, counts, comm)
+@non_differentiable allreduce_p2p!(buf, op, comm)
+
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)
