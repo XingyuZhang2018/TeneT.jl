@@ -30,6 +30,12 @@ export CUDA_LAUNCH_BLOCKING=1"
 echo "=== JSC Jupiter MPI Scaling Test ==="
 echo "Nodes: ${SLURM_NNODES}  Max GPUs: ${MAX_GPU}  Start: $(date)"
 
+# Serial warmup so all ranks find a consistent precompile cache (avoids the
+# multi-rank AtomixCUDAExt precompile race seen in job 390782).
+echo "--- Precompile warmup ---"
+srun -n 1 --gpus-per-task=1 bash -c "$ENVS; $JULIA --project=../../.. -e 'using TeneT, CUDA, MPI'" 2>&1 | tail -3
+echo ""
+
 for N in 1 2 4 8; do
     [ $N -gt $MAX_GPU ] && continue
     echo "========== ${N} GPU =========="
