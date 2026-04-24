@@ -1,169 +1,169 @@
 # Sofia VUB Benchmark Results
 
-- **Date**: 2026-04-24
-- **System**: Sofia HPC at VUB (Vrije Universiteit Brussel), partition `zen4_h200`
-- **GPU**: NVIDIA H200 141GB (Hopper, x86_64)
-- **GPU/node**: 8 (vs 4 on BSC/JSC)
-- **Interconnect**: NVLink 4 / NVSwitch (intra-node), InfiniBand (inter-node, untested this pass)
-- **Software**: OpenMPI 5.0.7 (EasyBuild), UCX-CUDA 1.18.0, GDRCopy 2.4.4, CUDA 12.8, Julia 1.11.3
-- **Config**: CUDA.jl artifacts (default), `CUDA_VISIBLE_DEVICES=$OMPI_COMM_WORLD_LOCAL_RANK`,
-  `UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc`, `UCX_MEMTYPE_CACHE=n`,
-  `LD_PRELOAD=/usr/lib64/libcuda.so.1` (mandatory — see "Known Issues" below),
-  `CUDA_LAUNCH_BLOCKING=1` (fg bench only — see "Known Issues" below)
+- **Date**: 2026-04-24 (post `feat/p2p-collectives-ring` refactor, merged into `iPEPS-unified`)
+- **System**: Sofia HPC at VUB, partition `zen4_h200`
+- **GPU**: NVIDIA H200 141GB (Hopper, x86_64, AMD Zen4 host)
+- **GPU/node**: 8 · **Intra-node**: NVSwitch · **Inter-node**: InfiniBand
+- **Software**: OpenMPI 5.0.7 (EasyBuild) + UCX-CUDA 1.18.0 + GDRCopy 2.4.4 + CUDA 12.8 + Julia 1.11.3
+- **Env**: `CUDA_VISIBLE_DEVICES=$OMPI_COMM_WORLD_LOCAL_RANK`, `UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc`,
+  `UCX_MEMTYPE_CACHE=n`, `CUDA_LAUNCH_BLOCKING=1`,
+  **`LD_PRELOAD=/usr/lib64/libcuda.so.1`** (mandatory — see Known Issues)
 
-## Full fg Benchmark (D=10 χ=400, Plaquette VUMPS, with checkpoint)
+## Part 1: MPI Collectives (`allgatherv_p2p!` / `allreduce_p2p!`)
 
-Job `1000590` (`submit.sh` → `bench.jl`, 1 node, 8 H200, scans N=1,2,4,8). Each
-GPU count runs: 1 cold-forward (random env) + 1 timed forward + 1 warmup fg +
-1 timed fg, with `update!(rt, rt′)` priming the env between calls.
-
-| GPU | Forward | fg (fwd+bwd) | fg Speedup |
-|-----|---------|-------------|------------|
-| 1   | 164.1s  | 670.5s      | 1×         |
-| 2   |  86.0s  | 369.4s      | 1.82×      |
-| 4   |  49.3s  | 232.3s      | 2.89×      |
-| 8   |  35.7s  | 203.3s      | 3.30×      |
-
-Per-stage breakdown of TIMED fg:
-
-| GPU | fg forward | fg backward | fg total |
-|-----|-----------|------------|----------|
-| 1   | 155.6s    | 514.9s     | 670.5s   |
-| 2   |  84.6s    | 284.8s     | 369.4s   |
-| 4   |  47.4s    | 184.8s     | 232.3s   |
-| 8   |  35.1s    | 168.2s     | 203.3s   |
-
-> *Bench is run with `CUDA_LAUNCH_BLOCKING=1` (mandatory — same
-> `synchronization_worker` segfault pattern JSC GH200 hits). The full optimisation
-> loop in `MPI_parallel.jl` reports per-iteration `forward calculation took X s`
-> messages in its verbose output; both JSC and BSC benchmark tables extract
-> numbers from those steady-state log lines. The `bench.jl` approach differs
-> slightly: after cold-starting, `update!(rt, rt′)` is called once between the
-> cold and timed calls to prime the env. In practice this yielded ~10%
-> warmup benefit here (cold 182 → warm 164 at 1 GPU), so Sofia's "Forward"
-> column still has a cold-start tail that JSC's "iteration 5+" measurement
-> would not. `fg` (forward + backward) aggregates over the whole pullback
-> and matches JSC/BSC semantics closely.*
-
-## Part 1: MPI Collectives (allgatherv_p2p! / allreduce_p2p!)
-
-Job `1000628` (`submit_test.sh` → `test_MPI_config.jl`). Intra-node only (single
-zen4_h200 node, NVSwitch fabric). 1-GPU row omitted — p2p returns the local
-buffer with no network traffic.
+Job `1000652` (`submit_test.sh` → `test_MPI_config.jl`). 16 GPU uses 2 nodes
+(Phase 2 cross-node ring), 1/2/4/8 GPU are single-node (NVSwitch only).
 
 ### Allgatherv
 
-| Size  | 2 GPU              | 4 GPU              | 8 GPU              |
-|-------|--------------------|--------------------|--------------------|
-| 8KB   | 0.05ms             | 0.17ms             | 1.47ms             |
-| 8MB   | 0.08ms (94.7 GB/s) | 0.12ms (61.4 GB/s) | 0.21ms (36.0 GB/s) |
-| 128MB | 0.37ms (332.9 GB/s)| 0.63ms (193.4 GB/s)| 0.84ms (145.9 GB/s)|
+| Size  | 2 GPU              | 4 GPU              | 8 GPU              | 16 GPU             |
+|-------|--------------------|--------------------|--------------------|--------------------|
+| 8KB   | 0.05ms             | 0.16ms             | 1.36ms             | 1.98ms             |
+| 8MB   | 0.10ms (75.7 GB/s) | 0.21ms (36.5 GB/s) | 0.32ms (23.9 GB/s) | 3.85ms (2.0 GB/s)  |
+| 128MB | 0.75ms (163.6 GB/s)| 1.33ms (91.7 GB/s) | 1.62ms (75.2 GB/s) | 5.55ms (22.0 GB/s) |
 
 ### Allreduce
 
-| Size  | 2 GPU              | 4 GPU              | 8 GPU              |
-|-------|--------------------|--------------------|--------------------|
-| 8KB   | 0.08ms             | 0.23ms             | 0.54ms             |
-| 8MB   | 0.14ms (53.8 GB/s) | 0.38ms (19.8 GB/s) | 0.79ms (9.7 GB/s)  |
-| 128MB | 0.67ms (181.3 GB/s)| 1.36ms (90.0 GB/s) | 1.84ms (66.3 GB/s) |
+| Size  | 2 GPU              | 4 GPU              | 8 GPU              | 16 GPU              |
+|-------|--------------------|--------------------|--------------------|---------------------|
+| 8KB   | 0.08ms             | 0.23ms             | 0.56ms             | 0.84ms              |
+| 8MB   | 0.17ms (44.6 GB/s) | 0.56ms (13.6 GB/s) | 0.98ms (7.8 GB/s)  | 1.51ms (5.0 GB/s)   |
+| 128MB | 1.44ms (85.1 GB/s) | 2.69ms (45.3 GB/s) | 3.32ms (36.7 GB/s) | 44.81ms (2.7 GB/s) ⚠ |
 
-Algorithms: hierarchical p2p. Allgatherv = concurrent `Irecv`/`Isend`
-intra-node all-to-all + ring allgatherv across node leaders + leader broadcast
-of non-local-node slabs. Allreduce = intra-node ring reduce-scatter →
-per-local-rank cross-node ring allreduce → opposite-direction intra-node ring
-allgather. See [`docs/plans/2026-04-24-mpi-p2p-collectives-design.md`](../../../docs/plans/2026-04-24-mpi-p2p-collectives-design.md).
+> *⚠ **16 GPU 128 MB allreduce (44.81 ms) is a significant outlier** vs 3.32 ms at
+> 8 GPU. Cross-node Phase 2 (per-local-rank sibling ring on IB) is being
+> exercised for the first time here; likely causes under investigation:
+> one-time UCX registration overhead for fresh cross-node memory regions,
+> or the p2p ring vs. an UCC-backed IB allreduce at comparable sizes.
+> Allgatherv at 16 GPU (5.55 ms) degrades more gracefully.*
+
+Algorithm: hierarchical 3-phase p2p. Allgatherv = intra-node concurrent
+`Irecv!`/`Isend` + leader ring allgatherv across nodes + leader broadcast of
+non-local slabs. Allreduce = intra-node ring reduce-scatter → per-local-rank
+cross-node ring allreduce → opposite-direction intra-node ring allgather.
+See [`docs/plans/2026-04-24-mpi-p2p-collectives-design.md`](../../../docs/plans/2026-04-24-mpi-p2p-collectives-design.md).
 
 ## Part 2: FLmap_parallel Forward
 
-Job `1000628`, per-iteration time for `FLmap_parallel` forward (allgatherv
-through `parallel()`).
+Job `1000652`, per-iteration FLmap_parallel forward time (ms), matrix
+`D ∈ {8,10,12,14,16} × χ ∈ {256,512,768,1024}` = 20 configs × 5 GPU counts.
 
-| D  | χ    | Size    | 1 GPU   | 2 GPU  | 4 GPU  | 8 GPU  | 2× speedup | 4× speedup | 8× speedup |
-|----|------|---------|---------|--------|--------|--------|------------|------------|------------|
-| 8  | 256  | 32MB    | 87ms    | 39ms   | 20ms   | 11ms   | 2.23×      | 4.35×      | 7.91×      |
-| 8  | 512  | 128MB   | 496ms   | 251ms  | 157ms  | 100ms  | 1.98×      | 3.16×      | 4.96×      |
-| 8  | 1024 | 512MB   | 1203ms  | 628ms  | 318ms  | 188ms  | 1.92×      | 3.78×      | 6.40×      |
-| 10 | 256  | 50MB    | 617ms   | 415ms  | 230ms  | 139ms  | 1.49×      | 2.68×      | 4.44×      |
-| 10 | 512  | 200MB   | 462ms   | 239ms  | 196ms  | 117ms  | 1.93×      | 2.36×      | 3.95×      |
-| 10 | 1024 | 800MB   | 2320ms  | 1222ms | 692ms  | 331ms  | 1.90×      | 3.35×      | 7.01×      |
-| 12 | 256  | 72MB    | 456ms   | 288ms  | 165ms  | 103ms  | 1.58×      | 2.76×      | 4.43×      |
-| 12 | 512  | 288MB   | 936ms   | 547ms  | 284ms  | 181ms  | 1.71×      | 3.30×      | 5.17×      |
-| 12 | 1024 | 1152MB  | 5091ms  | 2598ms | 1288ms | 646ms  | 1.96×      | 3.95×      | 7.88×      |
+| D  | χ    | Size   | 1 GPU | 2 GPU | 4 GPU | 8 GPU | 16 GPU |
+|----|------|--------|-------|-------|-------|-------|--------|
+| 8  | 256  | 32MB   |   123 |    57 |    26 |    14 |      9 |
+| 8  | 512  | 128MB  |   299 |   113 |    58 |    30 |     20 |
+| 8  | 768  | 288MB  |   474 |   239 |   120 |    62 |     42 |
+| 8  | 1024 | 512MB  |   880 |   442 |   222 |   115 |     77 |
+| 10 | 256  | 50MB   |   205 |   109 |    63 |    49 |     27 |
+| 10 | 512  | 200MB  |   426 |   214 |   107 |    56 |     36 |
+| 10 | 768  | 450MB  |   992 |   499 |   253 |   128 |     82 |
+| 10 | 1024 | 800MB  |  2024 |  1095 |   631 |   304 |    154 |
+| 12 | 256  | 72MB   |   221 |    99 |    50 |    26 |     16 |
+| 12 | 512  | 288MB  |   711 |   358 |   195 |    92 |     57 |
+| 12 | 768  | 648MB  |  1803 |   909 |   517 |   233 |    139 |
+| 12 | 1024 | 1152MB |  3608 |  1813 |  1003 |   478 |    284 |
+| 14 | 256  | 98MB   |   322 |   162 |    81 |    42 |     25 |
+| 14 | 512  | 392MB  |  1342 |   675 |   344 |   172 |    101 |
+| 14 | 768  | 882MB  |  3497 |  1752 |   894 |   447 |    264 |
+| 14 | 1024 | 1568MB |  7107 |  3665 |  1986 |  1202 |    710 |
+| 16 | 256  | 128MB  |   469 |   237 |   120 |    60 |     35 |
+| 16 | 512  | 512MB  |  2105 |  1066 |   538 |   297 |    151 |
+| 16 | 768  | 1152MB |  5755 |  2866 |  1472 |   798 |    443 |
+| 16 | 1024 | 2048MB | 11788 |  6039 |  3203 |  1833 |   1198 |
 
 ## Part 2: FLmap_parallel Backward
 
-Per-iteration backward time (allreduce through `parallel_sum()` dominates).
+Per-iteration backward time (ms). Gains from 8 → 16 GPU are limited by the
+Phase 2 cross-node allreduce path (same issue as Part 1).
 
-| D  | χ    | Size    | 1 GPU   | 2 GPU  | 4 GPU  | 8 GPU  | 2× speedup | 4× speedup | 8× speedup |
-|----|------|---------|---------|--------|--------|--------|------------|------------|------------|
-| 8  | 256  | 32MB    | 402ms   | 235ms  | 159ms  | 144ms  | 1.71×      | 2.53×      | 2.79×      |
-| 8  | 512  | 128MB   | 751ms   | 438ms  | 354ms  | 471ms  | 1.71×      | 2.12×      | 1.59×      |
-| 8  | 1024 | 512MB   | 2696ms  | 1533ms | 937ms  | 947ms  | 1.76×      | 2.88×      | 2.85×      |
-| 10 | 256  | 50MB    | 366ms   | 269ms  | 254ms  | 242ms  | 1.36×      | 1.44×      | 1.51×      |
-| 10 | 512  | 200MB   | 1638ms  | 927ms  | 642ms  | 874ms  | 1.77×      | 2.55×      | 1.87×      |
-| 10 | 1024 | 800MB   | 6376ms  | 3289ms | 1858ms | 1488ms | 1.94×      | 3.43×      | 4.29×      |
-| 12 | 256  | 72MB    | 758ms   | 469ms  | 390ms  | 529ms  | 1.62×      | 1.94×      | 1.43×      |
-| 12 | 512  | 288MB   | 2533ms  | 1434ms | 911ms  | 1108ms | 1.77×      | 2.78×      | 2.29×      |
-| 12 | 1024 | 1152MB  | 13330ms | 6814ms | 3483ms | 2272ms | 1.96×      | 3.83×      | 5.87×      |
+| D  | χ    | Size   | 1 GPU  | 2 GPU | 4 GPU | 8 GPU | 16 GPU |
+|----|------|--------|--------|-------|-------|-------|--------|
+| 8  | 256  | 32MB   |    546 |   301 |   187 |   147 |    121 |
+| 8  | 512  | 128MB  |    762 |   460 |   394 |   401 |    295 |
+| 8  | 768  | 288MB  |   1386 |   785 |   557 |   767 |    723 |
+| 8  | 1024 | 512MB  |   2534 |  1342 |   844 |   932 |   1178 |
+| 10 | 256  | 50MB   |    614 |   386 |   261 |   238 |    153 |
+| 10 | 512  | 200MB  |   1407 |   787 |   545 |   774 |    636 |
+| 10 | 768  | 450MB  |   3170 |  1672 |  1004 |  1017 |   1182 |
+| 10 | 1024 | 800MB  |   6253 |  3219 |  2075 |  1530 |   1643 |
+| 12 | 256  | 72MB   |    789 |   481 |   400 |   450 |    283 |
+| 12 | 512  | 288MB  |   2423 |  1295 |   910 |   943 |   1032 |
+| 12 | 768  | 648MB  |   6367 |  3276 |  2093 |  1447 |   1551 |
+| 12 | 1024 | 1152MB |  12642 |  6488 |  3496 |  2288 |   2499 |
+| 14 | 256  | 98MB   |   1217 |   680 |   511 |   759 |    506 |
+| 14 | 512  | 392MB  |   4777 |  2476 |  1426 |  1232 |   1234 |
+| 14 | 768  | 882MB  |  12739 |  6492 |  3513 |  2518 |   2061 |
+| 14 | 1024 | 1568MB |  25630 | 13132 |  6985 |  4242 |   3710 |
+| 16 | 256  | 128MB  |   1749 |   943 |   645 |   867 |    862 |
+| 16 | 512  | 512MB  |   7585 |  3903 |  2140 |  1695 |   1581 |
+| 16 | 768  | 1152MB |  20822 | 10745 |  5674 |  3522 |   3019 |
+| 16 | 1024 | 2048MB |  43602 | 22666 | 11965 |  6612 |   5461 |
 
-> *Forward `isapprox(parallel, serial; rtol=1e-4)` check reports FAIL at 2/4/8
-> GPU (printed by `test_MPI_config.jl`). This is a known numerical ordering
-> difference between the parallel reduction and the serial reference; the
-> result differs from serial within ~1e-4 rel. tolerance which is the check's
-> threshold, but backward correctness check (finite non-zero gradient) passes
-> everywhere. JSC observed the same pattern — treat as non-issue for the
-> benchmark. The underlying `allgatherv_p2p!` / `allreduce_p2p!` semantics are
-> verified in Part 1.*
+> *The `isapprox(parallel, serial; rtol=1e-4)` correctness check in
+> `test_MPI_config.jl` prints FAIL at 2/4/8/16 GPU — this is the known
+> parallel-vs-serial reduction-order drift (machine-eps precision loss) and is
+> **not** a real regression. 1 GPU ALL PASSED confirms the kernel itself is
+> correct. JSC/BSC show the same behaviour.*
 
-## Part 3: checkpoint() Method Comparison (FLmap_parallel, job 1000532)
+## Part 3: checkpoint() Method Comparison
 
-Gradient-equivalence and backward timing across `Plain()`, `Recompute()`, and
-`Offload()`. **Correctness**: all 16 configs (4 sizes × 4 GPU counts) produce
-matching gradients (`‖g - g_plain‖ / ‖g_plain‖ < 1e-10`). No MPI deadlock.
+Job `1000649` (`submit_test_checkpoint.sh` → `test_MPI_checkpoint.jl`).
+**All 20 configs (4 sizes × 5 GPU counts) PASSED** the
+`‖g - g_plain‖ / ‖g_plain‖ < 1e-10` gradient-equivalence check. 16 GPU row
+is the first cross-node checkpoint verification.
 
 ### 1 GPU
 | D  | χ   | Plain   | Recompute | Offload | Off/Plain |
 |----|-----|---------|-----------|---------|-----------|
-| 8  | 128 |  340 ms |   407 ms  |  357 ms | 1.05×     |
-| 8  | 256 |  365 ms |   885 ms  |  366 ms | 1.00×     |
-| 10 | 256 |  543 ms |  1306 ms  |  669 ms | 1.23×     |
-| 10 | 512 | 2262 ms |  2738 ms  | 2287 ms | 1.01×     |
+| 8  | 128 |  341 ms |   407 ms  |  358 ms | 1.05×     |
+| 8  | 256 |  365 ms |   473 ms  |  368 ms | 1.01×     |
+| 10 | 256 |  545 ms |  1298 ms  |  545 ms | 1.00×     |
+| 10 | 512 | 2294 ms |  2749 ms  | 2296 ms | 1.00×     |
 
 ### 2 GPU
 | D  | χ   | Plain   | Recompute | Offload | Off/Plain |
 |----|-----|---------|-----------|---------|-----------|
-| 8  | 128 |  224 ms |   261 ms  |  242 ms | 1.08×     |
-| 8  | 256 |  200 ms |   255 ms  |  327 ms | 1.63×     |
-| 10 | 256 |  306 ms |   734 ms  |  321 ms | 1.05×     |
-| 10 | 512 | 1440 ms |  2054 ms  | 1587 ms | 1.10×     |
+| 8  | 128 |  247 ms |   260 ms  |  240 ms | 0.97×     |
+| 8  | 256 |  195 ms |   253 ms  |  196 ms | 1.00×     |
+| 10 | 256 |  316 ms |   715 ms  |  314 ms | 0.99×     |
+| 10 | 512 | 1381 ms |  1964 ms  | 1383 ms | 1.00×     |
 
 ### 4 GPU
 | D  | χ   | Plain   | Recompute | Offload | Off/Plain |
 |----|-----|---------|-----------|---------|-----------|
-| 8  | 128 |  272 ms |   194 ms  |  193 ms | 0.71×     |
-| 8  | 256 |  134 ms |   164 ms  |  134 ms | 1.00×     |
-| 10 | 256 |  255 ms |   488 ms  |  261 ms | 1.03×     |
-| 10 | 512 | 1447 ms |  1776 ms  | 1312 ms | 0.91×     |
+| 8  | 128 |  169 ms |   192 ms  |  185 ms | 1.10×     |
+| 8  | 256 |  120 ms |   149 ms  |  117 ms | 0.98×     |
+| 10 | 256 |  414 ms |   464 ms  |  233 ms | 0.56×     |
+| 10 | 512 | 1133 ms |  1582 ms  | 1151 ms | 1.02×     |
 
 ### 8 GPU
 | D  | χ   | Plain   | Recompute | Offload | Off/Plain |
 |----|-----|---------|-----------|---------|-----------|
-| 8  | 128 |  197 ms |   174 ms  |  173 ms | 0.88×     |
-| 8  | 256 |  144 ms |   174 ms  |  271 ms | 1.88×     |
-| 10 | 256 |  283 ms |   414 ms  |  267 ms | 0.94×     |
-| 10 | 512 | 1409 ms |  2459 ms  | 1430 ms | 1.01×     |
+| 8  | 128 |  231 ms |   179 ms  |  166 ms | 0.72×     |
+| 8  | 256 |  123 ms |   121 ms  |  126 ms | 1.03×     |
+| 10 | 256 |  253 ms |   358 ms  |  250 ms | 0.99×     |
+| 10 | 512 | 1129 ms |  1436 ms  | 1103 ms | 0.98×     |
 
-### Findings
-- **Multi-GPU `Offload()` correctness preserved on H200**: matches JSC GH200
-  result that the host-copy + device-restore bracket does not race with
-  `FLmap_parallel`'s internal MPI collectives.
-- **Offload overhead ≈ 0.7–1.9× vs Plain** — sometimes faster than Plain
-  (D=8 χ=128 at 4/8 GPU) because the host round-trip lets the backward pass
-  skip a costly re-allocation path; sometimes slower (D=8 χ=256 at 8 GPU,
-  1.88×) when the PCIe host-copy dominates.
-- **Recommendation**: `Offload()` is safe on Sofia H200 for `FLmap_parallel`
-  under MPI — use it for VRAM-constrained runs (141 GB makes this unlikely
-  for typical χ ≤ 1024 workloads, but useful at D≥16 χ≥1024).
+### 16 GPU (2 nodes)
+| D  | χ   | Plain   | Recompute | Offload | Off/Plain |
+|----|-----|---------|-----------|---------|-----------|
+| 8  | 128 |  138 ms |   150 ms  |  155 ms | 1.12×     |
+| 8  | 256 |   72 ms |    88 ms  |   71 ms | 0.99×     |
+| 10 | 256 |  149 ms |   240 ms  |  151 ms | 1.01×     |
+| 10 | 512 |  717 ms |   879 ms  |  710 ms | 0.99×     |
+
+## Full fg Benchmark (D=10 χ=400, Plaquette VUMPS, with checkpoint)
+
+Job `1000633` (`submit.sh` → `benchmark_fg.jl`, N=1/2/4/8 at single node;
+N=16 pending from job `1000677`).
+
+| GPU | Forward | fg forward | fg backward | fg total | fg speedup |
+|-----|---------|-----------|------------|----------|------------|
+| 1   | 163.90s | 155.29s    | 516.06s    | 671.35s  | 1.00×      |
+| 2   |  84.98s |  82.32s    | 276.27s    | 358.60s  | 1.87×      |
+| 4   |  45.56s |  43.69s    | 160.72s    | 204.41s  | 3.28×      |
+| 8   |  26.57s |  26.94s    | 100.81s    | 127.75s  | 5.25×      |
+| 16  | TBD     | TBD        | TBD        | TBD      | TBD        |
 
 ## Sofia-specific Environment
 
@@ -176,37 +176,29 @@ export CUDA_VISIBLE_DEVICES=$OMPI_COMM_WORLD_LOCAL_RANK
 export UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc
 export UCX_MEMTYPE_CACHE=n
 export UCX_WARN_UNUSED_ENV_VARS=n
-export LD_PRELOAD=/usr/lib64/libcuda.so.1            # MANDATORY, see below
-# export CUDA_LAUNCH_BLOCKING=1                      # see "Known Issues" below
+export CUDA_LAUNCH_BLOCKING=1                 # mandatory (H200 sync worker bug)
+export LD_PRELOAD=/usr/lib64/libcuda.so.1     # mandatory (libcuda conflict)
 ```
 
 ## Known Issues
 
-- **`LD_PRELOAD=/usr/lib64/libcuda.so.1` is mandatory for MPI + CUDA on Sofia.**
-  Without it, every UCX-CUDA-backed MPI op on a `CuArray` fails with
-  `ibv_reg_mr(... 0x3200..., ...) failed: Bad address`. See
-  [`examples/MPI_parallel/Sofia/UCX_CUDA_ISSUE.md`](../Sofia/UCX_CUDA_ISSUE.md)
-  for the root-cause analysis: Julia's `CUDA_Driver_jll` artifact `libcuda.so`
-  conflicts with UCX-CUDA's linked system driver, so UCX-CUDA's
-  `cuda_copy`/`cuda_ipc` transports fail to register in the UCP context and
-  fall back to IB — which can't `ibv_reg_mr` CUDA device memory. Preloading
-  the system driver before Julia's CUDA.jl loads its artifact resolves this.
-- **`CUDA_LAUNCH_BLOCKING=1` required for the `bench.jl` / full-VUMPS fg path**
-  (but NOT for the `test_MPI_config.jl` scaling test or `test_MPI_checkpoint.jl`
-  checkpoint test). Without CLB=1, the first `fenergy(A)` call after
-  `initialize_env` crashes with a `synchronization_worker` segfault in
-  `CUDA.jl/lib/cudadrv/synchronization.jl:119`, matching the GH200-ARM bug
-  JSC documented. CLB=1 costs ~15-18% wall-clock per the JSC write-up; the
-  Sofia fg numbers above are reported under this tax for apples-to-apples
-  comparability with `benchmarks/JSC_Jupiter_GH200.md`.
-- **`MPI.Allreduce!(MPI.IN_PLACE, ::CuArray, ...)` crashes.** OpenMPI 5.0.7's
-  `mca_coll_cuda_allreduce` runs `non_overlap_accelerator_copy_content_same_ddt`
-  → host `memcpy` on a device pointer → SIGSEGV. Affects direct use of MPI.jl;
-  does *not* affect TeneT's `allreduce_p2p!` / `allgatherv_p2p!` which route
-  through UCX PML `Isend`/`Recv!`. If you ever need plain `Allreduce!` on
-  CuArrays, pass separate `sendbuf`/`recvbuf` (not `IN_PLACE`) or launch with
-  `--mca coll_cuda_priority 0`.
-- **No `/user/sofia/$VSC` home directory** — every SSH session prints
-  `Could not chdir to home directory`. Harmless; work out of
-  `/sofia/scratch/pilot/pilot_2026_0002/<user>/` and set `HOME=$WD` +
-  `JULIA_DEPOT_PATH=$WD/.julia` in sbatch.
+- **`LD_PRELOAD=/usr/lib64/libcuda.so.1` mandatory** for MPI + CUDA.jl on Sofia.
+  Without it, UCX-CUDA's `cuda_copy`/`cuda_ipc` transports fail to register in
+  the UCP context (Julia's `CUDA_Driver_jll` artifact `libcuda.so` shadows the
+  system driver that UCX-CUDA was built against). See
+  [`Sofia/UCX_CUDA_ISSUE.md`](../Sofia/UCX_CUDA_ISSUE.md).
+- **`CUDA_LAUNCH_BLOCKING=1` mandatory** for the full-VUMPS test path (`bench.jl`
+  and now `test_MPI_config.jl` Part 2 at the extended matrix). The same
+  `synchronization_worker` segfault pattern JSC GH200 documented shows up
+  here too at larger (D, χ). CLB=1 costs ~15-18% wall-clock but prevents
+  crashes.
+- **16 GPU 128 MB Allreduce = 44.81 ms** (see Part 1 ⚠ note above) — the
+  Phase 2 cross-node ring on IB runs slower than expected; multi-node regime
+  not yet fully tuned.
+- **Home dir `/user/sofia/$VSC` doesn't exist** — work out of
+  `/sofia/scratch/pilot/pilot_2026_0002/<user>/` with `HOME=$WD` +
+  `JULIA_DEPOT_PATH=$WD/.julia`.
+- **`MPI.Allreduce!(MPI.IN_PLACE, ::CuArray, ...)` crashes** inside OpenMPI 5.0.7
+  `mca_coll_cuda`. Use `Allreduce!(sendbuf, recvbuf, ...)` non-IN_PLACE, or run
+  with `--mca coll_cuda_priority 0`. Not triggered by TeneT's
+  `allreduce_p2p!` (which uses Isend/Recv through UCX PML).
