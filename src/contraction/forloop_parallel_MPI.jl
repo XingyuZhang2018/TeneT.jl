@@ -223,97 +223,130 @@ end
 """
     allreduce_p2p!(buf, +, comm)
 
-Hierarchical allreduce: tree reduce within node (NVLink), then between
-node leaders (IB), then broadcast back within node. Uses pre-allocated
-fixed buffers to avoid GPU registration accumulation.
+Bandwidth-optimal hierarchical allreduce via three phases:
+
+1. Intra-node ring reduce-scatter: walks a ring of `local_size` steps,
+   accumulating slices of `buf` so each local rank ends up owning the
+   intra-node sum on a unique slice.
+2. Cross-node ring allreduce per local_rank sibling communicator: the slice
+   owned by each rank gets summed across nodes. Degenerates to a no-op when
+   `n_nodes == 1`.
+3. Intra-node ring allgather in the opposite ring direction: rotates the
+   final slice ownership around so every rank ends up with the full reduced
+   buffer.
+
+Reduction order differs from a binary tree — machine-eps drift on complex
+sums is expected and within the 1e-10 relative tolerance the codebase assumes.
 """
 function allreduce_p2p!(buf, ::typeof(+), comm)
     rank = MPI.Comm_rank(comm)
-    P = MPI.Comm_size(comm)
+    P    = MPI.Comm_size(comm)
     P == 1 && return buf
     synchronize(buf)
     N = length(buf)
 
-    local_comm, leaders_comm = _get_local_comm(comm)
+    local_comm, _ = _get_local_comm(comm)
     local_rank = MPI.Comm_rank(local_comm)
     local_size = MPI.Comm_size(local_comm)
+    n_nodes    = P ÷ local_size
+    @assert P == n_nodes * local_size "allreduce_p2p! requires symmetric node layout; got P=$P, local_size=$local_size"
 
-    _ensure_buf!(_comm_recvbuf, buf, N)
-    recvbuf = reshape(view(_comm_recvbuf[], 1:N), size(buf))
+    # Slice buf into `local_size` ~equal pieces. The N-mod-local_size "stragglers"
+    # get 1 extra element each (via split_count), matching the existing helper.
+    slice_counts = split_count(N, local_size)
+    slice_displs = cumsum([0; slice_counts[1:end-1]])
+    slice_range(i) = (slice_displs[i] + 1) : (slice_displs[i] + slice_counts[i])
 
-    # Phase 1: Tree reduce within node to local_rank 0
-    step = 1
-    while step < local_size
-        if local_rank % (2 * step) == 0
-            partner = local_rank + step
-            if partner < local_size
-                MPI.Recv!(recvbuf, local_comm; source=partner, tag=step)
-                buf .+= recvbuf
-            end
-        elseif local_rank % (2 * step) == step
-            synchronize(buf)
-            sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
-            copyto!(sendbuf, buf)
-            synchronize(buf)
-            MPI.Send(sendbuf, local_comm; dest=local_rank - step, tag=step)
-            # This rank is done reducing, wait for broadcast
-        end
-        step *= 2
-    end
+    prev_l, next_l = _ring_neighbors(local_rank, local_size)
 
-    # Phase 2: Reduce between node leaders (local_rank 0 only)
-    if local_rank == 0 && !isnothing(leaders_comm)
-        leaders_size = MPI.Comm_size(leaders_comm)
-        leaders_rank = MPI.Comm_rank(leaders_comm)
-        if leaders_size > 1
-            synchronize(buf)
-            step = 1
-            while step < leaders_size
-                if leaders_rank % (2 * step) == 0
-                    partner = leaders_rank + step
-                    if partner < leaders_size
-                        MPI.Recv!(recvbuf, leaders_comm; source=partner, tag=100+step)
-                        buf .+= recvbuf
-                    end
-                elseif leaders_rank % (2 * step) == step
-                    synchronize(buf)
-                    sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
-                    copyto!(sendbuf, buf)
-                    synchronize(buf)
-                    MPI.Send(sendbuf, leaders_comm; dest=leaders_rank - step, tag=100+step)
-                end
-                step *= 2
-            end
-            # Broadcast back to all leaders (use pre-allocated buffers to avoid GPU registration accumulation)
-            synchronize(buf)
-            if leaders_rank == 0
-                sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
-                copyto!(sendbuf, buf)
-                synchronize(buf)
-                reqs = [MPI.Isend(sendbuf, leaders_comm; dest=r, tag=200) for r in 1:leaders_size-1]
-                MPI.Waitall(reqs)
-            else
-                MPI.Recv!(recvbuf, leaders_comm; source=0, tag=200)
-                copyto!(buf, recvbuf)
-            end
-        end
-    end
-
-    # Phase 3: Broadcast within node from local_rank 0 (use pre-allocated buffers)
-    synchronize(buf)
+    # ── Phase 1: intra-node ring reduce-scatter (send to next, recv from prev) ──
     if local_size > 1
-        if local_rank == 0
-            sendbuf = _ensure_buf!(_comm_sendbuf, buf, N)
-            copyto!(sendbuf, buf)
+        _ensure_buf!(_comm_recvbuf, buf, maximum(slice_counts))
+        for step in 1:local_size-1
+            send_idx = mod(local_rank - step + 1, local_size) + 1
+            recv_idx = mod(local_rank - step,     local_size) + 1
+            send_sub = view(buf, slice_range(send_idx))
+            recv_sub = view(_comm_recvbuf[], 1:slice_counts[recv_idx])
             synchronize(buf)
-            reqs = [MPI.Isend(sendbuf, local_comm; dest=r, tag=300) for r in 1:local_size-1]
-            MPI.Waitall(reqs)
-        else
-            MPI.Recv!(recvbuf, local_comm; source=0, tag=300)
-            copyto!(buf, recvbuf)
+            req_send = MPI.Isend(send_sub,  local_comm; dest=next_l,   tag=_TAG_BASE + 300 + step)
+            req_recv = MPI.Irecv!(recv_sub, local_comm; source=prev_l, tag=_TAG_BASE + 300 + step)
+            MPI.Waitall([req_send, req_recv])
+            view(buf, slice_range(recv_idx)) .+= recv_sub
         end
     end
+
+    # After Phase 1, rank r owns the intra-node sum on slice my_slice.
+    my_slice = mod(local_rank + 1, local_size) + 1
+
+    # ── Phase 2: cross-node ring allreduce on the owned slice ──
+    if n_nodes > 1
+        sib_comm = _per_local_rank_comm(comm, local_comm)
+        sib_size = MPI.Comm_size(sib_comm)
+        if sib_size > 1
+            sib_rank = MPI.Comm_rank(sib_comm)
+            _allreduce_ring_on_slice!(view(buf, slice_range(my_slice)),
+                                      sib_comm, sib_rank, sib_size)
+        end
+    end
+
+    # ── Phase 3: intra-node ring allgather (send to prev, recv from next) ──
+    if local_size > 1
+        for step in 1:local_size-1
+            send_idx = mod(my_slice - 1 + step - 1, local_size) + 1
+            recv_idx = mod(my_slice - 1 + step,     local_size) + 1
+            send_sub = view(buf, slice_range(send_idx))
+            recv_sub = view(buf, slice_range(recv_idx))
+            synchronize(buf)
+            req_send = MPI.Isend(send_sub,  local_comm; dest=prev_l,   tag=_TAG_BASE + 400 + step)
+            req_recv = MPI.Irecv!(recv_sub, local_comm; source=next_l, tag=_TAG_BASE + 400 + step)
+            MPI.Waitall([req_send, req_recv])
+        end
+    end
+
     return buf
+end
+
+# Phase 2 helper: ring allreduce on a contiguous slice that every rank in
+# `comm` owns an independent copy of. RS direction: send next, recv prev;
+# AG direction: send prev, recv next (same ring-flip trick as the main
+# allreduce). For `size_ == 2` this degenerates to a single swap+sum.
+function _allreduce_ring_on_slice!(slice, comm, rank, size_)
+    size_ == 1 && return slice
+    N = length(slice)
+    sub_counts = split_count(N, size_)
+    sub_displs = cumsum([0; sub_counts[1:end-1]])
+    sub_range(i) = (sub_displs[i] + 1) : (sub_displs[i] + sub_counts[i])
+    prev, next_ = _ring_neighbors(rank, size_)
+
+    _ensure_buf!(_comm_recvbuf, slice, maximum(sub_counts))
+
+    # Reduce-scatter
+    for step in 1:size_-1
+        send_idx = mod(rank - step + 1, size_) + 1
+        recv_idx = mod(rank - step,     size_) + 1
+        send_sub = view(slice, sub_range(send_idx))
+        recv_sub = view(_comm_recvbuf[], 1:sub_counts[recv_idx])
+        synchronize(slice)
+        req_send = MPI.Isend(send_sub,  comm; dest=next_, tag=_TAG_BASE + 500 + step)
+        req_recv = MPI.Irecv!(recv_sub, comm; source=prev, tag=_TAG_BASE + 500 + step)
+        MPI.Waitall([req_send, req_recv])
+        view(slice, sub_range(recv_idx)) .+= recv_sub
+    end
+    my_sub = mod(rank + 1, size_) + 1
+
+    # Allgather (opposite ring direction)
+    for step in 1:size_-1
+        send_idx = mod(my_sub - 1 + step - 1, size_) + 1
+        recv_idx = mod(my_sub - 1 + step,     size_) + 1
+        send_sub = view(slice, sub_range(send_idx))
+        recv_sub = view(slice, sub_range(recv_idx))
+        synchronize(slice)
+        req_send = MPI.Isend(send_sub,  comm; dest=prev,  tag=_TAG_BASE + 600 + step)
+        req_recv = MPI.Irecv!(recv_sub, comm; source=next_, tag=_TAG_BASE + 600 + step)
+        MPI.Waitall([req_send, req_recv])
+    end
+
+    return slice
 end
 
 # ─── Boundary cast helpers for mixed-precision at the parallel/forloop level ───
