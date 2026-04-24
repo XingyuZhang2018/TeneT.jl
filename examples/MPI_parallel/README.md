@@ -15,10 +15,19 @@ MPI_parallel/
 ├── JSC/                    # JSC Jupiter (GH200 120GB)
 │   ├── submit.sh
 │   ├── submit_test.sh
+│   ├── submit_test_checkpoint.sh
+│   └── LocalPreferences.toml
+├── Sofia/                  # Sofia VUB (H200 141GB, 8 GPU/node)
+│   ├── submit.sh
+│   ├── submit_test.sh
+│   ├── submit_test_checkpoint.sh
+│   ├── bench.jl            # Per-iteration fg timing (submit.sh runs this)
+│   ├── UCX_CUDA_ISSUE.md   # Debug log for LD_PRELOAD libcuda fix
 │   └── LocalPreferences.toml
 ├── benchmarks/             # Benchmark results
 │   ├── BSC_MareNostrum5_H100.md
 │   ├── JSC_Jupiter_GH200.md
+│   ├── Sofia_VUB_H200.md
 │   └── cross_system_comparison.md
 └── README.md
 ```
@@ -52,14 +61,15 @@ sbatch submit.sh
 
 ## Required Environment Variables
 
-| Variable | Purpose | BSC | JSC |
-|----------|---------|-----|-----|
-| `CUDA_VISIBLE_DEVICES` | GPU isolation (critical) | `$OMPI_COMM_WORLD_LOCAL_RANK` | `$SLURM_LOCALID` |
-| `UCX_MEMTYPE_CACHE` | Disable CUDA memory cache | `n` (auto) | `n` (explicit) |
-| `UCX_TLS` | UCX transport selection | default | `rc_x,self,sm,cuda_copy` |
-| `UCX_WARN_UNUSED_ENV_VARS` | Suppress warnings | not needed | `n` |
-| `CUDA_LAUNCH_BLOCKING` | Sync GPU ops | not needed | `1` (ARM bug) |
-| `LD_LIBRARY_PATH` | CUDA lib path | clean | strip NVHPC math_libs |
+| Variable | Purpose | BSC | JSC | Sofia |
+|----------|---------|-----|-----|-------|
+| `CUDA_VISIBLE_DEVICES` | GPU isolation (critical) | `$OMPI_COMM_WORLD_LOCAL_RANK` | `$SLURM_LOCALID` | `$OMPI_COMM_WORLD_LOCAL_RANK` |
+| `UCX_MEMTYPE_CACHE` | Disable CUDA memory cache | `n` (auto) | `n` (explicit) | `n` (explicit) |
+| `UCX_TLS` | UCX transport selection | default | `rc_x,self,sm,cuda_copy` | `rc_x,self,sm,cuda_copy,cuda_ipc` |
+| `UCX_WARN_UNUSED_ENV_VARS` | Suppress warnings | not needed | `n` | `n` |
+| `CUDA_LAUNCH_BLOCKING` | Sync GPU ops | not needed | `1` (ARM bug) | `1` (H200 sync worker bug) |
+| `LD_LIBRARY_PATH` | CUDA lib path | clean | strip NVHPC math_libs | EasyBuild stack |
+| `LD_PRELOAD` | Shadow Julia artifact libcuda | not needed | not needed | `/usr/lib64/libcuda.so.1` (MANDATORY) |
 
 ## Julia Import Order
 
@@ -67,11 +77,11 @@ sbatch submit.sh
 
 ## Performance (D=10 χ=400)
 
-| GPU | BSC H100 fg | JSC GH200 fg |
-|-----|-------------|--------------|
-| 1   | 923s        | 831s         |
-| 2   | 555s        | 457s         |
-| 4   | 408s        | 324s         |
-| 8   | 354s        | 231s         |
+| GPU | BSC H100 fg | JSC GH200 fg | Sofia H200 fg |
+|-----|-------------|--------------|---------------|
+| 1   | 923s        | 831s         | **670s**      |
+| 2   | 555s        | 457s         | **369s**      |
+| 4   | 408s        | 324s         | **232s**      |
+| 8   | 354s        | 231s         | **203s**      |
 
 See `benchmarks/cross_system_comparison.md` for detailed comparison.
