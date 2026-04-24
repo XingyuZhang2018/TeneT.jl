@@ -2,8 +2,8 @@
 #SBATCH --job-name=Sofia_MPI_test
 #SBATCH --output=%x_%j.out
 #SBATCH --partition=zen4_h200
-#SBATCH --time=00:30:00
-#SBATCH --nodes=1
+#SBATCH --time=01:00:00
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8
 #SBATCH --cpus-per-task=24
 #SBATCH --gres=gpu:nvidia_h200:8
@@ -33,7 +33,7 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1"
 echo "=== Sofia MPI Scaling Test ==="
 echo "Nodes: ${SLURM_NNODES}  Max GPUs: ${MAX_GPU}  Start: $(date)"
 
-for N in 1 2 4 8; do
+for N in 1 2 4 8 16; do
     [ $N -gt $MAX_GPU ] && continue
     echo ""
     echo "========== ${N} GPU =========="

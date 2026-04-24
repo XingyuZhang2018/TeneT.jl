@@ -3,7 +3,7 @@
 #SBATCH --output=%x_%j.out
 #SBATCH --partition=zen4_h200
 #SBATCH --time=02:00:00
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8
 #SBATCH --cpus-per-task=24
 #SBATCH --gres=gpu:nvidia_h200:8
@@ -32,7 +32,7 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1"
 echo "=== Sofia iPEPS fg Benchmark (D=10 χ=400) ==="
 echo "Nodes: ${SLURM_NNODES}  Max GPUs: ${MAX_GPU}  Start: $(date)"
 
-for N in 1 2 4 8; do
+for N in 1 2 4 8 16; do
     [ $N -gt $MAX_GPU ] && continue
     echo ""
     echo "========== ${N} GPU =========="

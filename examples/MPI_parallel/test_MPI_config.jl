@@ -81,7 +81,7 @@ rank == 0 && println()
 # ═══════════════════════════════════════════════════════════════════════
 rank == 0 && println("─── Part 2: FLmap_parallel Forward & Backward ───")
 
-for (D, χ) in [(8,256),(8,512),(8,1024), (10,256),(10,512),(10,1024), (12,256),(12,512),(12,1024)]
+for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     total_splits = 128
     forloop_iter = total_splits ÷ nprocs
     d = 2  # physical dimension
