@@ -26,4 +26,23 @@ using MPI
         r_parallel = FLmap_parallel(FL, ALu, ALd, M; ifparallel=true, forloop_iter=1)
         @test r_serial ≈ r_parallel atol=1e-10
     end
+
+    @testset "allgatherv_p2p! correctness" begin
+        for atype in ATYPES, T in (Float64, ComplexF64), N in (1023, 8192, 262144)
+            counts = Cint.(split_count(N, nprocs))
+            displs = cumsum([0; counts[1:end-1]])
+            my_count = counts[rank + 1]
+
+            # Each rank fills its own chunk with (rank+1); after allgatherv,
+            # every rank should see [1…1, 2…2, 3…3, …, nprocs…nprocs] pattern.
+            buf = atype(zeros(T, N))
+            buf[displs[rank+1]+1 : displs[rank+1]+my_count] .= T(rank + 1)
+            TeneT.allgatherv_p2p!(buf, counts, comm)
+            CUDA.functional() && atype == CuArray && CUDA.synchronize()
+            MPI.Barrier(comm)
+
+            expected = reduce(vcat, [fill(T(r+1), counts[r+1]) for r in 0:nprocs-1])
+            @test Array(buf) == expected
+        end
+    end
 end
