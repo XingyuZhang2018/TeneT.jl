@@ -138,7 +138,9 @@ CUDA.synchronize(); MPI.Barrier(comm)
 reuse_env!()
 rank == 0 && @printf("warmup fg     : fwd=%8.2f s  bwd=%8.2f s  total=%8.2f s\n",
                      t2-t1, time()-t2, time()-t1)
-GC.gc(); CUDA.reclaim()
+e = nothing; vjp = nothing; g = nothing
+GC.gc(true); CUDA.reclaim()
+MPI.Barrier(comm)
 
 # ── Timed fg ──
 MPI.Barrier(comm)
