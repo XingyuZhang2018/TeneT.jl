@@ -45,4 +45,22 @@ using MPI
             @test Array(buf) == expected
         end
     end
+
+    @testset "allreduce_p2p! correctness" begin
+        for atype in ATYPES, T in (Float64, ComplexF64), N in (1023, 8192, 262144)
+            # Pattern 1: all-ones, reduce to nprocs
+            buf = atype(ones(T, N))
+            TeneT.allreduce_p2p!(buf, +, comm)
+            CUDA.functional() && atype == CuArray && CUDA.synchronize()
+            MPI.Barrier(comm)
+            @test all(Array(buf) .== T(nprocs))
+
+            # Pattern 2: rank-specific constant, reduce to sum(1:nprocs)
+            buf = atype(fill(T(rank + 1), N))
+            TeneT.allreduce_p2p!(buf, +, comm)
+            CUDA.functional() && atype == CuArray && CUDA.synchronize()
+            MPI.Barrier(comm)
+            @test all(Array(buf) .≈ T(sum(1:nprocs)))
+        end
+    end
 end
