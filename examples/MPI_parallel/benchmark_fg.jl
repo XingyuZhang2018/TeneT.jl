@@ -154,7 +154,9 @@ t_bwd = time() - t2
 t_fg = time() - t1
 rank == 0 && @printf("TIMED fg      : fwd=%8.2f s  bwd=%8.2f s  total=%8.2f s\n",
                      t_fwd_in_fg, t_bwd, t_fg)
+rank == 0 && @printf("gnorm         : %.15e\n", norm(Array(g)))
 rank == 0 && println()
-rank == 0 && @printf("=== SUMMARY nprocs=%d: Forward=%.2fs  fg=%.2fs ===\n", nprocs, t_fwd, t_fg)
+rank == 0 && @printf("=== SUMMARY nprocs=%d: Forward=%.2fs  fg=%.2fs  gnorm=%.10e ===\n",
+                     nprocs, t_fwd, t_fg, norm(Array(g)))
 
 MPI.Finalize()
