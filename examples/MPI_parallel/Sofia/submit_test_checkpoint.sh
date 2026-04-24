@@ -26,6 +26,7 @@ ENVS="export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
 export UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc; \
 export UCX_MEMTYPE_CACHE=n; \
 export UCX_WARN_UNUSED_ENV_VARS=n; \
+export CUDA_LAUNCH_BLOCKING=1; \
 export LD_PRELOAD=/usr/lib64/libcuda.so.1"
 
 echo "=== Sofia MPI checkpoint() Test ==="
