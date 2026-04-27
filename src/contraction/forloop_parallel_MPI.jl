@@ -1,3 +1,5 @@
+include("nccl_wrapper.jl")
+
 """
     split_count(N::Integer, n::Integer)
 
@@ -23,6 +25,7 @@ end
 
 const _comm_sendbuf = Ref{Any}(nothing)
 const _comm_recvbuf = Ref{Any}(nothing)
+const _comm_hostbuf = Ref{Any}(nothing)   # CPU staging buf for host-staged Phase 2
 const _comm_local = Ref{Any}(nothing)     # node-local communicator
 const _comm_leaders = Ref{Any}(nothing)   # inter-node leaders communicator
 const _comm_siblings = Ref{Any}(nothing)  # inter-node comm split by local_rank
@@ -30,6 +33,15 @@ const _comm_siblings = Ref{Any}(nothing)  # inter-node comm split by local_rank
 # MPI tag namespace for internal p2p collectives. Keep well above any tag the
 # caller might use (current callers use tag = rank ∈ 0..nprocs-1).
 const _TAG_BASE = 1000
+
+# Opt-in host staging for cross-node Phase 2 Allreduce. On systems where the
+# UCX CUDA-IB rendezvous is slower than the pinned-host path (e.g. Sofia H200:
+# 40 ms vs 11 ms for a 15 MB slice), set `TENET_MPI_HOST_STAGE=1` in the env
+# to route Phase 2 through D2H → system MPI.Allreduce! on host → H2D. Intra-
+# node Phase 1/3 stay on-device (cuda_ipc over NVLink). Default is off so
+# GDR-capable systems (JSC GH200, BSC H100) keep the GPU-resident path.
+# Read per-call (not precompile-const) so ENV changes apply in fresh processes.
+_host_stage_rndv() = get(ENV, "TENET_MPI_HOST_STAGE", "0") == "1"
 
 function _ensure_buf!(ref, buf, n)
     if isnothing(ref[]) || length(ref[]) < n || eltype(ref[]) != eltype(buf)
@@ -113,6 +125,20 @@ function allgatherv_p2p!(buf, counts, comm)
     rank   = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
     nprocs == 1 && return buf
+
+    # NCCL fast path: if all per-rank counts are equal, one ncclAllGather
+    # replaces the 3-phase flow. Variable-length layouts fall through to
+    # the p2p ring since NCCL has no native Allgatherv. Stream FIFO handles
+    # ordering — copyto! + ncclAllGather + downstream ops all chain on
+    # CUDA.stream() without explicit syncs.
+    if _use_nccl() && buf isa CuArray && all(==(counts[1]), counts)
+        c = counts[1]
+        my_off = c * rank
+        sendbuf = _ensure_buf!(_comm_sendbuf, buf, c)
+        copyto!(sendbuf, view(buf, my_off+1 : my_off+c))
+        return _nccl_allgather_equal!(sendbuf, buf, comm)
+    end
+
     synchronize(buf)
 
     local_comm, _ = _get_local_comm(comm)
@@ -242,6 +268,15 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
     rank = MPI.Comm_rank(comm)
     P    = MPI.Comm_size(comm)
     P == 1 && return buf
+
+    # NCCL fast path: single ncclAllReduce handles intra+inter node hierarchy
+    # optimally (GDR over IB + NVLink). On Sofia H200: 1.5 ms vs 44 ms 3-phase.
+    # Stream FIFO on CUDA.stream() handles the before-after ordering so no
+    # CUDA.synchronize is required around the call.
+    if _use_nccl() && buf isa CuArray
+        return _nccl_allreduce!(buf, comm)
+    end
+
     synchronize(buf)
     N = length(buf)
 
@@ -284,8 +319,12 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
         sib_size = MPI.Comm_size(sib_comm)
         if sib_size > 1
             sib_rank = MPI.Comm_rank(sib_comm)
-            _allreduce_ring_on_slice!(view(buf, slice_range(my_slice)),
-                                      sib_comm, sib_rank, sib_size)
+            slice_view = view(buf, slice_range(my_slice))
+            if _host_stage_rndv()
+                _allreduce_host_staged!(slice_view, sib_comm)
+            else
+                _allreduce_ring_on_slice!(slice_view, sib_comm, sib_rank, sib_size)
+            end
         end
     end
 
@@ -346,6 +385,29 @@ function _allreduce_ring_on_slice!(slice, comm, rank, size_)
         MPI.Waitall([req_send, req_recv])
     end
 
+    return slice
+end
+
+# Host-staged Phase 2: D2H → system MPI.Allreduce on pinned host memory → H2D.
+# The cross-node step goes through the IB driver's native host path, which on
+# Sofia H200 is ~4× faster than UCX's GPU-direct rendezvous at ≥16 MB slice.
+# Intra-node Phase 1/3 of allreduce_p2p! keep using the cuda_ipc ring.
+function _allreduce_host_staged!(slice, comm)
+    MPI.Comm_size(comm) == 1 && return slice
+    N = length(slice)
+    T = eltype(slice)
+    # Exact-size reuse: CUDA.jl's copyto!(Vector, SubArray{CuArray}) isn't
+    # defined, so we copy in positional form on the full Vector.
+    if isnothing(_comm_hostbuf[]) || length(_comm_hostbuf[]) != N || eltype(_comm_hostbuf[]) != T
+        _comm_hostbuf[] = Vector{T}(undef, N)
+    end
+    hbuf = _comm_hostbuf[]::Vector{T}
+    synchronize(slice)                  # Phase 1 `.+=` done
+    copyto!(hbuf, 1, slice, 1, N)       # D2H
+    synchronize(slice)                  # ensure transfer visible to host
+    MPI.Allreduce!(hbuf, +, comm)       # system MPI on host, IB-native
+    copyto!(slice, 1, hbuf, 1, N)       # H2D
+    synchronize(slice)
     return slice
 end
 
