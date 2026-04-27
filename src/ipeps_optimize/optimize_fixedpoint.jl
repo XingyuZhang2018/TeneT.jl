@@ -396,3 +396,149 @@ function _make_H_op_central(rt::VUMPSRuntime, A, dir::Val{:V}, params)
     end
     return H_op
 end
+
+# ============================================================================
+# sweep_bond: build φ, geneigsolve, decompose back to A
+# ============================================================================
+
+"""
+    sweep_bond(rt, A, dir, params, cfg) -> (λ, A_new, trunc_err)
+
+One bond sweep step: build φ from A·A on the chosen bond, build H_op/N_op
+from boundary env, run KrylovKit.geneigsolve to find the lowest generalized
+eigenvalue/eigenvector pair, decompose φ_new back to a 1-site A_new.
+
+Does NOT update boundary env or apply MCF (those are outer-loop concerns).
+1×1 unit cell only.
+"""
+function sweep_bond(rt::VUMPSRuntime, A, dir::Val, params, cfg::iPEPSFixedPointConfig)
+    A_central = A[1, 1]
+    φ_old = build_phi(A_central, A_central, dir)
+    H_op  = make_H_op(rt, A, dir, params; mode=cfg.H_eff_mode)
+    N_op  = make_N_op(rt, A, dir, params)
+
+    λs, φs, info = geneigsolve(
+        x -> (H_op(x), N_op(x)), φ_old, 1, :SR;
+        krylovdim   = cfg.geneig_krylovdim,
+        tol         = cfg.geneig_tol,
+        maxiter     = cfg.geneig_maxiter,
+        ishermitian = true,
+        isposdef    = true,
+    )
+    if info.converged < 1
+        @warn "geneigsolve did not converge" info=info dir=dir
+    end
+    λ_new = real(λs[1])
+    φ_new = φs[1]
+
+    D = size(A_central, 1)
+    A_new_central, trunc_err = decompose_phi(φ_new, dir;
+                                             method = cfg.decompose_method,
+                                             D_max  = D)
+    A_new = deepcopy(A)
+    A_new[1, 1] = A_new_central
+    return λ_new, A_new, trunc_err
+end
+
+# ============================================================================
+# optimize_ipeps_fixedpoint: top-level driver
+# ============================================================================
+
+"""
+    optimize_ipeps_fixedpoint(A_raw, χ, model, params, cfg) -> history
+
+Top-level driver for the fixed-point eigenvalue iteration optimizer.
+- `A_raw` : 6D parameter array (D×D×D×D×d×Nsites).
+- `χ`     : boundary bond dim.
+- `model` : Hamiltonian model (used for diagnostics; bond H from `params.model`).
+- `params`: GradientOptimize/iPEPSOptimize params (provides boundary_alg, pattern).
+- `cfg`   : `iPEPSFixedPointConfig`.
+
+Returns per-step history `Vector` of `NamedTuple` with keys
+`(iter, λ, E, dλ, dA, trunc_err, t_total, t_env, t_eig, t_mcf)`.
+"""
+function optimize_ipeps_fixedpoint(A_raw, χ::Int, model, params, cfg::iPEPSFixedPointConfig)
+    A = build_A(A_raw, params)
+    rt = init_VUMPSRuntime(A, χ, params.boundary_alg)
+    rt, _ = leading_boundary(rt, A, params.boundary_alg)
+
+    history = NamedTuple[]
+    λ_prev = NaN
+    A_prev = deepcopy(A)
+
+    for k in 1:cfg.outer_maxiter
+        t0 = time()
+
+        # Env update by mode
+        t_env0 = time()
+        if cfg.env_mode == :A
+            rt, _ = leading_boundary(rt, A, params.boundary_alg)
+        elseif cfg.env_mode == :B
+            warm_alg = deepcopy(params.boundary_alg)
+            warm_alg.maxiter = cfg.env_warm_steps
+            rt, _ = leading_boundary(rt, A, warm_alg)
+        elseif cfg.env_mode == :C
+            warm_alg = deepcopy(params.boundary_alg)
+            warm_alg.maxiter = 1
+            rt, _ = leading_boundary(rt, A, warm_alg)
+        else
+            error("Unknown env_mode: $(cfg.env_mode)")
+        end
+        t_env = time() - t_env0
+
+        # Sweep H + V
+        t_eig0 = time()
+        trunc_errs = Float64[]
+        λs = Float64[]
+        for dir in (Val(:H), Val(:V))
+            λ_dir, A, te = sweep_bond(rt, A, dir, params, cfg)
+            push!(λs, λ_dir)
+            push!(trunc_errs, te)
+        end
+        t_eig = time() - t_eig0
+
+        # MCF gauge fix on A[1,1] (wrap 5D → 6D for local_min_norm signature)
+        t_mcf0 = time()
+        if !cfg.mcf_ifignore_gauge
+            A_c = A[1, 1]
+            A_c6 = reshape(A_c, size(A_c)..., 1)
+            A_c6 = local_min_norm(A_c6, params; ifignore_gauge=cfg.mcf_ifignore_gauge)
+            A[1, 1] = reshape(A_c6, size(A_c))
+        end
+        t_mcf = time() - t_mcf0
+
+        # Energy diagnostic via converged env (re-converges if env_mode != :A)
+        env = ObsEnv(rt, A, params.boundary_alg)
+        E, _ = energy_value(model, A, env, params)
+        E = real(E)
+        λ_now = sum(λs) / length(λs)
+        dλ = isnan(λ_prev) ? Inf : abs(λ_now - λ_prev)
+        dA = norm(A[1, 1] .- A_prev[1, 1])
+
+        rec = (
+            iter      = k,
+            λ         = λ_now,
+            E         = E,
+            dλ        = dλ,
+            dA        = dA,
+            trunc_err = maximum(trunc_errs),
+            t_total   = time() - t0,
+            t_env     = t_env,
+            t_eig     = t_eig,
+            t_mcf     = t_mcf,
+        )
+        push!(history, rec)
+
+        if k % cfg.log_every == 0
+            @info "outer step $k" λ=λ_now E=E dλ=dλ dA=dA trunc_err=rec.trunc_err
+        end
+
+        if dλ < cfg.outer_tol_λ && dA < cfg.outer_tol_A
+            @info "converged at iter $k"
+            break
+        end
+        λ_prev = λ_now
+        A_prev = deepcopy(A)
+    end
+    return history
+end

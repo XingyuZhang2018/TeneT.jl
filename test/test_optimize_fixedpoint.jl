@@ -184,6 +184,38 @@ end
     @test val ≈ n_via_contract  rtol=1e-10
 end
 
+@testset "optimize_ipeps_fixedpoint 1-step smoke" begin
+    D, d, χ = 2, 2, 8
+    A_raw = randn(D, D, D, D, d, 1) / sqrt(D^4 * d)
+    params = TeneT.make_default_params(; D=D, χ=χ)
+    cfg = iPEPSFixedPointConfig(outer_maxiter=1, log_every=1)
+
+    history = TeneT.optimize_ipeps_fixedpoint(A_raw, χ, params.model, params, cfg)
+    @test length(history) == 1
+    @test haskey(history[1], :λ)
+    @test haskey(history[1], :E)
+    @test haskey(history[1], :dλ)
+    @test isfinite(history[1].λ)
+    @test isfinite(history[1].E)
+end
+
+@testset "sweep_bond horizontal smoke" begin
+    D, d, χ = 2, 2, 8
+    A_raw = randn(D, D, D, D, d, 1) / sqrt(D^4 * d)
+    params = TeneT.make_default_params(; D=D, χ=χ)
+    A = build_A(A_raw, params)
+    rt = init_VUMPSRuntime(A, χ, params.boundary_alg)
+    rt, _ = leading_boundary(rt, A, params.boundary_alg)
+
+    cfg = iPEPSFixedPointConfig(decompose_method=:X)
+    A_before = deepcopy(A)
+    λ, A_new, trunc_err = TeneT.sweep_bond(rt, A, Val(:H), params, cfg)
+    @test isfinite(λ)
+    @test size(A_new[1,1]) == size(A_before[1,1])
+    @test trunc_err >= 0
+    @test !(A_new[1,1] ≈ A_before[1,1])  # something changed
+end
+
 @testset "make_H_op :a vertical — sanity" begin
     D, d, χ = 2, 2, 8
     A_raw = randn(D, D, D, D, d, 1)
