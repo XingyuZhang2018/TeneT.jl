@@ -145,3 +145,33 @@ function make_N_op(rt::VUMPSRuntime, A, ::Val{:H}, params)
     end
     return N_op
 end
+
+"""
+    make_N_op(rt, A, ::Val{:V}, params) -> Function
+
+Vertical 2-site bond version of `make_N_op`. Env tensors: ACu (top),
+ACd (bot), FLu/FRu (upper-row left/right), FLo/FRo (lower-row).
+φ legs match `build_phi(_, _, Val(:V))`: `(lt, ut, rt, pt, lb, db, rb, pb)`.
+"""
+function make_N_op(rt::VUMPSRuntime, A, ::Val{:V}, params)
+    env = ObsEnv(rt, A, params.boundary_alg)
+    ACu = env.ACu[1, 1]
+    ACd = env.ACd[1, 1]
+    FLu = env.FLu[1, 1]
+    FRu = env.FRu[1, 1]
+    FLo = env.FLo[1, 1]
+    FRo = env.FRo[1, 1]
+
+    function N_op(φ)
+        @tensor opt = true Nφ[lt, ut, rt, pt, lb, db, rb, pb] :=
+            ACu[χTL, ut_b, ut, χTR] *
+            FLu[χTL, lt_b, lt, χML] *
+            FRu[χTR, rt_b, rt, χMR] *
+            FLo[χML, lb_b, lb, χBL] *
+            FRo[χMR, rb_b, rb, χBR] *
+            ACd[χBL, db_b, db, χBR] *
+            φ[lt_b, ut_b, rt_b, pt, lb_b, db_b, rb_b, pb]
+        return Nφ
+    end
+    return N_op
+end

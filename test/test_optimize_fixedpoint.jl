@@ -76,3 +76,30 @@ end
                                          forloop_iter=1, ifparallel=false)
     @test val ≈ n_via_contract  rtol=1e-10
 end
+
+@testset "make_N_op vertical — sanity" begin
+    D, d, χ = 2, 2, 8
+    A_raw = randn(D, D, D, D, d, 1)
+    A_raw /= norm(A_raw)
+    params = TeneT.make_default_params(; D=D, χ=χ)
+    A = build_A(A_raw, params)
+    rt = init_VUMPSRuntime(A, χ, params.boundary_alg)
+    rt, _ = leading_boundary(rt, A, params.boundary_alg)
+
+    φ = TeneT.build_phi(A[1,1], A[1,1], Val(:V))
+    N_op = TeneT.make_N_op(rt, A, Val(:V), params)
+
+    Nφ = N_op(φ)
+    @test size(Nφ) == size(φ)
+    val = sum(conj(φ) .* Nφ)
+    @test isfinite(val)
+    @test real(val) > 0
+
+    # Strong consistency: <φ|N|φ> via vertical N_op ≈ contract_n_21.
+    env = TeneT.ObsEnv(rt, A, params.boundary_alg)
+    n_via_contract = TeneT.contract_n_21(env.ACu[1,1], env.FLu[1,1], A[1,1],
+                                         env.FRu[1,1], env.FLo[1,1], A[1,1],
+                                         env.FRo[1,1], env.ACd[1,1];
+                                         forloop_iter=1, ifparallel=false)
+    @test val ≈ n_via_contract  rtol=1e-10
+end
