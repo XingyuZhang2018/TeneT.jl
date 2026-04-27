@@ -37,3 +37,36 @@ end
 
 # build_phi, make_N_op, make_H_op, decompose_phi, sweep_bond, optimize_ipeps_fixedpoint
 # are added in subsequent tasks.
+
+# ============================================================================
+# build_phi: form 2-site bond tensor from two 5-leg iPEPS tensors
+# A is (l, d, r, u, p). φ has 8 legs.
+# ============================================================================
+
+"""
+    build_phi(A_l, A_r, ::Val{:H})
+
+Form a 2-site horizontal-bond tensor `φ` by contracting the right leg of `A_l`
+with the left leg of `A_r`.
+
+Output legs: `(l, d_l, u_l, p_l, d_r, u_r, r, p_r)`.
+"""
+function build_phi(A_l, A_r, ::Val{:H})
+    @tensor φ[l, dl, ul, pl, dr, ur, r, pr] :=
+        A_l[l, dl, c, ul, pl] * A_r[c, dr, r, ur, pr]
+    return φ
+end
+
+"""
+    build_phi(A_t, A_b, ::Val{:V})
+
+Form a 2-site vertical-bond tensor `φ` by contracting the down leg of `A_t`
+with the up leg of `A_b`.
+
+Output legs: `(l_t, u_t, r_t, p_t, l_b, d_b, r_b, p_b)`.
+"""
+function build_phi(A_t, A_b, ::Val{:V})
+    @tensor φ[lt, ut, rt, pt, lb, db, rb, pb] :=
+        A_t[lt, c, rt, ut, pt] * A_b[lb, db, rb, c, pb]
+    return φ
+end

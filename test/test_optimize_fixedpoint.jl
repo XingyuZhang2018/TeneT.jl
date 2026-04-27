@@ -1,7 +1,9 @@
 # Tests for src/ipeps_optimize/optimize_fixedpoint.jl
 # Built up incrementally per docs/plans/2026-04-27-ipeps-fixedpoint-mcf-plan.md.
 
+using TeneT
 using TeneT: iPEPSFixedPointConfig
+using TensorOperations: @tensor
 
 @testset "iPEPSFixedPointConfig" begin
     cfg = iPEPSFixedPointConfig()
@@ -14,4 +16,33 @@ using TeneT: iPEPSFixedPointConfig
     cfg2 = iPEPSFixedPointConfig(env_mode=:C, mcf_ifignore_gauge=true)
     @test cfg2.env_mode == :C
     @test cfg2.mcf_ifignore_gauge == true
+end
+
+@testset "build_phi horizontal" begin
+    D, d = 2, 2
+    A = randn(D, D, D, D, d)  # legs (l, d, r, u, p)
+    φ = TeneT.build_phi(A, A, Val(:H))
+    # φ legs: (l, d_l, u_l, p_l, d_r, u_r, r, p_r)
+    @test ndims(φ) == 8
+    @test size(φ) == (D, D, D, d, D, D, D, d)
+
+    # Sanity: contraction value should equal explicit @tensor
+    φ_ref = similar(φ)
+    @tensor φ_ref[l, dl, ul, pl, dr, ur, r, pr] := A[l, dl, c, ul, pl] * A[c, dr, r, ur, pr]
+    @test φ ≈ φ_ref
+end
+
+@testset "build_phi vertical" begin
+    D, d = 2, 2
+    A = randn(D, D, D, D, d)  # legs (l, d, r, u, p)
+    φ = TeneT.build_phi(A, A, Val(:V))
+    # Vertical: top.down (leg 2) joins bottom.up (leg 4)
+    # Output legs: (l_t, u_t, r_t, p_t, l_b, d_b, r_b, p_b)
+    @test ndims(φ) == 8
+    @test size(φ) == (D, D, D, d, D, D, D, d)
+
+    φ_ref = similar(φ)
+    @tensor φ_ref[lt, ut, rt, pt, lb, db, rb, pb] :=
+        A[lt, c, rt, ut, pt] * A[lb, db, rb, c, pb]
+    @test φ ≈ φ_ref
 end
