@@ -1,0 +1,56 @@
+┌ Error: You are using CUDA 13.0.0, but CUDA.jl was precompiled for CUDA 13.2.0.
+│ This is unexpected; please file an issue.
+└ @ CUDA C:\Users\xingzhan\.julia\packages\CUDA\Il00B\src\initialization.jl:148
+┌ Warning: HIP library is unavailable, HIP integration will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:202
+┌ Warning: rocBLAS is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocSPARSE is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocSOLVER is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocRAND is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocFFT is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: MIOpen is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Info: Loading LBFGS-converged iPEPS as initial state from:
+└   D:/1 - research/1.26 - iPEPS_opt/TeneT.jl/.claude/worktrees/stupefied-cartwright/data/Heisenberg_Square(S=0.5,Jx=-1.0,Jy=-1.0,Jz=1.0,ifrotate=true,couplingtype=uniform)/[1;;]/VUMPS_General/Float64/seed42/D2/ipeps/χ16/No.20.jld2
+[ Info: Loaded shape: (2, 2, 2, 2, 2, 1)
+============================================================
+Heisenberg Square — fixed-point PoC, experiment E1
+============================================================
+D = 2, χ = 8, d = 2
+model = Heisenberg_Square(S=0.5,Jx=-1.0,Jy=-1.0,Jz=1.0,ifrotate=true,couplingtype=uniform)
+cfg   = iPEPSFixedPointConfig(:A, 5, :a, :X, 20, 1.0e-10, 100, false, 50, 1.0e-8, 1.0e-7, 1, 10)
+============================================================
+[ Info: initial norm = 1.0
+┌ Warning: Linesearch not converged after 10 iterations and 12 function evaluations:
+│ α = 5.00e+00, dϕ = -2.57e-20, ϕ - ϕ₀ = -1.11e-16
+└ @ OptimKit C:\Users\xingzhan\.julia\packages\OptimKit\OEwMx\src\linesearches.jl:151
+┌ Warning: Linesearch not converged after 10 iterations and 17 function evaluations:
+│ α = 1.91e+03, dϕ = -6.13e-20, ϕ - ϕ₀ = 0.00e+00
+└ @ OptimKit C:\Users\xingzhan\.julia\packages\OptimKit\OEwMx\src\linesearches.jl:151
+[ Info: final norm = 0.30092995445854376
+┌ Info: outer step 1
+│   λ = -0.7499999999999908
+│   E = -0.5
+│   dλ = Inf
+│   dA = 3.8026882877430093
+└   trunc_err = 194.84225781036542
+ERROR: LoadError: ArgumentError: initial vector should not have norm zero
+Stacktrace:
+ [1] geneigsolve(f::Function, x₀::Array{Float64, 8}, howmany::Int64, which::Symbol, alg::KrylovKit.GolubYe{KrylovKit.ModifiedGramSchmidt2, Float64})
+   @ KrylovKit C:\Users\xingzhan\.julia\packages\KrylovKit\ZcdRg\src\eigsolve\golubye.jl:12
+ [2] geneigsolve(f::Function, x₀::Array{Float64, 8}, howmany::Int64, which::Symbol; kwargs::@Kwargs{krylovdim::Int64, tol::Float64, maxiter::Int64, ishermitian::Bool, isposdef::Bool})
+   @ KrylovKit C:\Users\xingzhan\.julia\packages\KrylovKit\ZcdRg\src\eigsolve\geneigsolve.jl:195
+ [3] geneigsolve
+   @ C:\Users\xingzhan\.julia\packages\KrylovKit\ZcdRg\src\eigsolve\geneigsolve.jl:189 [inlined]
+ [4] sweep_bond(rt::TeneT.VUMPSRuntime, A::TeneT.StructArray{Vector{Array{Float64, 5}}}, dir::Val{:V}, params::GradientOptimize, cfg::iPEPSFixedPointConfig)
+   @ TeneT D:\1 - research\1.26 - iPEPS_opt\TeneT.jl\.claude\worktrees\ipeps-fixedpoint-mcf\src\ipeps_optimize\optimize_fixedpoint.jl:420
+ [5] optimize_ipeps_fixedpoint(A_raw::Array{Float64, 6}, χ::Int64, model::Heisenberg{Square}, params::GradientOptimize, cfg::iPEPSFixedPointConfig)
+   @ TeneT D:\1 - research\1.26 - iPEPS_opt\TeneT.jl\.claude\worktrees\ipeps-fixedpoint-mcf\src\ipeps_optimize\optimize_fixedpoint.jl:494
+ [6] top-level scope
+   @ D:\1 - research\1.26 - iPEPS_opt\TeneT.jl\.claude\worktrees\ipeps-fixedpoint-mcf\examples\Heisenberg\Heisenberg_Square_FixedPoint.jl:84
+in expression starting at D:\1 - research\1.26 - iPEPS_opt\TeneT.jl\.claude\worktrees\ipeps-fixedpoint-mcf\examples\Heisenberg\Heisenberg_Square_FixedPoint.jl:84
