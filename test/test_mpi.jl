@@ -77,4 +77,21 @@ using MPI
             @test all(Array(buf) .≈ T(sum(1:nprocs)))
         end
     end
+
+    @testset "packed allreduce correctness" begin
+        for atype in ATYPES, T in (Float64, ComplexF64)
+            a = atype(fill(T(rank + 1), 17))
+            b = atype(fill(T(10 * (rank + 1)), 3, 5))
+            c = atype(fill(T(100 * (rank + 1)), 2, 4, 3))
+
+            TeneT._allreduce_many_p2p!((a, b, c), comm)
+            CUDA.functional() && atype == CuArray && CUDA.synchronize()
+            MPI.Barrier(comm)
+
+            s = sum(1:nprocs)
+            @test all(Array(a) .≈ T(s))
+            @test all(Array(b) .≈ T(10s))
+            @test all(Array(c) .≈ T(100s))
+        end
+    end
 end

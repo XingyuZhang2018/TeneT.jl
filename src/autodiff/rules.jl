@@ -13,6 +13,7 @@
 # p2p collectives — pure data-movement primitives, no AD through them.
 @non_differentiable allgatherv_p2p!(buf, counts, comm)
 @non_differentiable allreduce_p2p!(buf, op, comm)
+@non_differentiable _allreduce_many_p2p!(items, comm)
 
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
@@ -318,19 +319,15 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             allgatherv_p2p!(dargs_c[j], counts, comm)
         end
 
-        # 2) Allreduce non-split args via p2p with pre-allocated buffers
+        # 2) Allreduce non-split args in one packed p2p collective.
+        reduce_items = Any[]
         for j in 1:length(args_c)
             if j == N_in[1] && has_split_gather
                 continue
             end
-            if dargs_c[j] isa Tuple
-                for k in 1:length(dargs_c[j])
-                    allreduce_p2p!(dargs_c[j][k], +, comm)
-                end
-            else
-                allreduce_p2p!(dargs_c[j], +, comm)
-            end
+            _push_allreduce_items!(reduce_items, dargs_c[j])
         end
+        _allreduce_many_p2p!(Tuple(reduce_items), comm)
 
         # Upcast partial gradients back to original precision at boundary exit.
         dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :

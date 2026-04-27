@@ -26,6 +26,7 @@ end
 const _comm_sendbuf = Ref{Any}(nothing)
 const _comm_recvbuf = Ref{Any}(nothing)
 const _comm_hostbuf = Ref{Any}(nothing)   # CPU staging buf for host-staged Phase 2
+const _comm_packbuf = Ref{Any}(nothing)   # Packed multi-gradient allreduce buf
 const _comm_local = Ref{Any}(nothing)     # node-local communicator
 const _comm_leaders = Ref{Any}(nothing)   # inter-node leaders communicator
 const _comm_siblings = Ref{Any}(nothing)  # inter-node comm split by local_rank
@@ -48,6 +49,13 @@ function _ensure_buf!(ref, buf, n)
         ref[] = similar(buf, n)
     end
     return view(ref[], 1:n)
+end
+
+function _ensure_exact_buf!(ref, buf, n)
+    if isnothing(ref[]) || length(ref[]) != n || eltype(ref[]) != eltype(buf) || typeof(similar(ref[], 0)) != typeof(similar(buf, 0))
+        ref[] = similar(buf, n)
+    end
+    return ref[]
 end
 
 function _get_local_comm(comm)
@@ -343,6 +351,90 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
     end
 
     return buf
+end
+
+function _push_allreduce_items!(flat, item)
+    if item isa Tuple
+        for x in item
+            _push_allreduce_items!(flat, x)
+        end
+    else
+        @assert item isa AbstractArray "_allreduce_many_p2p! only supports arrays and nested tuples of arrays"
+        push!(flat, item)
+    end
+    return flat
+end
+
+_allreduce_pack_key(item) = (eltype(item), typeof(similar(item, 0)))
+
+"""
+    _allreduce_many_p2p!(items, comm)
+
+Pack several gradient arrays into one contiguous buffer, run a single
+`allreduce_p2p!`, then unpack the reduced values back into the original arrays.
+This preserves the dense-gradient semantics while reducing the number of MPI
+Allreduce calls issued by `parallel`'s reverse pass.
+"""
+function _allreduce_many_p2p!(items, comm)
+    flat = Any[]
+    _push_allreduce_items!(flat, items)
+    isempty(flat) && return items
+
+    processed = falses(length(flat))
+    for seed in eachindex(flat)
+        processed[seed] && continue
+        key = _allreduce_pack_key(flat[seed])
+        group = Int[]
+        for i in eachindex(flat)
+            if !processed[i] && _allreduce_pack_key(flat[i]) == key
+                push!(group, i)
+                processed[i] = true
+            end
+        end
+        _allreduce_flat_group_p2p!(flat, group, comm)
+    end
+
+    return items
+end
+
+function _allreduce_flat_group_p2p!(flat, group, comm)
+    if length(group) == 1
+        allreduce_p2p!(flat[group[1]], +, comm)
+        return flat
+    end
+
+    first_item = flat[group[1]]
+    T = eltype(first_item)
+    for i in group
+        item = flat[i]
+        @assert eltype(item) == T "_allreduce_many_p2p! requires all packed arrays to have the same eltype"
+    end
+
+    total_len = sum(i -> length(flat[i]), group)
+    total_len == 0 && return flat
+
+    buf = _ensure_exact_buf!(_comm_packbuf, first_item, total_len)
+    offset = 0
+    for i in group
+        item = flat[i]
+        n = length(item)
+        n == 0 && continue
+        copyto!(view(buf, offset + 1:offset + n), reshape(item, :))
+        offset += n
+    end
+
+    allreduce_p2p!(buf, +, comm)
+
+    offset = 0
+    for i in group
+        item = flat[i]
+        n = length(item)
+        n == 0 && continue
+        copyto!(reshape(item, :), view(buf, offset + 1:offset + n))
+        offset += n
+    end
+
+    return flat
 end
 
 # Phase 2 helper: ring allreduce on a contiguous slice that every rank in
