@@ -65,4 +65,14 @@ end
     val = sum(conj(φ) .* Nφ)
     @test isfinite(val)
     @test real(val) > 0   # PSD norm operator (env at convergence)
+
+    # Strong consistency check: scalar <φ|N|φ> via N_op should agree
+    # with contract_n_12 (the codebase's verified 2-site norm) when
+    # φ = build_phi(A, A, Val(:H)).
+    env = TeneT.ObsEnv(rt, A, params.boundary_alg)
+    n_via_contract = TeneT.contract_n_12(env.FLo[1,1], env.ACu[1,1], A[1,1],
+                                         env.ACd[1,1], env.FRo[1,1],
+                                         env.ARu[1,1], A[1,1], env.ARd[1,1];
+                                         forloop_iter=1, ifparallel=false)
+    @test val ≈ n_via_contract  rtol=1e-10
 end

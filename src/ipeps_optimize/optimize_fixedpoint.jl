@@ -113,7 +113,35 @@ end
 Return `N_op(φ) -> Nφ` applying the 2-site horizontal-bond norm operator.
 For 1×1 unit cell: env tensors are FLo[1,1], FRo[1,1], ACu[1,1], ARu[1,1],
 ACd[1,1], ARd[1,1].
+
+Convention (matching `Mumap`/`FLmap(::leg5)`): the input φ is plugged into
+the M1 position (env leg-2), the output Nφ dangles at M2 position (env leg-3).
+Physical legs (pl, pr) pass through. Leg ordering of φ matches `build_phi`:
+`(l, dl, ul, pl, dr, ur, r, pr)`.
+
+Consistency: `dot(conj(φ), N_op(φ)) ≈ contract_n_12(...)` when
+`φ = build_phi(A, A, Val(:H))` and the env tensors come from a converged
+VUMPS environment around the same A.
 """
-function make_N_op(rt::VUMPSRuntime, A, dir::Val{:H}, params)
-    error("make_N_op horizontal: not yet implemented (filled in Task 7)")
+function make_N_op(rt::VUMPSRuntime, A, ::Val{:H}, params)
+    env = ObsEnv(rt, A, params.boundary_alg)
+    FL    = env.FLo[1, 1]
+    FR    = env.FRo[1, 1]
+    AC_l  = env.ACu[1, 1]
+    AR_r  = env.ARu[1, 1]
+    ACd_l = env.ACd[1, 1]
+    ARd_r = env.ARd[1, 1]
+
+    function N_op(φ)
+        @tensor opt = true Nφ[l, dl, ul, pl, dr, ur, r, pr] :=
+            FL[χTL, e, l, χBL] *
+            AC_l[χTL, b, ul, χTM] *
+            ACd_l[χBL, j, dl, χBM] *
+            AR_r[χTM, bp, ur, χTR] *
+            ARd_r[χBM, jp, dr, χBR] *
+            FR[χTR, gp, r, χBR] *
+            φ[e, j, b, pl, jp, bp, gp, pr]
+        return Nφ
+    end
+    return N_op
 end
