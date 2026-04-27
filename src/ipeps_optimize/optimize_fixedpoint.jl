@@ -70,3 +70,50 @@ function build_phi(A_t, A_b, ::Val{:V})
         A_t[lt, c, rt, ut, pt] * A_b[lb, db, rb, c, pb]
     return φ
 end
+
+# ============================================================================
+# make_default_params: minimal GradientOptimize for testing make_N_op / make_H_op
+# ============================================================================
+
+"""
+    make_default_params(; D, χ)
+
+Build a minimal `GradientOptimize` params object suitable for fixed-point
+PoC testing on a 1×1-cell rotated AFM Heisenberg model. χ is consumed at
+runtime by `init_VUMPSRuntime`/`init_ipeps`; the boundary_alg itself stores
+no χ field.
+"""
+function make_default_params(; D::Int, χ::Int)
+    boundary_alg = VUMPS{General}(maxiter=20, miniter=1, tol=1e-10,
+                                  ifupdown=false,
+                                  ifsimple_eig=true,
+                                  ifparallel=false,
+                                  forloop_iter=1,
+                                  verbosity=0)
+    model = Heisenberg(lattice=Square(), S=0.5,
+                       Jx=-1.0, Jy=-1.0, Jz=1.0,
+                       ifrotate=true,
+                       couplingtype=:uniform, bondratio=1.0)
+    return GradientOptimize(model=model,
+                            pattern=ones(Int, 1, 1),
+                            boundary_alg=boundary_alg,
+                            verbosity=0,
+                            ifSU=false,
+                            ifprecondition=false,
+                            forloop_iter=1)
+end
+
+# ============================================================================
+# make_N_op: 2-site norm operator on horizontal / vertical bond
+# ============================================================================
+
+"""
+    make_N_op(rt, A, ::Val{:H}, params) -> Function
+
+Return `N_op(φ) -> Nφ` applying the 2-site horizontal-bond norm operator.
+For 1×1 unit cell: env tensors are FLo[1,1], FRo[1,1], ACu[1,1], ARu[1,1],
+ACd[1,1], ARd[1,1].
+"""
+function make_N_op(rt::VUMPSRuntime, A, dir::Val{:H}, params)
+    error("make_N_op horizontal: not yet implemented (filled in Task 7)")
+end

@@ -2,8 +2,9 @@
 # Built up incrementally per docs/plans/2026-04-27-ipeps-fixedpoint-mcf-plan.md.
 
 using TeneT
-using TeneT: iPEPSFixedPointConfig
+using TeneT: iPEPSFixedPointConfig, leading_boundary, init_VUMPSRuntime, build_A
 using TensorOperations: @tensor
+using LinearAlgebra: norm
 
 @testset "iPEPSFixedPointConfig" begin
     cfg = iPEPSFixedPointConfig()
@@ -45,4 +46,23 @@ end
     @tensor φ_ref[lt, ut, rt, pt, lb, db, rb, pb] :=
         A[lt, c, rt, ut, pt] * A[lb, db, rb, c, pb]
     @test φ ≈ φ_ref
+end
+
+@testset "make_N_op horizontal — sanity" begin
+    D, d, χ = 2, 2, 8
+    A_raw = randn(D, D, D, D, d, 1)
+    A_raw /= norm(A_raw)
+    params = TeneT.make_default_params(; D=D, χ=χ)
+    A = build_A(A_raw, params)
+    rt = init_VUMPSRuntime(A, χ, params.boundary_alg)
+    rt, _ = leading_boundary(rt, A, params.boundary_alg)
+
+    φ = TeneT.build_phi(A[1,1], A[1,1], Val(:H))
+    N_op = TeneT.make_N_op(rt, A, Val(:H), params)
+
+    Nφ = N_op(φ)
+    @test size(Nφ) == size(φ)
+    val = sum(conj(φ) .* Nφ)
+    @test isfinite(val)
+    @test real(val) > 0   # PSD norm operator (env at convergence)
 end
