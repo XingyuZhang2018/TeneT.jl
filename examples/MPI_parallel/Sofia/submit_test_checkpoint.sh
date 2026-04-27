@@ -22,10 +22,11 @@ export HOME=$WD
 JULIA=$WD/julia-1.11.3/bin/julia
 MAX_GPU=${SLURM_NTASKS}
 
+CLEAN_LD=$(echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -v 'CUDA/12.8.0' | tr '\n' ':')
+
 ENVS="export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
 export UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc; \
 export UCX_MEMTYPE_CACHE=n; \
-export UCX_RNDV_FRAG_MEM_TYPES=host; \
 export UCX_WARN_UNUSED_ENV_VARS=n; \
 export CUDA_LAUNCH_BLOCKING=1; \
 export LD_PRELOAD=/usr/lib64/libcuda.so.1"
@@ -37,7 +38,7 @@ for N in 1 2 4 8 16; do
     [ $N -gt $MAX_GPU ] && continue
     echo ""
     echo "========== ${N} GPU =========="
-    mpirun -np $N -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
+    mpirun -np $N -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
         bash -c "$ENVS; exec $JULIA --project=../../.. ../test_MPI_checkpoint.jl"
 done
 
