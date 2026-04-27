@@ -111,6 +111,7 @@ include("ipeps_optimize/su_parameterization.jl")
 include("ipeps_optimize/observable.jl")
 include("visualization/plot_obs.jl")
 include("ipeps_optimize/optimize.jl")
+include("ipeps_optimize/optimize_fixedpoint.jl")
 
 # ============================================================================
 # Exports

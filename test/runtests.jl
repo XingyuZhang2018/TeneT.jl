@@ -172,6 +172,7 @@ end
     include("test_autodiff.jl")
     include("test_ipeps.jl")
     include("test_patch.jl")
+    include("test_optimize_fixedpoint.jl")
 
     if get(ENV, "TENET_TEST_MPI", "false") == "true"
         include("test_mpi.jl")
