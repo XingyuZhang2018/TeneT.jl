@@ -84,6 +84,10 @@ runtime by `init_VUMPSRuntime`/`init_ipeps`; the boundary_alg itself stores
 no χ field.
 """
 function make_default_params(; D::Int, χ::Int)
+    # Use Jx=Jy=Jz=+1.0 (current Heisenberg convention per
+    # examples/Heisenberg/Heisenberg_Square_VUMPS_General.jl); the @kwdef
+    # defaults of `Jx=-1` are an older convention now incompatible with the
+    # codebase's _heisenberg_bond_terms sign expectations.
     boundary_alg = VUMPS{General}(maxiter=20, miniter=1, tol=1e-10,
                                   ifupdown=false,
                                   ifsimple_eig=true,
@@ -91,7 +95,7 @@ function make_default_params(; D::Int, χ::Int)
                                   forloop_iter=1,
                                   verbosity=0)
     model = Heisenberg(lattice=Square(), S=0.5,
-                       Jx=-1.0, Jy=-1.0, Jz=1.0,
+                       Jx=1.0, Jy=1.0, Jz=1.0,
                        ifrotate=true,
                        couplingtype=:uniform, bondratio=1.0)
     return GradientOptimize(model=model,
@@ -284,21 +288,16 @@ function _decompose_phi_symmetrize(φ, ::Val{:H}, D_max::Int)
     @assert (Dl, Ddl, Dul, dl_sz) == (Dr, Ddr, Dur, dr_sz) ":X horizontal requires L/R-symmetric leg dims"
 
     M = reshape(φ_perm, Dl * Ddl * Dul * dl_sz, Dr * Ddr * Dur * dr_sz)
-    Msym = (M .+ M') ./ 2
-    F = eigen(Hermitian(Msym))
-    perm = sortperm(abs.(F.values), rev=true)
-    vals = F.values[perm]
-    vecs = F.vectors[:, perm]
-    keep = min(D_max, length(vals))
-    trunc_err = sum(abs2, @view vals[keep+1:end])
-    Σ_kept = sqrt.(complex.(vals[1:keep]))
-    Ut = vecs[:, 1:keep] .* Σ_kept'
+    # SVD on the symmetrized M (positive singular values, robust to KrylovKit's
+    # arbitrary sign convention for φ_new). Originally used eigh on (M+M')/2
+    # but that fails when top eigenvalues are negative (sqrt(complex(neg))
+    # → imaginary → real() zeros A_new).
+    U, S, _ = svd(M)
+    keep = min(D_max, length(S))
+    trunc_err = sum(abs2, @view S[keep+1:end])
+    Ut = U[:, 1:keep] .* sqrt.(S[1:keep]')
     A = reshape(Ut, Dl, Ddl, Dul, dl_sz, keep)
-    A_new = permutedims(A, (1, 2, 5, 3, 4))
-    if eltype(φ) <: Real
-        A_new = real(A_new)
-    end
-    return A_new, real(trunc_err)
+    return permutedims(A, (1, 2, 5, 3, 4)), trunc_err
 end
 
 function _decompose_phi_symmetrize(φ, ::Val{:V}, D_max::Int)
@@ -311,21 +310,13 @@ function _decompose_phi_symmetrize(φ, ::Val{:V}, D_max::Int)
     @assert (Dlt, Dut, Drt, pt_sz) == (Dlb, Ddb, Drb, pb_sz) ":X vertical requires top/bot-symmetric leg dims"
 
     M = reshape(φ_sym, Dlt * Dut * Drt * pt_sz, Dlb * Ddb * Drb * pb_sz)
-    Msym = (M .+ M') ./ 2
-    F = eigen(Hermitian(Msym))
-    perm = sortperm(abs.(F.values), rev=true)
-    vals = F.values[perm]
-    vecs = F.vectors[:, perm]
-    keep = min(D_max, length(vals))
-    trunc_err = sum(abs2, @view vals[keep+1:end])
-    Σ_kept = sqrt.(complex.(vals[1:keep]))
-    Ut = vecs[:, 1:keep] .* Σ_kept'
+    # SVD on the symmetrized M (see :H comment for why not eigh).
+    U, S, _ = svd(M)
+    keep = min(D_max, length(S))
+    trunc_err = sum(abs2, @view S[keep+1:end])
+    Ut = U[:, 1:keep] .* sqrt.(S[1:keep]')
     A = reshape(Ut, Dlt, Dut, Drt, pt_sz, keep)
-    A_new = permutedims(A, (1, 5, 3, 2, 4))
-    if eltype(φ) <: Real
-        A_new = real(A_new)
-    end
-    return A_new, real(trunc_err)
+    return permutedims(A, (1, 5, 3, 2, 4)), trunc_err
 end
 
 # ============================================================================

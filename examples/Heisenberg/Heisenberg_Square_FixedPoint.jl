@@ -33,7 +33,7 @@ const params = TeneT.make_default_params(; D=D, χ=χ)
 
 # ---- Initial state ----------------------------------------------------------
 
-const LBFGS_JLD2 = "D:/1 - research/1.26 - iPEPS_opt/TeneT.jl/.claude/worktrees/stupefied-cartwright/data/Heisenberg_Square(S=0.5,Jx=-1.0,Jy=-1.0,Jz=1.0,ifrotate=true,couplingtype=uniform)/[1;;]/VUMPS_General/Float64/seed42/D2/ipeps/χ16/No.20.jld2"
+const LBFGS_JLD2 = "D:/1 - research/1.26 - iPEPS_opt/TeneT.jl/.claude/worktrees/ipeps-fixedpoint-mcf/data/lbfgs_warmup/D2/ipeps/χ8/No.2.jld2"
 
 A_init = if isfile(LBFGS_JLD2)
     @info "Loading LBFGS-converged iPEPS as initial state from:\n  $LBFGS_JLD2"
