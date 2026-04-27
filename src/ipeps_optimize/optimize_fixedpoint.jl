@@ -327,3 +327,72 @@ function _decompose_phi_symmetrize(φ, ::Val{:V}, D_max::Int)
     end
     return A_new, real(trunc_err)
 end
+
+# ============================================================================
+# make_H_op: 2-site bond Hamiltonian as a linear operator on φ
+# ============================================================================
+
+"""
+    _build_h_bond_2site(model, atype, d) -> 4-leg tensor h[pl', pr', pl, pr]
+
+Assemble the 2-site bond Hamiltonian as a 4-leg tensor from
+`_heisenberg_bond_terms` (or analogous for other models). Leg convention:
+  h[pl_new, pr_new, pl_old, pr_old] = sum_i coeff_i * OL_i[pl_new, pl_old] * OR_i[pr_new, pr_old]
+"""
+function _build_h_bond_2site(model, atype, d::Int)
+    terms = _heisenberg_bond_terms(model, atype)
+    h_arr = zeros(Float64, d, d, d, d)
+    for (coeff, OL, OR) in terms
+        OL_a = Array(OL)
+        OR_a = Array(OR)
+        @tensor t[plp, prp, pl, pr] := OL_a[plp, pl] * OR_a[prp, pr]
+        h_arr .+= coeff .* real.(t)
+    end
+    return atype(h_arr)
+end
+
+"""
+    make_H_op(rt, A, dir, params; mode=:a) -> Function
+
+Return `H_op(φ) -> Hφ` applying the effective Hamiltonian on a 2-site bond.
+
+Mode `:a` includes only the bond Hamiltonian acting on the central bond
+between the two sites of φ. Mode `:b` (sum over all 7 bonds) is for v2.
+"""
+function make_H_op(rt::VUMPSRuntime, A, dir::Val, params; mode::Symbol=:a)
+    if mode == :a
+        return _make_H_op_central(rt, A, dir, params)
+    elseif mode == :b
+        error("make_H_op mode :b not yet implemented (v2)")
+    else
+        error("Unknown H_eff mode: $mode")
+    end
+end
+
+function _make_H_op_central(rt::VUMPSRuntime, A, dir::Val{:H}, params)
+    N_op = make_N_op(rt, A, dir, params)
+    atype = _arraytype(A[1, 1])
+    d = size(A[1, 1], 5)
+    h = _build_h_bond_2site(params.model, atype, d)
+
+    function H_op(φ)
+        @tensor opt = true φh[l, dl, ul, plp, dr, ur, r, prp] :=
+            φ[l, dl, ul, pl, dr, ur, r, pr] * h[plp, prp, pl, pr]
+        return N_op(φh)
+    end
+    return H_op
+end
+
+function _make_H_op_central(rt::VUMPSRuntime, A, dir::Val{:V}, params)
+    N_op = make_N_op(rt, A, dir, params)
+    atype = _arraytype(A[1, 1])
+    d = size(A[1, 1], 5)
+    h = _build_h_bond_2site(params.model, atype, d)
+
+    function H_op(φ)
+        @tensor opt = true φh[lt, ut, rt, ptp, lb, db, rb, pbp] :=
+            φ[lt, ut, rt, pt, lb, db, rb, pb] * h[ptp, pbp, pt, pb]
+        return N_op(φh)
+    end
+    return H_op
+end
