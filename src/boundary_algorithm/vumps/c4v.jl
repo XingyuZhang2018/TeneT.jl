@@ -3,11 +3,12 @@
 # tensors as explicit args so `checkpoint(Recompute()/Offload(), ...)`
 # can capture / offload them cleanly, avoiding closure-pinned refs.
 function _simple_eig_FLmap_parallel(FL, ALu, ALd, M; power_iter, ifparallel, forloop_iter,
+                                      inner_checkpoint::CheckpointMethod=Plain(),
                                       inner_etype=nothing, final_polish_steps=0,
                                       segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = FLmap_parallel(x, ALu, ALd, M; ifparallel, forloop_iter, inner_etype)
+    f(x) = checkpoint(inner_checkpoint, FLmap_parallel, x, ALu, ALd, M; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
-        f_final(x) = FLmap_parallel(x, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, FLmap_parallel, x, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
         return simple_eig(f, FL; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, FL; power_iter, segment_checkpoint)
@@ -15,11 +16,12 @@ function _simple_eig_FLmap_parallel(FL, ALu, ALd, M; power_iter, ifparallel, for
 end
 
 function _simple_eig_ACmap_parallel_c4v(AC, FL, M; power_iter, ifparallel, forloop_iter,
+                                          inner_checkpoint::CheckpointMethod=Plain(),
                                           inner_etype=nothing, final_polish_steps=0,
                                           segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = ACmap_parallel(x, FL, FL, M; ifparallel, forloop_iter, inner_etype)
+    f(x) = checkpoint(inner_checkpoint, ACmap_parallel, x, FL, FL, M; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
-        f_final(x) = ACmap_parallel(x, FL, FL, M; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, ACmap_parallel, x, FL, FL, M; ifparallel, forloop_iter, inner_etype=nothing)
         return simple_eig(f, AC; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, AC; power_iter, segment_checkpoint)
@@ -36,7 +38,8 @@ function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
     if ifsimple_eig
         λFLs, FLs = checkpoint(eig_checkpoint, _simple_eig_FLmap_parallel,
                                 FL, ALu, ALd, M;
-                                power_iter, ifparallel, forloop_iter, inner_etype,
+                                power_iter, ifparallel, forloop_iter,
+                                inner_checkpoint, inner_etype,
                                 segment_checkpoint,
                                 final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
     else
@@ -56,7 +59,8 @@ function ACenv_c4v(AC, FL, M; alg, kwargs...)
     if ifsimple_eig
         λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_parallel_c4v,
                                 AC, FL, M;
-                                power_iter, ifparallel, forloop_iter, inner_etype,
+                                power_iter, ifparallel, forloop_iter,
+                                inner_checkpoint, inner_etype,
                                 segment_checkpoint,
                                 final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
     else

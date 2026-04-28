@@ -139,6 +139,56 @@
         @test v4.step_checkpoint === TeneT.Recompute()
     end
 
+    # ---- [1;;] iPEPS gradient regression ----
+    # Earlier, leftenv/rightenv/ACenv had `eig_checkpoint isa Plain` branches that
+    # built `f(x) = checkpoint(inner_checkpoint, FLmap, ..., ALu[i, :], ...)` with
+    # the slice INSIDE the closure. For pattern=[1;;] (1-element data vector),
+    # iterating this closure inside simple_eig produced a wrong gradient (~12%
+    # rel err that exploded with more power_iter). Routing all eig calls through
+    # `_simple_eig_*` wrappers — which slice once and capture as args — fixes it.
+    # This regression catches a relapse via a single directional finite-diff.
+    @testset "Heisenberg [1;;] energy gradient — 1-element pattern AD" begin
+        Random.seed!(42)
+        D, chi = 2, 4
+        model = Heisenberg(lattice=Square(), S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                           ifrotate=true, couplingtype=:uniform, bondratio=1.0)
+        boundary_alg = VUMPS{General}(; ifupdown=true, ifdownfromup=false,
+                                       ifsimple_eig=true, ifparallel=false,
+                                       forloop_iter=1, maxiter=20, miniter=0,
+                                       maxiter_ad=4, miniter_ad=4,
+                                       power_iter=1, power_iter_ad=5,
+                                       tol=1e-10, verbosity=0)
+        params = GradientOptimize(; model, pattern=[1;;], boundary_alg,
+                                   optimizer=nothing, forloop_iter=1,
+                                   maxiter_restart=1, verbosity=0,
+                                   folder=mktempdir(),
+                                   ifSU=false, SUτ=0,
+                                   ifprecondition=false, iter_precond=0,
+                                   reuse_env=true, ifsave_env=false,
+                                   ifload_env=false, ifsave_lbfgs=false,
+                                   ifload_lbfgs=false)
+        A = init_ipeps(; atype=Array, etype=ComplexF64, No=0, D, χ=chi, params)
+
+        restriction_ipeps(A) = C4v_restriction(A) / norm(C4v_restriction(A))
+        rt = TeneT.initialize_env(A, D, chi, params; restriction_ipeps)
+        rt′ = deepcopy(rt)
+        fδEierr = [1.0, 1.0, 0.0, 0.0]
+        fenergy(A) = (TeneT._G_cache[] = nothing;
+                      real(TeneT.energy(restriction_ipeps(A), rt, rt′, fδEierr, params)))
+
+        g_zyg, = Zygote.gradient(fenergy, A)
+
+        # Directional finite difference along a fixed random direction
+        Random.seed!(7)
+        v = randn(ComplexF64, size(A))
+        v ./= norm(v)
+        δ = 1e-4
+        df = (fenergy(A .+ δ .* v) - fenergy(A .- δ .* v)) / (2δ)
+        # For real(energy) with complex A, Zygote convention: dE/dδ = real(dot(g_zyg, v))
+        df_ad = real(dot(g_zyg, v))
+        @test isapprox(df, df_ad; rtol=1e-3)
+    end
+
     # ---- simple_eig segment_checkpoint kwarg propagates ----
     @testset "simple_eig segment_checkpoint kwarg" begin
         # Hermitian matrix with well-separated dominant eigenvalue

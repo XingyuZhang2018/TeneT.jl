@@ -14,11 +14,12 @@
 # slices as explicit args so `checkpoint(Recompute()/Offload(), ...)`
 # can capture / offload them cleanly, avoiding closure-pinned refs.
 function _simple_eig_ACmap_plaq(AC1j, FLj, FLjr, Mj; power_iter, ifparallel, forloop_iter,
+                                  inner_checkpoint::CheckpointMethod=Plain(),
                                   inner_etype=nothing, final_polish_steps=0,
                                   segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = ACmap(1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype)
+    f(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
-        f_final(x) = ACmap(1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype=nothing)
         return simple_eig(f, AC1j; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, AC1j; power_iter, segment_checkpoint)
@@ -68,6 +69,7 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
                 λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_plaq,
                                         AC[1,j], FL[:,j], FL[:,jr], M[:,j];
                                         power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
                                         inner_etype=inner_etype_pass,
                                         segment_checkpoint,
                                         final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)

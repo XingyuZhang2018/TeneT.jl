@@ -32,33 +32,36 @@ permute_fronttail(t::AbstractZero) = t
 # iterations — mirroring the non-offload `polish_fine` branch in leftenv /
 # rightenv / ACenv below.
 function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, forloop_iter,
+                            inner_checkpoint::CheckpointMethod=Plain(),
                             inner_etype=nothing, final_polish_steps=0,
                             segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype)
+    f(x) = checkpoint(inner_checkpoint, FLmap, 1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
-        f_final(x) = FLmap(1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, FLmap, 1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
         return simple_eig(f, FLij; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, FLij; power_iter, segment_checkpoint)
     end
 end
 function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel, forloop_iter,
+                            inner_checkpoint::CheckpointMethod=Plain(),
                             inner_etype=nothing, final_polish_steps=0,
                             segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype)
+    f(x) = checkpoint(inner_checkpoint, FRmap, Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
-        f_final(x) = FRmap(Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, FRmap, Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
         return simple_eig(f, FRiNj; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, FRiNj; power_iter, segment_checkpoint)
     end
 end
 function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter,
+                            inner_checkpoint::CheckpointMethod=Plain(),
                             inner_etype=nothing, final_polish_steps=0,
                             segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype)
+    f(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype)
     if final_polish_steps > 0
-        f_final(x) = ACmap(1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing)
         return simple_eig(f, AC1j; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, AC1j; power_iter, segment_checkpoint)
@@ -284,6 +287,7 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
                 λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
                                          FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
                                          power_iter, ifparallel, forloop_iter,
+                                         inner_checkpoint,
                                          inner_etype=inner_etype_pass,
                                          segment_checkpoint,
                                          final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
@@ -365,6 +369,7 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
                 λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
                                         FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
                                         power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
                                         inner_etype=inner_etype_pass,
                                         segment_checkpoint,
                                         final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
@@ -565,6 +570,7 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
                 λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
                                         AC[1, j], FL[:, j], FR[:, j], M[:, j];
                                         power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
                                         inner_etype=inner_etype_pass,
                                         segment_checkpoint,
                                         final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
