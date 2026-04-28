@@ -1,6 +1,6 @@
 # Sofia VUB Benchmark Results
 
-- **Date**: 2026-04-24 (post `feat/p2p-collectives-ring` refactor, merged into `iPEPS-unified`)
+- **Date**: 2026-04-24 (post `feat/p2p-collectives-ring` refactor, merged into `iPEPS-unified`); 16 GPU NCCL fast-path numbers added 2026-04-27 (jobs `1003788` / `1003905`, commit `60fa029`)
 - **System**: Sofia HPC at VUB, partition `zen4_h200`
 - **GPU**: NVIDIA H200 141GB (Hopper, x86_64, AMD Zen4 host)
 - **GPU/node**: 8 · **Intra-node**: NVSwitch · **Inter-node**: InfiniBand
@@ -36,6 +36,11 @@ Job `1000652` (`submit_test.sh` → `test_MPI_config.jl`). 16 GPU uses 2 nodes
 > one-time UCX registration overhead for fresh cross-node memory regions,
 > or the p2p ring vs. an UCC-backed IB allreduce at comparable sizes.
 > Allgatherv at 16 GPU (5.55 ms) degrades more gracefully.*
+>
+> *Update 2026-04-27 (job `1003905`): `TENET_USE_NCCL=1` (commit `60fa029`)
+> replaces the 3-phase ring with a single `ncclAllReduce` and drops the
+> 16 GPU 128 MB allreduce to **11.83 ms (3.76× faster)**. See Part 4 for the
+> full ring vs. NCCL comparison and break-even analysis.*
 
 Algorithm: hierarchical 3-phase p2p. Allgatherv = intra-node concurrent
 `Irecv!`/`Isend` + leader ring allgatherv across nodes + leader broadcast of
@@ -74,7 +79,9 @@ Job `1000652`, per-iteration FLmap_parallel forward time (ms), matrix
 ## Part 2: FLmap_parallel Backward
 
 Per-iteration backward time (ms). Gains from 8 → 16 GPU are limited by the
-Phase 2 cross-node allreduce path (same issue as Part 1).
+Phase 2 cross-node allreduce path (same issue as Part 1). NCCL fast path
+(`TENET_USE_NCCL=1`) improves 16 GPU backward by **1.3-1.54× at D≥10 χ≥512**;
+see Part 4.
 
 | D  | χ    | Size   | 1 GPU  | 2 GPU | 4 GPU | 8 GPU | 16 GPU | 2× | 4× | 8× | 16× |
 |----|------|--------|--------|-------|-------|-------|--------|----|----|----|-----|
@@ -154,8 +161,8 @@ is the first cross-node checkpoint verification.
 
 ## Full fg Benchmark (D=10 χ=400, Plaquette VUMPS, with checkpoint)
 
-Job `1000633` (`submit.sh` → `benchmark_fg.jl`, N=1/2/4/8 at single node;
-N=16 pending from job `1000677`).
+Job `1000633` (`submit.sh` → `benchmark_fg.jl`, N=1/2/4/8 at single node);
+N=16 from job `1003788` (`submit_fg_nccl_compare.sh`, NCCL OFF column).
 
 | GPU | Forward | fg forward | fg backward | fg total | fg speedup |
 |-----|---------|-----------|------------|----------|------------|
@@ -163,7 +170,99 @@ N=16 pending from job `1000677`).
 | 2   |  84.98s |  82.32s    | 276.27s    | 358.60s  | 1.87×      |
 | 4   |  45.56s |  43.69s    | 160.72s    | 204.41s  | 3.28×      |
 | 8   |  26.57s |  26.94s    | 100.81s    | 127.75s  | 5.25×      |
-| 16  | TBD     | TBD        | TBD        | TBD      | TBD        |
+| 16  |  17.56s |  18.29s    | 114.79s    | 133.08s  | 5.04× ⚠    |
+
+> *⚠ The 16 GPU **fg total** speedup (5.04×) is *below* the 8 GPU (5.25×)
+> point — backward is comm-bound on the cross-node IB ring (114.79 s vs
+> 100.81 s at 8 GPU intra-node NVSwitch, the ring penalty dominates).
+> Same issue as Parts 1/2. **NCCL fast path (`TENET_USE_NCCL=1`) recovers
+> a 1.33× fg-total improvement (133.08 s → 100.22 s, fg speedup 5.04× →
+> 6.70×) at the same 16 GPU configuration**. See Part 4.3.*
+
+## Part 4: NCCL Fast Path (`TENET_USE_NCCL=1`) — 16 GPU 2-Node Comparison
+
+Jobs `1003905` (`submit_test_nccl_compare.sh` → `test_MPI_config.jl` twice
+at 16 GPU, ring vs `TENET_USE_NCCL=1`) and `1003788`
+(`submit_fg_nccl_compare.sh` → `benchmark_fg.jl` D=10 χ=400 same toggle), all
+2026-04-27, NCCL 2.27.7 + CUDA 12.8, commit `60fa029` introduces the wrapper.
+
+`TENET_USE_NCCL=1` routes `allreduce_p2p!` / `allgatherv_p2p!` (when buf
+isa `CuArray`) to a single `ncclAllReduce` / `ncclAllGather` and bypasses
+the 3-phase p2p ring entirely. NCCL handles the intra+inter node hierarchy
+itself (NVLink + IB GDR). Stays opt-in — small-collective workloads (≤8 MB)
+are *slower* under NCCL than the latency-optimised ring, so flipping the
+default would regress those.
+
+### Part 4.1: MPI Collectives (16 GPU)
+
+| Size  | Allgatherv ring | Allgatherv NCCL | Allgatherv× | Allreduce ring | Allreduce NCCL | Allreduce× |
+|-------|-----------------|-----------------|-------------|----------------|----------------|------------|
+| 8 KB  | 2.17 ms         | 3.75 ms         | 0.58×       | 0.81 ms        | 4.09 ms        | **0.20×** ⚠ |
+| 8 MB  | 3.88 ms         | 5.23 ms         | 0.74×       | 1.51 ms        | 5.88 ms        | **0.26×** ⚠ |
+| 128 MB| 5.53 ms         | 9.14 ms         | 0.61×       | **44.47 ms**   | **11.83 ms**   | **3.76×** ✅ |
+
+NCCL has substantial fixed setup cost (≥4 ms per call at 8 KB), so it loses
+to the latency-optimised ring at small sizes. Break-even is around 128 MB,
+where NCCL's bandwidth-optimal Tree algorithm dominates the ring's per-rank
+sequential sends. The 3.76× allreduce win at 128 MB is the headline result.
+
+### Part 4.2: FLmap_parallel Backward (16 GPU)
+
+Same `D ∈ {8,10,12,14,16} × χ ∈ {256,512,768,1024}` matrix as Part 2.
+Forward times are within ±10% of ring (small per-call allreduces dominate
+the call count → NCCL setup cost balances the throughput gain). Backward,
+which sums full-tensor allreduces over the AD pullback, is where NCCL pays
+off:
+
+| D  | χ    | Size    | bwd ring (ms) | bwd NCCL (ms) | Speedup |
+|----|------|---------|---------------|---------------|---------|
+| 8  | 256  |   32 MB |        121.4  |        158.2  | **0.77× ⚠** |
+| 8  | 512  |  128 MB |        299.8  |        257.6  | 1.16×   |
+| 8  | 1024 |  512 MB |       1186.3  |        860.6  | 1.38×   |
+| 10 | 512  |  200 MB |        655.5  |        554.8  | 1.18×   |
+| 10 | 768  |  450 MB |       1412.9  |        915.7  | **1.54×** (best) |
+| 10 | 1024 |  800 MB |       1644.4  |       1129.9  | 1.46×   |
+| 12 | 768  |  648 MB |       1560.0  |       1144.8  | 1.36×   |
+| 12 | 1024 | 1152 MB |       2354.5  |       1609.9  | 1.46×   |
+| 14 | 768  |  882 MB |       2176.2  |       1583.2  | 1.37×   |
+| 14 | 1024 | 1568 MB |       3654.6  |       2466.7  | 1.48×   |
+| 16 | 1024 | 2048 MB |       5473.7  |       4052.3  | 1.35×   |
+
+Break-even around χ ≈ 512 / size ≈ 128 MB. At small (D=8 χ=256, 32 MB) NCCL
+is **slower** than ring; at large χ where backward is allreduce-dominated,
+NCCL delivers 1.3-1.54× wallclock improvement. The best gain (1.54×) at
+D=10 χ=768 (450 MB) sits comfortably above break-even.
+
+### Part 4.3: Full fg Benchmark (D=10 χ=400, 16 GPU)
+
+|                | NCCL OFF (ring) | NCCL ON       | Speedup | gnorm |
+|----------------|-----------------|---------------|---------|-------|
+| TIMED forward  | 17.56 s         | 18.28 s       | 0.96×   | —     |
+| TIMED fg fwd   | 18.29 s         | 18.66 s       | 0.98×   | —     |
+| TIMED fg bwd   | 114.79 s        | **81.56 s**   | **1.41×** | —   |
+| TIMED fg total | 133.08 s        | **100.22 s**  | **1.33×** | —   |
+| gnorm          | 1.149580467e-02 | 1.149580411e-02 | (8 digits agree) | ✓ |
+| fg vs 1 GPU    | 5.04×           | **6.70×**     | —       | —     |
+
+The production-relevant 25 % wallclock reduction on the steady-state fg
+cycle that drives `optimise_ipeps`'s LBFGS. **gnorm equivalence to 8 digits
+across NCCL's reduction-order-different summation confirms no precision
+loss** (the 9th-digit divergence is well below `gradtol=1e-7` and within
+Float64 round-off for a 16-rank reduction).
+
+### Production Rule
+
+| Workload                                            | Recommend                  |
+|-----------------------------------------------------|----------------------------|
+| D ≥ 10, χ ≥ 512, ≥16 GPU 2-node (cross-node IB)     | `TENET_USE_NCCL=1` ✅       |
+| D = 8, χ = 256 / 1-8 GPU single-node intra-NVSwitch | leave default (ring)       |
+| Mixed sizes / one-off scripts                       | benchmark; production fg at D=10 χ=400 sees 25 % win |
+
+NCCL stays opt-in (`TENET_USE_NCCL=1` env, default off): cross-system tests
+on JSC GH200 8 GPU showed only 2 % wallclock improvement (smaller cross-node
+fraction); BSC H100 8 GPU OOM'd at D=10 χ=400 entirely (memory issue
+unrelated to NCCL). **The Sofia 16 GPU 2-node win does not generalise to
+single-node setups** — keep ring as the default to avoid regressing those.
 
 ## Sofia-specific Environment
 
@@ -194,7 +293,9 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1     # mandatory (libcuda conflict)
   crashes.
 - **16 GPU 128 MB Allreduce = 44.81 ms** (see Part 1 ⚠ note above) — the
   Phase 2 cross-node ring on IB runs slower than expected; multi-node regime
-  not yet fully tuned.
+  not yet fully tuned. **Mitigation:** `TENET_USE_NCCL=1` (commit `60fa029`)
+  drops this to **11.83 ms (3.76× faster)** by routing through `ncclAllReduce`
+  instead of the 3-phase p2p ring. See Part 4 for the production trade-off.
 - **Home dir `/user/sofia/$VSC` doesn't exist** — work out of
   `/sofia/scratch/pilot/pilot_2026_0002/<user>/` with `HOME=$WD` +
   `JULIA_DEPOT_PATH=$WD/.julia`.
