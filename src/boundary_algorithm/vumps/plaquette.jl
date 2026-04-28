@@ -64,20 +64,13 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
 
         if p ∉ processed_indices
             f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
-                if eig_checkpoint isa Plain && polish_fine
-                    λACs, ACs = simple_eig(f, AC[1,j]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif eig_checkpoint isa Plain
-                    λACs, ACs = simple_eig(f, AC[1,j]; power_iter, segment_checkpoint)
-                else
-                    λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_plaq,
-                                            AC[1,j], FL[:,j], FL[:,jr], M[:,j];
-                                            power_iter, ifparallel, forloop_iter,
-                                            inner_etype=inner_etype_pass,
-                                            segment_checkpoint,
-                                            final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                end
+                λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_plaq,
+                                        AC[1,j], FL[:,j], FL[:,jr], M[:,j];
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
             else
                 λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
                 verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
