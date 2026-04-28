@@ -160,4 +160,12 @@
                                           segment_checkpoint=TeneT.Recompute())
         @test abs(vals_r[1]) ≈ abs(vals_ref[1]) atol=1e-10
     end
+
+    @testset "eig checkpoint always uses explicit-arg wrappers" begin
+        vumps_dir = joinpath(pkgdir(TeneT), "src", "boundary_algorithm", "vumps")
+        sources = filter(endswith(".jl"), readdir(vumps_dir; join=true))
+        source = join(read.(sources, String), "\n")
+
+        @test !occursin("eig_checkpoint isa " * "Plain", source)
+    end
 end

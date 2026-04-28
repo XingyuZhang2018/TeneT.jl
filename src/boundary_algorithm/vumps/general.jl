@@ -280,20 +280,13 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
             f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
-                if eig_checkpoint isa Plain && polish_fine
-                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif eig_checkpoint isa Plain
-                    λLs, FLi1s = simple_eig(f, FL[i, 1]; power_iter, segment_checkpoint)
-                else
-                    λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
-                                             FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
-                                             power_iter, ifparallel, forloop_iter,
-                                             inner_etype=inner_etype_pass,
-                                             segment_checkpoint,
-                                             final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                end
+                λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
+                                         FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
+                                         power_iter, ifparallel, forloop_iter,
+                                         inner_etype=inner_etype_pass,
+                                         segment_checkpoint,
+                                         final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
             else
                 λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
@@ -368,20 +361,13 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
             f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
-                if eig_checkpoint isa Plain && polish_fine
-                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif eig_checkpoint isa Plain
-                    λRs, FR1s = simple_eig(f, FR[i, Nj]; power_iter, segment_checkpoint)
-                else
-                    λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
-                                            FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
-                                            power_iter, ifparallel, forloop_iter,
-                                            inner_etype=inner_etype_pass,
-                                            segment_checkpoint,
-                                            final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                end
+                λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
+                                        FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
             else
                 λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
@@ -575,20 +561,13 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
         p = AC.pattern[1, j]
         if p ∉ processed_indices
             f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
-            f_polish(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=nothing)
             if ifsimple_eig
-                if eig_checkpoint isa Plain && polish_fine
-                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter, segment_checkpoint, f_final=f_polish, final_polish_steps=simple_eig_polish_steps)
-                elseif eig_checkpoint isa Plain
-                    λACs, ACs = simple_eig(f, AC[1, j]; power_iter, segment_checkpoint)
-                else
-                    λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
-                                            AC[1, j], FL[:, j], FR[:, j], M[:, j];
-                                            power_iter, ifparallel, forloop_iter,
-                                            inner_etype=inner_etype_pass,
-                                            segment_checkpoint,
-                                            final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
-                end
+                λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
+                                        AC[1, j], FL[:, j], FR[:, j], M[:, j];
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
