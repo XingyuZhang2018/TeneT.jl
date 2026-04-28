@@ -58,10 +58,17 @@ A *true* fixed-point of the iteration would have residual << 1 (φ is an eigenve
 | 3 (Float64) | 2 | -0.606 | 0.65 | 0.84 | -0.7500 | — |
 | 7 (Float64) | 2 | -0.564 | 0.073 | 0.87 | -0.7500 | — |
 | **100** (Float64) | 6 | **-0.644** | 2.25 | **0.80** | -0.7500 | — |
+| **42 (VUMPS{C4v} + precondition)** | **13** | **-0.66023** | **6.5e-8** | **0.77** | **-0.7500** | **0.00013** |
 
-**Reference**: A separately-run 2×2 LBFGS converged to E=-0.6625 in 80 iterations (gnorm 7e-4) — close to the thermodynamic AFM Heisenberg per-site energy at D=2.
+The last row is the **decisive measurement**. With `VUMPS{C4v}` boundary algorithm and `ifprecondition=true`, LBFGS escapes the linesearch stall and converges to the exact reference variational minimum (gnorm 6.5e-8). At this *perfectly converged* state:
+- Residual ‖Hφ - λ·Nφ‖ / ‖Hφ‖ = 0.77 — still O(1).
+- KrylovKit eigenvector overlap with φ_LBFGS = **0.013%** — essentially orthogonal.
+- KrylovKit eigenvalue = -0.75 (= -3J/4, isolated 2-site singlet).
+- φ_LBFGS bond energy = -0.33 (PEPS variational); φ_kry bond energy = -0.75 (unconstrained singlet).
 
-**Pattern**: as LBFGS converges deeper (E approaches -0.66), residual decreases marginally (0.86 → 0.80), but stays O(1). Even a perfectly converged 1×1 LBFGS minimum would have residual ≥ 0.7 — far from the eigenvector condition.
+The two fixed-points are nearly orthogonal vectors with O(1) energy difference per bond — no PEPS-manifold-preserving operation (decompose/MCF/gauge fix) can bridge them.
+
+**Pattern**: as LBFGS converges deeper (E approaches -0.66), residual asymptotes to ~0.77, NOT to zero. The trend confirms: at the exact PEPS variational minimum, the framework's eigenvalue iteration target is still O(1) far away.
 
 **Geometric interpretation**:
 - LBFGS minimum: PEPS-rank-D variational ground state, bond energy ≈ -0.29 to -0.33 (per-bond, depending on convergence).

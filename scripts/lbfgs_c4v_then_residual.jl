@@ -34,7 +34,7 @@ const model = Heisenberg(lattice=Square(), S=0.5,
                          Jx=1.0, Jy=1.0, Jz=1.0, ifrotate=true,
                          couplingtype=:uniform, bondratio=1.0)
 
-const folder = joinpath(@__DIR__, "..", "data", "lbfgs_c4v_warmup_seed$(SEED)_$(etype)")
+const folder = joinpath(@__DIR__, "..", "data", "lbfgs_c4v_only_seed$(SEED)_$(etype)_restart10")
 mkpath(folder)
 
 const params = GradientOptimize(
@@ -44,7 +44,7 @@ const params = GradientOptimize(
     optimizer = LBFGS(20; maxiter=80, verbosity=2, gradtol=1e-7,
                       linesearch=HagerZhangLineSearch(maxfg=8)),
     forloop_iter = 1,
-    maxiter_restart = 1,
+    maxiter_restart = 10,
     verbosity = 3,
     folder = folder,
     ifSU = false,
@@ -60,8 +60,7 @@ const params = GradientOptimize(
 
 function restriction_ipeps(A)
     A = C4v_restriction(A)
-    A = local_min_norm(A, params)
-    return A
+    return A   # No MCF — test if inner local_min_norm LBFGS was interfering
 end
 
 const SKIP_LBFGS = isfile(joinpath(folder, "D$D", "ipeps", "χ$χ", "No.2.jld2"))
