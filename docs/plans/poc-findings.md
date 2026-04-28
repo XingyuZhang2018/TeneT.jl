@@ -100,6 +100,40 @@ This means: **ANY per-bond / fixed-env Rayleigh-quotient iteration cannot reach 
 
 The original PoC's "geneigsolve per bond" structure cannot recover the LBFGS minimum *even if* manifold escape were somehow prevented. The structural choice "per-bond Rayleigh quotient" is itself wrong for a target of "global LBFGS minimum".
 
+## Could a "DMRG-style 2D global eigvalue iteration" work?
+
+Asked during the PoC: instead of `Hφ = λNφ` (which fails by manifold escape) or per-bond updates (which fail by local-vs-global divergence), can we write a *global* eigvalue equation for iPEPS analogous to DMRG in 1D?
+
+Answer: **No genuinely different algorithm exists. The natural construction reduces to LBFGS + preconditioning.**
+
+In 1D DMRG, `<ψ(A)|H|ψ(A)>` is exactly quadratic in the center-site tensor A (with everything else absorbed into a linear environment). This gives a clean linear `H_eff · A = E · N_eff · A`.
+
+In 2D iPEPS, `<ψ(A)|H|ψ(A)>` is *highly non-linear* in A (the double-layer environment has A·conj(A) entanglement, and the environment itself depends on A through VUMPS). No linear eigvalue formulation exists.
+
+The closest valid global construction is the time-dependent variational principle (TDVP) for imaginary time:
+```
+A_{n+1} = A_n − α · G(A_n)⁻¹ · g(A_n)
+```
+where `g(A)` is the gradient and `G(A)` is the PEPS-manifold metric `⟨∂ψ/∂A | ∂ψ/∂A⟩`. The fixed-point `g = 0` characterizes ground-state stationarity within the variational manifold. This IS the "2D analog of DMRG" stationarity condition.
+
+In TeneT, `ifprecondition=true` already implements `G⁻¹ · g` (via `precondition_invese_single_envir` solving `(δI + N̄) · x = g` with `N̄` = single-layer norm transfer matrix). Combined with LBFGS quasi-Newton outer loop, it converges robustly:
+
+> 13 LBFGS iterations to E = -0.660231093479954, gnorm = 6.5e-8 — perfect convergence to canonical AFM Heisenberg D=2 reference.
+
+Newton-CG via second-order AD (true Hessian-vector products) would also target g = 0, with quadratic local convergence, but at 10–100× per-step cost vs LBFGS, plus convergence robustness issues without trust-region / Wolfe-condition machinery. The cost-to-benefit ratio doesn't beat LBFGS+precondition.
+
+## Final answer to "is there a g=0 fixed-point equation other than gradient descent?"
+
+Yes:
+- Newton's method: `A = A − H⁻¹ · g` (uses Hessian; expensive + needs damping).
+- Quasi-Newton (LBFGS): `A = A − B⁻¹ · g` with `B` rank-m updates from gradient history.
+- Imaginary time / FU: `A = truncate(exp(-τ h_local) · A)`.
+- Natural gradient / TDVP: `A = A − α · G⁻¹ · g` where G is PEPS metric.
+
+For iPEPS specifically, **LBFGS + N⁻¹ preconditioning combines all the practical advantages**: superlinear convergence (quasi-Newton), correct global target via env-AD, modest per-step cost (only first-order AD), and good preconditioner (N⁻¹ = leading metric). It is implemented in TeneT as `GradientOptimize` with `ifprecondition=true`.
+
+The PoC's original target (find a *bond-level* eigvalue iteration that converges to LBFGS minimum) is mathematically not achievable. The geometric construction works in 1D DMRG only because of the linearity of the variational state in 1D.
+
 **Geometric interpretation**:
 - LBFGS minimum: PEPS-rank-D variational ground state, bond energy ≈ -0.29 to -0.33 (per-bond, depending on convergence).
 - Framework target eigenvector: 2-site spin singlet, bond energy = -3/4 = -0.75.
