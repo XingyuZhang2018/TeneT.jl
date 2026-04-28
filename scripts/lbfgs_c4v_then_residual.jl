@@ -17,7 +17,8 @@ using OptimKit
 using KrylovKit
 using TensorOperations: @tensor
 
-Random.seed!(42)
+const SEED = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 1
+Random.seed!(SEED)
 
 const D = 2
 const χ = 16   # use χ=16 for robust LBFGS convergence
@@ -33,7 +34,7 @@ const model = Heisenberg(lattice=Square(), S=0.5,
                          Jx=1.0, Jy=1.0, Jz=1.0, ifrotate=true,
                          couplingtype=:uniform, bondratio=1.0)
 
-const folder = joinpath(@__DIR__, "..", "data", "lbfgs_c4v_warmup")
+const folder = joinpath(@__DIR__, "..", "data", "lbfgs_c4v_warmup_seed$(SEED)_$(etype)")
 mkpath(folder)
 
 const params = GradientOptimize(
