@@ -70,6 +70,36 @@ The two fixed-points are nearly orthogonal vectors with O(1) energy difference p
 
 **Pattern**: as LBFGS converges deeper (E approaches -0.66), residual asymptotes to ~0.77, NOT to zero. The trend confirms: at the exact PEPS variational minimum, the framework's eigenvalue iteration target is still O(1) far away.
 
+## Two separate issues, both inherent
+
+After a follow-up reframing test (`scripts/five_leg_eigsolve.jl`), it became clear the failure has TWO distinct components:
+
+### Issue 1: Manifold escape (the 8-leg version)
+`geneigsolve` on the 8-leg space finds the unconstrained 2-site singlet (λ = -3J/4) lying outside PEPS-rank-D. `decompose_phi` truncation discards ~80%+ of the eigenvector mass.
+
+### Issue 2: Local-vs-global fixed-point divergence (even in-manifold)
+We tested a 5-leg version: `H_eff_5(x) = M_l^†[H_op_8leg(M_l[x])]` where `M_l[x] = build_phi(x, A_old, :H)`. This stays inside the 5-leg PEPS-rank-D manifold by construction. But:
+
+| Quantity | Value |
+|---|---|
+| 5-leg residual at LBFGS-A: ‖HA - λNA‖ / ‖HA‖ | **0.55** (still O(1)) |
+| KrylovKit 5-leg ground eigenvalue | -0.71 |
+| \|⟨A_LBFGS, A_5leg_kry⟩\| | **0.00009** (~orthogonal) |
+
+So even when the iteration is restricted to PEPS-rank-D, its fixed-point is *still* nearly orthogonal to the LBFGS variational minimum. The reason: per-bond eigvalue iteration with env held fixed has a fixed-point characterized by
+
+  per-bond local stationarity: ∂(<φ|H|φ>/<φ|N|φ>)/∂A_l = 0  (with env fixed)
+
+while LBFGS minimum is characterized by
+
+  global stationarity:  ∂E_total/∂A = 0  (with env varying via ∂env/∂A)
+
+These are different conditions. The env-AD term `∂E/∂env · ∂env/∂A` and inter-bond couplings together are O(1), so the two fixed-points differ by O(1) in tensor norm.
+
+This means: **ANY per-bond / fixed-env Rayleigh-quotient iteration cannot reach the LBFGS minimum**. Local 5-leg eigsolve, FU updates, per-bond gradient descent — all converge to different fixed-points than LBFGS. To reach LBFGS minimum, the iteration must use the global gradient with full env-AD chain rule (which is exactly what `optimise_ipeps` does).
+
+The original PoC's "geneigsolve per bond" structure cannot recover the LBFGS minimum *even if* manifold escape were somehow prevented. The structural choice "per-bond Rayleigh quotient" is itself wrong for a target of "global LBFGS minimum".
+
 **Geometric interpretation**:
 - LBFGS minimum: PEPS-rank-D variational ground state, bond energy ≈ -0.29 to -0.33 (per-bond, depending on convergence).
 - Framework target eigenvector: 2-site spin singlet, bond energy = -3/4 = -0.75.
