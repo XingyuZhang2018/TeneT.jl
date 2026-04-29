@@ -214,7 +214,8 @@ function magnetization_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSE
     nphys = 0
     for p in 1:len
         i, j = Tuple(findfirst(==(p), ACu.pattern))
-        if (i % 2 == 0) && (j % 2 == 0)  # empty site: skip
+        if (i % 2 == 0) && (j % 2 == 0)  # empty site: trivial entry, do not contribute to mean
+            m_dict["$(i),$(j)"] = Dict("Mx" => 0.0, "My" => 0.0, "Mz" => 0.0, "|M|" => 0.0)
             continue
         end
         nphys += 1
