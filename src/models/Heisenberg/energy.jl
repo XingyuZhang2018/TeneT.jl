@@ -312,3 +312,56 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
     params.verbosity >= 4 && println("energy = $(etol/len)")
     return etol/len, e_dict
 end
+
+"""
+    energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params)
+
+Setup (a) Kagome embedding: three physical sites + one empty per 2×2 sub-block.
+Pattern must be (2N)×(2M); role of each tensor is determined by (i, j) parity:
+  (odd, odd) = A    (even, odd) = B    (odd, even) = C    (even, even) = empty
+Six Kagome bonds per 2×2 sub-block, distributed across the four sites by ownership.
+"""
+function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+    model.ifrotate && throw(ArgumentError("Kagome :onehole does not support ifrotate=true"))
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    Ni, Nj = size(A)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("Pattern must be (2N)x(2M) for Kagome :onehole; got ($Ni,$Nj)"))
+    atype = _arraytype(A[1])
+    etol = 0
+    len = length(A)
+    e_dict = Dict{String, Dict{String, Any}}(
+        "bond_AC_H_energy"  => Dict{String, Any}(),  # bond 1
+        "bond_AB_V_energy"  => Dict{String, Any}(),  # bond 2
+        "bond_BC_diag_energy" => Dict{String, Any}(),  # bond 3
+        "bond_CA_H_energy"  => Dict{String, Any}(),  # bond 4
+        "bond_BA_V_energy"  => Dict{String, Any}(),  # bond 5
+        "bond_BC_diag_cross_energy" => Dict{String, Any}(),  # bond 6
+    )
+
+    # Bare d×d Heisenberg terms (no rotation, no d^3 promotion)
+    terms = _heisenberg_bond_terms(model, atype; ifrotate=false)
+
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), A.pattern))
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        isA     = (i % 2 == 1) && (j % 2 == 1)
+        isB     = (i % 2 == 0) && (j % 2 == 1)
+        isC     = (i % 2 == 1) && (j % 2 == 0)
+        isempty = (i % 2 == 0) && (j % 2 == 0)
+
+        if isA
+            # Bond 1: A–C horizontal NN
+            ir = Ni + 1 - i
+            jr = mod1(j + 1, Nj)
+            e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms, params)
+            n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params)
+            params.verbosity >= 4 && println("bond_AC_H = $(e/n)")
+            etol += e/n
+            e_dict["bond_AC_H_energy"]["$(i),$(j)"] = e/n
+        end
+        # bonds 2-6 added in next task
+    end
+
+    params.verbosity >= 4 && println("energy = $(etol/len)")
+    return etol/len, e_dict
+end
