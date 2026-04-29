@@ -196,11 +196,46 @@ end
 # Magnetization — Kagome (3 sublattice sites per unit cell)
 # ============================================================================
 
-_onehole_mag_err() = throw(ArgumentError("magnetization_value not yet implemented for Kagome{:onehole} (the empty site would be measured as a real spin, producing wrong results)"))
-magnetization_value(::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params)         = _onehole_mag_err()
-magnetization_value(::Heisenberg{Kagome{:onehole}}, A, env::PlaquetteVUMPSEnv, params) = _onehole_mag_err()
-magnetization_value(::Heisenberg{Kagome{:onehole}}, A, env::C4vVUMPSEnv, params)       = _onehole_mag_err()
-magnetization_value(::Heisenberg{Kagome{:onehole}}, A, env::CTMEnv, params)            = _onehole_mag_err()
+function magnetization_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    atype = _arraytype(ACu[1])
+    etype = eltype(ACu[1])
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
+
+    Ni, Nj = size(ACu)
+    len = length(ACu.data)
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+    m_dict = Dict{String, Any}()
+    Mnorm = zeros(Float64, Ni, Nj)
+    nphys = 0
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), ACu.pattern))
+        if (i % 2 == 0) && (j % 2 == 0)  # empty site: skip
+            continue
+        end
+        nphys += 1
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        ir = Ni + 1 - i
+        Mx = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx; forloop_iter, ifparallel)
+        My = etype <: Real ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy; forloop_iter, ifparallel)
+        Mz = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz; forloop_iter, ifparallel)
+
+        n = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; forloop_iter, ifparallel)
+        Mag = [Mx/n, My/n, Mz/n]
+        Mnorm[i,j] = norm(Mag)
+        params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm[i,j])")
+
+        m_dict["$(i),$(j)"] = Dict("Mx" => Mag[1], "My" => Mag[2], "Mz" => Mag[3], "|M|" => Mnorm[i,j])
+    end
+
+    M_mean = sum(Mnorm) / nphys
+    params.verbosity >= 4 && println("|M|_mean = $(M_mean)")
+    return M_mean, m_dict
+end
 
 function magnetization_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
