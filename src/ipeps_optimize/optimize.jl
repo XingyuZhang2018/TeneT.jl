@@ -198,6 +198,10 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
             inner         = _inner,
             finalize!     = (x, f, g, iter) -> _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         )
+        # Write obs at BEST iter of current χ (after LBFGS converged at this χ,
+        # before chi-shift). Gives clean per-chi-stage obs vs the i=1-after-shift
+        # snapshot that the existing call below produces.
+        observable(A, χ, params_obs; restriction_ipeps)
         χ += χshift
         enew, = observable(A, χ, params_obs; restriction_ipeps)
         rt = initialize_env(A, D, χ, params; restriction_ipeps)
