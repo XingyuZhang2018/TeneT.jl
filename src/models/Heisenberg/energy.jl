@@ -333,8 +333,8 @@ function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, par
         "bond_AC_H_energy"  => Dict{String, Any}(),  # bond 1
         "bond_AB_V_energy"  => Dict{String, Any}(),  # bond 2
         "bond_BC_diag_energy" => Dict{String, Any}(),  # bond 3
-        "bond_CA_H_energy"  => Dict{String, Any}(),  # bond 4
-        "bond_BA_V_energy"  => Dict{String, Any}(),  # bond 5
+        "bond_CA_H_cross_energy"  => Dict{String, Any}(),  # bond 4
+        "bond_BA_V_cross_energy"  => Dict{String, Any}(),  # bond 5
         "bond_BC_diag_cross_energy" => Dict{String, Any}(),  # bond 6
     )
 
@@ -347,7 +347,7 @@ function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, par
         isA     = (i % 2 == 1) && (j % 2 == 1)
         isB     = (i % 2 == 0) && (j % 2 == 1)
         isC     = (i % 2 == 1) && (j % 2 == 0)
-        isempty = (i % 2 == 0) && (j % 2 == 0)
+        isE     = (i % 2 == 0) && (j % 2 == 0)
 
         if isA
             # Bond 1: A–C horizontal NN
