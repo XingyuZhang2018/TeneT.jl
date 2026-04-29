@@ -169,6 +169,14 @@
         # Honeycomb brickwall: (D,1,D,D,d,N)
         A_hb = _init_random_ipeps(Honeycomb{:brickwall}(), Float64, D, d, N, Ni, Nj)
         @test size(A_hb) == (D, 1, D, D, d, N)
+
+        # Kagome :onehole — (D,D,D,D,d,N), requires Ni,Nj even
+        A_kh = _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, Ni, Nj)
+        @test size(A_kh) == (D, D, D, D, d, N)
+
+        # Odd dimensions should error
+        @test_throws ArgumentError _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, 3, 2)
+        @test_throws ArgumentError _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, 2, 3)
     end
 
     # ================================================================
