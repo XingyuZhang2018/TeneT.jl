@@ -196,6 +196,10 @@ end
 # Magnetization — Kagome (3 sublattice sites per unit cell)
 # ============================================================================
 
+function magnetization_value(model::Heisenberg{Kagome{:onehole}}, A, env, params)
+    throw(ArgumentError("magnetization_value not yet implemented for Kagome{:onehole} (the empty site would be measured as a real spin, producing wrong results)"))
+end
+
 function magnetization_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack ifparallel = params.boundary_alg
