@@ -358,8 +358,70 @@ function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, par
             params.verbosity >= 4 && println("bond_AC_H = $(e/n)")
             etol += e/n
             e_dict["bond_AC_H_energy"]["$(i),$(j)"] = e/n
+
+            # Bond 2: A–B vertical NN
+            ir2  = mod1(i + 1, Ni)
+            irr2 = mod1(Ni - i, Ni)
+            e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir2,j], A[ir2,j], FRo[ir2,j], ACd[irr2,j]), terms, params)
+            n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir2,j], A[ir2,j], FRo[ir2,j], ACd[irr2,j]), params)
+            params.verbosity >= 4 && println("bond_AB_V = $(e/n)")
+            etol += e/n
+            e_dict["bond_AB_V_energy"]["$(i),$(j)"] = e/n
+
+            # Bond 3: B–C anti-diagonal plaquette at (i,j); operators on (i,jr) (=C) and (ir2,j) (=B)
+            e = _contract_barebones(contract_o_22_2,
+                (FLu[i,j], FLo[ir2,j], ACu[i,j], ACd[irr2,j], FRu[i,jr], FRo[ir2,jr], ARu[i,jr], ARd[irr2,jr],
+                 A[i,j], A[i,jr], A[ir2,j], A[ir2,jr]),
+                terms, params)
+            n = _contract_one(contract_n_22,
+                (FLu[i,j], FLo[ir2,j], ACu[i,j], ACd[irr2,j], FRu[i,jr], FRo[ir2,jr], ARu[i,jr], ARd[irr2,jr],
+                 A[i,j], A[i,jr], A[ir2,j], A[ir2,jr]),
+                params)
+            params.verbosity >= 4 && println("bond_BC_diag = $(e/n)")
+            etol += e/n
+            e_dict["bond_BC_diag_energy"]["$(i),$(j)"] = e/n
         end
-        # bonds 2-6 added in next task
+
+        if isC
+            # Bond 4: C–A horizontal NN to next cell
+            ir = Ni + 1 - i
+            jr = mod1(j + 1, Nj)
+            e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms, params)
+            n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params)
+            params.verbosity >= 4 && println("bond_CA_H = $(e/n)")
+            etol += e/n
+            e_dict["bond_CA_H_cross_energy"]["$(i),$(j)"] = e/n
+        end
+
+        if isB
+            # Bond 5: B–A vertical NN to next cell down
+            ir  = mod1(i + 1, Ni)
+            irr = mod1(Ni - i, Ni)
+            e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms, params)
+            n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), params)
+            params.verbosity >= 4 && println("bond_BA_V = $(e/n)")
+            etol += e/n
+            e_dict["bond_BA_V_cross_energy"]["$(i),$(j)"] = e/n
+        end
+
+        if isE
+            # Bond 6: B'–C' anti-diagonal plaquette at (i,j); plaquette spans
+            # {empty, B', C', A''} across 4 neighboring sub-blocks.
+            ir  = mod1(i + 1, Ni)
+            irr = mod1(Ni - i, Ni)
+            jr = mod1(j + 1, Nj)
+            e = _contract_barebones(contract_o_22_2,
+                (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr],
+                 A[i,j], A[i,jr], A[ir,j], A[ir,jr]),
+                terms, params)
+            n = _contract_one(contract_n_22,
+                (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j], FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr],
+                 A[i,j], A[i,jr], A[ir,j], A[ir,jr]),
+                params)
+            params.verbosity >= 4 && println("bond_BC_diag_cross = $(e/n)")
+            etol += e/n
+            e_dict["bond_BC_diag_cross_energy"]["$(i),$(j)"] = e/n
+        end
     end
 
     params.verbosity >= 4 && println("energy = $(etol/len)")
