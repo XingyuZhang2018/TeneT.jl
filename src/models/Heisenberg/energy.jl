@@ -350,9 +350,16 @@ function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, par
         isE     = (i % 2 == 0) && (j % 2 == 0)
 
         if isA
+            # Index conventions for this branch:
+            #   ir         = Ni + 1 - i       — reflected row for ACd (used by contract_o_12 / contract_o_22_2)
+            #   jr         = mod1(j + 1, Nj)  — column-shifted neighbor (bonds 1, 3)
+            #   ir2 / irr2 = mod1(i + 1, Ni) / mod1(Ni - i, Ni) — row-shifted neighbor (bonds 2, 3)
+            ir   = Ni + 1 - i
+            jr   = mod1(j + 1, Nj)
+            ir2  = mod1(i + 1, Ni)
+            irr2 = mod1(Ni - i, Ni)
+
             # Bond 1: A–C horizontal NN
-            ir = Ni + 1 - i
-            jr = mod1(j + 1, Nj)
             e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms, params)
             n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params)
             params.verbosity >= 4 && println("bond_AC_H = $(e/n)")
@@ -360,8 +367,6 @@ function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, par
             e_dict["bond_AC_H_energy"]["$(i),$(j)"] = e/n
 
             # Bond 2: A–B vertical NN
-            ir2  = mod1(i + 1, Ni)
-            irr2 = mod1(Ni - i, Ni)
             e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir2,j], A[ir2,j], FRo[ir2,j], ACd[irr2,j]), terms, params)
             n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir2,j], A[ir2,j], FRo[ir2,j], ACd[irr2,j]), params)
             params.verbosity >= 4 && println("bond_AB_V = $(e/n)")
