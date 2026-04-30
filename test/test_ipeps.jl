@@ -177,6 +177,11 @@
         # Odd dimensions should error
         @test_throws ArgumentError _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, 3, 2)
         @test_throws ArgumentError _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, 2, 3)
+
+        # Kagome :onehole_real — same shape as :onehole, requires Ni,Nj even
+        A_khr = _init_random_ipeps(Kagome(:onehole_real), Float64, D, d, N, Ni, Nj)
+        @test size(A_khr) == (D, D, D, D, d, N)
+        @test_throws ArgumentError _init_random_ipeps(Kagome(:onehole_real), Float64, D, d, N, 3, 2)
     end
 
     # ================================================================
