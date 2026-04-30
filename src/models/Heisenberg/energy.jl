@@ -314,14 +314,17 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
 end
 
 """
-    energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params)
+    energy_value(model::Heisenberg{<:KagomeOnehole}, A, env::VUMPSEnv, params)
 
-Setup (a) Kagome embedding: three physical sites + one empty per 2×2 sub-block.
-Pattern must be (2N)×(2M); role of each tensor is determined by (i, j) parity:
+Setup (a) Kagome embedding (works for both `:onehole` and `:onehole_real`):
+three physical sites + one empty/δ per 2×2 sub-block. Pattern must be
+(2N)×(2M); role of each tensor is determined by (i, j) parity:
   (odd, odd) = A    (even, odd) = B    (odd, even) = C    (even, even) = empty
-Six Kagome bonds per 2×2 sub-block, distributed across the four sites by ownership.
+Six Kagome bonds per 2×2 sub-block, distributed across the four sites by
+ownership. The empty site carries no Hamiltonian operator (its physical
+leg is summed in all bond contractions).
 """
-function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::Heisenberg{<:KagomeOnehole}, A, env::VUMPSEnv, params::iPEPSOptimize)
     model.ifrotate && throw(ArgumentError("Kagome :onehole does not support ifrotate=true"))
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni, Nj = size(A)
