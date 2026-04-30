@@ -202,10 +202,11 @@
         @test Ar2[1,2] === Ar[1,2]
         # Site 4 (empty) replaced with d=1 δ tensor
         @test size(Ar2[2,2]) == (D, D, D, D, 1)
-        # δ_{u,l} * δ_{r,d}: nonzero only when u==l AND r==d
-        for u in 1:D, r in 1:D, d in 1:D, l in 1:D
-            expected = (u == l && r == d) ? 1.0 : 0.0
-            @test Ar2[2,2][u, r, d, l, 1] == expected
+        # δ_{u,l} * δ_{r,d}: nonzero only when u==l AND d==r
+        # iPEPS index convention is (l, d, r, u, p)
+        for l in 1:D, d in 1:D, r in 1:D, u in 1:D
+            expected = (u == l && d == r) ? 1.0 : 0.0
+            @test Ar2[2,2][l, d, r, u, 1] == expected
         end
     end
 

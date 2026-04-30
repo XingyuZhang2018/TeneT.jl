@@ -54,15 +54,20 @@ _lattice_map(A, ::Kagome, pattern) = A
 """
     _onehole_real_delta_tensor(D::Int, etype)
 
-Fixed δ tensor injected at the empty position of `Kagome{:onehole_real}`:
-`T[u, r, d, l, 1] = δ_{u,l} · δ_{r,d}`. The two pairings carry the bond
-indices for bond 3 (in-cell B–C anti-diag, uses u/l) and bond 6
-(cross-cell B'–C' anti-diag, uses r/d) through the empty position.
+Fixed δ tensor injected at the empty position of `Kagome{:onehole_real}`.
+
+iPEPS index convention is `(l, d, r, u, p)` — left, down, right, up, physical.
+The δ tensor encodes:
+  T[l, d, r, u, 1] = δ_{u,l} · δ_{r,d}   (nonzero iff l == u AND d == r)
+
+The two pairings carry bond indices through the empty position:
+- `δ_{u,l}`: bond 3 (in-cell B–C anti-diag plaquette uses empty's u and l legs)
+- `δ_{r,d}`: bond 6 (cross-cell B'–C' anti-diag plaquette uses empty's r and d legs)
 """
 function _onehole_real_delta_tensor(D::Int, etype)
     T = zeros(etype, D, D, D, D, 1)
-    for u in 1:D, r in 1:D
-        T[u, r, r, u, 1] = one(etype)
+    for ul in 1:D, dr in 1:D
+        T[ul, dr, dr, ul, 1] = one(etype)
     end
     return T
 end
