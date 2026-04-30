@@ -228,11 +228,13 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
                          e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
                          e_min, e_max)
 
-    # Sites
+    # Sites — empty (|M|≈0 entry, e.g. Kagome :onehole hole) drawn as open white circles
     for (k, (x, y)) in all_coords
         alpha = is_original[k] ? 1.0 : 0.4
         ms = is_original[k] ? 22 : 16
-        scatter!(ax, [x], [y]; color=(:gray70, alpha), markersize=ms,
+        is_empty = abs(get(all_mdata[k], "|M|", 1.0)) < 1e-10
+        fill = is_empty ? (:white, alpha) : (:gray70, alpha)
+        scatter!(ax, [x], [y]; color=fill, markersize=ms,
                  strokewidth=is_original[k] ? 1.5 : 0.5,
                  strokecolor=(:gray40, alpha))
     end
@@ -548,15 +550,20 @@ const _BOND_COLORS = Dict(
     "bond_J1H" => :royalblue, "bond_J1V" => :forestgreen,
     "bond_J2H" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
     "bond_J3\\" => :gray60, "bond_J3/" => :gray60, "bond_J3|" => :gray40,
-    # Heisenberg Kagome
+    # Heisenberg Kagome :merge
     "bond_onsite" => :gray50,
     "bond_12" => colorant"#FF6666", "bond_23" => colorant"#66BB66",
     "bond_31H" => colorant"#6666FF", "bond_32H" => colorant"#FF9933",
     "bond_31V" => colorant"#9966CC", "bond_21V" => colorant"#33CCCC",
+    # Heisenberg Kagome :onehole
+    "bond_AC_H" => colorant"#FF6666", "bond_AB_V" => colorant"#66BB66",
+    "bond_BC_diag_cross" => colorant"#FF9933", "bond_BC_diag" => colorant"#6666FF",
+    "bond_CA_H_cross" => colorant"#9966CC", "bond_BA_V_cross" => colorant"#33CCCC",
 )
 
 function _bond_color(bond_type::String)
-    for (key, col) in _BOND_COLORS
+    # Iterate longer keys first so e.g. "bond_BC_diag_cross" wins over "bond_BC_diag".
+    for (key, col) in sort(collect(_BOND_COLORS); by=p -> -length(p.first))
         occursin(key, bond_type) && return col
     end
     return :gray60
@@ -640,6 +647,82 @@ function _draw_lattice_bonds!(ax, ::Square, all_coords, all_mdata,
     for (bond_type, bond_data) in e_dict
         color = _bond_color(bond_type)
         (off1i, off1j), (off2i, off2j) = _bond_offsets_square(bond_type)
+        for (pos_str, eval) in bond_data
+            parts = split(pos_str, ",")
+            oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
+            pv = pattern[oi, oj]
+            lw = _bond_linewidth(eval, e_min, e_max)
+
+            for (ci, cj) in pval_positions[pv]
+                for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+                    gi1 = ci + di * Ni + off1i
+                    gj1 = cj + dj * Nj + off1j
+                    gi2 = ci + di * Ni + off2i
+                    gj2 = cj + dj * Nj + off2j
+
+                    haskey(all_coords, (gi1, gj1)) || continue
+                    haskey(all_coords, (gi2, gj2)) || continue
+
+                    x1, y1 = all_coords[(gi1, gj1)]
+                    x2, y2 = all_coords[(gi2, gj2)]
+                    is_orig = (di == 0 && dj == 0)
+                    alpha = is_orig ? 0.85 : 0.3
+                    lines!(ax, [x1, x2], [y1, y2]; color=(color, alpha),
+                           linewidth=lw, linecap=:round)
+                    if is_orig
+                        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                        dx, dy = x2 - x1, y2 - y1
+                        blen = sqrt(dx^2 + dy^2)
+                        if blen > 1e-6
+                            nx, ny = -dy / blen * 0.15, dx / blen * 0.15
+                        else
+                            nx, ny = 0.1, 0.0
+                        end
+                        text!(ax, mx + nx, my + ny;
+                              text="$(round(real(eval); sigdigits=4))",
+                              fontsize=9, align=(:center, :center), color=:gray30)
+                    end
+                end
+            end
+        end
+    end
+end
+
+"""
+Bond offsets for Kagome :onehole, keyed by bond_*_energy name. Each entry
+maps to ((di1,dj1), (di2,dj2)) as offsets from the bond-owning anchor (i,j).
+For diagonal bonds the two endpoints are on different sub-block positions.
+"""
+function _bond_offsets_kagome_onehole(bond_type::String)
+    if occursin("bond_AC_H_energy", bond_type)
+        return (0, 0), (0, 1)            # A → C in-cell horizontal
+    elseif occursin("bond_AB_V_energy", bond_type)
+        return (0, 0), (1, 0)            # A → B in-cell vertical
+    elseif occursin("bond_BC_diag_energy", bond_type)
+        return (1, 0), (0, 1)            # B(i+1,j) → C(i,j+1) anti-diag, owner=A
+    elseif occursin("bond_CA_H_cross_energy", bond_type)
+        return (0, 0), (0, 1)            # C → A cross-cell horizontal
+    elseif occursin("bond_BA_V_cross_energy", bond_type)
+        return (0, 0), (1, 0)            # B → A cross-cell vertical
+    elseif occursin("bond_BC_diag_cross_energy", bond_type)
+        return (0, 1), (1, 0)            # B'(i,j+1) → C'(i+1,j) anti-diag, owner=empty
+    else
+        return (0, 0), (0, 1)
+    end
+end
+
+function _draw_lattice_bonds!(ax, ::Kagome{:onehole}, all_coords, all_mdata,
+                               e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
+                               e_min, e_max)
+    pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
+    for ci in 1:Ni, cj in 1:Nj
+        pv = pattern[ci, cj]
+        push!(get!(pval_positions, pv, Tuple{Int,Int}[]), (ci, cj))
+    end
+
+    for (bond_type, bond_data) in e_dict
+        color = _bond_color(bond_type)
+        (off1i, off1j), (off2i, off2j) = _bond_offsets_kagome_onehole(bond_type)
         for (pos_str, eval) in bond_data
             parts = split(pos_str, ",")
             oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
