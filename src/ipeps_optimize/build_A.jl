@@ -84,7 +84,7 @@ function _lattice_map(A, ::Kagome{:onehole_real}, pattern)
     D = size(A[1], 1)
     etype = eltype(A[1])
     atype = _arraytype(A[1])
-    δ = atype(_onehole_real_delta_tensor(D, etype))
+    δ = Zygote.@ignore atype(_onehole_real_delta_tensor(D, etype))
     new_data = map(eachindex(A.data)) do i
         # Find any (ci, cj) where pattern[ci, cj] == i
         ci, cj = Tuple(findfirst(==(i), pattern))
