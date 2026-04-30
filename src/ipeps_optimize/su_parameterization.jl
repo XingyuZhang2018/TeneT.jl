@@ -26,8 +26,8 @@ First applies horizontal gates, then vertical gates, truncating bond dimensions 
 function SU_parameterization(A, params; D_new)
     Ni, Nj = size(A)
     D, d = size(A[1])[[1,5]]
-    if params.model.lattice isa Kagome{:onehole}
-        throw(ArgumentError("SU_parameterization not yet implemented for Kagome{:onehole} (gates would act on the empty site, producing wrong results)"))
+    if params.model.lattice isa KagomeOnehole
+        throw(ArgumentError("SU_parameterization not yet implemented for $(typeof(params.model.lattice)) (gates would act on the empty site, producing wrong results)"))
     end
     if params.model.lattice isa Kagome{:merge}
         terms = _heisenberg_bond_terms(params.model, Array; ifrotate=false)
