@@ -435,6 +435,22 @@ function _onehole_to_kagome(i::Int, j::Int)
     end
 end
 
+# True Kagome NN geometry for :onehole: A/B/C of one 2x2 sub-block form an
+# equilateral up-triangle of side 1. Lattice vectors (2,0) and (1,-sqrt(3)).
+# After 90° rotation (x,y)→(-y,-x) so vertical bonds are vertical on screen.
+function _onehole_site_xy(KI::Int, KJ::Int, k::Int)
+    cx = 2.0 * (KI - 1) + (KJ - 1)
+    cy = -(KJ - 1) * sqrt(3)
+    if k == 1        # A = sub1
+        rx, ry = cx, cy
+    elseif k == 2    # B = sub2
+        rx, ry = cx + 1.0, cy
+    else             # k == 3, C = sub3 at the THIRD up-triangle vertex
+        rx, ry = cx + 0.5, cy - sqrt(3) / 2
+    end
+    return (-ry, -rx)
+end
+
 # Bond endpoint offsets for Kagome :onehole, returning ((Δi1, Δj1), (Δi2, Δj2))
 # from the bond's owning iPEPS site.
 function _onehole_bond_iPEPS_offsets(bond_type::String)
@@ -483,7 +499,7 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:onehole}, patter
             mapping = _onehole_to_kagome(gi, gj)
             mapping === nothing && continue
             kI, kJ, k = mapping
-            all_coords[(gi, gj)] = _kagome_site_xy(kI, kJ, k)
+            all_coords[(gi, gj)] = _onehole_site_xy(kI, kJ, k)
             pval = pattern[ci, cj]
             oi, oj = unique_sites[pval]
             all_mdata[(gi, gj)] = m_dict["$oi,$oj"]
