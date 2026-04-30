@@ -196,7 +196,7 @@ end
 # Magnetization — Kagome (3 sublattice sites per unit cell)
 # ============================================================================
 
-function magnetization_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, params)
+function magnetization_value(model::Heisenberg{<:KagomeOnehole}, A, env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
     etype = eltype(ACu[1])
