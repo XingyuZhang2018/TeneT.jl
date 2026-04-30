@@ -8,9 +8,11 @@ Random.seed!(42)
 
 D, χ = 2, 4
 pattern = [1 3; 2 4]
-model = Heisenberg(lattice=Kagome(:onehole), S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+mode = length(ARGS) >= 1 ? Symbol(ARGS[1]) : :onehole
+@assert mode in (:onehole, :onehole_real) "mode must be :onehole or :onehole_real"
+model = Heisenberg(lattice=Kagome(mode), S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
                    ifrotate=false, couplingtype=:uniform, bondratio=1.0)
-folder = joinpath(@__DIR__, "..", "..", ".claude", "onehole_inspect")
+folder = joinpath(@__DIR__, "..", "..", ".claude", "onehole_inspect_$(mode)")
 isdir(folder) && rm(folder; recursive=true)
 mkpath(folder)
 boundary_alg = VUMPS{TeneT.General}(ifupdown=true, ifsimple_eig=true,
