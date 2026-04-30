@@ -83,3 +83,85 @@
         end
     end
 end
+
+@testset "Kagome :onehole_real end-to-end" begin
+    using OptimKit: LBFGS, HagerZhangLineSearch
+    using TeneT: ObsEnv, energy_value, magnetization_value, build_A,
+                 leading_boundary, initialize_env
+
+    seed = 42
+    Random.seed!(seed)
+    D, χ, χshift = 2, 4, 2
+    pattern = [1 3;
+               2 4]
+    model = Heisenberg(lattice=Kagome(:onehole_real),
+                       S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                       ifrotate=false, couplingtype=:uniform, bondratio=1.0)
+    folder = mktempdir()
+    boundary_alg = VUMPS{TeneT.General}(ifupdown=true, ifsimple_eig=true,
+                                        maxiter=4, miniter=0, maxiter_ad=2, miniter_ad=2,
+                                        tol=1e-4, verbosity=0, show_every=1000)
+    params = GradientOptimize(model=model, pattern=pattern, boundary_alg=boundary_alg,
+                              optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
+                              maxiter_restart=1, verbosity=0, folder=folder,
+                              ifSU=false, SUτ=0.0, ifprecondition=false,
+                              reuse_env=true, ifsave_env=false, ifload_env=false,
+                              ifsave_lbfgs=false, ifload_lbfgs=false)
+
+    @testset "show string" begin
+        @test occursin("Kagome_onehole_real", string(model))
+    end
+
+    A_raw = init_ipeps(; atype=Array, etype=Float64, No=0, D=D, χ=χ, params=params)
+    @test size(A_raw) == (D, D, D, D, 2, 4)
+
+    @testset "δ tensor injection in build_A" begin
+        # iPEPS index convention is (l, d, r, u, p): empty site δ_{u,l}·δ_{r,d}
+        # → T[l, d, r, u, 1] nonzero iff (l == u) AND (d == r)
+        A = build_A(A_raw, params)
+        @test size(A[2, 2]) == (D, D, D, D, 1)
+        for l in 1:D, d in 1:D, r in 1:D, u in 1:D
+            expected = (l == u && d == r) ? 1.0 : 0.0
+            @test A[2, 2][l, d, r, u, 1] == expected
+        end
+    end
+
+    A = build_A(A_raw, params)
+    rt = initialize_env(A_raw, D, χ, params)
+    rt, _ = leading_boundary(rt, A, params.boundary_alg)
+    env = ObsEnv(rt, A, params.boundary_alg)
+
+    @testset "energy_value: 6 bonds, finite" begin
+        e, e_dict = energy_value(model, A, env, params)
+        @test isfinite(e)
+        @test length(e_dict) == 6
+        for (k, v) in e_dict
+            @test !isempty(v)
+            for (_, val) in v
+                @test isfinite(val)
+            end
+        end
+    end
+
+    @testset "magnetization_value: 3 physical sites + empty zero" begin
+        M_mean, m_dict = magnetization_value(model, A, env, params)
+        @test isfinite(M_mean)
+        @test length(m_dict) == 4
+        @test abs(m_dict["2,2"]["|M|"]) < 1e-10
+    end
+
+    @testset "optimise_ipeps + observable + plot" begin
+        function restriction_ipeps(A)
+            A = local_min_norm(A, params)
+            return A
+        end
+        result = optimise_ipeps(A_raw, χ, χshift, params; restriction_ipeps)
+        final_e = result[2]
+        @test isfinite(final_e)
+        D_str = "D$(D)"
+        for χ_val in (χ, χ + χshift)
+            @test isfile(joinpath(folder, D_str, "observable", "lattice_χ$(χ_val).png"))
+            @test isfile(joinpath(folder, D_str, "observable", "χ$(χ_val).log"))
+        end
+    end
+end
