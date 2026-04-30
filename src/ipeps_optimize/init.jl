@@ -24,6 +24,11 @@ checkpoint file; otherwise creates a random initial state.
 
 # Returns
 An array of shape `(D, D, D, D, d, Nsites)` on the requested backend.
+
+# Index convention
+Each iPEPS site tensor `A[l, d, r, u, p]` has 5 indices in the order
+`(left, down, right, up, physical)`. All virtual indices `l, d, r, u`
+have dimension `D`; the physical index `p` has dimension `d`.
 """
 function init_ipeps(; atype=Array, etype=Float64, No::Int=0, D::Int, χ::Int, params::iPEPSOptimize)
     Ni, Nj = size(params.pattern)
