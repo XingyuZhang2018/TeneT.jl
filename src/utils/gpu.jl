@@ -45,6 +45,7 @@ function CuArray(x::NamedTuple)
 end
 
 Array(x::NamedTuple) = x
+CuArray(::Nothing) = nothing
 
 function gc(::Type{Array})
     N_device = device_count(Array)
