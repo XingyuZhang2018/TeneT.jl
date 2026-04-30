@@ -309,8 +309,8 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
         e_dict["bond_V_energy"]["$(i),$(j)"] = e/n
     end
 
-    params.verbosity >= 4 && println("energy = $(etol/len)")
-    return etol/len, e_dict
+    params.verbosity >= 4 && println("energy = $(etol/len/3)")
+    return etol/len/3, e_dict
 end
 
 """
@@ -429,6 +429,6 @@ function energy_value(model::Heisenberg{Kagome{:onehole}}, A, env::VUMPSEnv, par
         end
     end
 
-    params.verbosity >= 4 && println("energy = $(etol/len)")
-    return etol/len, e_dict
+    params.verbosity >= 4 && println("energy = $(etol/len*4/3)")
+    return etol/len*4/3, e_dict
 end
