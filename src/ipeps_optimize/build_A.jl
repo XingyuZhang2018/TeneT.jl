@@ -52,6 +52,43 @@ _lattice_map(A, ::Square, pattern) = A
 _lattice_map(A, ::Kagome, pattern) = A
 
 """
+    _onehole_real_delta_tensor(D::Int, etype)
+
+Fixed δ tensor injected at the empty position of `Kagome{:onehole_real}`:
+`T[u, r, d, l, 1] = δ_{u,l} · δ_{r,d}`. The two pairings carry the bond
+indices for bond 3 (in-cell B–C anti-diag, uses u/l) and bond 6
+(cross-cell B'–C' anti-diag, uses r/d) through the empty position.
+"""
+function _onehole_real_delta_tensor(D::Int, etype)
+    T = zeros(etype, D, D, D, D, 1)
+    for u in 1:D, r in 1:D
+        T[u, r, r, u, 1] = one(etype)
+    end
+    return T
+end
+
+"""
+    _lattice_map(A, ::Kagome{:onehole_real}, pattern)
+
+Inject the fixed δ tensor at the empty site (the (even, even) position
+of every 2×2 sub-block — site value 4 in the canonical pattern).
+"""
+function _lattice_map(A, ::Kagome{:onehole_real}, pattern)
+    Ni, Nj = size(pattern)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("Pattern must be (2N)x(2M) for Kagome :onehole_real"))
+    D = size(A[1], 1)
+    etype = eltype(A[1])
+    atype = _arraytype(A[1])
+    δ = atype(_onehole_real_delta_tensor(D, etype))
+    new_data = map(eachindex(A.data)) do i
+        # Find any (ci, cj) where pattern[ci, cj] == i
+        ci, cj = Tuple(findfirst(==(i), pattern))
+        (ci % 2 == 0 && cj % 2 == 0) ? δ : A.data[i]
+    end
+    return StructArray(new_data, pattern)
+end
+
+"""
     _lattice_map(A, ::Honeycomb{:brickwall}, pattern)
 
 Brickwall mapping: permute legs on odd-parity sites so the brickwall

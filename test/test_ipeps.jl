@@ -185,6 +185,31 @@
     end
 
     # ================================================================
+    # _lattice_map(::Kagome{:onehole_real}, ...) injects δ at site 4
+    # ================================================================
+    @testset "Kagome :onehole_real δ injection" begin
+        D = 3
+        pattern = [1 3; 2 4]
+        # Build a fake input array of the expected shape
+        A = randn(D, D, D, D, 2, 4)
+        # Wrap as StructArray then apply _lattice_map
+        Ar = TeneT.StructArray([A[:,:,:,:,:,i] for i in 1:4], pattern)
+        Ar2 = TeneT._lattice_map(Ar, Kagome(:onehole_real), pattern)
+
+        # Sites 1, 2, 3 unchanged (same data references)
+        @test Ar2[1,1] === Ar[1,1]
+        @test Ar2[2,1] === Ar[2,1]
+        @test Ar2[1,2] === Ar[1,2]
+        # Site 4 (empty) replaced with d=1 δ tensor
+        @test size(Ar2[2,2]) == (D, D, D, D, 1)
+        # δ_{u,l} * δ_{r,d}: nonzero only when u==l AND r==d
+        for u in 1:D, r in 1:D, d in 1:D, l in 1:D
+            expected = (u == l && r == d) ? 1.0 : 0.0
+            @test Ar2[2,2][u, r, d, l, 1] == expected
+        end
+    end
+
+    # ================================================================
     # 12. Environment struct fieldnames
     # ================================================================
     @testset "Environment struct fieldnames" begin
