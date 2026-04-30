@@ -471,7 +471,7 @@ function _onehole_bond_iPEPS_offsets(bond_type::String)
     end
 end
 
-function plot_lattice_obs(e_dict, m_dict, lattice_type::Kagome{:onehole}, pattern::Matrix{Int};
+function plot_lattice_obs(e_dict, m_dict, lattice_type::KagomeOnehole, pattern::Matrix{Int};
                           save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
                           e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN, S::Real=0.5)
     isdir(save_path) || mkpath(save_path)
@@ -929,7 +929,7 @@ function _bond_offsets_kagome_onehole(bond_type::String)
     end
 end
 
-function _draw_lattice_bonds!(ax, ::Kagome{:onehole}, all_coords, all_mdata,
+function _draw_lattice_bonds!(ax, ::KagomeOnehole, all_coords, all_mdata,
                                e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
                                e_min, e_max)
     pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
