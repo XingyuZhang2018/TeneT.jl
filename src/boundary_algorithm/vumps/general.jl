@@ -21,6 +21,18 @@ permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
 permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
 permute_fronttail(t::AbstractZero) = t
 
+# ── FR distribution helpers (StructArray level) ─────────────────────
+
+function _prescatter_FR(FR::StructArray, forloop_iter::Int)
+    split_dim = ndims(FR.data[1])
+    StructArray([prescatter_for_parallel(d, split_dim, forloop_iter) for d in FR.data], FR.pattern)
+end
+
+function _allgather_FR(FR::StructArray, forloop_iter::Int, chi::Int)
+    split_dim = ndims(FR.data[1])
+    StructArray([allgather_for_parallel(d, split_dim, forloop_iter, chi) for d in FR.data], FR.pattern)
+end
+
 # ── Offload-friendly simple_eig wrappers ────────────────────────────
 # These accept the big neighbourhood tensors as explicit args so that
 # `checkpoint(Offload(), ...)` can move them to host memory during the backward
@@ -58,10 +70,11 @@ end
 function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter,
                             inner_checkpoint::CheckpointMethod=Plain(),
                             inner_etype=nothing, final_polish_steps=0,
-                            segment_checkpoint::CheckpointMethod=Plain())
-    f(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype)
+                            segment_checkpoint::CheckpointMethod=Plain(),
+                            fr_distributed=false)
+    f(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype, fr_distributed)
     if final_polish_steps > 0
-        f_final(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing)
+        f_final(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing, fr_distributed)
         return simple_eig(f, AC1j; power_iter, segment_checkpoint, f_final, final_polish_steps)
     else
         return simple_eig(f, AC1j; power_iter, segment_checkpoint)
@@ -526,11 +539,11 @@ end
 
 # ── AC and C environment updates ────────────────────────────────────
 
-function ACmap(I::Int, ACij, FLj, FRj, Mj; ifparallel, forloop_iter, inner_etype=nothing)
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifparallel, forloop_iter, inner_etype=nothing, fr_distributed=false)
     Ni = length(FLj)
     for i in I:(I + Ni - 1)
         ir = mod1(i, Ni)
-        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter, inner_etype)
+        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter, inner_etype, fr_distributed)
     end
     return ACij
 end
@@ -541,7 +554,7 @@ end
 Compute the up environment tensor for MPS `FL`, `FR` and MPO `M`, by finding the up fixed point
 of `FL - M - FR` contracted along the physical dimension.
 """
-function ACenv(AC, FL, M, FR; alg, kwargs...)
+function ACenv(AC, FL, M, FR; alg, fr_distributed=false, kwargs...)
     @unpack inner_etype, power_iter, forloop_iter, ifparallel,
             segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
@@ -565,7 +578,7 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
     for j in 1:Nj
         p = AC.pattern[1, j]
         if p ∉ processed_indices
-            f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass, fr_distributed)
             if ifsimple_eig
                 λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
                                         AC[1, j], FL[:, j], FR[:, j], M[:, j];
@@ -573,7 +586,8 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
                                         inner_checkpoint,
                                         inner_etype=inner_etype_pass,
                                         segment_checkpoint,
-                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0,
+                                        fr_distributed)
             else
                 λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
                 verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
@@ -588,7 +602,7 @@ function ACenv(AC, FL, M, FR; alg, kwargs...)
         for i in 2:Ni
             p = AC.pattern[i, j]
             if p ∉ processed_indices
-                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass, fr_distributed)
                 AC′[i, j] = ACij / norm(ACij)
                 λAC[i, j] = λAC[1, j]
                 push!(processed_indices, p)
@@ -766,6 +780,9 @@ function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{General})
     end
     _, FL = leftenv(AL, conj(AL), M; alg)
     _, FR = rightenv(AR, conj(AR), M; alg)
+    if alg.ifparallel
+        FR = _prescatter_FR(FR, alg.forloop_iter)
+    end
     return VUMPSRuntime(AL, AR, C, FL, FR)
 end
 
@@ -837,33 +854,41 @@ Uses the power-method variant: update environments first, then re-solve AC/C.
 """
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
+    @unpack ifparallel, forloop_iter = alg
     AC = ALCtoAC(AL, C)
-    _, ACp = ACenv(AC, FL, M, FR; alg)
-    _, Cp = Cenv(C, FL, FR; alg)
+    chi = size(FL.data[1], 1)
+    FR_full = ifparallel ? _allgather_FR(FR, forloop_iter, chi) : FR
+    _, Cp = Cenv(C, FL, FR_full; alg)
+    _, ACp = ACenv(AC, FL, M, FR; alg, fr_distributed=ifparallel)
     ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
     _, FL = leftenv(AL, conj(ALp), M, FL; alg)
-    _, FR = rightenv(AR, conj(ARp), M, FR; alg)
-    _, ACp = ACenv(ACp, FL, M, FR; alg)
-    _, Cp = Cenv(Cp, FL, FR; alg)
+    _, FR_full = rightenv(AR, conj(ARp), M, FR_full; alg)
+    _, Cp = Cenv(Cp, FL, FR_full; alg)
+    FR_dist = ifparallel ? _prescatter_FR(FR_full, forloop_iter) : FR_full
+    _, ACp = ACenv(ACp, FL, M, FR_dist; alg, fr_distributed=ifparallel)
     ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
     Cp = for_gc(Cp)
-    return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
+    return VUMPSRuntime(ALp, ARp, Cp, FL, FR_dist), err
 end
 
 function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
-    AC = ALCtoAC(AL,C)
+    @unpack ifparallel, forloop_iter = alg
+    AC = ALCtoAC(AL, C)
+    chi = size(FL.data[1], 1)
+    FR_full = ifparallel ? _allgather_FR(FR, forloop_iter, chi) : FR
     _, FL =  leftenv(AL, conj(AL), M, FL; alg)
-    _, FR = rightenv(AR, conj(AR), M, FR; alg)
-    _, AC = ACenv(AC, FL, M, FR; alg)
-    _,  C =  Cenv( C, FL, FR; alg)
+    _, FR_full = rightenv(AR, conj(AR), M, FR_full; alg)
+    _,  C =  Cenv( C, FL, FR_full; alg)
+    FR_dist = ifparallel ? _prescatter_FR(FR_full, forloop_iter) : FR_full
+    _, AC = ACenv(AC, FL, M, FR_dist; alg, fr_distributed=ifparallel)
     AL, AR, errL, errR = ACCtoALAR(AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
     C = for_gc(C)
-    return VUMPSRuntime(AL, AR, C, FL, FR), err
+    return VUMPSRuntime(AL, AR, C, FL, FR_dist), err
 end
 
 # ── VUMPS iteration loop ────────────────────────────────────────────
@@ -1030,6 +1055,11 @@ Construct a `VUMPSEnv` observation environment from a single VUMPS runtime.
 """
 function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General}, Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
+    if alg.ifparallel
+        chi = size(FL.data[1], 1)
+        FR = _allgather_FR(FR, alg.forloop_iter, chi)
+        Fo = [Fo[1], FR]
+    end
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg)
     _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg)
@@ -1048,6 +1078,11 @@ function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMP
     rtup, rtdown = rt
 
     ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR
+    if alg.ifparallel
+        chi = size(FLu.data[1], 1)
+        FRu = _allgather_FR(FRu, alg.forloop_iter, chi)
+        Fo = [Fo[1], FRu]
+    end
     ACu = ALCtoAC(ALu, Cu)
 
     ALd, ARd, Cd = rtdown.AL, rtdown.AR, rtdown.C

@@ -21,6 +21,66 @@ function split_ranges(N::Integer, n::Integer)
     return split_ranges(counts)
 end
 
+"""
+    prescatter_for_parallel(tensor, split_dim, forloop_iter)
+
+Extract the local slice(s) of `tensor` that this MPI rank needs for
+`parallel(...; input_prescattered=true)`.  Returns a copy containing
+`forloop_iter` contiguous slices along `split_dim`, concatenated.
+
+AD-safe: index computation is inside `ignore_derivatives`; only the
+final `tensor[idx...]` participates in the Zygote tape.
+"""
+function prescatter_for_parallel(tensor, split_dim::Int, forloop_iter::Int)
+    idx = ChainRulesCore.ignore_derivatives() do
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        nprocs = MPI.Comm_size(comm)
+        D_split = size(tensor, split_dim)
+        ranges = split_ranges(D_split, nprocs * forloop_iter)
+        first_idx = forloop_iter * rank + 1
+        last_idx  = forloop_iter * rank + forloop_iter
+        lo = first(ranges[first_idx])
+        hi = last(ranges[last_idx])
+        ntuple(d -> d == split_dim ? (lo:hi) : (:), ndims(tensor))
+    end
+    return tensor[idx...]
+end
+
+"""
+    allgather_for_parallel(tensor_local, split_dim, forloop_iter, D_full)
+
+Inverse of `prescatter_for_parallel`: reconstruct the full tensor by
+allgathering each rank's local slice along `split_dim`.  `D_full` is
+the full extent of the split dimension (e.g. χ).
+
+Has a custom rrule in `autodiff/rules.jl`.
+"""
+function allgather_for_parallel(tensor_local, split_dim::Int, forloop_iter::Int, D_full::Int)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)
+
+    ranges = split_ranges(D_full, nprocs * forloop_iter)
+
+    first_idx = forloop_iter * rank + 1
+    last_idx  = forloop_iter * rank + forloop_iter
+    lo = first(ranges[first_idx])
+    hi = last(ranges[last_idx])
+
+    full_shape = ntuple(d -> d == split_dim ? D_full : size(tensor_local, d), ndims(tensor_local))
+    result = similar(tensor_local, full_shape)
+    idx = ntuple(d -> d == split_dim ? (lo:hi) : (:), ndims(tensor_local))
+    result[idx...] = tensor_local
+    synchronize(tensor_local)
+
+    element_size = prod(full_shape) ÷ D_full
+    counts = Cint[sum(length(ranges[(i-1)*forloop_iter+j]) for j in 1:forloop_iter) * element_size for i in 1:nprocs]
+    allgatherv_p2p!(result, counts, comm)
+
+    return result
+end
+
 # ─── Pre-allocated communication buffers ──────────────────────────────────
 
 const _comm_sendbuf = Ref{Any}(nothing)
@@ -453,7 +513,7 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=no
     return do_cast ? T_orig.(result) : result
 end
 
-function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
+function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing, input_prescattered=false)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
@@ -464,13 +524,22 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=n
         args = map(a -> _boundary_cast(inner_etype, a), args)
     end
 
-    D_split = size(args[N_in[1]])[N_in[2]]
+    D_split = input_prescattered ? size_out[N_out] : size(args[N_in[1]])[N_in[2]]
     result = similar(args[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
 
+    if input_prescattered
+        local_arg = args[N_in[1]]
+        local_ranges = split_ranges(size(local_arg, N_in[2]), forloop_iter)
+    end
+
     for i in 1:forloop_iter
         ind = forloop_iter * rank + i
-        cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+        if input_prescattered
+            cols_in = (j == N_in[2] ? local_ranges[i] : (:) for j in 1:ndims(local_arg))
+        else
+            cols_in = (j == N_in[2] ? D_split_ranges[ind] : (:) for j in 1:ndims(args[N_in[1]]))
+        end
         cols_out = (j == N_out ? D_split_ranges[ind] : (:) for j in 1: ndims(result))
         split_args = Tuple(j == N_in[1] ? @view(args[j][cols_in...]) : args[j] for j in 1:length(args))
         result[cols_out...] = f(split_args...)
@@ -587,10 +656,10 @@ function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter, inner_etype=n
     end
 end
 
-function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing)
-    N_in = (3, ndims(FR))
-    N_out = ndims(FR)
-    χ = size(FR, 1)
+function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing, fr_distributed=false)
+    N_in = (3, fr_distributed ? ndims(FL) : ndims(FR))
+    N_out = ndims(FL)
+    χ = size(FL, 1)
     if M isa Tuple
         D1 = size(M[1], 2)
         D2 = size(M[2], 2)
@@ -603,7 +672,7 @@ function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=not
         size_out = (χ,D,χ)
     end
     if ifparallel
-        return parallel(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
+        return parallel(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype, input_prescattered=fr_distributed)
     else
         return forloop(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end

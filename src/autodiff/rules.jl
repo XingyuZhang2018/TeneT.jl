@@ -129,6 +129,45 @@ function ChainRulesCore.rrule(::Type{<:C4vVUMPSEnv}, AL, C, FL)
     return env, back
 end
 
+function ChainRulesCore.rrule(::typeof(prescatter_for_parallel), tensor, split_dim::Int, forloop_iter::Int)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nprocs = MPI.Comm_size(comm)
+    D_split = size(tensor, split_dim)
+    ranges = split_ranges(D_split, nprocs * forloop_iter)
+    first_idx = forloop_iter * rank + 1
+    last_idx  = forloop_iter * rank + forloop_iter
+    lo = first(ranges[first_idx])
+    hi = last(ranges[last_idx])
+    idx = ntuple(d -> d == split_dim ? (lo:hi) : (:), ndims(tensor))
+    result = tensor[idx...]
+    function back(d_result)
+        d_tensor = zero(tensor)
+        d_tensor[idx...] .= unthunk(d_result)
+        allreduce_p2p!(d_tensor, +, comm)
+        return NoTangent(), d_tensor, NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
+function ChainRulesCore.rrule(::typeof(allgather_for_parallel), tensor_local, split_dim::Int, forloop_iter::Int, D_full::Int)
+    result = allgather_for_parallel(tensor_local, split_dim, forloop_iter, D_full)
+    function back(d_result)
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        nprocs = MPI.Comm_size(comm)
+        ranges = split_ranges(D_full, nprocs * forloop_iter)
+        first_idx = forloop_iter * rank + 1
+        last_idx  = forloop_iter * rank + forloop_iter
+        lo = first(ranges[first_idx])
+        hi = last(ranges[last_idx])
+        idx = ntuple(d -> d == split_dim ? (lo:hi) : (:), ndims(d_result))
+        d_local = unthunk(d_result)[idx...]
+        return NoTangent(), d_local, NoTangent(), NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
 function ChainRulesCore.rrule(::Type{StructArray}, data, pattern)
     S = StructArray(data, pattern)
     function back(dS)
@@ -238,7 +277,7 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     end
 end
 
-function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
+function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing, input_prescattered=false)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
@@ -253,16 +292,17 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
 
     Ain = args_c[N_in[1]]
     split_dim = N_in[2]
-    D_split = size(Ain, split_dim)
+    D_split = input_prescattered ? size_out[N_out] : size(Ain, split_dim)
     result_c = similar(args_c[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs * forloop_iter)
+    local_ranges = input_prescattered ? split_ranges(size(Ain, split_dim), forloop_iter) : nothing
 
     in_idx  = ntuple(_ -> (:), ndims(Ain))
     out_idx = ntuple(_ -> (:), ndims(result_c))
 
     for i in 1:forloop_iter
         ind = forloop_iter * rank + i
-        in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
+        in_idx_r  = Base.setindex(in_idx, input_prescattered ? local_ranges[i] : D_split_ranges[ind], split_dim)
         out_idx_r = Base.setindex(out_idx, D_split_ranges[ind], N_out)
         split_args = ntuple(length(args_c)) do j
             j == N_in[1] ? @view(args_c[j][in_idx_r...]) : args_c[j]
@@ -283,7 +323,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
         dargs_c = ntuple(i -> args_c[i] isa Tuple ? zero.(args_c[i]) : zero(args_c[i]), length(args_c))
         @views for i in 1:forloop_iter
             ind = forloop_iter * rank + i
-            in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
+            in_idx_r  = Base.setindex(in_idx, input_prescattered ? local_ranges[i] : D_split_ranges[ind], split_dim)
             out_idx_r = Base.setindex(out_idx, D_split_ranges[ind], N_out)
             split_args = ntuple(length(args_c)) do j
                 j == N_in[1] ? view(args_c[j], in_idx_r...) : args_c[j]
@@ -308,9 +348,12 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
         synchronize(args_c[1])
 
         # MPI collectives on dargs_c (still in inner_etype — 2× bandwidth).
-        has_split_gather = N_in[2] == ndims(args_c[N_in[1]])
+        # When input_prescattered, the split arg's gradient is already local-
+        # sized — no allgatherv needed.  The outer prescatter op (array
+        # indexing) handles placing the local gradient into the full tensor.
+        has_split_gather = !input_prescattered && N_in[2] == ndims(args_c[N_in[1]])
 
-        # 1) Allgatherv for split arg (if contiguous)
+        # 1) Allgatherv for split arg (if contiguous and not prescattered)
         if has_split_gather
             j = N_in[1]
             element_size = prod(size(dargs_c[j])) ÷ D_split
@@ -320,7 +363,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
 
         # 2) Allreduce non-split args via p2p with pre-allocated buffers
         for j in 1:length(args_c)
-            if j == N_in[1] && has_split_gather
+            if j == N_in[1] && (has_split_gather || input_prescattered)
                 continue
             end
             if dargs_c[j] isa Tuple
