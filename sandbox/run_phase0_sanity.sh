@@ -29,6 +29,10 @@ export LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -v cuda | 
 # doesn't exist.
 [ -f /usr/lib64/libcuda.so.1 ] && export LD_PRELOAD=/usr/lib64/libcuda.so.1
 
+# UCX warns about UCX_MEMTYPE_CACHE / UCX_ERROR_SIGNALS env vars that the
+# system module sets but UCX 1.18 doesn't use; suppress to keep output clean.
+export UCX_WARN_UNUSED_ENV_VARS=n
+
 # Discover Julia (env-specific)
 JULIA=${JULIA:-julia}
 command -v "$JULIA" >/dev/null 2>&1 || { echo "ERROR: julia not on PATH"; exit 1; }

@@ -145,17 +145,21 @@ if rank == 0
     println("[2D alltoall sanity] N=$N, dims=(N1=$N1, N2=$N2), " *
             "χ_full=$χ_full, χ_per_rank=$χ_per_rank, ncol=$ncol")
     @assert length(all_records) == 5 * N
-    all_ok = true
-    for r in 0:N-1
-        base = 5 * r
-        rk, rr1, rr2, prt, ok = all_records[base+1], all_records[base+2],
-                                all_records[base+3], all_records[base+4],
-                                all_records[base+5]
-        status = ok == 1 ? "PASS" : "FAIL"
-        println("  rank=$rk  (r1=$rr1, r2=$rr2)  partner=$prt  $status")
-        all_ok &= (ok == 1)
+    # Wrap in `let` — Julia top-level soft-scope rule treats `all_ok &= ...` as
+    # a new local declaration; the read on the RHS is then UndefVar (real bug,
+    # surfaced on first Sofia run).
+    let all_ok = true
+        for r in 0:N-1
+            base = 5 * r
+            rk, rr1, rr2, prt, ok = all_records[base+1], all_records[base+2],
+                                    all_records[base+3], all_records[base+4],
+                                    all_records[base+5]
+            status = ok == 1 ? "PASS" : "FAIL"
+            println("  rank=$rk  (r1=$rr1, r2=$rr2)  partner=$prt  $status")
+            all_ok &= (ok == 1)
+        end
+        println(all_ok ? "[2D alltoall sanity] PASS" : "[2D alltoall sanity] FAIL")
     end
-    println(all_ok ? "[2D alltoall sanity] PASS" : "[2D alltoall sanity] FAIL")
 end
 
 # Also trip a local @test on every rank so any failure is loud in the

@@ -110,17 +110,21 @@ all_records = MPI.Gather(record, comm; root=0)
 if rank == 0
     println("[2D allgather sanity] N=$N, dims=(N1=$N1, N2=$N2), χ_local=$χ_local")
     @assert length(all_records) == 5 * N
-    all_ok = true
-    for r in 0:N-1
-        base = 5 * r
-        rk, rr1, rr2, crk, ok = all_records[base+1], all_records[base+2],
-                                all_records[base+3], all_records[base+4],
-                                all_records[base+5]
-        status = ok == 1 ? "PASS" : "FAIL"
-        println("  rank=$rk  (r1=$rr1, r2=$rr2)  col_rank=$crk  $status")
-        all_ok &= (ok == 1)
+    # Wrap in `let` so `all_ok` lives in a hard scope — at script top-level,
+    # Julia's soft-scope rule turns `all_ok &= ...` into a new local declaration
+    # and the read on the RHS is UndefVar (real bug, surfaced on first Sofia run).
+    let all_ok = true
+        for r in 0:N-1
+            base = 5 * r
+            rk, rr1, rr2, crk, ok = all_records[base+1], all_records[base+2],
+                                    all_records[base+3], all_records[base+4],
+                                    all_records[base+5]
+            status = ok == 1 ? "PASS" : "FAIL"
+            println("  rank=$rk  (r1=$rr1, r2=$rr2)  col_rank=$crk  $status")
+            all_ok &= (ok == 1)
+        end
+        println(all_ok ? "[2D allgather sanity] PASS" : "[2D allgather sanity] FAIL")
     end
-    println(all_ok ? "[2D allgather sanity] PASS" : "[2D allgather sanity] FAIL")
 end
 
 # Also trip a local @test on every rank so any failure is loud in the per-rank

@@ -78,16 +78,19 @@ let
     println("  PASS  ∂(sum(abs2, reduce_scatter(x)))/∂x ≈ 2x   (n=$(length(x)))")
 end
 
-# Test 3: Composition — gradient of sum(abs2, reduce_scatter(allgather(x))) ≈ 2x
-# This tests that the rrule chain composes correctly (forward and backward
-# go through both primitives, exercising the unthunk path in both rrules).
+# Test 3: Composition over complex tensors.
+# Note: Zygote's gradient convention for f: C^n → R is to return the
+# "Wirtinger" gradient ∂f/∂(conj z), so for f(z) = Σ|z|² = Σ z·conj(z) we get
+# g = 2·z (NOT 2·conj(z)). This matters for the 2D-distributed VUMPS rrules:
+# our primitives just pass d_y through reduce_scatter / allgather, no manual
+# conj() — Zygote's complex convention flows through unchanged.
+# (This expectation was wrong in the initial draft; first Sofia run caught it.)
 let
     x = randn(ComplexF64, 4, 6)
     f(x) = sum(abs2, my_reduce_scatter(my_allgather(x)))
     g = Zygote.gradient(f, x)[1]
-    # d/dx sum(abs2, f(x)) = 2 * conj(f(x)) where f is identity here, so g ≈ 2 * conj(x)
-    @test g ≈ 2 * conj(x)
-    println("  PASS  ∂(sum(abs2, reduce_scatter(allgather(z))))/∂z ≈ 2 conj(z)   (complex, n=$(length(x)))")
+    @test g ≈ 2 * x
+    println("  PASS  ∂(sum(abs2, reduce_scatter(allgather(z))))/∂z ≈ 2z   (complex, n=$(length(x)))")
 end
 
 println("[grad sanity] all 3 Zygote gradient checks PASS")
