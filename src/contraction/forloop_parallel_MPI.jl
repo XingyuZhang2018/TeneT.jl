@@ -663,7 +663,7 @@ function Mumap_parallel(AC, ACd, FL, FR, Mu; ifparallel, forloop_iter)
     end
 end
 
-function Mdmap_parallel(AC, ACd, FL, FR, Md; ifparallel, forloop_iter) 
+function Mdmap_parallel(AC, ACd, FL, FR, Md; ifparallel, forloop_iter)
     N_in1 = (2, 4)
     N_in2 = (4, 4)
     D1 = size(FL, 2)
@@ -677,4 +677,98 @@ function Mdmap_parallel(AC, ACd, FL, FR, Md; ifparallel, forloop_iter)
     else
         return forloop_sum(Mdmap, AC, ACd, FL, FR, Md; forloop_iter, N_in1, N_in2, size_out)
     end
+end
+
+# ─── 2D distributed VUMPS primitives ──────────────────────────────────────
+#
+# Phase 1 of the 2D distributed VUMPS port (`docs/2026-05-11-2d-distributed-
+# vumps-runtime-design.md`). `allgather_dim` is the first primitive: along a
+# Cartesian sub-communicator (row_comm or col_comm of a `Cart2DGrid`), it
+# materialises the full extent of one tensor dimension that the caller knows
+# is distributed equally across the ranks of `comm`.
+#
+# Design call: dim != ndims via local permutedims dance
+# ----------------------------------------------------
+# `allgatherv_p2p!` flattens its receive buffer to a linear-index view and
+# treats each rank's contribution as a contiguous range `displs[k]+1 :
+# displs[k]+counts[k]`. In Julia's column-major layout, a slab placed at
+# `result[..., local_range]` (last-dim range) maps to one contiguous linear
+# range exactly; a slab placed at `result[local_range, ...]` (first-dim
+# range) does NOT — the bytes from each rank would be strided across the
+# linear buffer and remote contributions would land interleaved.
+#
+# The sandbox `sandbox/2d_allgather_sanity.jl` confirmed this empirically by
+# choosing a 3D recv buffer `(χ_local, χ_local, N1)` over the originally
+# proposed 2D `(χ_local·N1, χ_local)` precisely so each rank's chunk stays
+# contiguous (see file header rationale).
+#
+# Section 2 of the design doc, however, requires both first-dim (FLmap `i`,
+# FRmap `d`) and last-dim (ACmap `d`, Cmap `e`/`f`) gathers, so a last-dim-
+# only API would force ad-hoc dances into every caller. Instead we centralise
+# the dance here: when `dim != ndims(tensor_local)`, we
+#   1. permute `dim ↔ ndims` to a temporary,
+#   2. allgather on the (now last) dim via the cheap direct path,
+#   3. permute back.
+# Cost: two extra contiguous reads of the local + full tensor. Acceptable
+# because allgather is bandwidth-bound on `allgatherv_p2p!`, not allocation-
+# bound, and the maps that wrap this primitive are dominated by the
+# subsequent einsum.
+
+"""
+    allgather_dim(tensor_local, dim, comm) -> tensor_full
+
+Collect `tensor_local`'s `dim`-th dimension across all ranks in `comm`,
+producing a tensor with the full extent on that dimension. Other dimensions
+are unchanged.
+
+Equal-size partition only: every rank must contribute the same `size(tensor
+_local, dim)`. (If uneven slices become needed downstream, add a `counts`-
+taking overload that calls `split_ranges`; do not modify this method.)
+
+Implementation notes:
+
+* If `MPI.Comm_size(comm) == 1`, returns `copy(tensor_local)` — a fresh array,
+  never an alias of the input. The `copy` matters for the rrule (Task 1.4):
+  mutation of the local-shape forward output by downstream code must not be
+  visible through the input tangent.
+* When `dim == ndims(tensor_local)` the data is placed at the last-dim slab
+  of `result` and handed to `allgatherv_p2p!` directly — one contiguous range
+  per rank, optimal.
+* When `dim != ndims(tensor_local)`, the function permutes `dim ↔ ndims`,
+  runs the direct path on the transposed tensor, then permutes back. This
+  costs two extra contiguous reads but keeps the API uniform.
+
+Used by the 2D distributed maps (Phase 2+) to gather distributed boundary
+tensors along col_comm / row_comm before local einsum contractions.
+"""
+function allgather_dim(tensor_local::AbstractArray{T,N}, dim::Int, comm) where {T,N}
+    1 <= dim <= N || throw(ArgumentError("dim=$dim out of range for $(N)D tensor"))
+    M = MPI.Comm_size(comm)
+    M == 1 && return copy(tensor_local)
+
+    # Non-last-dim case: permute `dim ↔ N`, gather, permute back.
+    # See module-header note for rationale (column-major contiguity).
+    if dim != N
+        perm = ntuple(d -> d == dim ? N : (d == N ? dim : d), N)
+        permuted = permutedims(tensor_local, perm)
+        gathered = allgather_dim(permuted, N, comm)
+        return permutedims(gathered, perm)
+    end
+
+    # Direct path: dim == N (last dim, contiguous slabs).
+    rank   = MPI.Comm_rank(comm)
+    chi_local = size(tensor_local, dim)
+    chi_full  = M * chi_local
+    full_shape = ntuple(d -> d == dim ? chi_full : size(tensor_local, d), N)
+
+    result = similar(tensor_local, full_shape)
+    local_range = (rank * chi_local + 1):((rank + 1) * chi_local)
+    idx = ntuple(d -> d == dim ? local_range : Colon(), N)
+    result[idx...] = tensor_local
+    synchronize(result)  # ensure the write is visible before MPI inspects buf
+
+    elem_count = prod(size(tensor_local))
+    counts = Cint[elem_count for _ in 1:M]
+    allgatherv_p2p!(result, counts, comm)
+    return result
 end
