@@ -58,6 +58,12 @@ C4v
     segment_checkpoint::CheckpointMethod = Plain()
     inner_checkpoint::CheckpointMethod   = Plain()
     eig_checkpoint::CheckpointMethod     = Plain()
+    # subop_checkpoint — wraps each individual subop inside vumps_step
+    # (leftenv, rightenv, ACenv, Cenv, ALCtoAC, ACCtoALAR). Sits between
+    # `eig_checkpoint` and `step_checkpoint` in the granularity hierarchy.
+    # OffloadRecompute at this level frees the simple_eig tape between subops,
+    # giving better GPU pool reuse during a single forward vumps_step.
+    subop_checkpoint::CheckpointMethod   = Plain()
     step_checkpoint::CheckpointMethod    = Plain()
 end
 

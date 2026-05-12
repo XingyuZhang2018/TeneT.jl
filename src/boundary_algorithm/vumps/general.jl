@@ -854,12 +854,13 @@ end
 
 function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     @unpack AL, C, AR, FL, FR = rt
-    AC = ALCtoAC(AL,C)
-    _, FL =  leftenv(AL, conj(AL), M, FL; alg)
-    _, FR = rightenv(AR, conj(AR), M, FR; alg)
-    _, AC = ACenv(AC, FL, M, FR; alg)
-    _,  C =  Cenv( C, FL, FR; alg)
-    AL, AR, errL, errR = ACCtoALAR(AC, C)
+    sub = alg.subop_checkpoint
+    AC = ALCtoAC(AL, C)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv(a, b, m, fl; alg), AL, conj(AL), M, FL)
+    _, FR = checkpoint(sub, (a, b, m, fr) -> rightenv(a, b, m, fr; alg), AR, conj(AR), M, FR)
+    _, AC = checkpoint(sub, (ac, fl, m, fr) -> ACenv(ac, fl, m, fr; alg), AC, FL, M, FR)
+    _, C  = Cenv(C, FL, FR; alg)                  # C is chi×chi (~MB), no simple_eig — skip checkpoint
+    AL, AR, errL, errR = checkpoint(sub, ACCtoALAR, AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
     C = for_gc(C)

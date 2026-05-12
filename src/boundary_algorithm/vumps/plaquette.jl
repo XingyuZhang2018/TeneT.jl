@@ -161,11 +161,12 @@ Only uses left environments (no right canonical / right environment).
 """
 function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     @unpack AL, C, FL = rt
+    sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
-    _, FL = leftenv(AL, conj(AL), M, FL; alg)
-    _, AC = ACenv_plaq(AC, FL, M; alg)
-    _, C  = Cenv_plaq(C, FL; alg)
-    AL, err = ACCtoAL(AC, C)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv(a, b, m, fl; alg), AL, conj(AL), M, FL)
+    _, AC = checkpoint(sub, (a, fl, m) -> ACenv_plaq(a, fl, m; alg), AC, FL, M)
+    _, C  = Cenv_plaq(C, FL; alg)                 # C is chi×chi (~MB), no simple_eig — skip checkpoint
+    AL, err = checkpoint(sub, ACCtoAL, AC, C)
     C = for_gc(C)
     return PlaquetteVUMPSRuntime(AL, C, FL), err
 end
