@@ -26,9 +26,7 @@ ObsEnv time.
 """
 function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Oneside})
     alg.ifparallelupdown && error("Oneside is incompatible with ifparallelupdown=true")
-    if alg.ifupdown
-        alg.verbosity >= 2 && @info "Oneside ignores ifupdown=true; running single-side VUMPS only"
-    end
+    alg.ifupdown && @warn "Oneside ignores ifupdown=true; running single-side VUMPS only" maxlog=1
     Ni, Nj = size(M)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
@@ -57,4 +55,29 @@ will MethodError until then. Stage 2 Task 6 lands the iteration body.
 """
 function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{<:Oneside})
     return vumps_itr(rt, M, alg)
+end
+
+# ── Oneside VUMPS step ───────────────────────────────────────────────
+
+"""
+    vumps_step(rt::VUMPSRuntime, M, alg::VUMPS{<:Oneside})
+
+One step of Oneside VUMPS: leftenv → rightenv → ACenv → Cenv → ACCtoALAR.
+Structurally identical to `vumps_step(...; alg::VUMPS{General})` but without
+the separate down-VUMPS half — the down env is derived from up at ObsEnv time
+via the model trait `_oneside_down_index`.
+"""
+function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{<:Oneside})
+    @unpack AL, C, AR, FL, FR = rt
+    sub = alg.subop_checkpoint
+    AC = ALCtoAC(AL, C)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv(a, b, m, fl; alg), AL, conj(AL), M, FL)
+    _, FR = checkpoint(sub, (a, b, m, fr) -> rightenv(a, b, m, fr; alg), AR, conj(AR), M, FR)
+    _, AC = checkpoint(sub, (ac, fl, m, fr) -> ACenv(ac, fl, m, fr; alg), AC, FL, M, FR)
+    _, C  = Cenv(C, FL, FR; alg)
+    AL, AR, errL, errR = checkpoint(sub, ACCtoALAR, AC, C)
+    err = errL + errR
+    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    C = for_gc(C)
+    return VUMPSRuntime(AL, AR, C, FL, FR), err
 end
