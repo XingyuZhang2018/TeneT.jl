@@ -47,7 +47,9 @@ end
 Array(x::NamedTuple) = x
 CuArray(::Nothing) = nothing
 
-function gc(::Type{Array})
+function gc(::Type{<:Array}; threshold::Real = 0.1)
+    # threshold ignored on CPU (no pool); accepted only to keep the gc(atype; threshold)
+    # interface uniform across CuArray / ROCArray / Array.
     N_device = device_count(Array)
     for i in 1:N_device
         set_device_id!(Array, i)
