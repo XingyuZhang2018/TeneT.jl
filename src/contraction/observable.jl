@@ -162,11 +162,11 @@ function oc_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1u, A1d, A2u, A2d, A
     return dot(conj(u), ACd)
 end
 
-function contract_n3_V(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3; forloop_iter, ifparallel)
+function contract_n_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3; forloop_iter, ifparallel)
     return oc_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, conj(A1), A2, conj(A2), A3, conj(A3); forloop_iter, ifparallel)
 end
 
-function contract_o3_V(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3, O1, O2; forloop_iter, ifparallel)
+function contract_o_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3, O1, O2; forloop_iter, ifparallel)
     @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
     @tensor A3u[a,b,c,d,f] := A3[a,b,c,d,e] * O2[e,f]
     return oc_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1u, conj(A1), A2, conj(A2), A3u, conj(A3); forloop_iter, ifparallel)

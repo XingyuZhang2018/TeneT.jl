@@ -542,4 +542,34 @@
             end
         end
     end
+
+    # =========================================================================
+    # Vertical-3 strip contraction (Task 5)
+    # =========================================================================
+    @testset "contract_n_31 smoke test — atype=$atype" for atype in ATYPES
+        # Verify the renamed vertical-3 norm primitive is callable and returns
+        # a sensible (non-zero, finite) value. End-to-end physics correctness
+        # is exercised in Task 9's benchmark; this is a naming/wiring sanity check.
+        Random.seed!(7)
+        T = ComplexF64
+        d = 2  # physical leg
+
+        # 3 site tensors (5-leg, iPEPS convention: l, d, r, u, p)
+        A1 = atype(randn(T, D, D, D, D, d))
+        A2 = atype(randn(T, D, D, D, D, d))
+        A3 = atype(randn(T, D, D, D, D, d))
+
+        # leg5 path: ACu/ACd are rank-4 (χ, D, D, χ), envs are rank-4 (χ, D, D, χ)
+        ACu = atype(randn(T, χ, D, D, χ))
+        ACd = atype(randn(T, χ, D, D, χ))
+
+        FLu1 = atype(randn(T, χ, D, D, χ)); FRu1 = atype(randn(T, χ, D, D, χ))
+        FLu2 = atype(randn(T, χ, D, D, χ)); FRu2 = atype(randn(T, χ, D, D, χ))
+        FLo  = atype(randn(T, χ, D, D, χ)); FRo  = atype(randn(T, χ, D, D, χ))
+
+        n = TeneT.contract_n_31(ACu, ACd, FLu1, FRu1, FLu2, FRu2, FLo, FRo, A1, A2, A3;
+                                forloop_iter=1, ifparallel=false)
+        @test isfinite(n)
+        @test n != zero(T)
+    end
 end
