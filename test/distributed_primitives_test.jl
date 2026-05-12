@@ -370,6 +370,77 @@ end
     end
 end
 
+# ─── Task 1.6: allreduce_dim primitive + identity rrule ─────────────────
+#
+# Forward: sums tensor across all ranks in comm, every rank receives the
+# same reduced value. Shape preserved.
+#
+# rrule: IDENTITY — passes d_result through unchanged (no allreduce in
+# backward). This matches the PR #42 "per-rank Zygote semantics"
+# convention: ∂(allreduce(x_r))/∂x_r = 1 on rank r since other ranks'
+# x_{r'} are treated as constants. See rules.jl comment for the
+# rationale on why the mathematical "self-adjoint = allreduce" form
+# would introduce a spurious M-factor.
+
+@testset "allreduce_dim primitive" begin
+    if N == 4
+        grid = Cart2DGrid(2, 2)
+
+        @testset "Forward: sums rank-specific inputs" begin
+            # rank-r1 has constant tensor (r1+1); sum over col_comm = 1 + 2 = 3
+            x = fill(Float64(grid.r1 + 1), 4, 8)
+            summed = allreduce_dim(x, +, grid.col_comm)
+            @test all(summed .== 3.0)
+            @test size(summed) == size(x)  # shape preserved
+            @test summed !== x  # not aliased
+        end
+
+        @testset "Forward: M=1 short-circuit returns copy" begin
+            single = MPI.Comm_split(world, rank, 0)
+            try
+                x = rand(Float64, 4, 8)
+                y = allreduce_dim(x, +, single)
+                @test y == x
+                @test y !== x  # copy, not alias
+                @test pointer(y) != pointer(x)
+            finally
+                MPI.free(single)
+            end
+        end
+
+        @testset "rrule: identity backward (no M factor)" begin
+            x = fill(Float64(grid.r1 + 1), 4, 8)
+            # loss = sum(abs2, allreduce(x)) ≡ sum(abs2, summed) where summed = 3.0
+            loss(x) = sum(abs2, allreduce_dim(x, +, grid.col_comm))
+            g = Zygote.gradient(loss, x)[1]
+            # Per Zygote per-rank semantics: ∂loss/∂x_r = 2*summed * ∂summed/∂x_r = 2*summed*1 = 2*summed
+            # Identity rrule passes d_summed = 2*summed through unchanged, so g = 2*summed = 6.
+            # The mathematical "self-adjoint = allreduce" would multiply by M and give 12 — wrong.
+            @test g ≈ 2 .* fill(3.0, 4, 8)  # 2 * summed (which is 3.0 everywhere)
+            # Cross-check: g should NOT be 2*M*summed (12 each), which the wrong rrule would yield
+            @test !all(g .== 12.0)
+        end
+
+        @testset "rrule: gradient flow with different per-rank d_y" begin
+            # When d_y is different across ranks (production case), identity rrule
+            # gives different d_x per rank — this is the "per-rank contribution"
+            # form expected by VUMPS's boundary allreduce pattern.
+            x = fill(Float64(grid.r1 + 1), 4, 8)
+            # Loss weights y differently per rank: rank-0 multiplies by 1.0, rank-1 by 2.0
+            weight = Float64(grid.r1 + 1)
+            loss(x) = sum(weight .* allreduce_dim(x, +, grid.col_comm))
+            g = Zygote.gradient(loss, x)[1]
+            # On rank r: y = summed = 3.0 (same). loss_r = weight_r * sum(summed) = weight_r * 96
+            # ∂loss_r/∂x_r = weight_r * ∂(sum(summed))/∂x_r = weight_r * (4*8) = weight_r * 32
+            # Identity rrule: d_x = d_y = weight_r * ones (shape (4,8))
+            # No M-factor; gradient is rank-specific (per rank's local view)
+            @test g ≈ fill(weight, size(x))
+        end
+    else
+        @warn "Skipping allreduce_dim tests: requires N=4 (got $N)"
+    end
+end
+
 MPI.Barrier(world)
 # Deliberately do NOT call MPI.Finalize() — this file may be `include`d from
 # a larger MPI test driver (test/sofia_mpi_test_driver.jl or similar).

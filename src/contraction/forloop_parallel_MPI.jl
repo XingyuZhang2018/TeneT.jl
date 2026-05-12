@@ -841,3 +841,26 @@ function reduce_scatter_dim(tensor_full::AbstractArray{T,N}, dim::Int, comm) whe
     idx = ntuple(d -> d == dim ? local_range : Colon(), N)
     return reduced[idx...]
 end
+
+"""
+    allreduce_dim(tensor, op, comm) -> tensor
+
+Sum (or other reduce-op) `tensor` across all ranks in `comm`, in-place semantics
+via a fresh `result = copy(tensor)` (no mutation of caller's `tensor` — important
+because Zygote may hold the input on the tape).
+
+Output shape == input shape. Every rank receives the SAME reduced value.
+
+For VUMPS use, `op = +`. Other ops can be plumbed if needed.
+
+This primitive's `rrule` passes the upstream gradient through UNCHANGED (no
+allreduce in the backward) — see comment in `src/autodiff/rules.jl` for the
+"per-rank Zygote semantics vs mathematical adjoint" rationale.
+"""
+function allreduce_dim(tensor::AbstractArray, op, comm)
+    MPI.Comm_size(comm) == 1 && return copy(tensor)
+    result = copy(tensor)
+    synchronize(result)
+    allreduce_p2p!(result, op, comm)
+    return result
+end

@@ -65,6 +65,24 @@ function ChainRulesCore.rrule(::typeof(reduce_scatter_dim), tensor_full, dim::In
     return result, back
 end
 
+# allreduce_dim rrule: identity backward — pass d_result through unchanged.
+#
+# Rationale: same convention as allgather_dim's slice rrule. In Zygote's per-rank
+# semantics, ∂(allreduce(x_r))/∂x_r = 1 (other ranks' x_{r'} treated as
+# constants), so the backward is identity. The mathematical linear-adjoint
+# "self-adjoint = allreduce" would multiply by M when d_y is replicated, giving
+# spurious M-factor in the gradient w.r.t. rank-specific x_r. PR #42's pattern
+# uses identity here; boundary-level allreduce in `parallel()` rrule combines
+# per-rank gradients into a global gradient for shared (full) inputs.
+function ChainRulesCore.rrule(::typeof(allreduce_dim), tensor, op::typeof(+), comm)
+    result = allreduce_dim(tensor, op, comm)
+    function back(d_result)
+        # Identity: just unthunk and return as-is.
+        return NoTangent(), unthunk(d_result), NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)
