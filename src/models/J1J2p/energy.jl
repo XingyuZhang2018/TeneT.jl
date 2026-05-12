@@ -205,3 +205,109 @@ function energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::VUMPSEnv, p
     params.verbosity >= 3 && println("energy per site = $(etol/len)")
     return etol/len, e_dict
 end
+
+"""
+    energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::OnesideVUMPSEnv, params)
+
+Per-site energy of J1J2p on `:brickwall_v` under Oneside VUMPS. Mirrors the
+`env::VUMPSEnv` version with ACu/ARu → AC/AR and ACd[ir, j] / ARd[ir, j] →
+AC[ir_oneside(i), j] / AR[ir_oneside(i), j], where
+`ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)`. For J1J2p under
+single-site restriction, `ir_oneside(i) = i` — down lives at the same row as up.
+"""
+function energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::OnesideVUMPSEnv, params::iPEPSOptimize)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+    @unpack J2p = model
+    atype = _arraytype(AC[1])
+    Ni, Nj = size(AC)
+    len = length(AC.data)
+
+    ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)
+
+    terms = _heisenberg_bond_terms(model, atype)
+    terms_norot = _heisenberg_bond_terms(model, atype; ifrotate=false)
+
+    e_dict = Dict{String, Dict{String, Any}}(
+        "bond_J1H_energy"  => Dict{String, Any}(),
+        "bond_J1V_energy"  => Dict{String, Any}(),
+        "bond_J2V_energy"  => Dict{String, Any}(),
+        "bond_J2\\_energy" => Dict{String, Any}(),
+        "bond_J2/_energy"  => Dict{String, Any}()
+    )
+    etol = 0.0
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), AC.pattern))
+
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        J1h, J1v = enlarge_coupling(model, i, j)
+
+        # ── J1V (always): vertical pair (i, j) ↔ (i+1, j) ──────────────────
+        # bond-endpoint index `ir` = bottom row of pair (preserved).
+        # ACd-obs-reflection `irr` → ir_oneside(ir) under Oneside.
+        ir  = mod1(i + 1, Ni)
+        ird = ir_oneside(ir)
+        e = _contract_barebones(contract_o_21, (AC[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],AC[ird,j]), terms, params)
+        n = _contract_one(contract_n_21, (AC[i,j],FLu[i,j],A[i,j],FRu[i,j],FLo[ir,j],A[ir,j],FRo[ir,j],AC[ird,j]), params)
+        params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
+        etol += J1v * e/n
+        e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
+
+        if (i + j) % 2 != 0
+            # ── J1H: horizontal pair (i, j) ↔ (i, j+1) ─────────────────────
+            # ACd-obs-reflection of row `i` → ir_oneside(i) under Oneside.
+            id = ir_oneside(i)
+            jr = mod1(j + 1, Nj)
+            e = _contract_barebones(contract_o_12, (FLo[i,j],AC[i,j],A[i,j],AC[id,j],FRo[i,jr],AR[i,jr],A[i,jr],AR[id,jr]), terms, params)
+            n = _contract_one(contract_n_12, (FLo[i,j],AC[i,j],A[i,j],AC[id,j],FRo[i,jr],AR[i,jr],A[i,jr],AR[id,jr]), params)
+            params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
+            etol += J1h * e/n
+            e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
+
+            # ── J2/: 2×2 plaquette diagonal (i, j+1) ↔ (i+1, j) ────────────
+            ir  = mod1(i + 1, Ni)
+            ird = ir_oneside(ir)
+            jr = mod1(j + 1, Nj)
+            e2 = _contract_barebones(contract_o_22_2, (FLu[i,j], FLo[ir,j], AC[i,j], AC[ird,j], FRu[i,jr], FRo[ir,jr], AR[i,jr], AR[ird,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot, params)
+            n =  _contract_one(contract_n_22, (FLu[i,j], FLo[ir,j], AC[i,j], AC[ird,j], FRu[i,jr], FRo[ir,jr], AR[i,jr], AR[ird,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), params)
+            params.verbosity >= 4 && println("bond_J2/ = $(J2p * e2/n)")
+            etol += J2p * e2/n
+            e_dict["bond_J2/_energy"]["$(i),$(j)"] = J2p * e2/n
+        else
+            # ── J2\\: 2×2 plaquette diagonal (i, j) ↔ (i+1, j+1) ───────────
+            ir  = mod1(i + 1, Ni)
+            ird = ir_oneside(ir)
+            jr = mod1(j + 1, Nj)
+            e1 = _contract_barebones(contract_o_22_1, (FLu[i,j], FLo[ir,j], AC[i,j], AC[ird,j], FRu[i,jr], FRo[ir,jr], AR[i,jr], AR[ird,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), terms_norot, params)
+            n =  _contract_one(contract_n_22, (FLu[i,j], FLo[ir,j], AC[i,j], AC[ird,j], FRu[i,jr], FRo[ir,jr], AR[i,jr], AR[ird,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr]), params)
+            params.verbosity >= 4 && println("bond_J2\\ = $(J2p * e1/n)")
+            etol += J2p * e1/n
+            e_dict["bond_J2\\_energy"]["$(i),$(j)"] = J2p * e1/n
+
+            # ── J2V: vertical triple (i, j) ↔ (i+2, j) skipping (i+1, j) ──
+            # ACd-obs-reflection of bottom row `ir2` → ir_oneside(ir2) under Oneside.
+            ir1 = mod1(i + 1, Ni)         # middle row of strip
+            ir2 = mod1(i + 2, Ni)         # bottom row of strip
+            ir2d = ir_oneside(ir2)        # Oneside down partner of bottom row
+            e = _contract_barebones(contract_o_31,
+                (AC[i,j], AC[ir2d,j],
+                 FLu[i,j],   FRu[i,j],     # row 1 (top) up env
+                 FLu[ir1,j], FRu[ir1,j],   # row 2 (middle) up env (no operator)
+                 FLo[ir2,j], FRo[ir2,j],   # row 3 (bottom) obs env
+                 A[i,j], A[ir1,j], A[ir2,j]),
+                terms_norot, params)
+            n = _contract_one(contract_n_31,
+                (AC[i,j], AC[ir2d,j],
+                 FLu[i,j],   FRu[i,j],
+                 FLu[ir1,j], FRu[ir1,j],
+                 FLo[ir2,j], FRo[ir2,j],
+                 A[i,j], A[ir1,j], A[ir2,j]),
+                params)
+            params.verbosity >= 4 && println("bond_J2V = $(J2p * e/n)")
+            etol += J2p * e/n
+            e_dict["bond_J2V_energy"]["$(i),$(j)"] = J2p * e/n
+        end
+    end
+
+    params.verbosity >= 3 && println("energy per site = $(etol/len)")
+    return etol/len, e_dict
+end
