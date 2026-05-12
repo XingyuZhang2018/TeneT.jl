@@ -129,6 +129,11 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         g .= 0
     end
 
+    # Aggressively release tape + return CUDA pool memory to OS between LBFGS iters
+    # — without this, pool fragments after ~3 iters at large χ and triggers
+    # spurious OOM on subsequent allocations (tested: D=16 χ=768 J2=0.5).
+    gc(typeof(x))
+
     return x, f, g
 end
 
@@ -173,11 +178,11 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
         t1 = time()
         e, vjp = pullback(fenergy, x)
         params.verbosity >= 2 && printstyled(" forward calculation took $(round(time() - t1, digits = 2)) s\n"; bold=true, color=:green)
-        reclaim(x)
+        gc(typeof(x))                # unconditional pool cleanup between forward and backward
         t2 = time()
         g = vjp(1)[1]
         params.verbosity >= 2 && printstyled("backward calculation took $(round(time() - t2, digits = 2)) s\n"; bold=true, color=:green)
-        reclaim(g)
+        gc(typeof(x))                # force pool defrag after each f+g (line search accumulates otherwise)
         return e, g
     end
 
