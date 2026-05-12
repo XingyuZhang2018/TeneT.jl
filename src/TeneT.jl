@@ -79,6 +79,7 @@ include("boundary_algorithm/qrctm.jl")
 
 include("models/basic_op.jl")
 include("models/basic_interactions.jl")
+include("models/oneside_traits.jl")
 include("models/Heisenberg/energy.jl")
 include("models/Heisenberg/order_init.jl")
 include("models/Kitaev/energy.jl")
