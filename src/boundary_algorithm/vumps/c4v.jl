@@ -226,3 +226,15 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
 end
 
 ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{C4v}) = rt
+
+# Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
+# See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
+function imag_error(env::C4vVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AL, C, FL = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    AC = ALCtoAC_map(AL, C)
+    A1 = A[1]
+    My = contract_o_11(FL, AC, A1, AC, FL, iSy; ifparallel, forloop_iter)
+    n  = contract_n_11(FL, AC, A1, AC, FL; ifparallel, forloop_iter)
+    return abs(My / n)
+end

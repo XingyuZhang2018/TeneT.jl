@@ -136,3 +136,15 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
 end
 
 ObsEnv(env::CTMEnv, M::StructArray, ::QRCTM) = env
+
+# Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
+# See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
+function imag_error(env::CTMEnv, A, iSy, params::iPEPSOptimize)
+    @unpack C, T = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    To = CTCtoT(C, T)
+    A1 = A[1]
+    My = contract_o_11(To, T, A1, T, To, iSy; ifparallel, forloop_iter)
+    n  = contract_n_11(To, T, A1, T, To; ifparallel, forloop_iter)
+    return abs(My / n)
+end
