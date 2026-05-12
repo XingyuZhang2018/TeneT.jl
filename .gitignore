@@ -3,6 +3,7 @@
 *.jl.mem
 /Manifest.toml
 .vscode/settings.json
+.claude/
 *.jld2
 data
 docs/plans/
