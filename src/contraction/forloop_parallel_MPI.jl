@@ -1024,10 +1024,12 @@ function FLmap_parallel_2D(FL, ALu, ALd, M; grid::Cart2DGrid)
     @assert ndims(FL) == ndims(ALu) == ndims(ALd) "FLmap_parallel_2D: FL, ALu, ALd must have the same ndims; got $(ndims(FL)), $(ndims(ALu)), $(ndims(ALd))"
     @assert size(FL, 1) == size(ALu, 1) "FLmap_parallel_2D: FL and ALu must agree on dim 1 (the local-χ/N1 boundary)"
     @assert size(FL, ndims(FL)) == size(ALu, ndims(ALu)) == size(ALd, ndims(ALd)) "FLmap_parallel_2D: FL, ALu, ALd must agree on last dim (the local-χ/N2 boundary)"
-    @assert size(ALd, 1) == size(FL, 1) * grid.N1 "FLmap_parallel_2D: size(ALd, 1) should be N1·size(FL, 1) (ALd's `i` leg already at full χ on dim=1 across col_comm)" *
-        " — got size(ALd, 1)=$(size(ALd, 1)), N1·size(FL, 1)=$(grid.N1 * size(FL, 1))." *
-        " HINT: this assertion enforces FL.dim1 = χ/N1 (rank-local first leg) and ALd.dim1 = χ (first leg distributed on col_comm so AllGather along col → χ full)." *
-        " Caller must build ALd with its first leg distributed on col_comm, i.e. ALd shape (χ/N1, D, D, χ/N2) BEFORE allgather."
+    # ALd is 2D-distributed on entry: its `i` leg (dim 1) lives on col_comm (N1).
+    # In the 2D layout, size(ALd, 1) == χ/N1 == size(FL, 1). The AllGather inside
+    # this function (Step 2 below) brings ALd.i to full χ.
+    @assert size(ALd, 1) == size(FL, 1) "FLmap_parallel_2D: size(ALd, 1) should match size(FL, 1) = χ/N1 (the rank-local first χ leg)." *
+        " Got size(ALd, 1)=$(size(ALd, 1)), size(FL, 1)=$(size(FL, 1))." *
+        " HINT: ALd enters in its 2D-distributed form (χ/N1, D, D, χ/N2); this function does the col_comm AllGather internally."
 
     # Step 1: AllGather FL along row_comm, dim = last (i leg).
     FL_full_i  = allgather_dim_direct(FL, ndims(FL), grid.row_comm)
