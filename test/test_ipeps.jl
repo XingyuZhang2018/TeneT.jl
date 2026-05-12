@@ -331,4 +331,70 @@
         @test_throws ArgumentError TeneT.enlarge_coupling(m_plaq, 1, 1)
     end
 
+    # ================================================================
+    # energy_value(::J1J2p{Honeycomb{:brickwall_v}}, ...) smoke test
+    # Exercises: dispatch + bond enumeration (J1V/J1H/J2//J2\\/J2V keys).
+    # Indices and absolute values are validated by the Stage-1 :h↔:v
+    # benchmark in examples/; this test only catches structural breakage
+    # (MethodErrors, wrong arity, missing bond keys).
+    # ================================================================
+    @testset "energy_value J1J2p :brickwall_v smoke" begin
+        using OptimKit: LBFGS
+        using TeneT: ObsEnv, energy_value, build_A,
+                     leading_boundary, initialize_env, J1J2p
+
+        Random.seed!(7)
+        D, χ = 2, 4
+        pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+        model = J1J2p(lattice=Honeycomb{:brickwall_v}(),
+                      S=0.5, J1=1.0, J2p=0.3,
+                      ifrotate=false,
+                      couplingtype=:uniform, bondratio=1.0)
+        folder = mktempdir()
+        boundary_alg = VUMPS{TeneT.General}(ifupdown=true, ifsimple_eig=true,
+                                            maxiter=3, miniter=0,
+                                            maxiter_ad=1, miniter_ad=1,
+                                            tol=1e-3, verbosity=0, show_every=1000)
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
+                                  maxiter_restart=1, verbosity=0, folder=folder,
+                                  ifSU=false, SUτ=0.0, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        # Raw shape for :brickwall_v is (1, D, D, D, d, N) — dim-1 on l-leg.
+        # `pattern` has 6 unique site labels, so N = 6.
+        d, N = 2, 6
+        A_raw = (rand(Float64, 1, D, D, D, d, N) .- 0.5)
+        A_raw /= norm(A_raw)
+        A = build_A(A_raw, params)
+
+        rt = initialize_env(A_raw, D, χ, params)
+        rt, _ = leading_boundary(rt, A, params.boundary_alg)
+        env = ObsEnv(rt, A, params.boundary_alg)
+
+        e, e_dict = energy_value(model, A, env, params)
+        @test isfinite(e)
+        # All 5 bond categories should be present in the dict
+        @test haskey(e_dict, "bond_J1V_energy")
+        @test haskey(e_dict, "bond_J1H_energy")
+        @test haskey(e_dict, "bond_J2/_energy")
+        @test haskey(e_dict, "bond_J2\\_energy")
+        @test haskey(e_dict, "bond_J2V_energy")
+        # J1V is always-on → every (i,j) contributes
+        @test length(e_dict["bond_J1V_energy"]) == length(unique(pattern))
+        # Parity-conditional bonds populate half the sites
+        @test !isempty(e_dict["bond_J1H_energy"])
+        @test !isempty(e_dict["bond_J2/_energy"])
+        @test !isempty(e_dict["bond_J2\\_energy"])
+        @test !isempty(e_dict["bond_J2V_energy"])
+        # Each per-bond entry must be finite
+        for key in keys(e_dict)
+            for (_, v) in e_dict[key]
+                @test isfinite(v)
+            end
+        end
+    end
+
 end
