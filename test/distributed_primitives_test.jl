@@ -1,6 +1,7 @@
 # test/distributed_primitives_test.jl
 #
-# Phase 1 Task 1.3 — `allgather_dim` forward primitive.
+# Phase 1 Tasks 1.3–1.5 — `allgather_dim` / `reduce_scatter_dim` primitives
+# plus their mutual rrules.
 #
 # Verifies that `allgather_dim` (the first 2D distributed VUMPS communication
 # primitive) materialises the full extent of an equally-partitioned dimension
@@ -34,6 +35,7 @@
 using Test
 using MPI
 using TeneT
+using Zygote
 
 MPI.Initialized() || MPI.Init()
 
@@ -149,6 +151,192 @@ const rank  = MPI.Comm_rank(world)
         # other than 1 or 4 ranks indicates a misconfigured driver.
         if rank == 0
             @warn "distributed_primitives_test expects 1 or 4 MPI ranks; got N=$N. Skipping."
+        end
+    end
+end
+
+# ─── Task 1.5: reduce_scatter_dim forward primitive ──────────────────────
+@testset "reduce_scatter_dim primitive" begin
+    if N == 4
+        grid = Cart2DGrid(2, 2)
+        M_col = MPI.Comm_size(grid.col_comm)
+        @assert M_col == 2 "Cart2DGrid(2,2).col_comm should have size 2; got $M_col"
+
+        @testset "Forward: identical 1s reduced over col_comm (size 2) → 2.0 in each rank's slice" begin
+            # All ranks contribute the same `1.0`-filled tensor. allreduce
+            # sums M_col copies → 2.0. Slicing returns this rank's piece.
+            full = ones(Float64, 8, 8)
+            local_data = reduce_scatter_dim(full, 1, grid.col_comm)
+            @test size(local_data) == (4, 8)
+            @test eltype(local_data) === Float64
+            @test all(local_data .== Float64(M_col))   # = 2.0
+        end
+
+        @testset "Forward: distinct per-rank ramp exercises sum semantics" begin
+            # Each rank holds a DIFFERENT full tensor: rank r1 has (r1+1) * ones.
+            # Sum over col_comm = 1 + 2 = 3. Every rank's slice has the same
+            # post-sum value (sum is rank-replicated), differing only by which
+            # slab of rows we keep.
+            data = fill(Float64(grid.r1 + 1), 8, 8)
+            local_data = reduce_scatter_dim(data, 1, grid.col_comm)
+            @test size(local_data) == (4, 8)
+            @test all(local_data .== 3.0)
+        end
+
+        @testset "Forward: last-dim slice (no layout dance needed)" begin
+            # Unlike allgather_dim, reduce_scatter_dim does not need a permutedims
+            # dance for dim != ndims because allreduce_p2p! is layout-agnostic.
+            # We still verify last-dim slicing works to lock the invariant.
+            data = fill(Float64(grid.r1 + 1), 8, 8)
+            local_data = reduce_scatter_dim(data, 2, grid.col_comm)
+            @test size(local_data) == (8, 4)
+            @test all(local_data .== 3.0)
+        end
+
+        @testset "Forward: 4D middle-dim slice" begin
+            # Production-shape rehearsal: 4D tensor, slice along dim=2 (middle).
+            # Verifies the general N-D slicing logic.
+            data = fill(Float64(grid.r1 + 1), 2, 6, 4, 5)
+            local_data = reduce_scatter_dim(data, 2, grid.col_comm)
+            @test size(local_data) == (2, 3, 4, 5)
+            @test all(local_data .== 3.0)
+        end
+
+        @testset "Round-trip: reduce_scatter ∘ allgather is M·identity" begin
+            # Each rank starts with its own local tensor x_r. allgather_dim
+            # makes every rank see the SAME concatenated tensor g of M·χ_local
+            # rows. reduce_scatter_dim then allreduces M identical copies of g
+            # (→ M·g) and slices, so rank r gets M · g[r-slice] = M · x_r.
+            #
+            # Hence the round-trip is **M·identity**, not identity. This is
+            # the expected behavior for the rrule composition: if `allgather`
+            # appears in a forward pass, its rrule via `reduce_scatter_dim`
+            # introduces the M factor that correctly accounts for the M
+            # rank-replicated copies of the downstream scalar loss.
+            local_orig = fill(Float64(grid.r1 + 1), 4, 8)
+            full = allgather_dim(local_orig, 1, grid.col_comm)
+            recovered = reduce_scatter_dim(full, 1, grid.col_comm)
+            @test size(recovered) == size(local_orig)
+            @test recovered ≈ M_col .* local_orig
+        end
+
+        @testset "M=1 short-circuit returns a fresh copy (not an alias)" begin
+            # Mirror of the allgather_dim M=1 test: rrule mutation safety.
+            single = MPI.Comm_split(world, rank, 0)
+            try
+                @test MPI.Comm_size(single) == 1
+                data = rand(Float64, 4, 6)
+                out = reduce_scatter_dim(data, 2, single)
+                @test out == data
+                @test out !== data
+                @test pointer(out) != pointer(data)
+                out[1, 1] = 999.0
+                @test data[1, 1] != 999.0
+            finally
+                MPI.free(single)
+            end
+        end
+    elseif N == 1
+        @testset "M=1 short-circuit (single-rank driver)" begin
+            data = rand(Float64, 4, 6)
+            out = reduce_scatter_dim(data, 2, MPI.COMM_WORLD)
+            @test out == data
+            @test out !== data
+            @test pointer(out) != pointer(data)
+        end
+    else
+        if rank == 0
+            @warn "reduce_scatter_dim tests skipped: expects N=1 or N=4 ranks; got $N."
+        end
+    end
+end
+
+# ─── Task 1.4 + 1.5: rrule gradient flow via Zygote ──────────────────────
+#
+# These tests verify the rrule fires and produces correctly-shaped tangents.
+# Full finite-difference gradcheck across MPI ranks is left for end-to-end
+# parity tests (Phase 5); here we sanity-check the rrule's adjoint math
+# against the analytical expectation `2 · M · x` (see Phase 1 implementer
+# report for the derivation).
+
+@testset "allgather_dim + reduce_scatter_dim rrules (gradient flow via Zygote)" begin
+    if N == 4
+        grid = Cart2DGrid(2, 2)
+        M_col = MPI.Comm_size(grid.col_comm)
+        chi_local = 4
+
+        @testset "allgather_dim rrule: ∇ loss(x) = sum(abs2, allgather(x))" begin
+            # Forward: y = allgather_dim(x, 1, col_comm) is the SAME shared
+            # tensor on every rank (concat of M local slices). The loss
+            # L = sum(abs2, y) is therefore identical across ranks.
+            #
+            # Adjoint: d_y = 2 · y on every rank. The rrule pushes this back
+            # via reduce_scatter_dim, which allreduces M identical copies of
+            # 2y (→ 2M·y) and slices. Rank r recovers 2M · y[r-slice] = 2M·x_r.
+            #
+            # Sketch said `g ≈ 2 * x` — that's wrong. Correct is `2 * M * x`.
+            x = rand(Float64, chi_local, 8)
+            loss(z) = sum(abs2, allgather_dim(z, 1, grid.col_comm))
+            g = Zygote.gradient(loss, x)[1]
+
+            @test g !== nothing
+            @test size(g) == size(x)
+            @test g ≈ 2 * M_col * x
+        end
+
+        @testset "reduce_scatter_dim rrule: ∇ loss(x) = sum(abs2, reduce_scatter(x))" begin
+            # Forward: y_r = reduce_scatter_dim(full_bcast, 1, col_comm) =
+            #               (M · full_bcast)[r-slice] = M · full_bcast[r-slice].
+            # L_r = sum(abs2, y_r) — DIFFERENT on each rank (each rank slices
+            # a different part of the reduced full).
+            #
+            # Adjoint: d_y_r = 2 · y_r = 2M · full_bcast[r-slice]. The rrule
+            # pushes back via allgather, which concatenates each rank's 2M·slice
+            # into a single full tensor on every rank → 2M · full_bcast.
+            full = rand(Float64, 8, 8)
+            # Broadcast so every rank starts with the same input (the usual
+            # rrule-adjoint invariant for reduce_scatter).
+            full_bcast = MPI.bcast(full, 0, grid.world)
+            loss(z) = sum(abs2, reduce_scatter_dim(z, 1, grid.col_comm))
+            g = Zygote.gradient(loss, full_bcast)[1]
+
+            @test g !== nothing
+            @test size(g) == size(full_bcast)
+            @test g ≈ 2 * M_col * full_bcast
+        end
+
+        @testset "rrule round-trip: ∇ loss(x) = sum(abs2, reduce_scatter(allgather(x)))" begin
+            # End-to-end the round-trip is x ↦ M·x (see "reduce_scatter ∘
+            # allgather" round-trip test above). So L = sum(abs2, M·x) =
+            # M² · sum(abs2, x), and ∇L = 2M² · x.
+            #
+            # This verifies that the chained rrules compose correctly — the
+            # allgather rrule (= reduce_scatter on d) and reduce_scatter rrule
+            # (= allgather on d) successively transform the upstream tangent.
+            x = rand(Float64, chi_local, 8)
+            loss(z) = sum(abs2, reduce_scatter_dim(
+                                    allgather_dim(z, 1, grid.col_comm),
+                                    1, grid.col_comm))
+            g = Zygote.gradient(loss, x)[1]
+
+            @test g !== nothing
+            @test size(g) == size(x)
+            @test g ≈ 2 * M_col^2 * x
+        end
+    elseif N == 1
+        # M=1: rrules degenerate to identity. `2 · 1 · x = 2x`.
+        @testset "rrules degenerate to identity at M=1" begin
+            x = rand(Float64, 4, 6)
+            loss_g(z) = sum(abs2, allgather_dim(z, 2, MPI.COMM_WORLD))
+            loss_r(z) = sum(abs2, reduce_scatter_dim(z, 2, MPI.COMM_WORLD))
+            g_g = Zygote.gradient(loss_g, x)[1]
+            g_r = Zygote.gradient(loss_r, x)[1]
+            @test g_g ≈ 2 * x
+            @test g_r ≈ 2 * x
+        end
+    else
+        if rank == 0
+            @warn "rrule gradient tests skipped: expects N=1 or N=4 ranks; got $N."
         end
     end
 end

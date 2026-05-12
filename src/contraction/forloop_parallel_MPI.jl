@@ -772,3 +772,72 @@ function allgather_dim(tensor_local::AbstractArray{T,N}, dim::Int, comm) where {
     allgatherv_p2p!(result, counts, comm)
     return result
 end
+
+"""
+    reduce_scatter_dim(tensor_full, dim, comm) -> tensor_local
+
+Adjoint partner of `allgather_dim`: sums `tensor_full` element-wise across
+all ranks in `comm`, then returns this rank's `dim`-slice of length
+`size(tensor_full, dim) ÷ M`, where `M = MPI.Comm_size(comm)`.
+
+Equal-size partition only: `size(tensor_full, dim)` must be divisible by
+`M`. (If uneven slices become needed downstream, add a `counts`-taking
+overload that calls `split_ranges`; do not modify this method.)
+
+Semantics — when does this make sense?
+--------------------------------------
+`reduce_scatter_dim` is the rrule adjoint of `allgather_dim`. It is most
+naturally interpreted when every rank holds the **same** `tensor_full`
+(e.g. the upstream gradient `d_result` from a per-rank scalar loss, where
+the loss value is rank-replicated because each rank ran the same downstream
+op on the same gathered tensor). Under that input invariant, the allreduce
+multiplies by `M` and the final slice yields `M · tensor_full[r-slice]`.
+
+The function is well-defined for inputs that differ across ranks too — it
+simply sums them — but the round-trip identity
+    `reduce_scatter_dim(allgather_dim(x, dim, comm), dim, comm) = M · x`
+holds only because allgather makes all ranks see the same tensor first.
+
+Implementation notes:
+
+* `M == 1` short-circuits to `copy(tensor_full)` — a fresh array, never an
+  alias of the input. The local slice would equal the whole tensor; copying
+  preserves the no-aliasing contract that the `allgather_dim` rrule relies
+  on (mutation of the local-shape forward output by downstream code must
+  not be visible through the input tangent).
+* We allocate `reduced = copy(tensor_full)` before `allreduce_p2p!`
+  (in-place) because (a) Zygote may have `tensor_full` on the AD tape and
+  (b) the local-slice we return is a non-owning view of `reduced`; the copy
+  becomes the storage backing that slice. `copy` works uniformly for `CuArray`
+  and `Array`, no extra dispatch needed.
+* Unlike `allgather_dim`, no permutedims dance is required: `allreduce_p2p!`
+  sums element-wise on the flattened buffer, which is layout-agnostic. We
+  simply slice after the reduction — and slicing is well-defined for any
+  `dim` regardless of column-major contiguity.
+
+v1: implemented as allreduce + slice. v2 could call `MPI.Reduce_scatter!`
+for true O(X/M) comm if profiling shows the extra factor-of-M bandwidth
+matters at scale.
+"""
+function reduce_scatter_dim(tensor_full::AbstractArray{T,N}, dim::Int, comm) where {T,N}
+    1 <= dim <= N || throw(ArgumentError("dim=$dim out of range for $(N)D tensor"))
+    M = MPI.Comm_size(comm)
+    M == 1 && return copy(tensor_full)
+
+    chi_full = size(tensor_full, dim)
+    chi_full % M == 0 || throw(ArgumentError(
+        "reduce_scatter_dim: size(tensor_full, $dim) = $chi_full not divisible " *
+        "by M = $M (equal-size partitions only)"))
+
+    # allreduce_p2p! mutates in-place. Copy first so the caller's
+    # `tensor_full` (which Zygote may have on the AD tape) is untouched.
+    reduced = copy(tensor_full)
+    synchronize(reduced)
+    allreduce_p2p!(reduced, +, comm)
+
+    rank = MPI.Comm_rank(comm)
+    chi_local = chi_full ÷ M
+    local_range = (rank * chi_local + 1):((rank + 1) * chi_local)
+    idx = ntuple(d -> d == dim ? local_range : Colon(), N)
+    return reduced[idx...]
+end

@@ -14,6 +14,34 @@
 @non_differentiable allgatherv_p2p!(buf, counts, comm)
 @non_differentiable allreduce_p2p!(buf, op, comm)
 
+# ─── 2D distributed comm primitives — adjoints are each other ─────────────
+#
+# `allgather_dim` and `reduce_scatter_dim` are mutually adjoint linear ops:
+# the backward of one is the forward of the other on the upstream tangent.
+# Both rrules pass `unthunk(d_result)` straight through with no `conj` —
+# Zygote's complex (Wirtinger) gradient convention flows correctly through
+# linear primitives unchanged (Phase 0, Bug 2). Tangents NoTangent for
+# (function-itself, dim::Int, comm) — three NoTangents alongside the data
+# tangent makes four return values total.
+
+function ChainRulesCore.rrule(::typeof(allgather_dim), tensor_local, dim::Int, comm)
+    result = allgather_dim(tensor_local, dim, comm)
+    function back(d_result)
+        d_local = reduce_scatter_dim(unthunk(d_result), dim, comm)
+        return NoTangent(), d_local, NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
+function ChainRulesCore.rrule(::typeof(reduce_scatter_dim), tensor_full, dim::Int, comm)
+    result = reduce_scatter_dim(tensor_full, dim, comm)
+    function back(d_result)
+        d_full = allgather_dim(unthunk(d_result), dim, comm)
+        return NoTangent(), d_full, NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)

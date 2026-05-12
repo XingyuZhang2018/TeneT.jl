@@ -121,7 +121,7 @@ export VUMPS
 export QRCTM
 
 export Cart2DGrid
-export allgather_dim
+export allgather_dim, reduce_scatter_dim
 
 export Square, Honeycomb, Kagome
 export General, C4v, Plaquette
