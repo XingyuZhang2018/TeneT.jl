@@ -87,6 +87,7 @@ include("models/J1J2/energy.jl")
 include("models/J1J2/order_init.jl")
 include("models/J1J2p/energy.jl")
 include("models/J1J2p/order_init.jl")
+include("models/J1J2p/brickwall_pi6.jl")
 include("models/J1J2J3/energy.jl")
 include("models/J1J2J3/order_init.jl")
 include("models/FWavePRVB/energy.jl")
@@ -127,6 +128,7 @@ export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
 export C4v_restriction, local_min_norm
 
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
+export init_ipeps_pi6_hermitian, dumu_symmetrize
 export GradientOptimize, optimise_ipeps
 export observable
 
