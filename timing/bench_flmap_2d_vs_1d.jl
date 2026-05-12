@@ -61,6 +61,11 @@ const N2   = N ÷ N1
 const REPEATS = parse(Int, get(ENV, "BENCH_REPEATS", "5"))
 const WARMUP  = parse(Int, get(ENV, "BENCH_WARMUP",  "2"))
 const SEED    = parse(Int, get(ENV, "BENCH_SEED",    "42"))
+# total_splits/nprocs to match production bench.jl methodology (default 128 splits).
+# For nprocs=4 → forloop_iter=32. Production uses this same scheme so timings
+# are comparable to examples/MPI_parallel/benchmarks/Sofia_VUB_H200.md.
+const TOTAL_SPLITS = parse(Int, get(ENV, "BENCH_TOTAL_SPLITS", "128"))
+const FORLOOP_ITER = max(1, TOTAL_SPLITS ÷ N)
 
 @assert N == N1 * N2  "N1 ($N1) * N2 ($N2) must equal MPI world size ($N)"
 @assert CHI % N1 == 0 "CHI ($CHI) must be divisible by N1 ($N1)"
@@ -87,10 +92,10 @@ function build_full_tensors(seed)
     chi = CHI
     d = D
     p = 2  # physical leg width (Kagome/Plaquette double-layer uses p=2 for D=4 toy)
-    FL  = randn(rng, ComplexF64, chi, d, d, chi)
-    ALu = randn(rng, ComplexF64, chi, d, d, chi)
-    ALd = randn(rng, ComplexF64, chi, d, d, chi)
-    M   = randn(rng, ComplexF64, d, d, d, d, p)
+    FL  = randn(rng, Float64, chi, d, d, chi)
+    ALu = randn(rng, Float64, chi, d, d, chi)
+    ALd = randn(rng, Float64, chi, d, d, chi)
+    M   = randn(rng, Float64, d, d, d, d, p)
     return FL, ALu, ALd, M
 end
 
@@ -99,6 +104,8 @@ if rank == 0
     println("FLmap_parallel_2D vs FLmap_parallel (1D) benchmark")
     println("=" ^ 60)
     @printf("N=%d (N1=%d × N2=%d), D=%d, χ=%d, ATYPE=%s\n", N, N1, N2, D, CHI, ATYPE)
+    @printf("eltype=Float64 (matches production bench.jl)\n")
+    @printf("TOTAL_SPLITS=%d → FORLOOP_ITER=%d/rank (1D only; 2D doesn't use forloop)\n", TOTAL_SPLITS, FORLOOP_ITER)
     @printf("WARMUP=%d, REPEATS=%d, SEED=%d\n", WARMUP, REPEATS, SEED)
     flush(stdout)
 end
@@ -109,10 +116,10 @@ if rank == 0
     FL_full, ALu_full, ALd_full, M_full = build_full_tensors(SEED)
 else
     # Pre-allocate matching-size arrays for bcast.
-    FL_full  = zeros(ComplexF64, CHI, D, D, CHI)
-    ALu_full = zeros(ComplexF64, CHI, D, D, CHI)
-    ALd_full = zeros(ComplexF64, CHI, D, D, CHI)
-    M_full   = zeros(ComplexF64, D, D, D, D, 2)
+    FL_full  = zeros(Float64, CHI, D, D, CHI)
+    ALu_full = zeros(Float64, CHI, D, D, CHI)
+    ALd_full = zeros(Float64, CHI, D, D, CHI)
+    M_full   = zeros(Float64, D, D, D, D, 2)
 end
 MPI.Bcast!(FL_full,  0, world)
 MPI.Bcast!(ALu_full, 0, world)
@@ -174,7 +181,7 @@ if rank == 0
     flush(stdout)
 end
 for _ in 1:WARMUP
-    _ = FLmap_parallel(FL_1d, ALu_1d, ALd_1d, M_1d; ifparallel=true, forloop_iter=1)
+    _ = FLmap_parallel(FL_1d, ALu_1d, ALd_1d, M_1d; ifparallel=true, forloop_iter=FORLOOP_ITER)
     _ = FLmap_parallel_2D(FL_local, ALu_local, ALd_local, M_local; grid)
 end
 
@@ -185,7 +192,7 @@ if rank == 0
     flush(stdout)
 end
 times_1d = timed_runs(REPEATS) do
-    FLmap_parallel(FL_1d, ALu_1d, ALd_1d, M_1d; ifparallel=true, forloop_iter=1)
+    FLmap_parallel(FL_1d, ALu_1d, ALd_1d, M_1d; ifparallel=true, forloop_iter=FORLOOP_ITER)
 end
 
 if rank == 0
@@ -207,7 +214,7 @@ if rank == 0
     println("[correctness] running both maps once more and checking parity …")
     flush(stdout)
 end
-res_1d = FLmap_parallel(FL_1d, ALu_1d, ALd_1d, M_1d; ifparallel=true, forloop_iter=1)
+res_1d = FLmap_parallel(FL_1d, ALu_1d, ALd_1d, M_1d; ifparallel=true, forloop_iter=FORLOOP_ITER)
 res_2d_local = FLmap_parallel_2D(FL_local, ALu_local, ALd_local, M_local; grid)
 
 # Gather 2D back to full (χ, D, D, χ): first along col, then along row.
