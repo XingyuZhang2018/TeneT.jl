@@ -1056,3 +1056,134 @@ function FLmap_parallel_2D(FL, ALu, ALd, M; grid::Cart2DGrid)
     idx = ntuple(k -> k == 1 ? d_slice : Colon(), ndims(summed))
     return summed[idx...]
 end
+
+# ─── FRmap_parallel_2D — 2D-distributed FRmap (mirror of FLmap algorithm) ──
+#
+# Algorithm (mirror of FLmap_parallel_2D; see that function's header for the
+# full derivation of why AllGather + AllReduce + slice avoids the broken
+# SUMMA / AllToAll dance from design Section 2):
+#
+#   1. AllGather FR  along col_comm on the `d` leg (first χ)       → FR.d full
+#   2. AllGather ARu along row_comm on the `d` leg (last χ)        → ARu.d full
+#   3. AllGather ARd along col_comm on the `i` leg (first χ)       → ARd.i full
+#   4. Local einsum (l sum partial over slice_r2, d sum complete)  → partial[a slice_r1, e, f, i full]
+#   5. AllReduce partial along row_comm (completes l sum)          → summed
+#   6. Slice summed on i (last dim) to slice_r2                    → result[a slice_r1, e, f, i slice_r2]
+#
+# Mirror correspondence with FLmap (see design doc Section 2 for full table):
+#
+#   FLmap                                FRmap
+#   -----------------------------        -----------------------------
+#   `d` is free, aligned (dim 1)         `a` is free, aligned (dim 1)
+#   `i` is free, cross-axis (last dim)   `i` is free, cross-axis (last dim)
+#   `a` contracted, co-dist on N1        `l` contracted, co-dist on N2
+#   `i` contracted, cross-axis             `d` contracted, cross-axis
+#   AllReduce along col_comm (sums a)    AllReduce along row_comm (sums l)
+#
+# Key non-obvious choice: AllReduce is along **row_comm** (not col_comm).
+# The contracted-and-co-distributed index `l` lives on row_comm (N2);
+# completing its sum requires reducing over r2. In FLmap, the analogous
+# index `a` lives on col_comm (N1), hence FLmap reduces over col_comm.
+#
+# Local einsum mirrors the leg-5 `FRmap` in `src/contraction/basic.jl`:
+#   @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l]
+#                            * M1[e,j,g,b,p] * M2[f,k,h,c,p]
+#                            * ARu[a,b,c,d]
+# adapted to the 2D-distributed shapes: FR is (χ/N1, D, D, χ/N2),
+# ARu is (χ/N1, D, D, χ/N2), ARd is (χ/N1, D, D, χ/N2). The free `i` leg
+# in the partial is the FULL χ (gathered from ARd); `l` in the contraction
+# runs over slice_r2 (rank-local), `d` runs over the full χ (gathered).
+
+# Leg-5 local einsum used by FRmap_parallel_2D. Replicates the leg-5 FRmap
+# contraction pattern from basic.jl, with the same index convention.
+function _frmap_local_einsum_2D(FR, ARu, ARd, M1::AbstractArray{T,5}, M2::AbstractArray{S,5}) where {T,S}
+    @tensor partial[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ARu[a,b,c,d]
+    return partial
+end
+# Single-M leg-5 dispatch: M defaults to M, conj(M) (matches FRmap leg5 single-arg).
+_frmap_local_einsum_2D(FR, ARu, ARd, M::AbstractArray{T,5}) where T =
+    _frmap_local_einsum_2D(FR, ARu, ARd, M, conj(M))
+_frmap_local_einsum_2D(FR, ARu, ARd, M::Tuple{<:AbstractArray,<:AbstractArray}) =
+    _frmap_local_einsum_2D(FR, ARu, ARd, M[1], M[2])
+
+# Leg-4 local einsum (small-D / simple iPEPS): rank-4 M, rank-3 inputs.
+# Replicates leg-4 FRmap from basic.jl:
+#   @tensor result[a,d,f] := ARd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * ARu[a,b,c]
+function _frmap_local_einsum_2D(FR, ARu, ARd, M::AbstractArray{T,4}) where T
+    @tensor partial[a,d,f] := ARd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * ARu[a,b,c]
+    return partial
+end
+
+"""
+    FRmap_parallel_2D(FR, ARu, ARd, M; grid::Cart2DGrid) -> result
+
+2D-distributed `FRmap`, mirror of `FLmap_parallel_2D`. Each rank holds:
+* `FR`  with first χ distributed on col_comm (size N1) and last χ on
+  row_comm (size N2): shape `(χ/N1, D, D, χ/N2)`
+* `ARu` with first χ distributed on col_comm (size N1) and last χ on
+  row_comm (size N2): shape `(χ/N1, D, D, χ/N2)`
+* `ARd` with first χ distributed on col_comm (size N1) and last χ on
+  row_comm (size N2): shape `(χ/N1, D, D, χ/N2)`
+* `M`   replicated on every rank
+
+Returns `result` of shape `(χ/N1, D, D, χ/N2)` on each rank, with the same
+distribution convention as the inputs.
+
+Algorithm: 3× AllGather (FR.d along col, ARu.d along row, ARd.i along col),
+1× local einsum, 1× AllReduce along row_comm, 1× local slice on the last
+dim. See the section header above and `FLmap_parallel_2D` for the mirror
+derivation.
+
+Only `M::AbstractArray{T,5}` (Kagome / Plaquette double-layer) and
+`M::AbstractArray{T,4}` are wired up for v1. Tuple-of-leg5 and leg-8
+single-tensor variants are not yet supported; add overloads when
+production needs them.
+
+`grid` must satisfy `grid.N1 * grid.N2 == MPI.Comm_size(grid.world)` and
+`size(FR, 1) == size(ARu, 1) == size(ARd, 1)` (the local-χ/N1 boundary),
+`size(FR, ndims(FR)) == size(ARu, ndims(ARu)) == size(ARd, ndims(ARd))`
+(the local-χ/N2 boundary). See the `@asserts` in the body for the
+exact preconditions.
+"""
+function FRmap_parallel_2D(FR, ARu, ARd, M; grid::Cart2DGrid)
+    # Validate the 2D partition contract — fail loud on shape mismatches.
+    @assert ndims(FR) == ndims(ARu) == ndims(ARd) "FRmap_parallel_2D: FR, ARu, ARd must have the same ndims; got $(ndims(FR)), $(ndims(ARu)), $(ndims(ARd))"
+    # All three boundary tensors enter in 2D-distributed form: first χ leg
+    # (dim 1) lives on col_comm (N1), last χ leg lives on row_comm (N2).
+    # Internal AllGathers (Steps 1-3 below) bring the relevant legs to full χ.
+    @assert size(FR, 1) == size(ARu, 1) == size(ARd, 1) "FRmap_parallel_2D: FR, ARu, ARd must agree on dim 1 (the local-χ/N1 boundary)." *
+        " Got size(FR, 1)=$(size(FR, 1)), size(ARu, 1)=$(size(ARu, 1)), size(ARd, 1)=$(size(ARd, 1))." *
+        " HINT: inputs enter in 2D-distributed form (χ/N1, D, D, χ/N2); this function does the col_comm/row_comm AllGathers internally."
+    @assert size(FR, ndims(FR)) == size(ARu, ndims(ARu)) == size(ARd, ndims(ARd)) "FRmap_parallel_2D: FR, ARu, ARd must agree on last dim (the local-χ/N2 boundary)"
+
+    # Step 1: AllGather FR along col_comm, dim = 1 (d leg, distributed on N1).
+    FR_full_d  = allgather_dim_direct(FR, 1, grid.col_comm)
+    # Step 2: AllGather ARu along row_comm, dim = last (d leg, distributed on N2).
+    ARu_full_d = allgather_dim_direct(ARu, ndims(ARu), grid.row_comm)
+    # Step 3: AllGather ARd along col_comm, dim = 1 (i leg, distributed on N1).
+    ARd_full_i = allgather_dim_direct(ARd, 1, grid.col_comm)
+
+    # Step 4: local einsum. Output `partial` has a = slice_r1, i FULL.
+    # The `d` contraction (FR.d × ARu.d) is complete: both are full after
+    # gathers. The `l` contraction (FR.l × ARd.l) is only over slice_r2
+    # locally; row_comm AllReduce in Step 5 completes the sum.
+    partial = _frmap_local_einsum_2D(FR_full_d, ARu_full_d, ARd_full_i, M)
+
+    # Step 5: sum over l (only slice_r2 contributed locally) by reducing
+    # across row_comm. row_comm varies r2, so this completes the l-sum.
+    # Every row_comm member holds the same shape with the same slot mapping
+    # (a = slice_r1, i full), so AllReduce is valid.
+    summed = allreduce_dim_direct(partial, +, grid.row_comm)
+
+    # Step 6: slice on i (the last dim of summed) to this rank's slice_r2
+    # portion. After the slice the output has the same 2D distribution as
+    # the inputs: (χ/N1, ..., χ/N2). Note the slice is on `ndims(summed)`,
+    # not a fixed dim, because in leg-5 result `[a,e,f,i]` `i` is dim 4 but
+    # in leg-4 result `[a,d,f]` `f` (the cross-axis index) is dim 3.
+    chi_full = size(summed, ndims(summed))
+    @assert chi_full == grid.N2 * size(FR, ndims(FR)) "FRmap_parallel_2D: post-reduce i-leg size $chi_full doesn't match N2·χ/N2 = $(grid.N2 * size(FR, ndims(FR))); shape mismatch in einsum or upstream gather."
+    chi_per_N2 = chi_full ÷ grid.N2
+    i_slice = (grid.r2 * chi_per_N2 + 1):((grid.r2 + 1) * chi_per_N2)
+    idx = ntuple(k -> k == ndims(summed) ? i_slice : Colon(), ndims(summed))
+    return summed[idx...]
+end
