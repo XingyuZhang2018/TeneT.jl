@@ -61,12 +61,23 @@ function gc(::Type{<:CuArray})
     N_device = device_count(CuArray)
     for i in 1:N_device
         set_device_id!(CuArray, i)
-        GC.gc()
+        GC.gc(true)              # full collection, not incremental
         CUDA.reclaim()
     end
-    @debug "GC triggered"
+    @debug "GC triggered (CuArray, full)"
     return nothing
 end
+
+function gc(::Type{<:ROCArray})
+    GC.gc(true)
+    AMDGPU.HIP.reclaim()
+    @debug "GC triggered (ROCArray, full)"
+    return nothing
+end
+
+# Convenience: pass an array, dispatch on its type. Always unconditional —
+# callers that want conditional cleanup should gate themselves.
+gc(x::AbstractArray) = gc(typeof(x))
 
 function synchronize(x::AbstractArray)
     if x isa CuArray
@@ -76,22 +87,10 @@ function synchronize(x::AbstractArray)
     end
 end
 
-function reclaim(x::AbstractArray)
-    if x isa CuArray
-        if CUDA.available_memory() / CUDA.total_memory() < 0.1
-            GC.gc(true)
-            CUDA.reclaim()
-        end
-    elseif x isa ROCArray
-        GC.gc(true)
-        AMDGPU.HIP.reclaim()
-    end
-end
-
 for_gc(x) = x
 function ChainRulesCore.rrule(::typeof(for_gc), x)
     function back(dx)
-        reclaim(x[1])
+        gc(x[1])
         return NoTangent(), dx
     end
     return x, back
