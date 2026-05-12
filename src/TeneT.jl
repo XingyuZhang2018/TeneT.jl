@@ -59,6 +59,7 @@ include("patch/OptimKit_patch.jl")
 # ============================================================================
 
 include("contraction/basic.jl")
+include("contraction/cart2d_grid.jl")
 include("contraction/forloop_parallel_MPI.jl")
 include("contraction/observable.jl")
 
@@ -118,6 +119,8 @@ include("ipeps_optimize/optimize.jl")
 
 export VUMPS
 export QRCTM
+
+export Cart2DGrid
 
 export Square, Honeycomb, Kagome
 export General, C4v, Plaquette
