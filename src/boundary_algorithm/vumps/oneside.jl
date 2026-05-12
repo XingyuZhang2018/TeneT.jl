@@ -348,3 +348,30 @@ function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{<:Oneside})
     _, FRo = rightenv_oneside(AR, M, FR; alg)
     return OnesideVUMPSEnv(AC, AR, FL, FR, FLo, FRo)
 end
+
+# ── Oneside imag error indicator ─────────────────────────────────────
+
+"""
+    imag_error(env::OnesideVUMPSEnv, A, iSy, params)
+
+|⟨iSy⟩| indicator for real-valued energies under Oneside mode. Uses the
+observation env (FLo, FRo) and the up AC tensor; the "down" partner is
+`AC[ir, j]` where `ir = _oneside_down_index(typeof(model), i, Ni)`.
+
+Mirrors `imag_error(env::PlaquetteVUMPSEnv, ...)` but adapted to Oneside's
+L-R-asymmetric env: uses both FLo (left observation env) and FRo (right)
+instead of FLo on both sides.
+"""
+function imag_error(env::OnesideVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    Ni, Nj = size(A)
+    i, j = 1, 1
+    model = params.model
+    ir = _oneside_down_index(typeof(model), i, Ni)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], iSy;
+                        ifparallel, forloop_iter)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j];
+                        ifparallel, forloop_iter)
+    return abs(My / n)
+end
