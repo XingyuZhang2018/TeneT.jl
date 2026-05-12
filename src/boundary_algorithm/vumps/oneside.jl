@@ -182,3 +182,148 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{<:Oneside})
     end
     return rt, err
 end
+
+# ── Oneside left/right observation envs ──────────────────────────────
+
+"""
+    leftenv_oneside(AL, M, FL=FLint(AL, M); alg::VUMPS{Oneside{Model}}, kwargs...) where Model
+
+Left observation environment for Oneside mode. Row pairing is determined by
+the model trait `_oneside_down_index(Model, i, Ni)` instead of the hardcoded
+`ir = Ni+1-i` used by `leftenv(...; ifobs=true)`. AL is used twice (no
+separate ALd) because under U-D hermiticity ALu == ALd at the corresponding
+row (where "corresponding" is defined by the trait).
+
+Body mirrors `leftenv` exactly except for the `ir` computation.
+"""
+function leftenv_oneside(AL, M, FL=FLint(AL, M);
+                         alg::VUMPS{Oneside{Model}}, kwargs...) where Model
+    @unpack inner_etype, forloop_iter, ifparallel,
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+    # Env-level boundary cast (mirror leftenv)
+    T_orig = AL isa StructArray ? eltype(AL.data[1]) : eltype(AL)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        AL = _downcast_eltype(inner_etype, AL)
+        M  = _downcast_eltype(inner_etype, M)
+        FL = _downcast_eltype(inner_etype, FL)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
+    λL = Zygote.Buffer(randSA(Array, M.pattern))
+    FL′ = Zygote.Buffer(FL)
+    Ni, Nj = size(M)
+    processed_indices = Set{Int}()
+    power_iter = alg.power_iter_obs
+    _assert_inner_method(inner_checkpoint)
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
+    for i in 1:Ni
+        ir = _oneside_down_index(Model, i, Ni)   # ← key difference from leftenv
+        p = FL.pattern[i, 1]
+        if p ∉ processed_indices
+            f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij,
+                                 AL[i, :], AL[ir, :], M[i, :];
+                                 ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            if ifsimple_eig
+                λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
+                                         FL[i, 1], AL[i, :], AL[ir, :], M[i, :];
+                                         power_iter, ifparallel, forloop_iter,
+                                         inner_checkpoint,
+                                         inner_etype=inner_etype_pass,
+                                         segment_checkpoint,
+                                         final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+            else
+                λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM;
+                                            alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "leftenv_oneside not converged"
+            end
+            λL[i, 1], FL′[i, 1] = selectpos(λLs, FLi1s, Nj)
+            push!(processed_indices, p)
+            length(processed_indices) == length(FL.data) && break
+        end
+        for j in 2:Nj
+            p = FL.pattern[i, j]
+            if p ∉ processed_indices
+                FL′[i, j] = FLmap_parallel(FL′[i, j-1], AL[i, j-1], AL[ir, j-1], M[i, j-1];
+                                            ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                λL[i, j] = λL[i, 1]
+                push!(processed_indices, p)
+                length(processed_indices) == length(FL.data) && break
+            end
+        end
+    end
+
+    if do_env_cast
+        return copy(λL), _downcast_eltype(real(T_orig), copy(FL′))
+    end
+    return copy(λL), copy(FL′)
+end
+
+"""
+    rightenv_oneside(AR, M, FR=FRint(AR, M); alg::VUMPS{Oneside{Model}}, kwargs...) where Model
+
+Right observation environment for Oneside mode. See `leftenv_oneside`.
+"""
+function rightenv_oneside(AR, M, FR=FRint(AR, M);
+                          alg::VUMPS{Oneside{Model}}, kwargs...) where Model
+    @unpack inner_etype, forloop_iter, ifparallel,
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+    T_orig = AR isa StructArray ? eltype(AR.data[1]) : eltype(AR)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        AR = _downcast_eltype(inner_etype, AR)
+        M  = _downcast_eltype(inner_etype, M)
+        FR = _downcast_eltype(inner_etype, FR)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
+    Ni, Nj = size(M)
+    λR = Zygote.Buffer(randSA(Array, M.pattern))
+    FR′ = Zygote.Buffer(FR)
+    processed_indices = Set{Int}()
+    power_iter = alg.power_iter_obs
+    _assert_inner_method(inner_checkpoint)
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
+    for i in 1:Ni
+        ir = _oneside_down_index(Model, i, Ni)
+        p = FR.pattern[i, Nj]
+        if p ∉ processed_indices
+            f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj,
+                                  AR[i, :], AR[ir, :], M[i, :];
+                                  ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            if ifsimple_eig
+                λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
+                                        FR[i, Nj], AR[i, :], AR[ir, :], M[i, :], Nj;
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+            else
+                λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM;
+                                           alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "rightenv_oneside not converged"
+            end
+            λR[i, Nj], FR′[i, Nj] = selectpos(λRs, FR1s, Nj)
+            push!(processed_indices, p)
+            length(processed_indices) == length(FR.data) && break
+        end
+        for j in Nj-1:-1:1
+            p = FR.pattern[i, j]
+            if p ∉ processed_indices
+                FR′[i, j] = FRmap_parallel(FR′[i, j+1], AR[i, j+1], AR[ir, j+1], M[i, j+1];
+                                            ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                λR[i, j] = λR[i, Nj]
+                push!(processed_indices, p)
+                length(processed_indices) == length(FR.data) && break
+            end
+        end
+    end
+
+    if do_env_cast
+        return copy(λR), _downcast_eltype(real(T_orig), copy(FR′))
+    end
+    return copy(λR), copy(FR′)
+end

@@ -284,6 +284,73 @@
         end
 
         # ==================================================================
+        # leftenv_oneside / rightenv_oneside parity with leftenv/rightenv
+        # ==================================================================
+        @testset "leftenv_oneside vs leftenv(AL,AL,M;ifobs=true) under default trait" begin
+            # When _oneside_down_index = Ni + 1 - i (the default), leftenv_oneside should
+            # produce the SAME result as leftenv(AL, AL, M, FL; ifobs=true).
+            using TeneT: Heisenberg, leftenv_oneside, leftenv, init_env
+            Random.seed!(42)
+            χ, D = 4, 2
+            # Build a small test setup. Use Heisenberg which has the DEFAULT trait.
+            m = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
+            pattern = [1 2; 2 1]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:2]
+            M = TeneT.StructArray(M_data, pattern)
+            alg = VUMPS(Oneside(m); maxiter=2, verbosity=0)
+            rt = init_env(M, χ, alg)
+            _, FLo_via_oneside = leftenv_oneside(rt.AL, M, rt.FL; alg)
+            _, FLo_via_standard = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg)
+            for i in 1:length(FLo_via_oneside.data)
+                @test FLo_via_oneside.data[i] ≈ FLo_via_standard.data[i] rtol=1e-10
+            end
+        end
+
+        @testset "rightenv_oneside vs rightenv(AR,AR,M;ifobs=true) under default trait" begin
+            using TeneT: Heisenberg, rightenv_oneside, rightenv, init_env
+            Random.seed!(42)
+            χ, D = 4, 2
+            m = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
+            pattern = [1 2; 2 1]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:2]
+            M = TeneT.StructArray(M_data, pattern)
+            alg = VUMPS(Oneside(m); maxiter=2, verbosity=0)
+            rt = init_env(M, χ, alg)
+            _, FRo_via_oneside = rightenv_oneside(rt.AR, M, rt.FR; alg)
+            _, FRo_via_standard = rightenv(rt.AR, rt.AR, M, rt.FR; ifobs=true, alg)
+            for i in 1:length(FRo_via_oneside.data)
+                @test FRo_via_oneside.data[i] ≈ FRo_via_standard.data[i] rtol=1e-10
+            end
+        end
+
+        @testset "leftenv_oneside with J1J2p override differs from standard" begin
+            # When _oneside_down_index = i (J1J2p :brickwall_v override), leftenv_oneside
+            # pairs AL[i,:] with AL[i,:] (same row). leftenv(AL, AL, M, FL; ifobs=true)
+            # pairs AL[i,:] with AL[Ni+1-i,:]. These should DIFFER for Ni > 2.
+            using TeneT: J1J2p, leftenv_oneside, leftenv, init_env
+            Random.seed!(42)
+            χ, D = 4, 2
+            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
+            # Ni = 6 (non-trivial — Ni+1-i ≠ i)
+            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:6]
+            M = TeneT.StructArray(M_data, pattern)
+            alg = VUMPS(Oneside(m); maxiter=2, verbosity=0)
+            rt = init_env(M, χ, alg)
+            _, FLo_via_oneside = leftenv_oneside(rt.AL, M, rt.FL; alg)
+            _, FLo_via_standard = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg)
+            # Should differ at some entry
+            differs = false
+            for i in 1:length(FLo_via_oneside.data)
+                if !isapprox(FLo_via_oneside.data[i], FLo_via_standard.data[i]; rtol=1e-6)
+                    differs = true
+                    break
+                end
+            end
+            @test differs
+        end
+
+        # ==================================================================
         # QRCTM
         # ==================================================================
         @testset "QRCTM" begin
