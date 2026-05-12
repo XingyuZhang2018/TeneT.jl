@@ -48,14 +48,21 @@ Array(x::NamedTuple) = x
 CuArray(::Nothing) = nothing
 
 function gc(::Type{<:Array}; threshold::Real = 0.1)
-    # threshold ignored on CPU (no pool); accepted only to keep the gc(atype; threshold)
-    # interface uniform across CuArray / ROCArray / Array.
+    # Same gate as the GPU branches: fire only when free RAM ratio drops below
+    # `threshold`. `threshold = Inf` forces unconditional collection.
+    # Note: on Linux, `Sys.free_memory()` reports MemFree (excluding reclaimable
+    # caches), so the ratio reads low even with plenty of usable memory — raise
+    # the threshold or pass `Inf` if you want the same effective behaviour as
+    # Windows, where Sys.free_memory() tracks MemAvailable.
+    if threshold !== Inf && Sys.free_memory() / Sys.total_memory() >= threshold
+        return nothing
+    end
     N_device = device_count(Array)
     for i in 1:N_device
         set_device_id!(Array, i)
-        GC.gc()
+        GC.gc(true)               # full collection — match GPU branch
     end
-    @debug "GC triggered"
+    @debug "GC triggered (CPU, full)"
     return nothing
 end
 
