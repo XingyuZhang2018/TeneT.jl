@@ -66,6 +66,13 @@ function gc(::Type{<:Array}; threshold::Real = 0.1)
     return nothing
 end
 
+# Per-job toggle for whether to return pool memory to the driver after each
+# `gc()` fire.  Set `TeneT.GC_RECLAIM_POOL[] = false` at script start to
+# diagnose suspected reclaim-induced OOMs (driver fails to give the segment
+# back when the pool tries to re-grow).  Default `true` preserves legacy
+# behaviour.
+const GC_RECLAIM_POOL = Ref(true)
+
 # Threshold-gated GPU GC + pool reclaim.
 #   threshold ∈ (0, 1]: fire only when available_memory/total_memory < threshold
 #   threshold = Inf:    unconditional (every call)
@@ -79,9 +86,9 @@ function gc(::Type{<:CuArray}; threshold::Real = 0.1)
     for i in 1:N_device
         set_device_id!(CuArray, i)
         GC.gc(true)               # full collection, not incremental
-        CUDA.reclaim()
+        GC_RECLAIM_POOL[] && CUDA.reclaim()
     end
-    @debug "GC triggered (CuArray, full)"
+    @debug "GC triggered (CuArray, full; reclaim=$(GC_RECLAIM_POOL[]))"
     return nothing
 end
 
@@ -90,8 +97,8 @@ function gc(::Type{<:ROCArray}; threshold::Real = 0.1)
     # honour the threshold only when caller passes Inf (force) — otherwise
     # always fire (legacy behaviour).
     GC.gc(true)
-    AMDGPU.HIP.reclaim()
-    @debug "GC triggered (ROCArray, full)"
+    GC_RECLAIM_POOL[] && AMDGPU.HIP.reclaim()
+    @debug "GC triggered (ROCArray, full; reclaim=$(GC_RECLAIM_POOL[]))"
     return nothing
 end
 
