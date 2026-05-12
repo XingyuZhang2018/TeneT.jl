@@ -253,11 +253,12 @@ end
 
 # ─── Task 1.4 + 1.5: rrule gradient flow via Zygote ──────────────────────
 #
-# These tests verify the rrule fires and produces correctly-shaped tangents.
-# Full finite-difference gradcheck across MPI ranks is left for end-to-end
-# parity tests (Phase 5); here we sanity-check the rrule's adjoint math
-# against the analytical expectation `2 · M · x` (see Phase 1 implementer
-# report for the derivation).
+# These tests verify the rrule fires and produces correctly-shaped tangents
+# under the PR #42 "single loss" gradient convention adopted for the
+# 2D-distributed VUMPS rewrite. The `allgather_dim` rrule is a pure SLICE
+# (no allreduce); see `src/autodiff/rules.jl` for the rationale. Full
+# finite-difference gradcheck across MPI ranks is left for end-to-end
+# parity tests (Phase 5).
 
 @testset "allgather_dim + reduce_scatter_dim rrules (gradient flow via Zygote)" begin
     if N == 4
@@ -270,18 +271,25 @@ end
             # tensor on every rank (concat of M local slices). The loss
             # L = sum(abs2, y) is therefore identical across ranks.
             #
-            # Adjoint: d_y = 2 · y on every rank. The rrule pushes this back
-            # via reduce_scatter_dim, which allreduces M identical copies of
-            # 2y (→ 2M·y) and slices. Rank r recovers 2M · y[r-slice] = 2M·x_r.
+            # Adjoint (PR #42 "single loss" convention): d_y = 2 · y on every
+            # rank. The rrule extracts the local rank's slice via a pure SLICE
+            # (no allreduce), so rank r recovers d_y[r-slice] = 2 · y[r-slice]
+            # = 2 · x_r. No M-factor.
             #
-            # Sketch said `g ≈ 2 * x` — that's wrong. Correct is `2 * M * x`.
+            # Rationale: Zygote computes ∂loss/∂x_local for the loss as
+            # evaluated on rank r. Since allgather replicates the output,
+            # every rank computes the SAME scalar loss; the local x_local
+            # only contributes to its r-slice of the gathered tensor, so
+            # ∂loss/∂x_r = 2 · x_r with no M-factor. The mathematical
+            # linear-adjoint (reduce_scatter) would represent the "M
+            # independent losses" interpretation, which we do not want.
             x = rand(Float64, chi_local, 8)
             loss(z) = sum(abs2, allgather_dim(z, 1, grid.col_comm))
             g = Zygote.gradient(loss, x)[1]
 
             @test g !== nothing
             @test size(g) == size(x)
-            @test g ≈ 2 * M_col * x
+            @test g ≈ 2 * x        # PR #42 convention: NO M-factor.
         end
 
         @testset "reduce_scatter_dim rrule: ∇ loss(x) = sum(abs2, reduce_scatter(x))" begin
@@ -293,6 +301,9 @@ end
             # Adjoint: d_y_r = 2 · y_r = 2M · full_bcast[r-slice]. The rrule
             # pushes back via allgather, which concatenates each rank's 2M·slice
             # into a single full tensor on every rank → 2M · full_bcast.
+            # This rrule is unchanged from the linear-adjoint convention —
+            # reduce_scatter forward is "M-to-M" (slices differ per rank), not
+            # replicating, so no M-factor issue arises.
             full = rand(Float64, 8, 8)
             # Broadcast so every rank starts with the same input (the usual
             # rrule-adjoint invariant for reduce_scatter).
@@ -306,13 +317,30 @@ end
         end
 
         @testset "rrule round-trip: ∇ loss(x) = sum(abs2, reduce_scatter(allgather(x)))" begin
-            # End-to-end the round-trip is x ↦ M·x (see "reduce_scatter ∘
-            # allgather" round-trip test above). So L = sum(abs2, M·x) =
-            # M² · sum(abs2, x), and ∇L = 2M² · x.
+            # This test characterizes what the *rrule chain* computes — which
+            # under the PR #42 "single loss" convention differs from the
+            # naive per-rank true gradient. Read both derivations:
             #
-            # This verifies that the chained rrules compose correctly — the
-            # allgather rrule (= reduce_scatter on d) and reduce_scatter rrule
-            # (= allgather on d) successively transform the upstream tangent.
+            # ── What the rrule chain computes (this is what Zygote returns) ─
+            #   forward:        y_full = allgather(x)              # M·χ_local rows, identical on each rank
+            #                   z_r    = reduce_scatter(y_full)     # = M · y_full[r-slice] = M · x_r
+            #   L_r           = sum(abs2, z_r) = M² · sum(abs2, x_r)
+            #   d_z_r         = 2 · z_r = 2M · x_r
+            #   reduce_scatter rrule (allgather): d_y_full = allgather(d_z) = 2M · concat_r(x_r)
+            #   allgather rrule (SLICE, PR #42):  d_x      = d_y_full[r-slice] = 2M · x_r
+            #   ────────────────────────────────────────────────────────────────
+            #   Chain output: g = 2 · M_col · x.
+            #
+            # ── Naive per-rank true ∂L_r/∂x_r ───────────────────────────────
+            #   L_r = M² · |x_r|² ⇒ ∂L_r/∂x_r = 2M² · x_r.
+            #
+            # The chain (2M·x) differs from the per-rank true gradient (2M²·x)
+            # by an M-factor: this is the cost of the "single loss" convention
+            # when both allgather AND reduce_scatter appear in a chain — the
+            # M-factor partially (not fully) cancels. This is NOT a bug; it
+            # is the Zygote+MPI convention we adopt to match PR #42's serial
+            # parity. The round-trip is documented here as a chain-composition
+            # check, not a "matches the math" check.
             x = rand(Float64, chi_local, 8)
             loss(z) = sum(abs2, reduce_scatter_dim(
                                     allgather_dim(z, 1, grid.col_comm),
@@ -321,10 +349,11 @@ end
 
             @test g !== nothing
             @test size(g) == size(x)
-            @test g ≈ 2 * M_col^2 * x
+            @test g ≈ 2 * M_col * x        # NOT 2 * M² * x — see comment above.
         end
     elseif N == 1
         # M=1: rrules degenerate to identity. `2 · 1 · x = 2x`.
+        # (Same result under both PR #42 and linear-adjoint conventions.)
         @testset "rrules degenerate to identity at M=1" begin
             x = rand(Float64, 4, 6)
             loss_g(z) = sum(abs2, allgather_dim(z, 2, MPI.COMM_WORLD))

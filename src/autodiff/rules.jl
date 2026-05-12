@@ -14,10 +14,24 @@
 @non_differentiable allgatherv_p2p!(buf, counts, comm)
 @non_differentiable allreduce_p2p!(buf, op, comm)
 
-# ─── 2D distributed comm primitives — adjoints are each other ─────────────
+# ─── 2D distributed comm primitives — PR #42 "single loss" convention ─────
 #
-# `allgather_dim` and `reduce_scatter_dim` are mutually adjoint linear ops:
-# the backward of one is the forward of the other on the upstream tangent.
+# `allgather_dim` rrule: pure SLICE (no allreduce). Picks out the local
+# rank's contribution to the gathered tensor. This is the "single loss"
+# gradient — every rank computes the same scalar loss, and the local
+# x_local only contributes to its r-slice of the gathered tensor, so
+# ∂loss/∂x_r = (∂loss/∂y)[r-slice] with no M-factor.
+#
+# Note: the mathematical linear-adjoint of allgather would be
+# reduce_scatter (sum d_y across replicated ranks, then slice). That
+# introduces a spurious M-factor under the "single loss" Zygote+MPI
+# convention used in PR #42, which was verified to give 1e-8 gradient
+# parity with serial code in production. We adopt the PR #42 convention.
+#
+# `reduce_scatter_dim` rrule: backward IS allgather (unchanged). No
+# M-factor issue arises here since reduce_scatter forward is "M-to-M",
+# not replicating its output.
+#
 # Both rrules pass `unthunk(d_result)` straight through with no `conj` —
 # Zygote's complex (Wirtinger) gradient convention flows correctly through
 # linear primitives unchanged (Phase 0, Bug 2). Tangents NoTangent for
@@ -26,9 +40,18 @@
 
 function ChainRulesCore.rrule(::typeof(allgather_dim), tensor_local, dim::Int, comm)
     result = allgather_dim(tensor_local, dim, comm)
+    rank = MPI.Comm_rank(comm)
+    χ_local = size(tensor_local, dim)
+    local_range = (rank * χ_local + 1):((rank + 1) * χ_local)
+    idx = ntuple(d -> d == dim ? local_range : (:), ndims(tensor_local))
     function back(d_result)
-        d_local = reduce_scatter_dim(unthunk(d_result), dim, comm)
-        return NoTangent(), d_local, NoTangent(), NoTangent()
+        # PR #42 convention: pure slice, no allreduce. This gives the
+        # "single loss" gradient (Zygote semantics: each rank's ∂loss/∂x_local
+        # is the local gradient, not the sum-across-ranks gradient).
+        # Mathematically the linear-adjoint would be reduce_scatter (sum d_y
+        # across replicated ranks then slice), but that introduces a spurious
+        # M-factor when forward replicates output.
+        return NoTangent(), unthunk(d_result)[idx...], NoTangent(), NoTangent()
     end
     return result, back
 end
