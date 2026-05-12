@@ -310,7 +310,7 @@ Apply gauge transformation to all sites of a multi-site iPEPS tensor `A` (6-leg,
 `G = [Gh, Gv]` are vectors of matrices indexed by site number (one matrix per site).
 Uses `params.pattern` to determine the unit cell layout.
 
-For Honeycomb{:brickwall} (detected by D2 ≠ D4), odd-parity sites are permuted with
+For Honeycomb{:brickwall_h} (detected by D2 ≠ D4), odd-parity sites are permuted with
 (3,4,1,2,5) before applying the gauge and permuted back afterwards, matching the
 brickwall orientation convention used in `_lattice_map`.  In this case Gv has mixed
 sizes: I(D2) at even-parity sites and D4×D4 matrices at odd-parity sites.
@@ -320,7 +320,7 @@ function gauge_transfer(A, G, params)
     pattern = params.pattern
     Ni, Nj = size(pattern)
     D2, D4 = size(A, 2), size(A, 4)
-    brickwall = D2 != D4   # true only for Honeycomb{:brickwall}
+    brickwall = D2 != D4   # true only for Honeycomb{:brickwall_h}
     A_buf = Zygote.Buffer(A)
     for q in 1:size(A, 6)
         i, j = Tuple(findfirst(==(q), pattern))
@@ -348,7 +348,7 @@ Find gauge matrices `G = [Gh, Gv]` that minimize the Frobenius norm of the
 gauge-transformed iPEPS tensor. Uses LBFGS optimization from OptimKit.
 
 Gauge matrices are stored as `Vector{Matrix}` (one matrix per site), allowing
-mixed sizes for Honeycomb{:brickwall}: even-parity sites get `I(D2)` (trivial,
+mixed sizes for Honeycomb{:brickwall_h}: even-parity sites get `I(D2)` (trivial,
 dim-1 bond), odd-parity sites get `I(D4)` (full D×D bond).
 """
 function find_local_min_norm_G(A, params)
@@ -357,7 +357,7 @@ function find_local_min_norm_G(A, params)
 
     D1, D2, D3, D4, _, N = size(A)
     eltypeA = eltype(A)
-    brickwall = D2 != D4   # true only for Honeycomb{:brickwall}
+    brickwall = D2 != D4   # true only for Honeycomb{:brickwall_h}
 
     # Horizontal gauge: D1×D1 per site (D1 == D3 always).
     Gh_init = [Matrix{eltypeA}(I, D1, D1) for _ in 1:N]

@@ -13,7 +13,7 @@ J1-J2 Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-neig
     ifrotate::Bool = true
     couplingtype::Symbol = :uniform # :uniform, :plaquette, :dimmer1, :dimmer2, :mixed
     bondratio::Real = 1.0 # only used when couplingtype is not :uniform
-                          # for Honeycomb{:brickwall}, bondratio<1 is plaquette, bondratio>1 is dimmer
+                          # for Honeycomb{:brickwall_h}, bondratio<1 is plaquette, bondratio>1 is dimmer
 end
 
 function energy_value(model::J1J2{Square}, A, env::VUMPSEnv, params::iPEPSOptimize)
@@ -201,7 +201,7 @@ function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize
     return etol*2, e_dict
 end
 
-function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::J1J2{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack J2 = model
     atype = _arraytype(ACu[1])
@@ -273,7 +273,7 @@ function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::VUMPSEnv, para
     return etol/len, e_dict
 end
 
-function energy_value(model::J1J2{Honeycomb{:brickwall}}, A, env::PlaquetteVUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::J1J2{Honeycomb{:brickwall_h}}, A, env::PlaquetteVUMPSEnv, params::iPEPSOptimize)
     model.ifrotate == true || throw(ArgumentError("model.ifrotate must be true for Plaquette VUMPS energy evaluation"))
 
     @unpack AL, C, FLu, FLo = env

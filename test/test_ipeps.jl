@@ -22,7 +22,7 @@
         D, d = 2, 2
         tensors = [randn(D, 1, D, D, d) for _ in 1:4]
         A = StructArray(tensors, pattern)
-        A_out = _lattice_map(A, Honeycomb{:brickwall}(), pattern)
+        A_out = _lattice_map(A, Honeycomb{:brickwall_h}(), pattern)
         # _lattice_map iterates over data indices 1:length(unique(pattern))
         # and uses CartesianIndices(pattern) with linear indexing to determine parity.
         # For pattern [1 2; 3 4] (column-major):
@@ -167,7 +167,7 @@
         @test size(A_hm) == (D, D, D, D, d^2, N)
 
         # Honeycomb brickwall: (D,1,D,D,d,N)
-        A_hb = _init_random_ipeps(Honeycomb{:brickwall}(), Float64, D, d, N, Ni, Nj)
+        A_hb = _init_random_ipeps(Honeycomb{:brickwall_h}(), Float64, D, d, N, Ni, Nj)
         @test size(A_hb) == (D, 1, D, D, d, N)
 
         # Kagome :onehole — (D,D,D,D,d,N), requires Ni,Nj even

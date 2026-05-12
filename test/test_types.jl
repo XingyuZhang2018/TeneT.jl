@@ -3,11 +3,11 @@
     # ---- Lattice type hierarchy ----
     @testset "Lattice types" begin
         @test Square() isa TeneT.AbstractLattice
-        @test Honeycomb() isa TeneT.AbstractLattice
+        @test Honeycomb{:brickwall_h}() isa TeneT.AbstractLattice
         @test Kagome() isa TeneT.AbstractLattice
 
-        # Honeycomb default mode is :brickwall
-        @test Honeycomb() isa Honeycomb{:brickwall}
+        # Honeycomb default mode is :brickwall_h
+        @test Honeycomb{:brickwall_h}() isa Honeycomb{:brickwall_h}
         @test Honeycomb{:merge}() isa Honeycomb{:merge}
         @test Honeycomb{:merge}() isa TeneT.AbstractLattice
     end
@@ -15,7 +15,7 @@
     # ---- Lattice show methods ----
     @testset "Lattice show" begin
         @test sprint(show, Square()) == "Square"
-        @test sprint(show, Honeycomb()) == "Honeycomb_brickwall"
+        @test sprint(show, Honeycomb{:brickwall_h}()) == "Honeycomb_brickwall_h"
         @test sprint(show, Honeycomb{:merge}()) == "Honeycomb_merge"
         @test sprint(show, Kagome()) == "Kagome"
     end

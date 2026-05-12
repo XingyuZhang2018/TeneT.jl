@@ -57,7 +57,7 @@ function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         p = AC.pattern[1,j]
         if L <: Plaquette{Square}
             jr = mod1(j + 1, Nj)
-        elseif L <: Plaquette{Honeycomb{:brickwall}}
+        elseif L <: Plaquette{Honeycomb{:brickwall_h}}
             jr = mod1(Nj - j , Nj)
         else
             error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")
@@ -117,7 +117,7 @@ function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
         jl = mod1(j + 1, Nj)
         if L <: Plaquette{Square}
             jr = mod1(j + 1, Nj)
-        elseif L <: Plaquette{Honeycomb{:brickwall}}
+        elseif L <: Plaquette{Honeycomb{:brickwall_h}}
             jr = mod1(Nj - j , Nj)
         else
             error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")

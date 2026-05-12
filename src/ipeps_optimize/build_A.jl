@@ -94,14 +94,14 @@ function _lattice_map(A, ::Kagome{:onehole_real}, pattern)
 end
 
 """
-    _lattice_map(A, ::Honeycomb{:brickwall}, pattern)
+    _lattice_map(A, ::Honeycomb{:brickwall_h}, pattern)
 
 Brickwall mapping: permute legs on odd-parity sites so the brickwall
 honeycomb maps onto a square lattice.
 """
-function _lattice_map(A, ::Honeycomb{:brickwall}, pattern)
+function _lattice_map(A, ::Honeycomb{:brickwall_h}, pattern)
     Ni, Nj = size(pattern)
-    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("For Honeycomb{:brickwall}, pattern must have even dimensions."))
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("For Honeycomb{:brickwall_h}, pattern must have even dimensions."))
     n_unique = length(unique(pattern))
     return StructArray([
         begin

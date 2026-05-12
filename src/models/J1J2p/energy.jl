@@ -6,7 +6,7 @@ export J1J2p
 J1-J2p Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-neighbor coupling `J2p` on a given lattice, but only on the one triangle not two on the Honeycomb lattice.
 """
 @kwdef mutable struct J1J2p{L<:AbstractLattice} <: HamiltonianModel
-    lattice::L = Honeycomb{:brickwall}()
+    lattice::L = Honeycomb{:brickwall_h}()
     S::Real = 1/2
     J1::Real = 1.0
     J2p::Real = 0.5
@@ -15,7 +15,7 @@ J1-J2p Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-nei
     bondratio::Real = 1.0 # only used when couplingtype is not :uniform
 end
 
-function energy_value(model::J1J2p{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::J1J2p{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack J2p = model
     atype = _arraytype(ACu[1])

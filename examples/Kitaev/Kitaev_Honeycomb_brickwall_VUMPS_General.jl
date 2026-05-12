@@ -16,7 +16,7 @@ D, χ, χshift, maxiter_restart = 2, 20, 1, 10
 #            2 4]
 pattern = [1 3 5 2 4 6;
            2 4 6 1 3 5]
-model = Kitaev(lattice=Honeycomb(:brickwall), 
+model = Kitaev(lattice=Honeycomb(:brickwall_h), 
                S=0.5, Jx=-1.0, Jy=-1.0, Jz=-1.0, 
                couplingtype=:plaquette, bondratio=1.0)
 No = 3

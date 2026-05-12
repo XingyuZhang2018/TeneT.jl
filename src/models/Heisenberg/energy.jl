@@ -130,7 +130,7 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
     return etol*2, e_dict
 end
 
-function energy_value(model::Heisenberg{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::Heisenberg{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
     Ni, Nj = size(ACu)

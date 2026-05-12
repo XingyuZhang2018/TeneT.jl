@@ -52,7 +52,7 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
                          save_format=params.plot_format, S=params.model.S)
     end
 
-    # if params.model.lattice == Honeycomb(:brickwall)
+    # if params.model.lattice == Honeycomb(:brickwall_h)
     #     Wp_value(params.model, A, env, params)
     #     fwave_order(params.model, A, env, params)
     # end

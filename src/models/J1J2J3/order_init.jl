@@ -1,11 +1,11 @@
-function enlarge_coupling(model::J1J2J3{Honeycomb{:brickwall}}, ::Val{:uniform}, i, j)
+function enlarge_coupling(model::J1J2J3{Honeycomb{:brickwall_h}}, ::Val{:uniform}, i, j)
     J1 = model.J1
     J1h = J1v = J1
 
     return J1h, J1v
 end
 
-function enlarge_coupling(model::J1J2J3{Honeycomb{:brickwall}}, ::Val{:plaquette}, i, j)
+function enlarge_coupling(model::J1J2J3{Honeycomb{:brickwall_h}}, ::Val{:plaquette}, i, j)
     @unpack J1, bondratio = model
     J1h = J1v = J1
     if (i,j) in [(1,2),(2,5)]
