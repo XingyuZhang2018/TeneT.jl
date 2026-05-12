@@ -74,6 +74,11 @@ function _init_random_ipeps(::Honeycomb{:brickwall_h}, etype, D, d, N, Ni, Nj)
     rand(etype, D, 1, D, D, d, N) .+ 1
 end
 
+function _init_random_ipeps(::Honeycomb{:brickwall_v}, etype, D, d, N, Ni, Nj)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("Ni and Nj should be even for brickwall_v"))
+    rand(etype, 1, D, D, D, d, N) .+ 1
+end
+
 # --------------------------------------------------------------------------- #
 #  init_ipeps_to_D  —  enlarge bond dimension via SU parameterization
 # --------------------------------------------------------------------------- #

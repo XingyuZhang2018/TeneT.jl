@@ -242,4 +242,15 @@
         @test result ≈ real(dot(dx1, dx2))
     end
 
+    @testset "_init_random_ipeps :brickwall_v" begin
+        D, d, N, Ni, Nj = 3, 2, 6, 6, 2
+        A = TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, Ni, Nj)
+        @test size(A) == (1, D, D, D, d, N)   # dim-1 on l leg
+        @test eltype(A) == Float64
+
+        # Constraint: Ni, Nj both even
+        @test_throws ArgumentError TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, 3, 2)
+        @test_throws ArgumentError TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, 2, 3)
+    end
+
 end
