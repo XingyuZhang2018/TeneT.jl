@@ -70,6 +70,7 @@ include("boundary_algorithm/interface.jl")
 include("boundary_algorithm/environment.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")
+include("boundary_algorithm/vumps/oneside.jl")
 include("boundary_algorithm/vumps/c4v.jl")
 include("boundary_algorithm/qrctm.jl")
 

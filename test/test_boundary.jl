@@ -241,6 +241,29 @@
         end
 
         # ==================================================================
+        # Oneside init_env dispatch
+        # ==================================================================
+        @testset "Oneside init_env dispatch" begin
+            using TeneT: J1J2p
+            Random.seed!(42)
+            χ, D = 4, 2
+            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3, ifrotate=false)
+            alg = VUMPS(Oneside(m); maxiter=2, maxiter_ad=0, verbosity=0,
+                        ifupdown=false, ifparallelupdown=false)
+
+            # Use a tiny rank-4 M directly — pattern doesn't matter for dispatch,
+            # only that init_env can produce canonical forms + envs from it.
+            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+            M_data = [atype(rand(Float64, D, D, D, D)) for _ in 1:6]
+            M = TeneT.StructArray(M_data, pattern)
+
+            rt = TeneT.init_env(M, χ, alg)
+            @test rt isa TeneT.VUMPSRuntime
+            @test size(rt.AL, 1) == 6
+            @test size(rt.AL, 2) == 2
+        end
+
+        # ==================================================================
         # QRCTM
         # ==================================================================
         @testset "QRCTM" begin
