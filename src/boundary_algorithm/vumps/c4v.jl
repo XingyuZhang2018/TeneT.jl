@@ -43,7 +43,7 @@ function leftenv_c4v(ALu, ALd, M, FL; alg, kwargs...)
                                 segment_checkpoint,
                                 final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
     else
-        λFLs, FLs, info = eigsolve(f, FL, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
+        λFLs, FLs, info = eigsolve(f, FL, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "FLenv_c4v not converged"
     end
 
@@ -64,7 +64,7 @@ function ACenv_c4v(AC, FL, M; alg, kwargs...)
                                 segment_checkpoint,
                                 final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
     else
-        λACs, ACs, info = eigsolve(f, AC, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
+        λACs, ACs, info = eigsolve(f, AC, 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
         verbosity >= 1 && info.converged == 0 && @warn "ACenv_c4v not converged"
     end
 
