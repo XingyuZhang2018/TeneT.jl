@@ -36,6 +36,13 @@ a `Cart2DGrid`; we do **not** initialize MPI for you, so that the host
 program controls the MPI lifecycle (single `Init` / `Finalize` per
 process).
 
+Each `Cart2DGrid` creates 3 MPI communicators (`cart`, `row_comm`,
+`col_comm`) that are not freed automatically. Treat instances as
+program-lifetime. If a future use case needs per-iteration construction
+(rare), add a finalizer or `Base.close(::Cart2DGrid)` that calls
+`MPI.Comm_free` on the 3 owned communicators. Do not free `world` — the
+grid borrows it.
+
 Serial mode
 -----------
 When run without `mpirun` (single Julia process), `MPI.Comm_size(world)`
@@ -61,6 +68,8 @@ Construct a 2D `N1 × N2` Cartesian process grid on top of `world`.
 Requires `MPI.Init` to have been called and `N1 * N2 == MPI.Comm_size(world)`.
 """
 function Cart2DGrid(N1::Int, N2::Int, world::MPI.Comm = MPI.COMM_WORLD)
+    @assert MPI.Initialized() "Cart2DGrid: call MPI.Init() before constructing — see https://juliaparallel.org/MPI.jl/stable/usage/#Initializing-and-finalizing-MPI"
+    @assert N1 > 0 && N2 > 0 "Cart2DGrid: N1=$N1, N2=$N2 must be positive"
     @assert N1 * N2 == MPI.Comm_size(world) (
         "Cart2DGrid: N1 * N2 = $(N1 * N2) must equal MPI world size " *
         "$(MPI.Comm_size(world))"
@@ -78,8 +87,7 @@ end
     Cart2DGrid()
 
 Degenerate 1×1 serial-mode grid; convenient for single-process runs that
-share code with the distributed path. Requires `MPI.Init` to have been
-called (MPI.jl initialises lazily, but explicit `MPI.Init()` is what the
-distributed entry points already do, so we keep the contract uniform).
+share code with the distributed path. The 2-arg constructor asserts
+`MPI.Initialized()`, so callers don't need to repeat the check here.
 """
 Cart2DGrid() = Cart2DGrid(1, 1)

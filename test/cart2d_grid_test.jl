@@ -41,6 +41,10 @@ const rank  = MPI.Comm_rank(world)
             @test MPI.Comm_size(grid.row_comm) == 2
             @test MPI.Comm_size(grid.col_comm) == 2
 
+            # Canonical Cart_sub invariant: sub-comm ranks preserve the coordinate they vary along
+            @test MPI.Comm_rank(grid.row_comm) == grid.r2
+            @test MPI.Comm_rank(grid.col_comm) == grid.r1
+
             # Per-rank (r1, r2) must lie in valid ranges.
             @test 0 <= grid.r1 < grid.N1
             @test 0 <= grid.r2 < grid.N2
