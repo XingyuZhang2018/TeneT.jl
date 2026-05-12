@@ -205,6 +205,42 @@
         end
 
         # ==================================================================
+        # OnesideVUMPSEnv construction + conversion
+        # ==================================================================
+        @testset "OnesideVUMPSEnv construction + conversion" begin
+            χ, D = 4, 2
+            # Build minimal 6×2 StructArrays to stuff into env (purely structural test —
+            # the actual content isn't physically meaningful, just shape-correct).
+            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+            AC_data = [rand(χ, D, χ) for _ in 1:6]    # leg3
+            AR_data = [rand(χ, D, χ) for _ in 1:6]
+            FL_data = [rand(χ, D, χ) for _ in 1:6]
+            FR_data = [rand(χ, D, χ) for _ in 1:6]
+            AC = TeneT.StructArray(AC_data, pattern)
+            AR = TeneT.StructArray(AR_data, pattern)
+            FLu = TeneT.StructArray(FL_data, pattern)
+            FRu = TeneT.StructArray(FR_data, pattern)
+            FLo = TeneT.StructArray(deepcopy(FL_data), pattern)
+            FRo = TeneT.StructArray(deepcopy(FR_data), pattern)
+
+            env = TeneT.OnesideVUMPSEnv(AC, AR, FLu, FRu, FLo, FRo)
+            @test env.AC === AC
+            @test env.AR === AR
+            @test env.FLu === FLu
+            @test env.FRu === FRu
+            @test env.FLo === FLo
+            @test env.FRo === FRo
+
+            # CPU/GPU conversion smoke
+            env_cpu = Array(env)
+            @test env_cpu isa TeneT.OnesideVUMPSEnv
+            @test env_cpu.AC.data[1] isa Array
+
+            # _atype_of returns the device array type (Array on CPU)
+            @test TeneT._atype_of(env) == Array
+        end
+
+        # ==================================================================
         # QRCTM
         # ==================================================================
         @testset "QRCTM" begin

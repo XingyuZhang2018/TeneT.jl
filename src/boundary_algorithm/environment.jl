@@ -84,6 +84,31 @@ struct PlaquetteVUMPSEnv
     FLo::StructArray
 end
 
+"""
+    OnesideVUMPSEnv
+
+Observation environment for `VUMPS{<:Oneside}` mode. Has both left and right
+environments (no L-R symmetry to exploit) but only the up canonical tensors
+(no ACd/ARd because U-D hermiticity makes them equal to AC/AR under the
+model's `_oneside_down_index` row mapping).
+
+# Fields
+- `AC`:  Mixed-canonical tensor (= ACu; ACd derived via `_oneside_down_index`)
+- `AR`:  Right-canonical tensor (= ARu)
+- `FLu`: Up left environment (= FL from runtime, ifobs=false)
+- `FRu`: Up right environment (= FR from runtime, ifobs=false)
+- `FLo`: Observation left environment (from `leftenv_oneside`)
+- `FRo`: Observation right environment (from `rightenv_oneside`)
+"""
+struct OnesideVUMPSEnv
+    AC::StructArray
+    AR::StructArray
+    FLu::StructArray
+    FRu::StructArray
+    FLo::StructArray
+    FRo::StructArray
+end
+
 struct C4vVUMPSEnv{CT <: AbstractArray{<:Number, 2}, ET <: Union{leg3, leg4}}
     AL::ET
     C::CT
@@ -117,6 +142,16 @@ Array(rt::PlaquetteVUMPSRuntime)    = PlaquetteVUMPSRuntime(Array(rt.AL), Array(
 CuArray(rt::PlaquetteVUMPSRuntime)  = PlaquetteVUMPSRuntime(CuArray(rt.AL), CuArray(rt.C), CuArray(rt.FL))
 ROCArray(rt::PlaquetteVUMPSRuntime) = PlaquetteVUMPSRuntime(ROCArray(rt.AL), ROCArray(rt.C), ROCArray(rt.FL))
 
+Array(env::OnesideVUMPSEnv) = OnesideVUMPSEnv(Array(env.AC), Array(env.AR),
+                                              Array(env.FLu), Array(env.FRu),
+                                              Array(env.FLo), Array(env.FRo))
+CuArray(env::OnesideVUMPSEnv) = OnesideVUMPSEnv(CuArray(env.AC), CuArray(env.AR),
+                                                CuArray(env.FLu), CuArray(env.FRu),
+                                                CuArray(env.FLo), CuArray(env.FRo))
+ROCArray(env::OnesideVUMPSEnv) = OnesideVUMPSEnv(ROCArray(env.AC), ROCArray(env.AR),
+                                                 ROCArray(env.FLu), ROCArray(env.FRu),
+                                                 ROCArray(env.FLo), ROCArray(env.FRo))
+
 Array(rt::C4vVUMPSEnv)    = C4vVUMPSEnv(Array(rt.AL), Array(rt.C), Array(rt.FL))
 CuArray(rt::C4vVUMPSEnv)  = C4vVUMPSEnv(CuArray(rt.AL), CuArray(rt.C), CuArray(rt.FL))
 ROCArray(rt::C4vVUMPSEnv) = C4vVUMPSEnv(ROCArray(rt.AL), ROCArray(rt.C), ROCArray(rt.FL))
@@ -133,6 +168,7 @@ ROCArray(rt::CTMEnv) = CTMEnv(ROCArray(rt.C), ROCArray(rt.T))
 _atype_of(S::StructArray) = isempty(S.data) ? nothing : _atype_of(S.data[1])
 _atype_of(rt::VUMPSRuntime) = _atype_of(rt.AL)
 _atype_of(rt::PlaquetteVUMPSRuntime) = _atype_of(rt.AL)
+_atype_of(env::OnesideVUMPSEnv) = _atype_of(env.AC)
 _atype_of(rt::C4vVUMPSEnv) = _atype_of(rt.AL)
 
 # _offload_to_host: walk struct, replace each device leaf with a CPU copy.
@@ -142,6 +178,10 @@ _offload_to_host(rt::VUMPSRuntime) =
                  _offload_to_host(rt.C),  _offload_to_host(rt.FL), _offload_to_host(rt.FR))
 _offload_to_host(rt::PlaquetteVUMPSRuntime) =
     PlaquetteVUMPSRuntime(_offload_to_host(rt.AL), _offload_to_host(rt.C), _offload_to_host(rt.FL))
+_offload_to_host(env::OnesideVUMPSEnv) = OnesideVUMPSEnv(
+    _offload_to_host(env.AC), _offload_to_host(env.AR),
+    _offload_to_host(env.FLu), _offload_to_host(env.FRu),
+    _offload_to_host(env.FLo), _offload_to_host(env.FRo))
 _offload_to_host(rt::C4vVUMPSEnv) =
     C4vVUMPSEnv(_offload_to_host(rt.AL), _offload_to_host(rt.C), _offload_to_host(rt.FL))
 
@@ -154,6 +194,10 @@ _to_atype(atype, rt::VUMPSRuntime) =
                  _to_atype(atype, rt.C),  _to_atype(atype, rt.FL), _to_atype(atype, rt.FR))
 _to_atype(atype, rt::PlaquetteVUMPSRuntime) =
     PlaquetteVUMPSRuntime(_to_atype(atype, rt.AL), _to_atype(atype, rt.C), _to_atype(atype, rt.FL))
+_to_atype(atype, env::OnesideVUMPSEnv) = OnesideVUMPSEnv(
+    _to_atype(atype, env.AC), _to_atype(atype, env.AR),
+    _to_atype(atype, env.FLu), _to_atype(atype, env.FRu),
+    _to_atype(atype, env.FLo), _to_atype(atype, env.FRo))
 _to_atype(atype, rt::C4vVUMPSEnv) =
     C4vVUMPSEnv(_to_atype(atype, rt.AL), _to_atype(atype, rt.C), _to_atype(atype, rt.FL))
 
