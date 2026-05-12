@@ -323,6 +323,27 @@
             end
         end
 
+        @testset "Oneside ObsEnv" begin
+            using TeneT: J1J2p, init_env, leading_boundary, ObsEnv, OnesideVUMPSEnv
+            Random.seed!(42)
+            χ, D = 4, 2
+            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:6]
+            M = TeneT.StructArray(M_data, pattern)
+            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
+            alg = VUMPS(Oneside(m); maxiter=2, maxiter_ad=0, verbosity=0)
+            rt = init_env(M, χ, alg)
+            rt_conv, _ = leading_boundary(rt, M, alg)
+            env = ObsEnv(rt_conv, M, alg)
+            @test env isa OnesideVUMPSEnv
+            @test size(env.AC) == size(M)
+            @test size(env.AR) == size(M)
+            @test size(env.FLu) == size(M)
+            @test size(env.FRu) == size(M)
+            @test size(env.FLo) == size(M)
+            @test size(env.FRo) == size(M)
+        end
+
         @testset "leftenv_oneside with J1J2p override differs from standard" begin
             # When _oneside_down_index = i (J1J2p :brickwall_v override), leftenv_oneside
             # pairs AL[i,:] with AL[i,:] (same row). leftenv(AL, AL, M, FL; ifobs=true)

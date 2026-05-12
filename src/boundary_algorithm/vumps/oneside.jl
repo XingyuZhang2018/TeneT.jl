@@ -327,3 +327,24 @@ function rightenv_oneside(AR, M, FR=FRint(AR, M);
     end
     return copy(λR), copy(FR′)
 end
+
+# ── Oneside observation environment ──────────────────────────────────
+
+"""
+    ObsEnv(rt::VUMPSRuntime, M, alg::VUMPS{<:Oneside})
+
+Construct an `OnesideVUMPSEnv` from a Oneside runtime. Computes FLo / FRo via
+`leftenv_oneside` / `rightenv_oneside` (which use the model's row-index trait
+`_oneside_down_index`). FLu / FRu are reused from the runtime's FL / FR.
+
+The resulting env has 6 fields (AC, AR, FLu, FRu, FLo, FRo) — no separate
+ACd / ARd because U-D hermiticity makes them equal to AC / AR at the row
+determined by the trait.
+"""
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{<:Oneside})
+    @unpack AL, AR, C, FL, FR = rt
+    AC = ALCtoAC(AL, C)
+    _, FLo = leftenv_oneside(AL, M, FL; alg)
+    _, FRo = rightenv_oneside(AR, M, FR; alg)
+    return OnesideVUMPSEnv(AC, AR, FL, FR, FLo, FRo)
+end
