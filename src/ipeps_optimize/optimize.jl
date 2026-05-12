@@ -33,37 +33,40 @@ function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
 
     ignore_derivatives() do
         update!(rt′, rt)
-        if eltype(e) <: Complex
-            fδEierr[4] = abs(imag(e))
+        fδEierr[4] = if eltype(e) <: Complex
+            abs(imag(e))
         else
-            iSy = real(1im * const_Sy(params.model.S))
-            d = size(iSy, 1)
-            Id = Matrix{Float64}(I, d, d)
-            n = round(Int, log(d, size(A[1], 5)))
-            iSy = _arraytype(A[1])(reduce(kron, fill(Id, n - 1); init = iSy))
-            @unpack forloop_iter, ifparallel = params.boundary_alg
-            i, j = 1, 1
-            Ni,Nj = size(A)
-            if env isa VUMPSEnv
-                @unpack FLo, ACu, ACd, FRo = env
-                id = Ni + 1 - i
-                My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
-                n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
-                fδEierr[4] = abs(My/n)
-            elseif env isa PlaquetteVUMPSEnv
-                @unpack AL, C, FLu, FLo = env
-                AC = ALCtoAC(AL, C)
-                ir = 2
-                jr = params.model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
-                My = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], iSy; ifparallel, forloop_iter)
-                n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
-                fδEierr[4] = abs(My/n)
-            end
+            iSy = _imag_error_op(A, params)
+            imag_error(env, A, iSy, params)
         end
     end
 
     return e
 end
+
+"""
+    _imag_error_op(A, params) -> iSy
+
+Prepare the `iSy = real(i·Sy)` operator extended over all sites of the
+local unit cell, ready to be inserted into a single-site one-point
+measurement. Returned as the array type matching `A`.
+"""
+function _imag_error_op(A, params)
+    iSy = real(1im * const_Sy(params.model.S))
+    d = size(iSy, 1)
+    Id = Matrix{Float64}(I, d, d)
+    n_sites = round(Int, log(d, size(A[1], 5)))
+    return _arraytype(A[1])(reduce(kron, fill(Id, n_sites - 1); init = iSy))
+end
+
+"""
+    imag_error(env, A, iSy, params::iPEPSOptimize) -> Float64
+
+|⟨iSy⟩| — sign-bias contamination indicator for real-valued energies.
+Dispatch on `env` type: each boundary contraction (General VUMPS,
+Plaquette VUMPS, C4v, ...) implements its own version in its own file.
+"""
+function imag_error end
 
 # ============================================================================
 # LBFGS inner product

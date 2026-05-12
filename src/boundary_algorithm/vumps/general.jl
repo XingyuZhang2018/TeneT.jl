@@ -1059,3 +1059,16 @@ function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMP
     _, FRo = rightenv(ARu, ARd, M, Fo[2]; ifobs = true, alg)
     return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
 end
+
+# Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
+# See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
+function imag_error(env::VUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack FLo, ACu, ACd, FRo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    Ni, Nj = size(A)
+    i, j = 1, 1
+    id = Ni + 1 - i
+    My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
+    n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
+    return abs(My / n)
+end

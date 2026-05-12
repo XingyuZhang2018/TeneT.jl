@@ -297,3 +297,17 @@ function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquett
     _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
     return PlaquetteVUMPSEnv(AL, C, FL, FLo)
 end
+
+# Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
+# See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
+function imag_error(env::PlaquetteVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AL, C, FLu, FLo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    AC = ALCtoAC(AL, C)
+    Ni, Nj = size(A)
+    i, j, ir = 1, 1, 2
+    jr = params.model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], iSy; ifparallel, forloop_iter)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
+    return abs(My / n)
+end
