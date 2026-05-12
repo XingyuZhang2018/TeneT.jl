@@ -274,4 +274,48 @@
         end
     end
 
+    @testset "gauge_transfer dispatches on lattice for :brickwall_v" begin
+        using LinearAlgebra: I
+        D, d = 2, 2
+        Ni, Nj = 2, 2
+        N = Ni * Nj
+        pattern = reshape(1:N, Ni, Nj)
+        # :brickwall_v shape (1, D, D, D, d, N) — dim-1 on l-leg
+        A = rand(Float64, 1, D, D, D, d, N)
+
+        # Identity gauges for :brickwall_v.  Gh[q] lives on the r-leg (post-permutation),
+        # whose size depends on parity:
+        #   even-parity site (no permutation): r-leg size = D3 = D  → Gh = I(D)
+        #   odd-parity site  (after (3,4,1,2,5) permutation): new r-leg = old l-leg = D1 = 1
+        #                                                    → Gh = I(1)
+        # Gv[q] lives on the d-leg, always size D2 = D in :brickwall_v.
+        Gh = [begin
+                  pos = findfirst(==(q), pattern)
+                  sum(Tuple(pos)) % 2 == 0 ? Matrix{Float64}(I, D, D) : Matrix{Float64}(I, 1, 1)
+              end for q in 1:N]
+        Gv = [Matrix{Float64}(I, D, D) for _ in 1:N]
+
+        mock_params = (pattern=pattern, model=(lattice=Honeycomb{:brickwall_v}(),))
+        A2 = TeneT.gauge_transfer(A, [Gh, Gv], mock_params)
+
+        # Identity gauges should leave A unchanged (and the routing through the lattice
+        # type ensures the gauges land on the right legs for both parities).
+        @test size(A2) == size(A)
+        @test A2 ≈ A
+
+        # Sanity: gauge_transfer with `:brickwall_h` (existing logic) still works as before.
+        # For :brickwall_h, Gh is uniform I(D) (r-leg always size D), while Gv is parity-mixed
+        # (d-leg size 1 at even-parity, D at odd-parity).
+        Ah = rand(Float64, D, 1, D, D, d, N)
+        Gh_h = [Matrix{Float64}(I, D, D) for _ in 1:N]
+        Gv_h = [begin
+                    pos = findfirst(==(q), pattern)
+                    sum(Tuple(pos)) % 2 == 0 ? Matrix{Float64}(I, 1, 1) : Matrix{Float64}(I, D, D)
+                end for q in 1:N]
+        mock_params_h = (pattern=pattern, model=(lattice=Honeycomb{:brickwall_h}(),))
+        Ah2 = TeneT.gauge_transfer(Ah, [Gh_h, Gv_h], mock_params_h)
+        @test size(Ah2) == size(Ah)
+        @test Ah2 ≈ Ah
+    end
+
 end

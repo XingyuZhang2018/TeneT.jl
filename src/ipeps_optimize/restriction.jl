@@ -303,6 +303,20 @@ Returns `G1 * A * G2 * G3 * G4` contracted on the four virtual legs.
 """
 local_gauge_contraction(A, G) = @tensor out[e,f,g,h,p] := A[a,b,c,d,p] * G[1][e,a] * G[2][b,f] * G[3][c,g] * G[4][h,d]
 
+# Lattice-typed brickwall queries (replaces the old D2!=D4 heuristic)
+_is_brickwall(::Honeycomb{:brickwall_h}) = true
+_is_brickwall(::Honeycomb{:brickwall_v}) = true
+_is_brickwall(::AbstractLattice) = false
+
+# Odd-parity permutation for brickwall — same (3,4,1,2,5) for both h and v
+_brickwall_odd_perm(::Honeycomb{:brickwall_h}) = (3,4,1,2,5)
+_brickwall_odd_perm(::Honeycomb{:brickwall_v}) = (3,4,1,2,5)
+
+# Which leg is dim-1 for parity-dependent gauge sizes:
+# :brickwall_h → leg 2 (d-leg); :brickwall_v → leg 1 (l-leg)
+_brickwall_dim1_leg(::Honeycomb{:brickwall_h}) = 2
+_brickwall_dim1_leg(::Honeycomb{:brickwall_v}) = 1
+
 """
     gauge_transfer(A, G, params)
 
@@ -310,29 +324,33 @@ Apply gauge transformation to all sites of a multi-site iPEPS tensor `A` (6-leg,
 `G = [Gh, Gv]` are vectors of matrices indexed by site number (one matrix per site).
 Uses `params.pattern` to determine the unit cell layout.
 
-For Honeycomb{:brickwall_h} (detected by D2 ≠ D4), odd-parity sites are permuted with
-(3,4,1,2,5) before applying the gauge and permuted back afterwards, matching the
-brickwall orientation convention used in `_lattice_map`.  In this case Gv has mixed
-sizes: I(D2) at even-parity sites and D4×D4 matrices at odd-parity sites.
+For Honeycomb brickwall lattices (`:brickwall_h` or `:brickwall_v`, detected via
+`params.model.lattice`), odd-parity sites are permuted with (3,4,1,2,5) before
+applying the gauge and permuted back afterwards, matching the brickwall orientation
+convention used in `_lattice_map`. For `:brickwall_h`, Gv has parity-dependent sizes
+(`I(1)` at even-parity, `D×D` at odd-parity) while Gh is uniformly `D×D`; for
+`:brickwall_v`, Gh has parity-dependent sizes (`D×D` at even-parity, `I(1)` at
+odd-parity) while Gv is uniformly `D×D`.
 """
 function gauge_transfer(A, G, params)
     Gh, Gv = G
     pattern = params.pattern
+    lattice = params.model.lattice
     Ni, Nj = size(pattern)
-    D2, D4 = size(A, 2), size(A, 4)
-    brickwall = D2 != D4   # true only for Honeycomb{:brickwall_h}
+    is_bw = _is_brickwall(lattice)
+    perm = is_bw ? _brickwall_odd_perm(lattice) : nothing
     A_buf = Zygote.Buffer(A)
     for q in 1:size(A, 6)
         i, j = Tuple(findfirst(==(q), pattern))
         ir = mod1(i - 1, Ni)
         jr = mod1(j - 1, Nj)
         gauges = [inv(Gh[pattern[i,jr]]), Gv[q], Gh[q], inv(Gv[pattern[ir,j]])]
-        if brickwall && (i + j) % 2 != 0
-            # Odd-parity brickwall site: permute (l,d,r,u,p)→(r,u,l,d,p) so the effective
-            # dim-D bond becomes leg 2, apply gauge, then permute back.
+        if is_bw && (i + j) % 2 != 0
+            # Odd-parity brickwall site: permute legs so the effective dim-D bonds align
+            # with the canonical leg order, apply gauge, then permute back.
             A_buf[:,:,:,:,:,q] = permutedims(
-                local_gauge_contraction(permutedims(A[:,:,:,:,:,q], (3,4,1,2,5)), gauges),
-                (3,4,1,2,5)
+                local_gauge_contraction(permutedims(A[:,:,:,:,:,q], perm), gauges),
+                perm
             )
         else
             A_buf[:,:,:,:,:,q] = local_gauge_contraction(A[:,:,:,:,:,q], gauges)
@@ -347,9 +365,14 @@ end
 Find gauge matrices `G = [Gh, Gv]` that minimize the Frobenius norm of the
 gauge-transformed iPEPS tensor. Uses LBFGS optimization from OptimKit.
 
-Gauge matrices are stored as `Vector{Matrix}` (one matrix per site), allowing
-mixed sizes for Honeycomb{:brickwall_h}: even-parity sites get `I(D2)` (trivial,
-dim-1 bond), odd-parity sites get `I(D4)` (full D×D bond).
+Gauge matrices are stored as `Vector{Matrix}` (one matrix per site). Dispatch
+on `params.model.lattice` selects the appropriate gauge layout:
+
+- `Honeycomb{:brickwall_h}` (dim-1 on the d-leg): `Gv` has mixed sizes
+  (`I(D2)` at even-parity sites, `I(D4)` at odd-parity sites); `Gh` is uniformly `I(D1)`.
+- `Honeycomb{:brickwall_v}` (dim-1 on the l-leg): `Gh` has mixed sizes
+  (`I(D3)` at even-parity sites, `I(D1)` at odd-parity sites); `Gv` is uniformly `I(D2)`.
+- Other lattices: both gauges are uniform identity matrices of the corresponding sizes.
 """
 function find_local_min_norm_G(A, params)
     atype = _arraytype(A)
@@ -357,27 +380,51 @@ function find_local_min_norm_G(A, params)
 
     D1, D2, D3, D4, _, N = size(A)
     eltypeA = eltype(A)
-    brickwall = D2 != D4   # true only for Honeycomb{:brickwall_h}
+    lattice = params.model.lattice
 
-    # Horizontal gauge: D1×D1 per site (D1 == D3 always).
-    Gh_init = [Matrix{eltypeA}(I, D1, D1) for _ in 1:N]
-
-    # Vertical gauge: parity-dependent for brickwall, uniform D2×D2 otherwise.
-    # For brickwall: even-parity sites have the trivial dim-D2=1 bond → I(D2);
-    #               odd-parity sites have the real dim-D4=D bond → I(D4).
+    # Gauge initialization is lattice-dependent. The per-site gauge size must match
+    # the corresponding leg dimension AFTER the odd-parity permutation applied in
+    # `gauge_transfer`. Concretely:
+    #
+    # - :brickwall_h (raw shape (D,1,D,D,d,N), dim-1 on the d-leg):
+    #     Gh[q] lives on the r-leg (uniformly size D). Even-parity site: d-leg=1
+    #     (no perm), so Gv[q]=I(D2)=I(1). Odd-parity site: after perm (3,4,1,2,5)
+    #     the new d-leg = old r-leg of size D, so Gv[q]=I(D4)=I(D).
+    # - :brickwall_v (raw shape (1,D,D,D,d,N), dim-1 on the l-leg):
+    #     Gv[q] lives on the d-leg (uniformly size D). Even-parity site: r-leg=D
+    #     (no perm), so Gh[q]=I(D3)=I(D). Odd-parity site: after perm (3,4,1,2,5)
+    #     the new r-leg = old l-leg of size 1, so Gh[q]=I(D1)=I(1).
+    # - non-brickwall: Gh uniform D1×D1, Gv uniform D2×D2.
+    #
     # Parity is determined by findfirst(==(q), pattern), consistent with _lattice_map
-    # and gauge_transfer — NOT by cartindex[q] (which is column-major order, not site order).
-    # Both Gv and inv(Gv) are always applied in pairs (one on each side of the bond),
-    # so the optimization is well-posed regardless of bond dimension.
-    Gv_init = [
-        if brickwall
-            pos = findfirst(==(q), params.pattern)
-            sum(Tuple(pos)) % 2 == 0 ? Matrix{eltypeA}(I, D2, D2) : Matrix{eltypeA}(I, D4, D4)
+    # and gauge_transfer. Both gauges and their inverses are always applied in pairs
+    # (one on each side of a bond), so the optimization is well-posed regardless of
+    # the per-site bond dimension.
+    if _is_brickwall(lattice)
+        dim1_leg = _brickwall_dim1_leg(lattice)
+        if dim1_leg == 2   # :brickwall_h — Gv has parity-dependent sizes, Gh uniform
+            Gh_init = [Matrix{eltypeA}(I, D1, D1) for _ in 1:N]
+            Gv_init = [
+                let pos = findfirst(==(q), params.pattern)
+                    sum(Tuple(pos)) % 2 == 0 ? Matrix{eltypeA}(I, D2, D2) : Matrix{eltypeA}(I, D4, D4)
+                end
+                for q in 1:N
+            ]
+        elseif dim1_leg == 1   # :brickwall_v — Gh has parity-dependent sizes, Gv uniform
+            Gh_init = [
+                let pos = findfirst(==(q), params.pattern)
+                    sum(Tuple(pos)) % 2 == 0 ? Matrix{eltypeA}(I, D3, D3) : Matrix{eltypeA}(I, D1, D1)
+                end
+                for q in 1:N
+            ]
+            Gv_init = [Matrix{eltypeA}(I, D2, D2) for _ in 1:N]
         else
-            Matrix{eltypeA}(I, D2, D2)
+            error("Unsupported brickwall dim-1 leg position: $dim1_leg")
         end
-        for q in 1:N
-    ]
+    else
+        Gh_init = [Matrix{eltypeA}(I, D1, D1) for _ in 1:N]
+        Gv_init = [Matrix{eltypeA}(I, D2, D2) for _ in 1:N]
+    end
 
     Ginit = [Gh_init, Gv_init]
     function f(G)
