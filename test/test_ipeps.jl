@@ -318,4 +318,17 @@
         @test Ah2 ≈ Ah
     end
 
+    @testset "enlarge_coupling J1J2p :brickwall_v" begin
+        # Uniform: J1h = J1v = J1 for all (i,j)
+        m_unif = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.5, J2p=0.3, couplingtype=:uniform)
+        @test TeneT.enlarge_coupling(m_unif, 1, 1) == (1.5, 1.5)
+        @test TeneT.enlarge_coupling(m_unif, 3, 2) == (1.5, 1.5)
+        @test TeneT.enlarge_coupling(m_unif, 6, 2) == (1.5, 1.5)
+
+        # Plaquette mode is intentionally deferred — calling it should error clearly
+        m_plaq = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3,
+                       couplingtype=:plaquette, bondratio=0.5)
+        @test_throws ErrorException TeneT.enlarge_coupling(m_plaq, 1, 1)
+    end
+
 end

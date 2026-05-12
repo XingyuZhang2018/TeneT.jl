@@ -17,3 +17,14 @@ function enlarge_coupling(model::J1J2p{Honeycomb{:brickwall_h}}, ::Val{:plaquett
 
     return J1h, J1v
 end
+
+function enlarge_coupling(model::J1J2p{Honeycomb{:brickwall_v}}, ::Val{:uniform}, i, j)
+    J1 = model.J1
+    J1h = J1v = J1
+
+    return J1h, J1v
+end
+
+function enlarge_coupling(model::J1J2p{Honeycomb{:brickwall_v}}, ::Val{:plaquette}, i, j)
+    error("J1J2p{Honeycomb{:brickwall_v}} with couplingtype=:plaquette is not yet implemented. The (i,j) → bondratio mapping for the 6×2 pattern [1 4; 2 5; 3 6; 4 1; 5 2; 6 3] requires user-provided physical bond identification. Use :uniform for now.")
+end
