@@ -25,6 +25,9 @@ ComplexF64 Duals in the same @tensor give TC = Array{Union{},N}):
   3. VJP via Zygote: gN = J_R^† * T_x
 """
 function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple{VUMPSRuntime,VUMPSRuntime}}, params, restriction_ipeps, fδEi, iter_precond)
+    if params.boundary_alg isa VUMPS{<:Oneside}
+        return _precondition_invese_single_envir_oneside(A, grad, rt, params, restriction_ipeps, fδEi, iter_precond)
+    end
     if fδEi[3] <= iter_precond
         return grad
     end
@@ -241,5 +244,63 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
     end
 
     params.verbosity >= 3 && printstyled("Preconditioner took $(round(time() - t0, digits = 2)) s\n"; bold=true, color=:green)
+    return gradnew
+end
+
+function _precondition_invese_single_envir_oneside(A, grad, rt::VUMPSRuntime, params, restriction_ipeps, fδEi, iter_precond)
+    if fδEi[3] <= iter_precond
+        return grad
+    end
+    t0 = time()
+    δ = fδEi[2]
+    build_restricted_A(x) = build_A(restriction_ipeps(x), params)
+
+    _G_cache[] = nothing
+    A_prime = build_restricted_A(A)
+
+    env = ObsEnv(rt, A_prime, params.boundary_alg)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+
+    gradnew = deepcopy(grad)
+    Ni, Nj = size(A_prime)
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+    model = params.model
+    ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)
+
+    # Precompute normalizations (independent of x, so hoist out of linsolve)
+    n_map = [begin
+        ir = ir_oneside(i)
+        contract_n_11(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FRo[i,j]; forloop_iter, ifparallel)
+    end for (i,j) in eachindex(A_prime)]
+
+    gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
+        ε_fd = sqrt(eps(real(eltype(A))))
+        B_plus  = build_restricted_A(A + ε_fd * x)
+        B_minus = build_restricted_A(A - ε_fd * x)
+
+        idx = 0
+        T_x_data = [begin
+            idx += 1
+            A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
+            ir = ir_oneside(i)
+            Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FRo[i,j], A_prime_x_q; forloop_iter, ifparallel) / n_map[idx]
+        end for (i,j) in eachindex(A_prime)]
+        T_x = StructArray(T_x_data, A_prime.pattern)
+
+        function overlap_vjp(y)
+            total = zero(real(eltype(y)))
+            Ad = build_restricted_A(y)
+            for (i,j) in eachindex(A_prime)
+                total += real(dot(Ad[i,j], T_x[i,j]))
+            end
+            return total
+        end
+        gN = Zygote.gradient(overlap_vjp, A)[1]
+
+        return δ * x + gN
+    end
+
+    params.verbosity >= 3 && printstyled("Oneside preconditioner took $(round(time() - t0, digits = 2)) s\n"; bold=true, color=:green)
     return gradnew
 end
