@@ -57,27 +57,37 @@ function gc(::Type{Array})
     return nothing
 end
 
-function gc(::Type{<:CuArray})
+# Threshold-gated GPU GC + pool reclaim.
+#   threshold ∈ (0, 1]: fire only when available_memory/total_memory < threshold
+#   threshold = Inf:    unconditional (every call)
+# Default 0.1 = trigger once pool is >90% reserved; pass higher (or Inf) in
+# tight hot loops where you want forced cleanup every iter.
+function gc(::Type{<:CuArray}; threshold::Real = 0.1)
+    if threshold !== Inf && CUDA.available_memory() / CUDA.total_memory() >= threshold
+        return nothing   # pool has headroom — skip
+    end
     N_device = device_count(CuArray)
     for i in 1:N_device
         set_device_id!(CuArray, i)
-        GC.gc(true)              # full collection, not incremental
+        GC.gc(true)               # full collection, not incremental
         CUDA.reclaim()
     end
     @debug "GC triggered (CuArray, full)"
     return nothing
 end
 
-function gc(::Type{<:ROCArray})
+function gc(::Type{<:ROCArray}; threshold::Real = 0.1)
+    # AMDGPU has no direct free-mem query analogous to CUDA.available_memory;
+    # honour the threshold only when caller passes Inf (force) — otherwise
+    # always fire (legacy behaviour).
     GC.gc(true)
     AMDGPU.HIP.reclaim()
     @debug "GC triggered (ROCArray, full)"
     return nothing
 end
 
-# Convenience: pass an array, dispatch on its type. Always unconditional —
-# callers that want conditional cleanup should gate themselves.
-gc(x::AbstractArray) = gc(typeof(x))
+# Convenience: pass an array, dispatch on its type.
+gc(x::AbstractArray; threshold::Real = 0.1) = gc(typeof(x); threshold)
 
 function synchronize(x::AbstractArray)
     if x isa CuArray
