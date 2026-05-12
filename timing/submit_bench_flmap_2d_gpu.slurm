@@ -1,45 +1,60 @@
-#!/bin/bash -l
+#!/bin/bash
 #SBATCH --job-name=flmap2d_gpu
-#SBATCH --account=pilot_2026_0002
+#SBATCH --output=%x_%j.out
 #SBATCH --partition=zen4_h200
+#SBATCH --time=00:30:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=4
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=8
-#SBATCH --time=00:45:00
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=24
+#SBATCH --gres=gpu:nvidia_h200:4
+#SBATCH --account=pilot_2026_0002
 #SBATCH --chdir=/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT-2d-validation
-#SBATCH --output=flmap2d_gpu_%j.out
 
-# GPU benchmark of FLmap_parallel_2D vs FLmap_parallel (1D) at production scale.
-# 4 H200 GPUs, 2x2 grid, D=10 chi=512 — comparable to Kagome 1003757 OOM regime.
+# Mirrored from examples/MPI_parallel/Sofia/submit_D16_chi768_2node_sofia.sh.
+# Production-grade env setup is required for NCCL + CUDA-aware MPI to work
+# correctly on Sofia H200 nodes.
 
 source /etc/profile
-module load OpenMPI/5.0.7-GCC-14.2.0
+source /etc/profile.d/modules.sh
+module load GDRCopy/2.4.4-GCCcore-14.2.0 UCX-CUDA/1.18.0-GCCcore-14.2.0-CUDA-12.8.0 OpenMPI/5.0.7-GCC-14.2.0 NCCL/2.27.7-GCCcore-14.2.0-CUDA-12.8.0
 
-# LD_LIBRARY_PATH: strip CUDA per memory note reference_sofia_ld_path
-export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -v cuda | tr '\n' ':' | sed 's/:$//')
+WD=/sofia/scratch/pilot/pilot_2026_0002/xz
+export JULIA_DEPOT_PATH=$WD/.julia
+export HOME=$WD
+JULIA=$WD/julia-1.11.3/bin/julia
+MAX_GPU=${SLURM_NTASKS}
 
-# UCX/MPI fix per memory note project_sofia_hpc_ucx_fix
-[ -f /usr/lib64/libcuda.so.1 ] && export LD_PRELOAD=/usr/lib64/libcuda.so.1
-export UCX_WARN_UNUSED_ENV_VARS=n
+# Production env vars for Sofia GPU + NCCL fast path.
+ENVS="export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
+export UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc; \
+export UCX_MEMTYPE_CACHE=n; \
+export UCX_WARN_UNUSED_ENV_VARS=n; \
+export CUDA_LAUNCH_BLOCKING=1; \
+export LD_PRELOAD=/usr/lib64/libcuda.so.1; \
+export TENET_USE_NCCL=1; \
+export TENET_NCCL_REGISTER=1; \
+export BENCH_D=${BENCH_D:-10}; \
+export BENCH_CHI=${BENCH_CHI:-512}; \
+export BENCH_N1=${BENCH_N1:-2}; \
+export BENCH_USE_GPU=1; \
+export BENCH_REPEATS=${BENCH_REPEATS:-3}; \
+export BENCH_WARMUP=${BENCH_WARMUP:-1}"
 
-export PATH=/sofia/scratch/pilot/pilot_2026_0002/xz/julia-1.11.3/bin:$PATH
-export JULIA_DEPOT_PATH=/sofia/scratch/pilot/pilot_2026_0002/xz/.julia
+echo "=== FLmap_parallel_2D vs FLmap_parallel GPU bench (Sofia H200) ==="
+echo "Nodes: ${SLURM_NNODES}  GPUs: ${MAX_GPU}  Start: $(date)"
+echo "D=${BENCH_D:-10} CHI=${BENCH_CHI:-512} N1=${BENCH_N1:-2}"
 
-# Production-scale config: D=10 chi=512 (close to Kagome 1003757 regime)
-export BENCH_D=${BENCH_D:-10}
-export BENCH_CHI=${BENCH_CHI:-512}
-export BENCH_N1=${BENCH_N1:-2}
-export BENCH_USE_GPU=1
-export BENCH_REPEATS=${BENCH_REPEATS:-3}
-export BENCH_WARMUP=${BENCH_WARMUP:-1}
+# Warm-up: trigger precompile outside mpirun.
+bash -c "$ENVS; export CUDA_VISIBLE_DEVICES=0; \
+    $JULIA --project=$WD/TeneT-2d-validation -e 'using TeneT, MPI, CUDA; @info \"warm-up loaded\"'"
 
-echo "[$(date)] starting flmap_2d_vs_1d GPU bench"
-echo "  D=${BENCH_D}, CHI=${BENCH_CHI}, N1=${BENCH_N1}, USE_GPU=${BENCH_USE_GPU}"
-echo "  Per-rank tensor size (each of FL/ALu/ALd) = chi^2 * D^2 / N = $(( BENCH_CHI * BENCH_CHI * BENCH_D * BENCH_D * 16 / 4 )) bytes"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || echo "(nvidia-smi not on login node — will run on compute node)"
+echo "=== Warm-up done; launching MPI ranks ==="
 
-mpirun -n 4 julia --project=. timing/bench_flmap_2d_vs_1d.jl
-RC=$?
-echo "[$(date)] bench exit=${RC}"
-exit $RC
+mpirun -np ${MAX_GPU} \
+    -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
+    -x TENET_USE_NCCL -x TENET_NCCL_REGISTER \
+    -x BENCH_D -x BENCH_CHI -x BENCH_N1 -x BENCH_USE_GPU \
+    -x BENCH_REPEATS -x BENCH_WARMUP \
+    bash -c "$ENVS; exec $JULIA --project=$WD/TeneT-2d-validation $WD/TeneT-2d-validation/timing/bench_flmap_2d_vs_1d.jl"
+
+echo "=== Done: $(date) ==="

@@ -36,10 +36,19 @@ const rank  = MPI.Comm_rank(world)
 const USE_GPU = parse(Int, get(ENV, "BENCH_USE_GPU", "0")) == 1
 if USE_GPU
     using CUDA
-    # Each MPI rank picks a different GPU. Sofia uses OMPI's
-    # OMPI_COMM_WORLD_LOCAL_RANK env var to identify the local rank.
-    local_rank = parse(Int, get(ENV, "OMPI_COMM_WORLD_LOCAL_RANK", "$rank"))
-    CUDA.device!(local_rank)
+    # Production Sofia submit scripts set CUDA_VISIBLE_DEVICES per-rank to
+    # OMPI_COMM_WORLD_LOCAL_RANK, so each rank sees exactly one GPU as device 0.
+    # Don't call CUDA.device!(local_rank) — only device 0 is visible.
+    # If CUDA_VISIBLE_DEVICES isn't set (debugging on a single-GPU host),
+    # fall back to selecting by local rank for safety.
+    if !haskey(ENV, "CUDA_VISIBLE_DEVICES")
+        local_rank = parse(Int, get(ENV, "OMPI_COMM_WORLD_LOCAL_RANK", "$rank"))
+        n_dev = length(CUDA.devices())
+        if n_dev > 1
+            CUDA.device!(local_rank % n_dev)
+        end
+    end
+    # Otherwise: leave at default device (= the single visible GPU per rank)
 end
 const ATYPE = USE_GPU ? CuArray : Array
 
