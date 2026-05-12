@@ -105,14 +105,16 @@ function ising_mpo(beta; atype=Array)
          exp(-beta) exp(beta)]
     # W = sqrt of Boltzmann weight matrix
     W = sqrt(B)
-    # Build M[s1,s2,s3,s4] = sum_sigma W[s1,sigma]*W[s2,sigma]*W[s3,sigma]*W[s4,sigma]
-    # Use stepwise contraction (TensorOperations doesn't allow >2 occurrences of an index)
-    @tensor T12[s1, s2, a, b] := W[s1, a] * W[s2, b]
-    @tensor T34[s3, s4, a, b] := W[s3, a] * W[s4, b]
     d = size(W, 2)
-    T12r = reshape(T12, size(T12,1), size(T12,2), d*d)
-    T34r = reshape(T34, size(T34,1), size(T34,2), d*d)
-    @tensor M[s1, s2, s3, s4] := T12r[s1, s2, σ] * T34r[s3, s4, σ]
+    # Standard 2D Ising tensor: 4 legs all pass through a single central spin
+    # M[a, b, c, d] = sum_s W[s, a] * W[s, b] * W[s, c] * W[s, d]
+    # Use a 4-index δ tensor (δ[s1,s2,s3,s4] = 1 iff s1=s2=s3=s4) so each
+    # index appears at most twice in the contraction (TensorOperations rule).
+    δ = zeros(d, d, d, d)
+    for s in 1:d
+        δ[s, s, s, s] = 1.0
+    end
+    @tensor M[a, b, c, d] := δ[s1, s2, s3, s4] * W[s1, a] * W[s2, b] * W[s3, c] * W[s4, d]
     M = atype(M)
     return StructArray([M], [1;;])
 end
