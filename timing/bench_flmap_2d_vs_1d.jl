@@ -158,20 +158,30 @@ M_1d   = ATYPE(M_full)
 
 # ─── Helper: timed runs with GPU sync ────────────────────────────────────
 
-"Run `f()` `n` times, returning per-iteration wall times in seconds."
+"Run `f()` `n` times, returning per-iteration wall times in seconds.
+Matches production methodology (examples/MPI_parallel/test_MPI_config.jl):
+one MPI.Barrier before the loop, CUDA.synchronize inside each iter,
+divide total elapsed by n. No per-iter barrier (avoids serializing on
+slowest rank's straggle, which dominates at this map cost level)."
 function timed_runs(f, n; sync=true)
-    times = Vector{Float64}(undef, n)
-    for i in 1:n
-        MPI.Barrier(world)
-        t0 = time()
-        out = f()
+    if sync && USE_GPU
+        CUDA.synchronize()
+    end
+    MPI.Barrier(world)
+    t0 = time()
+    for _ in 1:n
+        f()
         if sync && USE_GPU
             CUDA.synchronize()
         end
-        MPI.Barrier(world)
-        times[i] = time() - t0
     end
-    return times
+    total_elapsed = time() - t0
+    # Return n equal slots — caller computes median/min/mean over them.
+    # Since we time the loop as a whole, all "slots" are identical (the
+    # per-iter average). Production reports the mean; we report min/median
+    # too for compatibility with the existing UI, but note they're all equal.
+    avg = total_elapsed / n
+    return fill(avg, n)
 end
 
 # ─── Warmup ──────────────────────────────────────────────────────────────
