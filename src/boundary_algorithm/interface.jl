@@ -7,6 +7,14 @@ Variational Uniform Matrix Product State algorithm
 General
 Plaquette{<:AbstractLattice}
 C4v
+
+2D distributed-parallel layout fields
+-------------------------------------
+* `N1::Int` — first dim of 2D MPI grid (defaults to 1).
+* `N2::Int` — second dim of 2D MPI grid (defaults to 1).
+* `grid::Union{Cart2DGrid, Nothing}` — constructed automatically by
+  `VUMPS(...)` when `ifparallel && N1*N2 != 1`; pass an explicit grid if
+  you've built one already.
 """
 @kwdef mutable struct VUMPS{F <: ContractionMode} <: Algorithm
     tol::Float64 = 1e-10
@@ -26,6 +34,11 @@ C4v
     ifdownfromup::Bool = false
     ifparallelupdown = false
     ifparallel::Bool = false
+    # 2D MPI grid layout (filled in by the convenience constructor when
+    # ifparallel && N1*N2 != 1; see VUMPS(::F; kwargs...) below).
+    N1::Int = 1
+    N2::Int = 1
+    grid::Union{Cart2DGrid, Nothing} = nothing
     ifsimple_eig::Bool = true
 
     inner_etype::Union{Nothing, Type} = nothing
@@ -62,7 +75,15 @@ C4v
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
-VUMPS(::F; kwargs...) where {F <: ContractionMode} = VUMPS{F}(; kwargs...)
+# When the user opts into parallel mode and a non-trivial N1×N2 layout but did
+# not supply a pre-built grid, construct a default Cart2DGrid on the fly.
+function VUMPS(::F; kwargs...) where {F <: ContractionMode}
+    alg = VUMPS{F}(; kwargs...)
+    if alg.ifparallel && alg.N1 * alg.N2 != 1 && alg.grid === nothing
+        alg.grid = Cart2DGrid(alg.N1, alg.N2)
+    end
+    return alg
+end
 
 """
     CTMRG <: Algorithm
