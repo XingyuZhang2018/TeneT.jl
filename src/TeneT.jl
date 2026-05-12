@@ -120,7 +120,7 @@ export VUMPS
 export QRCTM
 
 export Square, Honeycomb, Kagome
-export General, C4v, Plaquette
+export General, C4v, Plaquette, Oneside
 
 export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
 

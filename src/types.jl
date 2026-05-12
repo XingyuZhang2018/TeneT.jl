@@ -16,6 +16,10 @@ Base.show(io::IO, ::Kagome{M}) where M    = print(io, "Kagome_", M)
 # Two Kagome embeddings sharing identical bond / energy / plot logic.
 const KagomeOnehole = Union{Kagome{:onehole}, Kagome{:onehole_real}}
 
+# Hamiltonian model base type (forward-declared so ContractionMode constructors
+# can dispatch on it; concrete subtypes live in src/models/*)
+abstract type HamiltonianModel end
+
 # Contraction modes for VUMPS specialization
 abstract type ContractionMode end
 struct General <: ContractionMode end
@@ -23,14 +27,24 @@ struct C4v <: ContractionMode end
 struct Plaquette{Mode} <: ContractionMode end
 Plaquette(L::AbstractLattice) = Plaquette{typeof(L)}()
 
+"""
+    Oneside{M} <: ContractionMode
+
+VUMPS contraction mode for models with up-down (but NOT left-right) hermiticity.
+The down environment is derived from the up environment via the per-model
+trait `_oneside_down_index(::Type{<:M}, i, Ni)`. Distinct from `Plaquette`
+which exploits BOTH L-R and U-D symmetries.
+
+Constructor: `Oneside(m::HamiltonianModel) = Oneside{typeof(m)}()`.
+"""
+struct Oneside{M} <: ContractionMode end
+Oneside(m::HamiltonianModel) = Oneside{typeof(m)}()
+
 # Boundary algorithm base type
 abstract type Algorithm end
 
 # iPEPS optimization base type
 abstract type iPEPSOptimize end
-
-# Hamiltonian model base type
-abstract type HamiltonianModel end
 
 # Filesystem-safe show for all HamiltonianModel subtypes
 # Produces e.g. "Heisenberg_Square(S=0.5,Jx=-1.0,Jy=-1.0,Jz=1.0,ifrotate=true)" instead of
