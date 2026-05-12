@@ -83,6 +83,36 @@ function ChainRulesCore.rrule(::typeof(allreduce_dim), tensor, op::typeof(+), co
     return result, back
 end
 
+# ─── rrules for direct (sub-comm-safe) primitives ─────────────────────────
+#
+# Same conventions as `allgather_dim` / `allreduce_dim`:
+# * `allgather_dim_direct` rrule = pure SLICE (no allreduce) — the PR #42
+#   "single loss" semantics. Per-rank ∂L/∂x_local recovers the local slice
+#   of the upstream gradient with no M-factor.
+# * `allreduce_dim_direct` rrule = identity — pass d_result through; this is
+#   the per-rank "other ranks treated as constant" gradient. Matches the
+#   semantics expected by VUMPS boundary collectives.
+
+function ChainRulesCore.rrule(::typeof(allgather_dim_direct), tensor_local, dim::Int, comm)
+    result = allgather_dim_direct(tensor_local, dim, comm)
+    rank = MPI.Comm_rank(comm)
+    χ_local = size(tensor_local, dim)
+    local_range = (rank * χ_local + 1):((rank + 1) * χ_local)
+    idx = ntuple(d -> d == dim ? local_range : (:), ndims(tensor_local))
+    function back(d_result)
+        return NoTangent(), unthunk(d_result)[idx...], NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
+function ChainRulesCore.rrule(::typeof(allreduce_dim_direct), tensor, op::typeof(+), comm)
+    result = allreduce_dim_direct(tensor, op, comm)
+    function back(d_result)
+        return NoTangent(), unthunk(d_result), NoTangent(), NoTangent()
+    end
+    return result, back
+end
+
 # patch since it's currently broken otherwise
 function ChainRulesCore.rrule(::typeof(Base.typed_hvcat), ::Type{T}, rows::Tuple{Vararg{Int}}, xs::S...) where {T,S}
     y = Base.typed_hvcat(T, rows, xs...)

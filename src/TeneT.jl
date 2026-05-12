@@ -122,6 +122,8 @@ export QRCTM
 
 export Cart2DGrid
 export allgather_dim, reduce_scatter_dim, allreduce_dim
+export allgather_dim_direct, allreduce_dim_direct
+export FLmap_parallel_2D
 
 export Square, Honeycomb, Kagome
 export General, C4v, Plaquette

@@ -864,3 +864,193 @@ function allreduce_dim(tensor::AbstractArray, op, comm)
     allreduce_p2p!(result, op, comm)
     return result
 end
+
+# ─── Sub-comm-safe "direct" variants ─────────────────────────────────────
+#
+# `allgather_dim` / `allreduce_dim` route through `allgatherv_p2p!` /
+# `allreduce_p2p!`, which call `_get_local_comm(comm)` — a function that
+# memoizes its result in a module-level `Ref` keyed only on whether the
+# cache is populated, **not** on the `comm` argument. The first call seeds
+# the cache with the local/leaders comms derived from whatever `comm` was
+# passed first (typically `MPI.COMM_WORLD`); subsequent calls with a
+# different sub-comm (e.g. `Cart2DGrid.row_comm` / `col_comm`) silently
+# reuse the stale cached comms, producing wrong results.
+#
+# Fixing the cache properly means keying it on `MPI.Comm` (and freeing
+# entries on `MPI.free`), which is invasive and tangled with the
+# hierarchical 3-phase optimisation that the cache exists to support.
+# For the 2D-port primitives we instead provide thin wrappers around
+# `MPI.Allgatherv!` / `MPI.Allreduce!` that bypass the hierarchical path
+# entirely. We pay a single round-trip of bandwidth (no NCCL fast-path,
+# no intra-node optimisation) — acceptable for first-version 2D maps where
+# the sub-comm size is typically 2.
+
+"""
+    allgather_dim_direct(tensor_local, dim, comm) -> tensor_full
+
+Like `allgather_dim`, but calls `MPI.Allgatherv!` directly — bypasses the
+hierarchical `allgatherv_p2p!` (which has a sub-comm-unsafe cache, see
+the module-section comment above).
+
+Equal-size partition only.
+"""
+function allgather_dim_direct(tensor_local::AbstractArray{T,N}, dim::Int, comm) where {T,N}
+    1 <= dim <= N || throw(ArgumentError("dim=$dim out of range for $(N)D tensor"))
+    M = MPI.Comm_size(comm)
+    M == 1 && return copy(tensor_local)
+
+    # Non-last-dim case: permute `dim ↔ N`, gather, permute back. Same
+    # rationale as `allgather_dim` — keeps per-rank slabs contiguous in
+    # column-major order so MPI sees one contiguous range per contributor.
+    if dim != N
+        perm = ntuple(d -> d == dim ? N : (d == N ? dim : d), N)
+        permuted = permutedims(tensor_local, perm)
+        gathered = allgather_dim_direct(permuted, N, comm)
+        return permutedims(gathered, perm)
+    end
+
+    chi_local = size(tensor_local, dim)
+    chi_full  = M * chi_local
+    full_shape = ntuple(d -> d == dim ? chi_full : size(tensor_local, d), N)
+
+    result = similar(tensor_local, full_shape)
+    elem_count = length(tensor_local)
+    counts = fill(Cint(elem_count), M)
+
+    # tensor_local is contiguous (dim == N path), so passing it as the send
+    # buffer is safe for Allgatherv. Synchronize on both sides of MPI for
+    # device-side data — MPI does not coordinate with the CUDA stream.
+    synchronize(tensor_local)
+    MPI.Allgatherv!(tensor_local, MPI.VBuffer(result, counts), comm)
+    synchronize(result)
+    return result
+end
+
+"""
+    allreduce_dim_direct(tensor, op, comm) -> tensor
+
+Like `allreduce_dim`, but calls `MPI.Allreduce!` directly — bypasses
+`allreduce_p2p!`'s sub-comm-unsafe cache.
+
+Output shape == input shape. Every rank receives the SAME reduced value.
+Tensor is unchanged in the caller (we copy then reduce).
+"""
+function allreduce_dim_direct(tensor::AbstractArray, op, comm)
+    MPI.Comm_size(comm) == 1 && return copy(tensor)
+    result = copy(tensor)
+    synchronize(result)
+    MPI.Allreduce!(result, op, comm)
+    synchronize(result)
+    return result
+end
+
+# ─── FLmap_parallel_2D — 2D-distributed FLmap ────────────────────────────
+#
+# Algorithm:
+#   1. AllGather FL along row_comm on the `i` leg (last χ)        → FL.i full
+#   2. AllGather ALd along col_comm on the `i` leg (first χ)      → ALd.i full
+#   3. AllGather ALu along row_comm on the `d` leg (last χ)       → ALu.d full
+#   4. Local einsum (a sum partial over slice_r1, i sum complete) → partial[d full, g, h, l slice_r2]
+#   5. AllReduce partial along col_comm (completes a sum)         → summed
+#   6. Slice summed on d to slice_r1                              → result[d slice_r1, g, h, l slice_r2]
+#
+# Compared to the broken "AllGather + AllReduce + AllToAll + SUMMA" attempt
+# of design Section 2, this keeps `d` FULL in the partial and `l` slice_r2,
+# avoiding the off-diagonal (d, l) block bug. Memory cost of ALu_full_d is
+# (χ/N1, D², χ) ≈ χ² · D² / N1 — larger than rank-local but smaller than
+# fully replicated. AllToAll is unnecessary because col_comm members hold
+# identical-shape partials with the same slot mapping (d is full, l is
+# already on r2's slot), so a plain AllReduce sums correctly.
+#
+# Local einsum mimics the leg-5 `FLmap` in `src/contraction/basic.jl`
+#   @tensor result[d,g,h,l] := FL[a,e,f,i] * ALd[i,j,k,l]
+#                            * M1[e,j,g,b,p] * M2[f,k,h,c,p]
+#                            * ALu[a,b,c,d]
+# adapted to the 2D-distributed shapes: FL is (chi/N1, D, D, chi),
+# ALd is (chi, D, D, chi/N2), ALu is (chi/N1, D, D, chi). The free `d`
+# leg in the output is the FULL chi (gathered from ALu); a in the
+# contraction runs over slice_r1 (rank-local), i runs over the full chi
+# (gathered).
+
+# Leg-5 local einsum used by FLmap_parallel_2D. Replicates the leg-5 FLmap
+# contraction pattern from basic.jl, with the same index convention.
+function _flmap_local_einsum_2D(FL, ALu, ALd, M1::AbstractArray{T,5}, M2::AbstractArray{S,5}) where {T,S}
+    @tensor partial[d,g,h,l] := FL[a,e,f,i] * ALd[i,j,k,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ALu[a,b,c,d]
+    return partial
+end
+# Single-M leg-5 dispatch: M defaults to M, conj(M) (matches FLmap leg5 single-arg).
+_flmap_local_einsum_2D(FL, ALu, ALd, M::AbstractArray{T,5}) where T =
+    _flmap_local_einsum_2D(FL, ALu, ALd, M, conj(M))
+_flmap_local_einsum_2D(FL, ALu, ALd, M::Tuple{<:AbstractArray,<:AbstractArray}) =
+    _flmap_local_einsum_2D(FL, ALu, ALd, M[1], M[2])
+
+# Leg-4 local einsum (small-D / simple iPEPS): rank-4 M, rank-3 inputs.
+# Replicates leg-4 FLmap from basic.jl:
+#   @tensor result[c,e,h] := FL[a,d,f] * ALd[f,g,h] * M[d,g,e,b] * ALu[a,b,c]
+function _flmap_local_einsum_2D(FL, ALu, ALd, M::AbstractArray{T,4}) where T
+    @tensor partial[c,e,h] := FL[a,d,f] * ALd[f,g,h] * M[d,g,e,b] * ALu[a,b,c]
+    return partial
+end
+
+"""
+    FLmap_parallel_2D(FL, ALu, ALd, M; grid::Cart2DGrid) -> result
+
+2D-distributed `FLmap`. Each rank holds:
+* `FL`  with last χ distributed on row_comm (size N2): shape `(χ/N1, D, D, χ/N2)`
+* `ALu` with last χ distributed on row_comm (size N2): shape `(χ/N1, D, D, χ/N2)`
+* `ALd` with first χ distributed on col_comm (size N1): shape `(χ/N1, D, D, χ/N2)`
+* `M`   replicated on every rank
+
+Returns `result` of shape `(χ/N1, D, D, χ/N2)` on each rank, with the same
+distribution convention as the inputs.
+
+Algorithm: 3× AllGather (FL.i along row, ALd.i along col, ALu.d along row),
+1× local einsum, 1× AllReduce along col_comm, 1× local slice. See
+`docs/2026-05-12-2d-design-blockers.md` for the derivation and the bug
+that the broken AllToAll-based design hit.
+
+Only `M::AbstractArray{T,5}` (Kagome / Plaquette double-layer) and
+`M::AbstractArray{T,4}` are wired up for v1. Tuple-of-leg5 and leg-8
+single-tensor variants are not yet supported; add overloads when
+production needs them.
+
+`grid` must satisfy `grid.N1 * grid.N2 == MPI.Comm_size(grid.world)` and
+`size(FL, 1) == size(ALu, 1) == grid.N1 ·` (something divisible),
+`size(FL, 4) == size(ALd, 4) == grid.N2 ·` (something divisible). See
+the `@asserts` in the body for the exact preconditions.
+"""
+function FLmap_parallel_2D(FL, ALu, ALd, M; grid::Cart2DGrid)
+    # Validate the 2D partition contract — fail loud on shape mismatches.
+    @assert ndims(FL) == ndims(ALu) == ndims(ALd) "FLmap_parallel_2D: FL, ALu, ALd must have the same ndims; got $(ndims(FL)), $(ndims(ALu)), $(ndims(ALd))"
+    @assert size(FL, 1) == size(ALu, 1) "FLmap_parallel_2D: FL and ALu must agree on dim 1 (the local-χ/N1 boundary)"
+    @assert size(FL, ndims(FL)) == size(ALu, ndims(ALu)) == size(ALd, ndims(ALd)) "FLmap_parallel_2D: FL, ALu, ALd must agree on last dim (the local-χ/N2 boundary)"
+    @assert size(ALd, 1) == size(FL, 1) * grid.N1 "FLmap_parallel_2D: size(ALd, 1) should be N1·size(FL, 1) (ALd's `i` leg already at full χ on dim=1 across col_comm)" *
+        " — got size(ALd, 1)=$(size(ALd, 1)), N1·size(FL, 1)=$(grid.N1 * size(FL, 1))." *
+        " HINT: this assertion enforces FL.dim1 = χ/N1 (rank-local first leg) and ALd.dim1 = χ (first leg distributed on col_comm so AllGather along col → χ full)." *
+        " Caller must build ALd with its first leg distributed on col_comm, i.e. ALd shape (χ/N1, D, D, χ/N2) BEFORE allgather."
+
+    # Step 1: AllGather FL along row_comm, dim = last (i leg).
+    FL_full_i  = allgather_dim_direct(FL, ndims(FL), grid.row_comm)
+    # Step 2: AllGather ALd along col_comm, dim = 1 (i leg, distributed on N1).
+    ALd_full_i = allgather_dim_direct(ALd, 1, grid.col_comm)
+    # Step 3: AllGather ALu along row_comm, dim = last (d leg).
+    ALu_full_d = allgather_dim_direct(ALu, ndims(ALu), grid.row_comm)
+
+    # Step 4: local einsum. Output `partial` has d FULL, l = slice_r2.
+    partial = _flmap_local_einsum_2D(FL_full_i, ALu_full_d, ALd_full_i, M)
+
+    # Step 5: sum over a (only slice_r1 contributed locally) by reducing
+    # across col_comm. col_comm varies r1, so this completes the a-sum.
+    # Every col_comm member holds the same shape with the same slot mapping
+    # (d is full, l = slice_r2), so AllReduce is valid.
+    summed = allreduce_dim_direct(partial, +, grid.col_comm)
+
+    # Step 6: slice on d to this rank's slice_r1 portion. After the slice
+    # the output has the same 2D distribution as the inputs: (χ/N1, ..., χ/N2).
+    chi_full = size(summed, 1)
+    @assert chi_full == grid.N1 * size(FL, 1) "FLmap_parallel_2D: post-reduce d-leg size $chi_full doesn't match N1·χ/N1 = $(grid.N1 * size(FL, 1)); shape mismatch in einsum or upstream gather."
+    chi_per_N1 = chi_full ÷ grid.N1
+    d_slice = (grid.r1 * chi_per_N1 + 1):((grid.r1 + 1) * chi_per_N1)
+    idx = ntuple(k -> k == 1 ? d_slice : Colon(), ndims(summed))
+    return summed[idx...]
+end
