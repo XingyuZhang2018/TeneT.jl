@@ -264,6 +264,26 @@
         end
 
         # ==================================================================
+        # Oneside leading_boundary smoke
+        # ==================================================================
+        @testset "Oneside leading_boundary smoke" begin
+            using TeneT: J1J2p, init_env, leading_boundary
+            Random.seed!(42)
+            χ, D = 4, 2
+            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+            # Use a tiny rank-4 M just to verify dispatch + iter compiles
+            M_data = [atype(rand(Float64, D, D, D, D)) for _ in 1:6]
+            M = TeneT.StructArray(M_data, pattern)
+            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3, ifrotate=false)
+            alg = VUMPS(Oneside(m); maxiter=2, maxiter_ad=0, verbosity=0,
+                        ifupdown=false, ifparallelupdown=false)
+            rt = init_env(M, χ, alg)
+            rt_conv, err = leading_boundary(rt, M, alg)
+            @test rt_conv isa TeneT.VUMPSRuntime
+            @test isfinite(err) || err == 0
+        end
+
+        # ==================================================================
         # QRCTM
         # ==================================================================
         @testset "QRCTM" begin
