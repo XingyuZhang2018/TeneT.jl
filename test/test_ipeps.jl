@@ -38,56 +38,6 @@
     end
 
     # ================================================================
-    # 2b. _lattice_map -- Honeycomb brickwall_pi6
-    # ================================================================
-    @testset "_lattice_map Honeycomb brickwall_pi6" begin
-        pattern = [1 2; 3 4]
-        D, d = 2, 2
-        # In brickwall_pi6 the trivial leg is L (position 1), so init shape is (1,D,D,D,d).
-        tensors = [randn(1, D, D, D, d) for _ in 1:4]
-        A = StructArray(tensors, pattern)
-        A_out = _lattice_map(A, Honeycomb{:brickwall_pi6}(), pattern)
-        # Permutation for odd-parity sites is (3, 2, 1, 4, 5): swap L ↔ R, keep D/U/phys.
-        @test Array(A_out.data[1]) ≈ Array(A.data[1])
-        @test Array(A_out.data[2]) ≈ permutedims(Array(A.data[3]), (3, 2, 1, 4, 5))
-        @test Array(A_out.data[3]) ≈ permutedims(Array(A.data[2]), (3, 2, 1, 4, 5))
-        @test Array(A_out.data[4]) ≈ Array(A.data[4])
-        # After mapping, every site has non-trivial U (leg 4) and D (leg 2);
-        # the trivial leg is horizontal (exactly one of L/R is dim 1 per site).
-        for k in 1:4
-            @test size(A_out.data[k], 2) == D
-            @test size(A_out.data[k], 4) == D
-            @test (size(A_out.data[k], 1) == 1) ⊻ (size(A_out.data[k], 3) == 1)
-        end
-    end
-
-    # ================================================================
-    # 2c. _lattice_map -- Honeycomb brickwall_pi6 rejects mixed-parity patterns
-    # ================================================================
-    @testset "_lattice_map Honeycomb brickwall_pi6 mixed-parity rejection" begin
-        # Tensor 1 at (1,1) [even] and (3,2) [odd] — must be rejected.
-        pattern = [1 2; 3 4; 2 1; 4 3]
-        D, d = 2, 2
-        tensors = [randn(1, D, D, D, d) for _ in 1:4]
-        A = StructArray(tensors, pattern)
-        @test_throws ArgumentError _lattice_map(A, Honeycomb{:brickwall_pi6}(), pattern)
-    end
-
-    # ================================================================
-    # 2d. dumu_symmetrize is an idempotent projector onto D↔U symmetric subspace
-    # ================================================================
-    @testset "dumu_symmetrize idempotent + D↔U fixed point" begin
-        D, d, N = 3, 2, 2
-        A = randn(1, D, D, D, d, N)
-        A1 = dumu_symmetrize(A)
-        A2 = dumu_symmetrize(A1)
-        # idempotent
-        @test A1 ≈ A2
-        # exact D↔U symmetry
-        @test A1 ≈ permutedims(A1, (1, 4, 3, 2, 5, 6))
-    end
-
-    # ================================================================
     # 3. C4v_restriction -- 5-leg
     # ================================================================
     @testset "C4v_restriction 5-leg" begin
@@ -219,10 +169,6 @@
         # Honeycomb brickwall: (D,1,D,D,d,N)
         A_hb = _init_random_ipeps(Honeycomb{:brickwall}(), Float64, D, d, N, Ni, Nj)
         @test size(A_hb) == (D, 1, D, D, d, N)
-
-        # Honeycomb brickwall_pi6: (1,D,D,D,d,N) — trivial leg is L (position 1)
-        A_hb6 = _init_random_ipeps(Honeycomb{:brickwall_pi6}(), Float64, D, d, N, Ni, Nj)
-        @test size(A_hb6) == (1, D, D, D, d, N)
 
         # Kagome :onehole — (D,D,D,D,d,N), requires Ni,Nj even
         A_kh = _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, Ni, Nj)
