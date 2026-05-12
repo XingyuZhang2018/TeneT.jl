@@ -113,6 +113,26 @@ function _lattice_map(A, ::Honeycomb{:brickwall_h}, pattern)
 end
 
 """
+    _lattice_map(A, ::Honeycomb{:brickwall_v}, pattern)
+
+Vertical brickwall mapping: permute legs on odd-parity sites with `(3,4,1,2,5)`
+so the brickwall honeycomb maps onto a square lattice, with dim-1 leg
+alternating between `l` (even-parity) and `r` (odd-parity).
+"""
+function _lattice_map(A, ::Honeycomb{:brickwall_v}, pattern)
+    Ni, Nj = size(pattern)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("For Honeycomb{:brickwall_v}, pattern must have even dimensions."))
+    n_unique = length(unique(pattern))
+    return StructArray([
+        begin
+            pos = findfirst(==(i), pattern)
+            sum(Tuple(pos)) % 2 == 0 ? A[i] : permutedims(A[i], (3,4,1,2,5))
+        end
+        for i in 1:n_unique
+    ], pattern)
+end
+
+"""
     _lattice_map(A, ::Honeycomb{:merge}, pattern)
 
 Merge mapping: identity (sites are already independent tensors on

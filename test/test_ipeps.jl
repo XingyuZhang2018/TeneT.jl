@@ -253,4 +253,25 @@
         @test_throws ArgumentError TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, 2, 3)
     end
 
+    @testset "_lattice_map :brickwall_v" begin
+        D, d = 3, 2
+        Ni, Nj = 4, 2
+        N = Ni * Nj
+        pattern = reshape(1:N, Ni, Nj)
+        A_raw = rand(Float64, 1, D, D, D, d, N)  # initial shape for :brickwall_v
+        A = TeneT.StructArray([A_raw[:,:,:,:,:,i] for i in 1:N], pattern)
+        Ar = TeneT._lattice_map(A, Honeycomb{:brickwall_v}(), pattern)
+
+        # Even-parity site: unchanged → shape (1,D,D,D,d)
+        # Odd-parity site: permutedims (3,4,1,2,5) → (D,D,1,D,d)
+        for i in 1:N
+            pos = findfirst(==(i), pattern)
+            if sum(Tuple(pos)) % 2 == 0
+                @test size(Ar[i]) == (1, D, D, D, d)
+            else
+                @test size(Ar[i]) == (D, D, 1, D, d)
+            end
+        end
+    end
+
 end
