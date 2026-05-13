@@ -241,12 +241,17 @@ function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifparallel, forloop_iter, inner_et
 end
 
 """
-    λL, FL = leftenv(ALu, ALd, M, FL=FLint(ALu,M); kwargs...)
+    λL, FL = leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, alg, model=nothing, kwargs...)
 
 Compute the left environment tensor for MPS `ALu`, `ALd` and MPO `M`, by finding the left fixed point
 of ALu - M - ALd contracted along the physical dimension.
+
+When `ifobs=true`, the down-row partner of row `i` is `ir = Ni + 1 - i` by default.
+Passing a non-`nothing` `model` overrides this with `obs_index(typeof(model), i, Ni)`,
+which lets per-model U-D symmetries (e.g. `J1J2p{Honeycomb{:brickwall_v}}` → `ir = i`)
+replace the default reflection.
 """
-function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
+function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, model=nothing, kwargs...)
     @unpack inner_etype, forloop_iter, ifparallel,
             segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast: Plaquette/General leftenv makes multiple
@@ -279,7 +284,11 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
-        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        ir = if ifobs
+            model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)
+        else
+            mod1(i + 1, Ni)
+        end
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
             f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
@@ -333,12 +342,17 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifparallel, forloop_iter, inner_et
 end
 
 """
-    λR, FR = rightenv(ARu, ARd, M, FR=FRint(ARu,M); kwargs...)
+    λR, FR = rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, alg, model=nothing, kwargs...)
 
 Compute the right environment tensor for MPS `ARu`, `ARd` and MPO `M`, by finding the right fixed point
 of AR - M - conj(AR) contracted along the physical dimension.
+
+When `ifobs=true`, the down-row partner of row `i` is `ir = Ni + 1 - i` by default.
+Passing a non-`nothing` `model` overrides this with `obs_index(typeof(model), i, Ni)`,
+which lets per-model U-D symmetries (e.g. `J1J2p{Honeycomb{:brickwall_v}}` → `ir = i`)
+replace the default reflection.
 """
-function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
+function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, model=nothing, kwargs...)
     @unpack inner_etype, forloop_iter, ifparallel,
             segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
@@ -361,7 +375,11 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
-        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        ir = if ifobs
+            model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)
+        else
+            mod1(i + 1, Ni)
+        end
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
             f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
@@ -1025,25 +1043,42 @@ end
 # ── Observation environment construction ─────────────────────────────
 
 """
-    VUMPSEnv(rt::VUMPSRuntime, M, alg)
+    ObsEnv(rt::VUMPSRuntime, M, alg::VUMPS{General}, model=nothing; Fo=[rt.FL, rt.FR])
 
-Construct a `VUMPSEnv` observation environment from a single VUMPS runtime.
+Build an observation environment from a single VUMPS runtime (i.e. when
+`alg.ifupdown == false`, so no separate down runtime was converged).
+
+Two return shapes:
+- If `model === nothing`, returns the legacy `VUMPSEnv` filling ACd/ARd with
+  AC/AR (the U-D-symmetric default; the down row partner is implicit `Ni+1-i`).
+- If a `model` is given, returns an `OnesideVUMPSEnv` (no ACd/ARd; down row
+  partner determined per-call by `obs_index(typeof(model), i, Ni)`). Used by
+  `optimise_ipeps` / `observable` / `precondition` to opt the J1J2p
+  `:brickwall_v` self-symmetric model into the memory-saving env shape.
 """
-function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General}, Fo=[rt.FL, rt.FR])
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
+                model=nothing; Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
-    _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg)
-    _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg)
-    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+    _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
+    _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg, model)
+    if model === nothing
+        return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+    else
+        return OnesideVUMPSEnv(AC, AR, FL, FR, FLo, FRo)
+    end
 end
 
 """
-    VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg)
+    ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General}, model=nothing; Fo=...)
 
 Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
-Computes mixed (observation) left and right environments.
+Computes mixed (observation) left and right environments. `model` is accepted
+for call-site uniformity but currently ignored: ACd/ARd come from the converged
+down runtime, so the `obs_index` trait is not needed.
 """
-function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General}, Fo=[rt[1].FL, rt[1].FR])
+function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
+                model=nothing; Fo=[rt[1].FL, rt[1].FR])
     atype = _arraytype(M)
     set_device_id!(atype, 1)
     rtup, rtdown = rt
@@ -1070,5 +1105,30 @@ function imag_error(env::VUMPSEnv, A, iSy, params::iPEPSOptimize)
     id = Ni + 1 - i
     My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
     n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
+    return abs(My / n)
+end
+
+"""
+    imag_error(env::OnesideVUMPSEnv, A, iSy, params)
+
+|⟨iSy⟩| indicator for real-valued energies under the one-sided env. Uses the
+observation env (FLo, FRo) and the up AC tensor; the "down" partner is
+`AC[ir, j]` where `ir = obs_index(typeof(model), i, Ni)`.
+
+Mirrors `imag_error(env::PlaquetteVUMPSEnv, ...)` but adapted to the L-R-
+asymmetric env: uses both FLo (left observation env) and FRo (right) instead
+of FLo on both sides.
+"""
+function imag_error(env::OnesideVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AC, FLo, FRo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    Ni, Nj = size(A)
+    i, j = 1, 1
+    model = params.model
+    ir = obs_index(typeof(model), i, Ni)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], iSy;
+                        ifparallel, forloop_iter)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j];
+                        ifparallel, forloop_iter)
     return abs(My / n)
 end

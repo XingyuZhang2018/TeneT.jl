@@ -397,4 +397,73 @@
         end
     end
 
+    # ================================================================
+    # energy_value(::J1J2p{Honeycomb{:brickwall_v}}, ::OnesideVUMPSEnv) smoke
+    # Mirrors the General-mode :brickwall_v smoke test (above), but routes
+    # through `VUMPS{General}(; ifupdown=false)` + passing the model to
+    # ObsEnv. Exercises dispatch on OnesideVUMPSEnv and confirms the 5
+    # bond-category keys are populated.
+    # ================================================================
+    @testset "energy_value J1J2p :brickwall_v OnesideVUMPSEnv smoke" begin
+        using OptimKit: LBFGS
+        using TeneT: ObsEnv, energy_value, build_A,
+                     leading_boundary, initialize_env, J1J2p, OnesideVUMPSEnv
+
+        Random.seed!(7)
+        D, χ = 2, 4
+        pattern = [1 2; 2 1]
+        model = J1J2p(lattice=Honeycomb{:brickwall_v}(),
+                      S=0.5, J1=1.0, J2p=0.3,
+                      ifrotate=false,
+                      couplingtype=:uniform, bondratio=1.0)
+        folder = mktempdir()
+        boundary_alg = VUMPS{General}(; maxiter=3, miniter=0,
+                                        maxiter_ad=0, miniter_ad=0,
+                                        tol=1e-3, verbosity=0, show_every=1000,
+                                        ifupdown=false, ifparallelupdown=false,
+                                        ifsimple_eig=true)
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
+                                  maxiter_restart=1, verbosity=0, folder=folder,
+                                  ifSU=false, SUτ=0.0, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        # Raw shape for :brickwall_v is (1, D, D, D, d, N) — dim-1 on l-leg.
+        # `pattern` has 2 unique site labels, so N = 2.
+        d, N = 2, 2
+        A_raw = (rand(Float64, 1, D, D, D, d, N) .- 0.5)
+        A_raw /= norm(A_raw)
+        A = build_A(A_raw, params)
+
+        rt = initialize_env(A_raw, D, χ, params)
+        rt, _ = leading_boundary(rt, A, params.boundary_alg)
+        # Pass `params.model` to opt into OnesideVUMPSEnv shape
+        env = ObsEnv(rt, A, params.boundary_alg, params.model)
+        @test env isa OnesideVUMPSEnv
+
+        e, e_dict = energy_value(model, A, env, params)
+        @test isfinite(e)
+        # All 5 bond categories should be present in the dict
+        @test haskey(e_dict, "bond_J1V_energy")
+        @test haskey(e_dict, "bond_J1H_energy")
+        @test haskey(e_dict, "bond_J2/_energy")
+        @test haskey(e_dict, "bond_J2\\_energy")
+        @test haskey(e_dict, "bond_J2V_energy")
+        # J1V is always-on → every (i,j) contributes
+        @test length(e_dict["bond_J1V_energy"]) == length(unique(pattern))
+        # Parity-conditional bonds populate half the sites
+        @test !isempty(e_dict["bond_J1H_energy"])
+        @test !isempty(e_dict["bond_J2/_energy"])
+        @test !isempty(e_dict["bond_J2\\_energy"])
+        @test !isempty(e_dict["bond_J2V_energy"])
+        # Each per-bond entry must be finite
+        for key in keys(e_dict)
+            for (_, v) in e_dict[key]
+                @test isfinite(v)
+            end
+        end
+    end
+
 end

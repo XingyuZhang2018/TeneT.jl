@@ -205,6 +205,118 @@
         end
 
         # ==================================================================
+        # OnesideVUMPSEnv construction + conversion
+        # ==================================================================
+        @testset "OnesideVUMPSEnv construction + conversion" begin
+            χ, D = 4, 2
+            # Build minimal 2×2 StructArrays to stuff into env (purely structural test —
+            # the actual content isn't physically meaningful, just shape-correct).
+            pattern = [1 2; 2 1]
+            AC_data = [rand(χ, D, χ) for _ in 1:2]    # leg3
+            AR_data = [rand(χ, D, χ) for _ in 1:2]
+            FL_data = [rand(χ, D, χ) for _ in 1:2]
+            FR_data = [rand(χ, D, χ) for _ in 1:2]
+            AC = TeneT.StructArray(AC_data, pattern)
+            AR = TeneT.StructArray(AR_data, pattern)
+            FLu = TeneT.StructArray(FL_data, pattern)
+            FRu = TeneT.StructArray(FR_data, pattern)
+            FLo = TeneT.StructArray(deepcopy(FL_data), pattern)
+            FRo = TeneT.StructArray(deepcopy(FR_data), pattern)
+
+            env = TeneT.OnesideVUMPSEnv(AC, AR, FLu, FRu, FLo, FRo)
+            @test env.AC === AC
+            @test env.AR === AR
+            @test env.FLu === FLu
+            @test env.FRu === FRu
+            @test env.FLo === FLo
+            @test env.FRo === FRo
+
+            # CPU/GPU conversion smoke
+            env_cpu = Array(env)
+            @test env_cpu isa TeneT.OnesideVUMPSEnv
+            @test env_cpu.AC.data[1] isa Array
+
+            # _atype_of returns the device array type (Array on CPU)
+            @test TeneT._atype_of(env) == Array
+        end
+
+        # ==================================================================
+        # ObsEnv(::VUMPSRuntime, M, VUMPS{General}(ifupdown=false), model)
+        # returns OnesideVUMPSEnv. Exercises the one-sided env shape via the
+        # unified General algorithm (the old VUMPS{Oneside} path).
+        # ==================================================================
+        @testset "ObsEnv VUMPS{General} ifupdown=false + model -> OnesideVUMPSEnv" begin
+            using TeneT: J1J2p, init_env, leading_boundary, ObsEnv, OnesideVUMPSEnv
+            Random.seed!(42)
+            χ, D = 4, 2
+            pattern = [1 2; 2 1]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:2]
+            M = TeneT.StructArray(M_data, pattern)
+            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
+            alg = VUMPS{General}(; maxiter=2, maxiter_ad=0, verbosity=0,
+                                    ifupdown=false, ifparallelupdown=false)
+            rt = init_env(M, χ, alg)
+            @test rt isa TeneT.VUMPSRuntime
+
+            rt_conv, err = leading_boundary(rt, M, alg)
+            @test rt_conv isa TeneT.VUMPSRuntime
+            @test isfinite(err) || err == 0
+
+            # With `model` passed → OnesideVUMPSEnv (uses obs_index trait)
+            env = ObsEnv(rt_conv, M, alg, m)
+            @test env isa OnesideVUMPSEnv
+            @test size(env.AC) == size(M)
+            @test size(env.AR) == size(M)
+            @test size(env.FLu) == size(M)
+            @test size(env.FRu) == size(M)
+            @test size(env.FLo) == size(M)
+            @test size(env.FRo) == size(M)
+
+            # Without `model` → legacy VUMPSEnv shape (backward compat)
+            env_legacy = ObsEnv(rt_conv, M, alg)
+            @test env_legacy isa TeneT.VUMPSEnv
+        end
+
+        # ==================================================================
+        # leftenv `model` kwarg routes through obs_index when model !== nothing.
+        # With a model whose obs_index override differs from the default
+        # Ni+1-i, leftenv should produce different output for ifobs=true.
+        # ==================================================================
+        @testset "leftenv model kwarg uses obs_index trait" begin
+            using TeneT: J1J2p, Heisenberg, leftenv, init_env
+            Random.seed!(42)
+            χ, D = 4, 2
+            # Build a 4×2 pattern so Ni=4 makes Ni+1-i != i for at least one i.
+            pattern = [1 3; 2 4; 3 1; 4 2]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:4]
+            M = TeneT.StructArray(M_data, pattern)
+            alg = VUMPS{General}(; maxiter=2, verbosity=0, ifupdown=false)
+            rt = init_env(M, χ, alg)
+
+            # Default trait (Heisenberg): ir = Ni+1-i. model=Heisenberg vs no model
+            # should AGREE since the model just gives back the default value.
+            m_default = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
+            _, FLo_no_model  = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg)
+            _, FLo_w_default = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg, model=m_default)
+            for i in 1:length(FLo_no_model.data)
+                @test FLo_no_model.data[i] ≈ FLo_w_default.data[i] rtol=1e-10
+            end
+
+            # J1J2p :brickwall_v override: ir = i. Should DIFFER from default
+            # for Ni=4 (e.g. row 2 → default ir=3, override ir=2).
+            m_override = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
+            _, FLo_override = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg, model=m_override)
+            differs = false
+            for i in 1:length(FLo_no_model.data)
+                if !isapprox(FLo_no_model.data[i], FLo_override.data[i]; rtol=1e-6)
+                    differs = true
+                    break
+                end
+            end
+            @test differs
+        end
+
+        # ==================================================================
         # QRCTM
         # ==================================================================
         @testset "QRCTM" begin

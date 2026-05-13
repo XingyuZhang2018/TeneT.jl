@@ -27,7 +27,7 @@ This function is designed to be differentiated through by Zygote.
 function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
     A = build_A(A, params)
     rt, err = leading_boundary(rt, A, params.boundary_alg)
-    env = ObsEnv(rt, A, params.boundary_alg)
+    env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = checkpoint(params.obs_checkpoint, _energy_value_scalar,
                    params.model, A, env, params)
 
@@ -163,7 +163,7 @@ This loop repeats up to `params.maxiter_restart` times.
 """
 function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
                         restriction_ipeps=_restriction_ipeps)
-    D = size(A, 1)
+    D = maximum(size(A)[1:4])
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
     rt′ = deepcopy(rt)
     fδEierr = [1.0, 1.0, 0.0, 0.0]

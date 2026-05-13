@@ -23,7 +23,7 @@ given iPEPS tensor `A` at bond dimension `χ`. Initializes a VUMPS runtime,
 converges the boundary, and evaluates expectation values.
 """
 function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps)
-    D = size(A, 1)
+    D = maximum(size(A)[1:4])
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
     _G_cache[] = nothing
@@ -32,7 +32,7 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
 
     rt, _ = leading_boundary(rt, A, params.boundary_alg)
     params.ifsave_env && save_rt(joinpath(params.folder, "D$(D)", "environment"), rt; file="χ$(χ).jld2")
-    env = ObsEnv(rt, A, params.boundary_alg)
+    env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = energy_value(params.model, A, env, params)
     mag = magnetization_value(params.model, A, env, params)
     ξ = cor_len_value(env, params)
@@ -126,6 +126,43 @@ function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
         Mz = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter)
         
         n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
+        Mag = [Mx/n, My/n, Mz/n]
+        Mnorm[i,j] = norm(Mag)
+        params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
+
+        m_dict["$(i),$(j)"] = Dict("Mx" => Mag[1], "My" => Mag[2], "Mz" => Mag[3], "|M|" => Mnorm[i,j])
+    end
+
+    M_mean = sum(Mnorm)/len
+    params.verbosity >= 4 && println("|M|_mean = $(M_mean)")
+    return M_mean, m_dict
+end
+
+function magnetization_value(model, A, env::OnesideVUMPSEnv, params)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+    atype = _arraytype(AC[1])
+    etype = eltype(AC[1])
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
+
+    Ni, Nj = size(AC)
+    len = length(AC.data)
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+    m_dict = Dict{String, Any}()
+    Mnorm = zeros(Float64, Ni, Nj)
+    ir_oneside(i) = obs_index(typeof(model), i, Ni)
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), AC.pattern))
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        ir = ir_oneside(i)
+        Mx = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], Sx; forloop_iter, ifparallel)
+        My = etype <: Real ? 0.0 : contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], Sy; forloop_iter, ifparallel)
+        Mz = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], Sz; forloop_iter, ifparallel)
+
+        n = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j]; forloop_iter, ifparallel)
         Mag = [Mx/n, My/n, Mz/n]
         Mnorm[i,j] = norm(Mag)
         params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
@@ -347,6 +384,27 @@ function cor_len_value(env::PlaquetteVUMPSEnv, params)
             break
         end
     end
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ = $(ξ)")
+    return ξ
+end
+
+function cor_len_value(env::OnesideVUMPSEnv, params)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+    Cint = cellones(AC)[1]
+    model = params.model
+    Ni = size(AC, 1)
+    ir = obs_index(typeof(model), 1, Ni)
+    λcs, _, info = eigsolve(C -> Lmap(1, C, AR[1,:], AR[ir,:]), Cint, 10, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+
     ξ = -1/log(abs(λ2/λcs[1]))
     params.verbosity >= 4 && println("ξ = $(ξ)")
     return ξ

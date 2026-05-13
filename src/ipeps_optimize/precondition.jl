@@ -35,7 +35,10 @@ function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple
     _G_cache[] = nothing          # reset so the first plain call below computes fresh G
     A_prime = build_restricted_A(A)   # populates _G_cache; all JVP+VJP calls reuse it
 
-    env = ObsEnv(rt, A_prime, params.boundary_alg)
+    env = ObsEnv(rt, A_prime, params.boundary_alg, params.model)
+    if env isa OnesideVUMPSEnv
+        return _precondition_oneside_body(A, grad, env, A_prime, params, build_restricted_A, δ, t0)
+    end
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
 
     gradnew = deepcopy(grad)
@@ -241,5 +244,60 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
     end
 
     params.verbosity >= 3 && printstyled("Preconditioner took $(round(time() - t0, digits = 2)) s\n"; bold=true, color=:green)
+    return gradnew
+end
+
+"""
+    _precondition_oneside_body(A, grad, env::OnesideVUMPSEnv, A_prime, params, build_restricted_A, δ, t0)
+
+Body of `precondition_invese_single_envir` specialised for `OnesideVUMPSEnv`.
+Mirrors the VUMPSEnv body but reads from a single AC field and uses
+`obs_index(typeof(params.model), i, Ni)` for the down-row partner instead of
+the hardcoded `Ni + 1 - i`. Hoisted into a helper so the dispatching outer
+function stays single-method on rt::Union{VUMPSRuntime, Tuple}.
+"""
+function _precondition_oneside_body(A, grad, env::OnesideVUMPSEnv, A_prime, params, build_restricted_A, δ, t0)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+    gradnew = deepcopy(grad)
+    Ni, Nj = size(A_prime)
+    @unpack forloop_iter = params
+    @unpack ifparallel = params.boundary_alg
+    model = params.model
+    ir_oneside(i) = obs_index(typeof(model), i, Ni)
+
+    # Precompute normalizations (independent of x, so hoist out of linsolve)
+    n_map = [begin
+        ir = ir_oneside(i)
+        contract_n_11(FLo[i,j], AC[i,j], A_prime[i,j], AC[ir,j], FRo[i,j]; forloop_iter, ifparallel)
+    end for (i,j) in eachindex(A_prime)]
+
+    gradnew, _ = linsolve(grad; isposdef=true, maxiter=1, verbosity=0) do x
+        ε_fd = sqrt(eps(real(eltype(A))))
+        B_plus  = build_restricted_A(A + ε_fd * x)
+        B_minus = build_restricted_A(A - ε_fd * x)
+
+        idx = 0
+        T_x_data = [begin
+            idx += 1
+            A_prime_x_q = (B_plus[i,j] - B_minus[i,j]) / (2ε_fd)
+            ir = ir_oneside(i)
+            Mumap_parallel(AC[i,j], AC[ir,j], FLo[i,j], FRo[i,j], A_prime_x_q; forloop_iter, ifparallel) / n_map[idx]
+        end for (i,j) in eachindex(A_prime)]
+        T_x = StructArray(T_x_data, A_prime.pattern)
+
+        function overlap_vjp(y)
+            total = zero(real(eltype(y)))
+            Ad = build_restricted_A(y)
+            for (i,j) in eachindex(A_prime)
+                total += real(dot(Ad[i,j], T_x[i,j]))
+            end
+            return total
+        end
+        gN = Zygote.gradient(overlap_vjp, A)[1]
+
+        return δ * x + gN
+    end
+
+    params.verbosity >= 3 && printstyled("Oneside preconditioner took $(round(time() - t0, digits = 2)) s\n"; bold=true, color=:green)
     return gradnew
 end

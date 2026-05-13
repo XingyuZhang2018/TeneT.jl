@@ -720,6 +720,16 @@ function _site_xy(::Honeycomb{:brickwall_h}, i, j)
     return (x, y)
 end
 
+function _site_xy(::Honeycomb{:brickwall_v}, i, j)
+    # 90° rotation of :brickwall_h: long axis along columns (Δx=1.5), short
+    # axis along rows (Δy=sqrt(3)/2). Odd-parity sites are shifted LEFT by 0.5
+    # (mirroring :brickwall_h's down-shift on odd parity by 0.5 in y), so the
+    # conditional J1H bond (even → odd, horizontal) has length 1.5-0.5=1.
+    x = (j - 1) * 1.5 - ((i + j) % 2 == 1 ? 0.5 : 0.0)
+    y = -(i - 1) * sqrt(3) / 2
+    return (x, y)
+end
+
 """
 Kagome merge: 3 sublattice sites per unit cell (i,j).
 Returns positions for sublattice k ∈ {1,2,3}.
@@ -766,7 +776,7 @@ const _BOND_COLORS = Dict(
     "bond_H" => :royalblue, "bond_V" => :forestgreen,
     # J1J2
     "bond_J1H" => :royalblue, "bond_J1V" => :forestgreen,
-    "bond_J2H" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
+    "bond_J2H" => :orange, "bond_J2V" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
     "bond_J3\\" => :gray60, "bond_J3/" => :gray60, "bond_J3|" => :gray40,
     # Heisenberg Kagome :merge
     "bond_onsite" => :gray50,
@@ -798,7 +808,8 @@ function _bond_linewidth(eval, e_min, e_max)
     return 3.0 + t * 18.0
 end
 
-function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall_h}, all_coords, all_mdata,
+function _draw_lattice_bonds!(ax, ::Union{Honeycomb{:brickwall_h}, Honeycomb{:brickwall_v}},
+                               all_coords, all_mdata,
                                e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
                                e_min, e_max)
     pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
@@ -1021,6 +1032,8 @@ function _bond_offsets_honeycomb(bond_type::String)
         return (0, 2), (1, 0)           # J3/ : (i,j+2) → (i+1,j)
     elseif occursin("J2H", bond_type)
         return (0, 0), (0, 2)
+    elseif occursin("J2V", bond_type)
+        return (0, 0), (2, 0)           # J2V vertical triple: (i,j) → (i+2,j)
     elseif occursin("_H_", bond_type) || occursin("J1H", bond_type) || occursin("Jx", bond_type) || occursin("Jz", bond_type)
         return (0, 0), (0, 1)
     elseif _is_cross_diagonal(bond_type)

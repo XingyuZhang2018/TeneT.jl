@@ -68,6 +68,8 @@ include("contraction/observable.jl")
 
 include("boundary_algorithm/interface.jl")
 include("boundary_algorithm/environment.jl")
+# obs_index trait — referenced by leftenv/rightenv (general.jl); must precede them.
+include("models/oneside_traits.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")
 include("boundary_algorithm/vumps/c4v.jl")

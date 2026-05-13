@@ -112,4 +112,23 @@
         @test q.forloop_iter == 1
     end
 
+    @testset "obs_index trait" begin
+        using TeneT: obs_index
+
+        # Default: ir = Ni + 1 - i  (sublattice U-D hermiticity)
+        @test obs_index(Heisenberg{Square}, 2, 6) == 5
+        @test obs_index(Heisenberg{Square}, 1, 6) == 6
+        @test obs_index(Heisenberg{Square}, 6, 6) == 1
+
+        # J1J2p{:brickwall_v} override: ir = i  (single-site U-D self-symmetry)
+        M_v = J1J2p{Honeycomb{:brickwall_v}}
+        @test obs_index(M_v, 1, 6) == 1
+        @test obs_index(M_v, 4, 6) == 4
+        @test obs_index(M_v, 6, 6) == 6
+
+        # J1J2p with :brickwall_h still uses default (no override)
+        M_h = J1J2p{Honeycomb{:brickwall_h}}
+        @test obs_index(M_h, 2, 6) == 5
+    end
+
 end
