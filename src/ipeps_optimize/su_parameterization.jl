@@ -30,24 +30,35 @@ function SU_parameterization(A, params; D_new)
         throw(ArgumentError("SU_parameterization not yet implemented for $(typeof(params.model.lattice)) (gates would act on the empty site, producing wrong results)"))
     end
     if params.model.lattice isa Kagome{:merge}
+        # d above is the merged physical dim (d_single^3). The Kagome helpers
+        # work with the per-sublattice dim, so derive it from the model.
+        d_single = Int(2 * params.model.S + 1)
         terms = _heisenberg_bond_terms(params.model, Array; ifrotate=false)
         # Inter-cell H = bond(3→1)+bond(3→2), V = bond(3→1)+bond(2→1)
         function _build_kagome_twosite(sublattice_left, sublattice_right)
-            h = zeros(Float64, d^3, d^3, d^3, d^3)
+            h = zeros(Float64, d, d, d, d)
             for (c, OL, OR) in terms
-                OL_d3 = _kagome_site_op(OL, sublattice_left, d)
-                OR_d3 = _kagome_site_op(OR, sublattice_right, d)
-                @tensor o[a,b,c,d] := OL_d3[a,b] * OR_d3[c,d]
+                OL_d3 = _kagome_site_op(OL, sublattice_left, d_single)
+                OR_d3 = _kagome_site_op(OR, sublattice_right, d_single)
+                @tensor o[a,b,c,e] := OL_d3[a,b] * OR_d3[c,e]
                 h += c * real(o)
             end
             return h
         end
         h_H = _build_kagome_twosite(3, 1) + _build_kagome_twosite(3, 2)
         h_V = _build_kagome_twosite(3, 1) + _build_kagome_twosite(2, 1)
-        h_onsite = _kagome_onsite_op(terms, 1, 2, d, Array) + _kagome_onsite_op(terms, 2, 3, d, Array)
-        @tensor h_twosite[1,2,3,4] := h_onsite[1,2] * h_onsite[3,4]
-        h_H += h_twosite
-        h_V += h_twosite
+
+        # Intra-cell (1-2, 2-3) bonds sit on a single merged site. Distribute
+        # them symmetrically into the two-site gates as h_onsite⊗I + I⊗h_onsite.
+        # Each cell participates in 4 gates per sweep (left/right of H,
+        # upper/lower of V), so divide by 4 to recover unit Trotter weight.
+        h_onsite = _kagome_onsite_op(terms, 1, 2, d_single, Array) +
+                   _kagome_onsite_op(terms, 2, 3, d_single, Array)
+        Id = Matrix{Float64}(I, d, d)
+        @tensor h_twosite[a,b,c,e] := h_onsite[a,b] * Id[c,e] +
+                                      Id[a,b] * h_onsite[c,e]
+        h_H += h_twosite / 4
+        h_V += h_twosite / 4
     else
         terms = _heisenberg_bond_terms(params.model, Array)
         h = zeros(Float64, d, d, d, d)
