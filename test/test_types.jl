@@ -26,20 +26,6 @@
         @test TeneT.Plaquette() isa TeneT.ContractionMode
     end
 
-    # ---- Oneside type ----
-    @testset "Oneside type" begin
-        m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
-        @test TeneT.Oneside(m) isa TeneT.ContractionMode
-        @test TeneT.Oneside(m) isa TeneT.Oneside{typeof(m)}
-    end
-
-    @testset "VUMPS{Oneside}" begin
-        m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
-        alg = VUMPS(Oneside(m))
-        @test alg isa TeneT.Algorithm
-        @test alg isa VUMPS
-    end
-
     # ---- Algorithm types ----
     @testset "Algorithm types" begin
         @test VUMPS{General}() isa TeneT.Algorithm

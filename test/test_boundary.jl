@@ -209,13 +209,13 @@
         # ==================================================================
         @testset "OnesideVUMPSEnv construction + conversion" begin
             χ, D = 4, 2
-            # Build minimal 6×2 StructArrays to stuff into env (purely structural test —
+            # Build minimal 2×2 StructArrays to stuff into env (purely structural test —
             # the actual content isn't physically meaningful, just shape-correct).
-            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
-            AC_data = [rand(χ, D, χ) for _ in 1:6]    # leg3
-            AR_data = [rand(χ, D, χ) for _ in 1:6]
-            FL_data = [rand(χ, D, χ) for _ in 1:6]
-            FR_data = [rand(χ, D, χ) for _ in 1:6]
+            pattern = [1 2; 2 1]
+            AC_data = [rand(χ, D, χ) for _ in 1:2]    # leg3
+            AR_data = [rand(χ, D, χ) for _ in 1:2]
+            FL_data = [rand(χ, D, χ) for _ in 1:2]
+            FR_data = [rand(χ, D, χ) for _ in 1:2]
             AC = TeneT.StructArray(AC_data, pattern)
             AR = TeneT.StructArray(AR_data, pattern)
             FLu = TeneT.StructArray(FL_data, pattern)
@@ -241,100 +241,29 @@
         end
 
         # ==================================================================
-        # Oneside init_env dispatch
+        # ObsEnv(::VUMPSRuntime, M, VUMPS{General}(ifupdown=false), model)
+        # returns OnesideVUMPSEnv. Exercises the one-sided env shape via the
+        # unified General algorithm (the old VUMPS{Oneside} path).
         # ==================================================================
-        @testset "Oneside init_env dispatch" begin
-            using TeneT: J1J2p
-            Random.seed!(42)
-            χ, D = 4, 2
-            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3, ifrotate=false)
-            alg = VUMPS(Oneside(m); maxiter=2, maxiter_ad=0, verbosity=0,
-                        ifupdown=false, ifparallelupdown=false)
-
-            # Use a tiny rank-4 M directly — pattern doesn't matter for dispatch,
-            # only that init_env can produce canonical forms + envs from it.
-            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
-            M_data = [atype(rand(Float64, D, D, D, D)) for _ in 1:6]
-            M = TeneT.StructArray(M_data, pattern)
-
-            rt = TeneT.init_env(M, χ, alg)
-            @test rt isa TeneT.VUMPSRuntime
-            @test size(rt.AL, 1) == 6
-            @test size(rt.AL, 2) == 2
-        end
-
-        # ==================================================================
-        # Oneside leading_boundary smoke
-        # ==================================================================
-        @testset "Oneside leading_boundary smoke" begin
-            using TeneT: J1J2p, init_env, leading_boundary
-            Random.seed!(42)
-            χ, D = 4, 2
-            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
-            # Use a tiny rank-4 M just to verify dispatch + iter compiles
-            M_data = [atype(rand(Float64, D, D, D, D)) for _ in 1:6]
-            M = TeneT.StructArray(M_data, pattern)
-            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3, ifrotate=false)
-            alg = VUMPS(Oneside(m); maxiter=2, maxiter_ad=0, verbosity=0,
-                        ifupdown=false, ifparallelupdown=false)
-            rt = init_env(M, χ, alg)
-            rt_conv, err = leading_boundary(rt, M, alg)
-            @test rt_conv isa TeneT.VUMPSRuntime
-            @test isfinite(err) || err == 0
-        end
-
-        # ==================================================================
-        # leftenv_oneside / rightenv_oneside parity with leftenv/rightenv
-        # ==================================================================
-        @testset "leftenv_oneside vs leftenv(AL,AL,M;ifobs=true) under default trait" begin
-            # When obs_index = Ni + 1 - i (the default), leftenv_oneside should
-            # produce the SAME result as leftenv(AL, AL, M, FL; ifobs=true).
-            using TeneT: Heisenberg, leftenv_oneside, leftenv, init_env
-            Random.seed!(42)
-            χ, D = 4, 2
-            # Build a small test setup. Use Heisenberg which has the DEFAULT trait.
-            m = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
-            pattern = [1 2; 2 1]
-            M_data = [atype(rand(D, D, D, D)) for _ in 1:2]
-            M = TeneT.StructArray(M_data, pattern)
-            alg = VUMPS(Oneside(m); maxiter=2, verbosity=0)
-            rt = init_env(M, χ, alg)
-            _, FLo_via_oneside = leftenv_oneside(rt.AL, M, rt.FL; alg)
-            _, FLo_via_standard = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg)
-            for i in 1:length(FLo_via_oneside.data)
-                @test FLo_via_oneside.data[i] ≈ FLo_via_standard.data[i] rtol=1e-10
-            end
-        end
-
-        @testset "rightenv_oneside vs rightenv(AR,AR,M;ifobs=true) under default trait" begin
-            using TeneT: Heisenberg, rightenv_oneside, rightenv, init_env
-            Random.seed!(42)
-            χ, D = 4, 2
-            m = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
-            pattern = [1 2; 2 1]
-            M_data = [atype(rand(D, D, D, D)) for _ in 1:2]
-            M = TeneT.StructArray(M_data, pattern)
-            alg = VUMPS(Oneside(m); maxiter=2, verbosity=0)
-            rt = init_env(M, χ, alg)
-            _, FRo_via_oneside = rightenv_oneside(rt.AR, M, rt.FR; alg)
-            _, FRo_via_standard = rightenv(rt.AR, rt.AR, M, rt.FR; ifobs=true, alg)
-            for i in 1:length(FRo_via_oneside.data)
-                @test FRo_via_oneside.data[i] ≈ FRo_via_standard.data[i] rtol=1e-10
-            end
-        end
-
-        @testset "Oneside ObsEnv" begin
+        @testset "ObsEnv VUMPS{General} ifupdown=false + model -> OnesideVUMPSEnv" begin
             using TeneT: J1J2p, init_env, leading_boundary, ObsEnv, OnesideVUMPSEnv
             Random.seed!(42)
             χ, D = 4, 2
-            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
-            M_data = [atype(rand(D, D, D, D)) for _ in 1:6]
+            pattern = [1 2; 2 1]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:2]
             M = TeneT.StructArray(M_data, pattern)
             m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
-            alg = VUMPS(Oneside(m); maxiter=2, maxiter_ad=0, verbosity=0)
+            alg = VUMPS{General}(; maxiter=2, maxiter_ad=0, verbosity=0,
+                                    ifupdown=false, ifparallelupdown=false)
             rt = init_env(M, χ, alg)
-            rt_conv, _ = leading_boundary(rt, M, alg)
-            env = ObsEnv(rt_conv, M, alg)
+            @test rt isa TeneT.VUMPSRuntime
+
+            rt_conv, err = leading_boundary(rt, M, alg)
+            @test rt_conv isa TeneT.VUMPSRuntime
+            @test isfinite(err) || err == 0
+
+            # With `model` passed → OnesideVUMPSEnv (uses obs_index trait)
+            env = ObsEnv(rt_conv, M, alg, m)
             @test env isa OnesideVUMPSEnv
             @test size(env.AC) == size(M)
             @test size(env.AR) == size(M)
@@ -342,28 +271,44 @@
             @test size(env.FRu) == size(M)
             @test size(env.FLo) == size(M)
             @test size(env.FRo) == size(M)
+
+            # Without `model` → legacy VUMPSEnv shape (backward compat)
+            env_legacy = ObsEnv(rt_conv, M, alg)
+            @test env_legacy isa TeneT.VUMPSEnv
         end
 
-        @testset "leftenv_oneside with J1J2p override differs from standard" begin
-            # When obs_index = i (J1J2p :brickwall_v override), leftenv_oneside
-            # pairs AL[i,:] with AL[i,:] (same row). leftenv(AL, AL, M, FL; ifobs=true)
-            # pairs AL[i,:] with AL[Ni+1-i,:]. These should DIFFER for Ni > 2.
-            using TeneT: J1J2p, leftenv_oneside, leftenv, init_env
+        # ==================================================================
+        # leftenv `model` kwarg routes through obs_index when model !== nothing.
+        # With a model whose obs_index override differs from the default
+        # Ni+1-i, leftenv should produce different output for ifobs=true.
+        # ==================================================================
+        @testset "leftenv model kwarg uses obs_index trait" begin
+            using TeneT: J1J2p, Heisenberg, leftenv, init_env
             Random.seed!(42)
             χ, D = 4, 2
-            m = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
-            # Ni = 6 (non-trivial — Ni+1-i ≠ i)
-            pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
-            M_data = [atype(rand(D, D, D, D)) for _ in 1:6]
+            # Build a 4×2 pattern so Ni=4 makes Ni+1-i != i for at least one i.
+            pattern = [1 3; 2 4; 3 1; 4 2]
+            M_data = [atype(rand(D, D, D, D)) for _ in 1:4]
             M = TeneT.StructArray(M_data, pattern)
-            alg = VUMPS(Oneside(m); maxiter=2, verbosity=0)
+            alg = VUMPS{General}(; maxiter=2, verbosity=0, ifupdown=false)
             rt = init_env(M, χ, alg)
-            _, FLo_via_oneside = leftenv_oneside(rt.AL, M, rt.FL; alg)
-            _, FLo_via_standard = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg)
-            # Should differ at some entry
+
+            # Default trait (Heisenberg): ir = Ni+1-i. model=Heisenberg vs no model
+            # should AGREE since the model just gives back the default value.
+            m_default = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
+            _, FLo_no_model  = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg)
+            _, FLo_w_default = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg, model=m_default)
+            for i in 1:length(FLo_no_model.data)
+                @test FLo_no_model.data[i] ≈ FLo_w_default.data[i] rtol=1e-10
+            end
+
+            # J1J2p :brickwall_v override: ir = i. Should DIFFER from default
+            # for Ni=4 (e.g. row 2 → default ir=3, override ir=2).
+            m_override = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3)
+            _, FLo_override = leftenv(rt.AL, rt.AL, M, rt.FL; ifobs=true, alg, model=m_override)
             differs = false
-            for i in 1:length(FLo_via_oneside.data)
-                if !isapprox(FLo_via_oneside.data[i], FLo_via_standard.data[i]; rtol=1e-6)
+            for i in 1:length(FLo_no_model.data)
+                if !isapprox(FLo_no_model.data[i], FLo_override.data[i]; rtol=1e-6)
                     differs = true
                     break
                 end
