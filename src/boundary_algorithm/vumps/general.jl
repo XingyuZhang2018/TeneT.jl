@@ -241,12 +241,17 @@ function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifparallel, forloop_iter, inner_et
 end
 
 """
-    λL, FL = leftenv(ALu, ALd, M, FL=FLint(ALu,M); kwargs...)
+    λL, FL = leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, alg, model=nothing, kwargs...)
 
 Compute the left environment tensor for MPS `ALu`, `ALd` and MPO `M`, by finding the left fixed point
 of ALu - M - ALd contracted along the physical dimension.
+
+When `ifobs=true`, the down-row partner of row `i` is `ir = Ni + 1 - i` by default.
+Passing a non-`nothing` `model` overrides this with `obs_index(typeof(model), i, Ni)`,
+which lets per-model U-D symmetries (e.g. `J1J2p{Honeycomb{:brickwall_v}}` → `ir = i`)
+replace the default reflection.
 """
-function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
+function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, model=nothing, kwargs...)
     @unpack inner_etype, forloop_iter, ifparallel,
             segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast: Plaquette/General leftenv makes multiple
@@ -279,7 +284,11 @@ function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, kwargs...)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
-        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        ir = if ifobs
+            model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)
+        else
+            mod1(i + 1, Ni)
+        end
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
             f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
@@ -333,12 +342,17 @@ function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifparallel, forloop_iter, inner_et
 end
 
 """
-    λR, FR = rightenv(ARu, ARd, M, FR=FRint(ARu,M); kwargs...)
+    λR, FR = rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, alg, model=nothing, kwargs...)
 
 Compute the right environment tensor for MPS `ARu`, `ARd` and MPO `M`, by finding the right fixed point
 of AR - M - conj(AR) contracted along the physical dimension.
+
+When `ifobs=true`, the down-row partner of row `i` is `ir = Ni + 1 - i` by default.
+Passing a non-`nothing` `model` overrides this with `obs_index(typeof(model), i, Ni)`,
+which lets per-model U-D symmetries (e.g. `J1J2p{Honeycomb{:brickwall_v}}` → `ir = i`)
+replace the default reflection.
 """
-function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
+function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, model=nothing, kwargs...)
     @unpack inner_etype, forloop_iter, ifparallel,
             segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
     # Env-level boundary cast — see leftenv for rationale.
@@ -361,7 +375,11 @@ function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, kwargs...)
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
-        ir = ifobs ? Ni + 1 - i : mod1(i + 1, Ni)
+        ir = if ifobs
+            model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)
+        else
+            mod1(i + 1, Ni)
+        end
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
             f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
