@@ -21,13 +21,17 @@ nprocs = MPI.Comm_size(comm)
 CUDA.device!(0)
 
 # ─── Cart2DGrid setup (square grid only for v1) ────────────────────────────
-N1 = Int(floor(sqrt(nprocs)))
-while nprocs % N1 != 0 || N1 * N1 != nprocs
-    N1 -= 1
-    N1 == 0 && error("SUMMA MWE requires square grid (N=$nprocs is not a square)")
+function _square_M(nprocs)
+    m = Int(floor(sqrt(nprocs)))
+    while m * m != nprocs
+        m -= 1
+        m == 0 && error("SUMMA MWE requires square grid (N=$nprocs is not a square)")
+    end
+    return m
 end
-N2 = N1
-M  = N1  # alias: M = N1 = N2
+const N1 = _square_M(nprocs)
+const N2 = N1
+const M  = N1  # alias: M = N1 = N2
 
 grid = Cart2DGrid(N1, N2)
 const r1 = grid.r1
@@ -132,8 +136,10 @@ rank == 0 && @printf("%-30s %15s %15s %15s %10s\n",
 rank == 0 && println("─" ^ 90)
 
 for (D, χ) in [(10, 64), (10, 128), (10, 256)]
-    total_splits = 128
-    forloop_iter = total_splits ÷ nprocs
+    # forloop_iter=1: each rank takes one χ/nprocs slice. Avoids cuTENSOR
+    # complaining when total_splits exceeds χ at small χ (the MWE point is
+    # algorithm validation, not 1D forloop tuning).
+    forloop_iter = 1
 
     # Deterministic full tensors on each rank (same seed → same data everywhere)
     FL_full, ALu_full, ALd_full, M1_full, M2_full =
