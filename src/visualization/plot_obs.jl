@@ -721,8 +721,11 @@ function _site_xy(::Honeycomb{:brickwall_h}, i, j)
 end
 
 function _site_xy(::Honeycomb{:brickwall_v}, i, j)
-    # 90° rotation of :brickwall_h: long axis along columns, zigzag horizontal
-    x = (j - 1) * 1.5 + ((i + j) % 2 == 1 ? 0.5 : 0.0)
+    # 90° rotation of :brickwall_h: long axis along columns (Δx=1.5), short
+    # axis along rows (Δy=sqrt(3)/2). Odd-parity sites are shifted LEFT by 0.5
+    # (mirroring :brickwall_h's down-shift on odd parity by 0.5 in y), so the
+    # conditional J1H bond (even → odd, horizontal) has length 1.5-0.5=1.
+    x = (j - 1) * 1.5 - ((i + j) % 2 == 1 ? 0.5 : 0.0)
     y = -(i - 1) * sqrt(3) / 2
     return (x, y)
 end
