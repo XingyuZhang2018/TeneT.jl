@@ -37,4 +37,4 @@ end
 # Oneside trait override: each tensor on :brickwall_v under single-site restriction
 # is u-d self-symmetric (A[l,d,r,u,p] = A[l,u,r,d,p]), so down at row i equals
 # up at row i (no reflection). See docs/plans/2026-05-12-vertical-brickwall-oneside-design.md S2.2.
-_oneside_down_index(::Type{<:J1J2p{Honeycomb{:brickwall_v}}}, i, Ni) = i
+obs_index(::Type{<:J1J2p{Honeycomb{:brickwall_v}}}, i, Ni) = i

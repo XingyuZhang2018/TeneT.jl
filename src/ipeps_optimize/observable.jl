@@ -153,7 +153,7 @@ function magnetization_value(model, A, env::OnesideVUMPSEnv, params)
     @unpack ifparallel = params.boundary_alg
     m_dict = Dict{String, Any}()
     Mnorm = zeros(Float64, Ni, Nj)
-    ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)
+    ir_oneside(i) = obs_index(typeof(model), i, Ni)
     for p in 1:len
         i, j = Tuple(findfirst(==(p), AC.pattern))
         params.verbosity >= 4 && println("===========$i,$j===========")
@@ -394,7 +394,7 @@ function cor_len_value(env::OnesideVUMPSEnv, params)
     Cint = cellones(AC)[1]
     model = params.model
     Ni = size(AC, 1)
-    ir = _oneside_down_index(typeof(model), 1, Ni)
+    ir = obs_index(typeof(model), 1, Ni)
     λcs, _, info = eigsolve(C -> Lmap(1, C, AR[1,:], AR[ir,:]), Cint, 10, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len not converged"
     λ2 = 0

@@ -212,7 +212,7 @@ end
 Per-site energy of J1J2p on `:brickwall_v` under Oneside VUMPS. Mirrors the
 `env::VUMPSEnv` version with ACu/ARu → AC/AR and ACd[ir, j] / ARd[ir, j] →
 AC[ir_oneside(i), j] / AR[ir_oneside(i), j], where
-`ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)`. For J1J2p under
+`ir_oneside(i) = obs_index(typeof(model), i, Ni)`. For J1J2p under
 single-site restriction, `ir_oneside(i) = i` — down lives at the same row as up.
 """
 function energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::OnesideVUMPSEnv, params::iPEPSOptimize)
@@ -222,7 +222,7 @@ function energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::OnesideVUMP
     Ni, Nj = size(AC)
     len = length(AC.data)
 
-    ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)
+    ir_oneside(i) = obs_index(typeof(model), i, Ni)
 
     terms = _heisenberg_bond_terms(model, atype)
     terms_norot = _heisenberg_bond_terms(model, atype; ifrotate=false)

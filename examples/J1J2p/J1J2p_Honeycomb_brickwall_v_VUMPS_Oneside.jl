@@ -7,9 +7,9 @@ using Zygote
 
 # Oneside-VUMPS variant of the :brickwall_v J1J2p example. Uses the single-side
 # VUMPS algorithm (one fixed-point only — the down environment is reconstructed
-# from the up environment via the model's `_oneside_down_index` trait). For
+# from the up environment via the model's `obs_index` trait). For
 # `J1J2p{Honeycomb{:brickwall_v}}` under single-site restriction that trait is
-# `_oneside_down_index(_, i, Ni) = i`, which requires each iPEPS tensor to be
+# `obs_index(_, i, Ni) = i`, which requires each iPEPS tensor to be
 # u-d self-symmetric. The `restriction_ipeps` below enforces that symmetry
 # explicitly by symmetrizing A on the (d, u) legs before the parity mapping.
 seed = 88
@@ -86,7 +86,7 @@ A = init_ipeps(; atype, etype, No, D, χ, params)
 #   Odd-parity sites:  2, 4, 6 (positions (2,1),(4,1),(6,1) and (5,2),(1,2),(3,2))
 #
 # Oneside requirement: each iPEPS tensor must satisfy A[l,d,r,u,p] = A[l,u,r,d,p]
-# (d ↔ u swap is a symmetry). This is what makes `_oneside_down_index = i`
+# (d ↔ u swap is a symmetry). This is what makes `obs_index = i`
 # correct for J1J2p :brickwall_v under the Oneside Stage 2 design.
 # We enforce it via `A + permutedims(A, (1,4,3,2,5))`, which projects onto the
 # U-D-symmetric subspace (doubles the norm — divided out by `norm(B)` below).

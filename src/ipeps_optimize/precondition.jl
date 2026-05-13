@@ -266,7 +266,7 @@ function _precondition_invese_single_envir_oneside(A, grad, rt::VUMPSRuntime, pa
     @unpack forloop_iter = params
     @unpack ifparallel = params.boundary_alg
     model = params.model
-    ir_oneside(i) = _oneside_down_index(typeof(model), i, Ni)
+    ir_oneside(i) = obs_index(typeof(model), i, Ni)
 
     # Precompute normalizations (independent of x, so hoist out of linsolve)
     n_map = [begin

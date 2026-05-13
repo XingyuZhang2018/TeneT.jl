@@ -32,7 +32,7 @@ Plaquette(L::AbstractLattice) = Plaquette{typeof(L)}()
 
 VUMPS contraction mode for models with up-down (but NOT left-right) hermiticity.
 The down environment is derived from the up environment via the per-model
-trait `_oneside_down_index(::Type{<:M}, i, Ni)`. Distinct from `Plaquette`
+trait `obs_index(::Type{<:M}, i, Ni)`. Distinct from `Plaquette`
 which exploits BOTH L-R and U-D symmetries.
 
 Constructor: `Oneside(m::HamiltonianModel) = Oneside{typeof(m)}()`.

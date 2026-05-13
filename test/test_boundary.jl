@@ -287,7 +287,7 @@
         # leftenv_oneside / rightenv_oneside parity with leftenv/rightenv
         # ==================================================================
         @testset "leftenv_oneside vs leftenv(AL,AL,M;ifobs=true) under default trait" begin
-            # When _oneside_down_index = Ni + 1 - i (the default), leftenv_oneside should
+            # When obs_index = Ni + 1 - i (the default), leftenv_oneside should
             # produce the SAME result as leftenv(AL, AL, M, FL; ifobs=true).
             using TeneT: Heisenberg, leftenv_oneside, leftenv, init_env
             Random.seed!(42)
@@ -345,7 +345,7 @@
         end
 
         @testset "leftenv_oneside with J1J2p override differs from standard" begin
-            # When _oneside_down_index = i (J1J2p :brickwall_v override), leftenv_oneside
+            # When obs_index = i (J1J2p :brickwall_v override), leftenv_oneside
             # pairs AL[i,:] with AL[i,:] (same row). leftenv(AL, AL, M, FL; ifobs=true)
             # pairs AL[i,:] with AL[Ni+1-i,:]. These should DIFFER for Ni > 2.
             using TeneT: J1J2p, leftenv_oneside, leftenv, init_env

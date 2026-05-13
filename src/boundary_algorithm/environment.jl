@@ -90,10 +90,10 @@ end
 Observation environment for `VUMPS{<:Oneside}` mode. Has both left and right
 environments (no L-R symmetry to exploit) but only the up canonical tensors
 (no ACd/ARd because U-D hermiticity makes them equal to AC/AR under the
-model's `_oneside_down_index` row mapping).
+model's `obs_index` row mapping).
 
 # Fields
-- `AC`:  Mixed-canonical tensor (= ACu; ACd derived via `_oneside_down_index`)
+- `AC`:  Mixed-canonical tensor (= ACu; ACd derived via `obs_index`)
 - `AR`:  Right-canonical tensor (= ARu)
 - `FLu`: Up left environment (= FL from runtime, ifobs=false)
 - `FRu`: Up right environment (= FR from runtime, ifobs=false)

@@ -3,7 +3,7 @@
 #
 # Key differences from General VUMPS:
 #   - Only ONE VUMPS iteration (no separate down VUMPS); down env derived via
-#     model trait `_oneside_down_index(::Type{<:Model}, i, Ni)`
+#     model trait `obs_index(::Type{<:Model}, i, Ni)`
 #   - ObsEnv builds FLo/FRo via leftenv_oneside / rightenv_oneside (which
 #     use the model trait, not hardcoded `ir = Ni+1-i` of `ifobs=true`)
 #   - Reuses VUMPSRuntime (5 fields); introduces OnesideVUMPSEnv (6 fields)
@@ -21,7 +21,7 @@
     init_env(M, χ, alg::VUMPS{<:Oneside})
 
 Initialize a single VUMPSRuntime for Oneside mode. No down VUMPS is created
-since the down env is derived from the up env via `_oneside_down_index` at
+since the down env is derived from the up env via `obs_index` at
 ObsEnv time.
 """
 function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Oneside})
@@ -65,7 +65,7 @@ end
 One step of Oneside VUMPS: leftenv → rightenv → ACenv → Cenv → ACCtoALAR.
 Structurally identical to `vumps_step(...; alg::VUMPS{General})` but without
 the separate down-VUMPS half — the down env is derived from up at ObsEnv time
-via the model trait `_oneside_down_index`.
+via the model trait `obs_index`.
 """
 function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{<:Oneside})
     @unpack AL, C, AR, FL, FR = rt
@@ -189,7 +189,7 @@ end
     leftenv_oneside(AL, M, FL=FLint(AL, M); alg::VUMPS{Oneside{Model}}, kwargs...) where Model
 
 Left observation environment for Oneside mode. Row pairing is determined by
-the model trait `_oneside_down_index(Model, i, Ni)` instead of the hardcoded
+the model trait `obs_index(Model, i, Ni)` instead of the hardcoded
 `ir = Ni+1-i` used by `leftenv(...; ifobs=true)`. AL is used twice (no
 separate ALd) because under U-D hermiticity ALu == ALd at the corresponding
 row (where "corresponding" is defined by the trait).
@@ -219,7 +219,7 @@ function leftenv_oneside(AL, M, FL=FLint(AL, M);
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
-        ir = _oneside_down_index(Model, i, Ni)   # ← key difference from leftenv
+        ir = obs_index(Model, i, Ni)   # ← key difference from leftenv
         p = FL.pattern[i, 1]
         if p ∉ processed_indices
             f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij,
@@ -287,7 +287,7 @@ function rightenv_oneside(AR, M, FR=FRint(AR, M);
     simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
     polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
     for i in 1:Ni
-        ir = _oneside_down_index(Model, i, Ni)
+        ir = obs_index(Model, i, Ni)
         p = FR.pattern[i, Nj]
         if p ∉ processed_indices
             f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj,
@@ -335,7 +335,7 @@ end
 
 Construct an `OnesideVUMPSEnv` from a Oneside runtime. Computes FLo / FRo via
 `leftenv_oneside` / `rightenv_oneside` (which use the model's row-index trait
-`_oneside_down_index`). FLu / FRu are reused from the runtime's FL / FR.
+`obs_index`). FLu / FRu are reused from the runtime's FL / FR.
 
 The resulting env has 6 fields (AC, AR, FLu, FRu, FLo, FRo) — no separate
 ACd / ARd because U-D hermiticity makes them equal to AC / AR at the row
@@ -356,7 +356,7 @@ end
 
 |⟨iSy⟩| indicator for real-valued energies under Oneside mode. Uses the
 observation env (FLo, FRo) and the up AC tensor; the "down" partner is
-`AC[ir, j]` where `ir = _oneside_down_index(typeof(model), i, Ni)`.
+`AC[ir, j]` where `ir = obs_index(typeof(model), i, Ni)`.
 
 Mirrors `imag_error(env::PlaquetteVUMPSEnv, ...)` but adapted to Oneside's
 L-R-asymmetric env: uses both FLo (left observation env) and FRo (right)
@@ -368,7 +368,7 @@ function imag_error(env::OnesideVUMPSEnv, A, iSy, params::iPEPSOptimize)
     Ni, Nj = size(A)
     i, j = 1, 1
     model = params.model
-    ir = _oneside_down_index(typeof(model), i, Ni)
+    ir = obs_index(typeof(model), i, Ni)
     My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], iSy;
                         ifparallel, forloop_iter)
     n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j];
