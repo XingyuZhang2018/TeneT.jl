@@ -10,13 +10,13 @@ seed = 88
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 3, 8, 0, 100
-# pattern = [1 2;
-#            2 1]
+D, χ, χshift, maxiter_restart = 2, 16, 0, 100
+pattern = [1 2;
+           2 1]
 # pattern = [1 3;
 #            2 4]
-pattern = [1 3 5 2 4 6;
-           2 4 6 1 3 5]
+# pattern = [1 3 5 2 4 6;
+#            2 4 6 1 3 5]
 # pattern = [1 3 5 7  9 11;
 #            2 4 6 8 10 12]
 model = J1J2p(lattice=Honeycomb(:brickwall_h), 
@@ -65,21 +65,21 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 # A = init_ipeps_perturbation(;atype, No, D, D_new=4, χ, ϵ=1e-2, params)
 
 function restriction_ipeps(A)
-   # A /= norm(A)
-   # A = local_min_norm(A, params)
-   B = Zygote.Buffer(A)
-   for i in 1:length(A)
-       if i in [1,4,5]
-           B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
-       elseif i in [2,3,6]
-           B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
-       end
-   end
-   B = copy(B)
-   return B/norm(B)
-   # return A
+   A /= norm(A)
+#    A = local_min_norm(A, params)
+#    B = Zygote.Buffer(A)
+#    for i in 1:length(A)
+#        if i in [1,4,5]
+#            B[:,:,:,:,:,i] = A[:,:,:,:,:,1]
+#        elseif i in [2,3,6]
+#            B[:,:,:,:,:,i] = A[:,:,:,:,:,2]
+#        end
+#    end
+#    B = copy(B)
+#    return B/norm(B)
+   return A
 end
 
 # observable(A, 16, params; restriction_ipeps)
-optimise_ipeps(A, 8, χshift, params; restriction_ipeps);
+optimise_ipeps(A, 16, χshift, params; restriction_ipeps);
 # 

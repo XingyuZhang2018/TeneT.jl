@@ -18,7 +18,7 @@ seed = 88
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 3, 8, 0, 100
+D, χ, χshift, maxiter_restart = 2, 16, 0, 100
 
 # Minimal 2×2 brickwall pattern. Site 1 occupies positions (1,1) and (2,2)
 # — both even parity; site 2 occupies (1,2) and (2,1) — both odd parity.
@@ -32,7 +32,7 @@ pattern = [1 2;
 # the (i,j)→bondratio mapping for the :brickwall_v pattern is derived.
 # Use :uniform for now.
 model = J1J2p(lattice=Honeycomb(:brickwall_v),
-              S=0.5, J1=1.0, J2p=0.3,
+              S=0.5, J1=1.0, J2p=0.5,
               ifrotate=false,
               couplingtype=:uniform, bondratio=1.0)
 No = 0
@@ -62,7 +62,7 @@ boundary_alg = VUMPS{General}(; ifsimple_eig=true,
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg,
-                          optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
+                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
                           maxiter_restart=maxiter_restart,
                           verbosity=4,
@@ -104,4 +104,4 @@ function restriction_ipeps(A)
     return B / norm(B)
 end
 
-optimise_ipeps(A, 8, χshift, params; restriction_ipeps);
+optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
