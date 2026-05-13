@@ -142,7 +142,7 @@ function energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::VUMPSEnv, p
         etol += J1v * e/n
         e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
 
-        if (i + j) % 2 != 0
+        if (i + j) % 2 == 0
             # ── J1H: horizontal pair (i, j) ↔ (i, j+1) ─────────────────────
             ir = Ni + 1 - i
             jr = mod1(j + 1, Nj)
@@ -252,7 +252,7 @@ function energy_value(model::J1J2p{Honeycomb{:brickwall_v}}, A, env::OnesideVUMP
         etol += J1v * e/n
         e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
 
-        if (i + j) % 2 != 0
+        if (i + j) % 2 == 0
             # ── J1H: horizontal pair (i, j) ↔ (i, j+1) ─────────────────────
             # ACd-obs-reflection of row `i` → ir_oneside(i) under Oneside.
             id = ir_oneside(i)
