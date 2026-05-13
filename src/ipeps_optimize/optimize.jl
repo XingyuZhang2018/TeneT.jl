@@ -27,7 +27,7 @@ This function is designed to be differentiated through by Zygote.
 function energy(A, rt, rt′, fδEierr, params::iPEPSOptimize)
     A = build_A(A, params)
     rt, err = leading_boundary(rt, A, params.boundary_alg)
-    env = ObsEnv(rt, A, params.boundary_alg)
+    env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = checkpoint(params.obs_checkpoint, _energy_value_scalar,
                    params.model, A, env, params)
 

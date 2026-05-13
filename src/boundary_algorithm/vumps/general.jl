@@ -1043,25 +1043,42 @@ end
 # ── Observation environment construction ─────────────────────────────
 
 """
-    VUMPSEnv(rt::VUMPSRuntime, M, alg)
+    ObsEnv(rt::VUMPSRuntime, M, alg::VUMPS{General}, model=nothing; Fo=[rt.FL, rt.FR])
 
-Construct a `VUMPSEnv` observation environment from a single VUMPS runtime.
+Build an observation environment from a single VUMPS runtime (i.e. when
+`alg.ifupdown == false`, so no separate down runtime was converged).
+
+Two return shapes:
+- If `model === nothing`, returns the legacy `VUMPSEnv` filling ACd/ARd with
+  AC/AR (the U-D-symmetric default; the down row partner is implicit `Ni+1-i`).
+- If a `model` is given, returns an `OnesideVUMPSEnv` (no ACd/ARd; down row
+  partner determined per-call by `obs_index(typeof(model), i, Ni)`). Used by
+  `optimise_ipeps` / `observable` / `precondition` to opt the J1J2p
+  `:brickwall_v` self-symmetric model into the memory-saving env shape.
 """
-function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General}, Fo=[rt.FL, rt.FR])
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
+                model=nothing; Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
     AC = ALCtoAC(AL, C)
-    _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg)
-    _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg)
-    return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+    _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
+    _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg, model)
+    if model === nothing
+        return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+    else
+        return OnesideVUMPSEnv(AC, AR, FL, FR, FLo, FRo)
+    end
 end
 
 """
-    VUMPSEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg)
+    ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General}, model=nothing; Fo=...)
 
 Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
-Computes mixed (observation) left and right environments.
+Computes mixed (observation) left and right environments. `model` is accepted
+for call-site uniformity but currently ignored: ACd/ARd come from the converged
+down runtime, so the `obs_index` trait is not needed.
 """
-function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General}, Fo=[rt[1].FL, rt[1].FR])
+function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
+                model=nothing; Fo=[rt[1].FL, rt[1].FR])
     atype = _arraytype(M)
     set_device_id!(atype, 1)
     rtup, rtdown = rt
@@ -1088,5 +1105,30 @@ function imag_error(env::VUMPSEnv, A, iSy, params::iPEPSOptimize)
     id = Ni + 1 - i
     My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
     n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
+    return abs(My / n)
+end
+
+"""
+    imag_error(env::OnesideVUMPSEnv, A, iSy, params)
+
+|⟨iSy⟩| indicator for real-valued energies under the one-sided env. Uses the
+observation env (FLo, FRo) and the up AC tensor; the "down" partner is
+`AC[ir, j]` where `ir = obs_index(typeof(model), i, Ni)`.
+
+Mirrors `imag_error(env::PlaquetteVUMPSEnv, ...)` but adapted to the L-R-
+asymmetric env: uses both FLo (left observation env) and FRo (right) instead
+of FLo on both sides.
+"""
+function imag_error(env::OnesideVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AC, FLo, FRo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    Ni, Nj = size(A)
+    i, j = 1, 1
+    model = params.model
+    ir = obs_index(typeof(model), i, Ni)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], iSy;
+                        ifparallel, forloop_iter)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j];
+                        ifparallel, forloop_iter)
     return abs(My / n)
 end

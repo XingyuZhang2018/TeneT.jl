@@ -25,9 +25,6 @@ ComplexF64 Duals in the same @tensor give TC = Array{Union{},N}):
   3. VJP via Zygote: gN = J_R^† * T_x
 """
 function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple{VUMPSRuntime,VUMPSRuntime}}, params, restriction_ipeps, fδEi, iter_precond)
-    if params.boundary_alg isa VUMPS{<:Oneside}
-        return _precondition_invese_single_envir_oneside(A, grad, rt, params, restriction_ipeps, fδEi, iter_precond)
-    end
     if fδEi[3] <= iter_precond
         return grad
     end
@@ -38,7 +35,10 @@ function precondition_invese_single_envir(A, grad, rt::Union{VUMPSRuntime, Tuple
     _G_cache[] = nothing          # reset so the first plain call below computes fresh G
     A_prime = build_restricted_A(A)   # populates _G_cache; all JVP+VJP calls reuse it
 
-    env = ObsEnv(rt, A_prime, params.boundary_alg)
+    env = ObsEnv(rt, A_prime, params.boundary_alg, params.model)
+    if env isa OnesideVUMPSEnv
+        return _precondition_oneside_body(A, grad, env, A_prime, params, build_restricted_A, δ, t0)
+    end
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
 
     gradnew = deepcopy(grad)
@@ -247,20 +247,17 @@ function precondition_invese_single_envir(A, grad, env::CTMEnv, params, restrict
     return gradnew
 end
 
-function _precondition_invese_single_envir_oneside(A, grad, rt::VUMPSRuntime, params, restriction_ipeps, fδEi, iter_precond)
-    if fδEi[3] <= iter_precond
-        return grad
-    end
-    t0 = time()
-    δ = fδEi[2]
-    build_restricted_A(x) = build_A(restriction_ipeps(x), params)
+"""
+    _precondition_oneside_body(A, grad, env::OnesideVUMPSEnv, A_prime, params, build_restricted_A, δ, t0)
 
-    _G_cache[] = nothing
-    A_prime = build_restricted_A(A)
-
-    env = ObsEnv(rt, A_prime, params.boundary_alg)
+Body of `precondition_invese_single_envir` specialised for `OnesideVUMPSEnv`.
+Mirrors the VUMPSEnv body but reads from a single AC field and uses
+`obs_index(typeof(params.model), i, Ni)` for the down-row partner instead of
+the hardcoded `Ni + 1 - i`. Hoisted into a helper so the dispatching outer
+function stays single-method on rt::Union{VUMPSRuntime, Tuple}.
+"""
+function _precondition_oneside_body(A, grad, env::OnesideVUMPSEnv, A_prime, params, build_restricted_A, δ, t0)
     @unpack AC, AR, FLu, FRu, FLo, FRo = env
-
     gradnew = deepcopy(grad)
     Ni, Nj = size(A_prime)
     @unpack forloop_iter = params

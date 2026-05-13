@@ -32,7 +32,7 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
 
     rt, _ = leading_boundary(rt, A, params.boundary_alg)
     params.ifsave_env && save_rt(joinpath(params.folder, "D$(D)", "environment"), rt; file="χ$(χ).jld2")
-    env = ObsEnv(rt, A, params.boundary_alg)
+    env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = energy_value(params.model, A, env, params)
     mag = magnetization_value(params.model, A, env, params)
     ξ = cor_len_value(env, params)

@@ -27,19 +27,6 @@ struct C4v <: ContractionMode end
 struct Plaquette{Mode} <: ContractionMode end
 Plaquette(L::AbstractLattice) = Plaquette{typeof(L)}()
 
-"""
-    Oneside{M} <: ContractionMode
-
-VUMPS contraction mode for models with up-down (but NOT left-right) hermiticity.
-The down environment is derived from the up environment via the per-model
-trait `obs_index(::Type{<:M}, i, Ni)`. Distinct from `Plaquette`
-which exploits BOTH L-R and U-D symmetries.
-
-Constructor: `Oneside(m::HamiltonianModel) = Oneside{typeof(m)}()`.
-"""
-struct Oneside{M} <: ContractionMode end
-Oneside(m::HamiltonianModel) = Oneside{typeof(m)}()
-
 # Boundary algorithm base type
 abstract type Algorithm end
 
