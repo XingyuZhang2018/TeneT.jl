@@ -23,7 +23,7 @@ given iPEPS tensor `A` at bond dimension `χ`. Initializes a VUMPS runtime,
 converges the boundary, and evaluates expectation values.
 """
 function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps)
-    D = size(A, 1)
+    D = maximum(size(A)[1:4])
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
     _G_cache[] = nothing
