@@ -19,7 +19,7 @@ pattern = [1 3 5 2 4 6;
            2 4 6 1 3 5]
 # pattern = [1 3 5 7  9 11;
 #            2 4 6 8 10 12]
-lattice = Honeycomb(:brickwall)
+lattice = Honeycomb(:brickwall_h)
 model = J1J2J3(lattice=lattice, 
                S=0.5, J1=1.0, J2=0.35, J3=0.1,
                ifrotate=true, 

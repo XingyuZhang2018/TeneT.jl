@@ -3,7 +3,7 @@ export J1J2J3
 """
     J1J2J3{L<:AbstractLattice}
 
-J1-J2-J3 Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-neighbor coupling `J2` and next-next-nearest-neighbor coupling `J3`. The model is defined on a lattice `L`, which can be specified by the user (e.g., `Square()`, `Honeycomb(:brickwall)`, etc.). The spin magnitude is given by `S`. The parameter `ifrotate` determines whether to rotate the spin operators in the Hamiltonian, and `couplingtype` specifies the type of coupling pattern (e.g., uniform, plaquette, dimmer, etc.). The `bondratio` parameter is used to adjust the coupling strength for non-uniform patterns.
+J1-J2-J3 Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-neighbor coupling `J2` and next-next-nearest-neighbor coupling `J3`. The model is defined on a lattice `L`, which can be specified by the user (e.g., `Square()`, `Honeycomb(:brickwall_h)`, etc.). The spin magnitude is given by `S`. The parameter `ifrotate` determines whether to rotate the spin operators in the Hamiltonian, and `couplingtype` specifies the type of coupling pattern (e.g., uniform, plaquette, dimmer, etc.). The `bondratio` parameter is used to adjust the coupling strength for non-uniform patterns.
 """
 @kwdef mutable struct J1J2J3{L<:AbstractLattice} <: HamiltonianModel
     lattice::L = Square()
@@ -14,10 +14,10 @@ J1-J2-J3 Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-n
     ifrotate::Bool = true
     couplingtype::Symbol = :uniform # :uniform, :plaquette, :dimmer1, :dimmer2, :mixed
     bondratio::Real = 1.0 # only used when couplingtype is not :uniform
-                          # for Honeycomb{:brickwall}, bondratio<1 is plaquette, bondratio>1 is dimmer
+                          # for Honeycomb{:brickwall_h}, bondratio<1 is plaquette, bondratio>1 is dimmer
 end
 
-function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::J1J2J3{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack J2, J3 = model
     atype = _arraytype(ACu[1])
@@ -127,7 +127,7 @@ function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::VUMPSEnv, pa
     return etol/len, e_dict
 end
 
-function energy_value(model::J1J2J3{Honeycomb{:brickwall}}, A, env::PlaquetteVUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::J1J2J3{Honeycomb{:brickwall_h}}, A, env::PlaquetteVUMPSEnv, params::iPEPSOptimize)
     model.ifrotate == true || throw(ArgumentError("model.ifrotate must be true for Plaquette VUMPS energy evaluation"))
 
     @unpack AL, C, FLu, FLo = env

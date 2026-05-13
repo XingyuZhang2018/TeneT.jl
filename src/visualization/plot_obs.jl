@@ -714,7 +714,7 @@ end
 # Site coordinates
 # ============================================================================
 
-function _site_xy(::Honeycomb{:brickwall}, i, j)
+function _site_xy(::Honeycomb{:brickwall_h}, i, j)
     x = (j - 1) * sqrt(3) / 2
     y = -(i - 1) * 1.5 - ((i + j) % 2 == 1 ? 0.5 : 0.0)
     return (x, y)
@@ -798,7 +798,7 @@ function _bond_linewidth(eval, e_min, e_max)
     return 3.0 + t * 18.0
 end
 
-function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall}, all_coords, all_mdata,
+function _draw_lattice_bonds!(ax, ::Honeycomb{:brickwall_h}, all_coords, all_mdata,
                                e_dict, pattern, unique_sites, Ni, Nj, n_repeat,
                                e_min, e_max)
     pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()

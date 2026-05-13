@@ -14,7 +14,7 @@ the f-wave ground state (E_f = -2K).
 Set J1=0 for the pure ring exchange model.
 """
 @kwdef mutable struct FWavePRVB{L<:AbstractLattice} <: HamiltonianModel
-    lattice::L = Honeycomb(:brickwall)
+    lattice::L = Honeycomb(:brickwall_h)
     S::Real = 1/2
     J1::Real = 0.0
     K::Real = 1.0     # ring exchange coupling
@@ -23,7 +23,7 @@ Set J1=0 for the pure ring exchange model.
 end
 
 """
-    energy_value(model::FWavePRVB, A, env, params::iPEPSOptimize{:brickwall})
+    energy_value(model::FWavePRVB, A, env, params::iPEPSOptimize{:brickwall_h})
 
 Energy = J1 Σ_NN ⟨S⃗ᵢ·S⃗ⱼ⟩  -  K Σ_hexagons ⟨K₆⟩
 
@@ -33,7 +33,7 @@ The K₆ = C₆ + C₆⁻¹ ring exchange term is decomposed as:
     ⟨K₆⟩ = 2 Re(⟨C₆⟩)
 Each term is evaluated via contract_o_23 with 6 one-site projectors.
 """
-function energy_value(model::FWavePRVB{Honeycomb{:brickwall}}, A, env, params::iPEPSOptimize)
+function energy_value(model::FWavePRVB{Honeycomb{:brickwall_h}}, A, env, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
     Ni, Nj = size(ACu)

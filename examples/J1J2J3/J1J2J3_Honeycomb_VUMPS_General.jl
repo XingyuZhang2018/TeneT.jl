@@ -19,7 +19,7 @@ pattern = [1 2;
 #            2 4 6 1 3 5]
 # pattern = [1 3 5 7  9 11;
 #            2 4 6 8 10 12]
-model = J1J2J3(lattice=Honeycomb(:brickwall), 
+model = J1J2J3(lattice=Honeycomb(:brickwall_h), 
               S=0.5, J1=1.0, J2=0.45, J3=0.2,
               ifrotate=false, 
               couplingtype=:plaquette, bondratio=1)

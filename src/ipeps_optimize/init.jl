@@ -69,9 +69,14 @@ function _init_random_ipeps(::Honeycomb{:merge}, etype, D, d, N, Ni, Nj)
     rand(etype, D, D, D, D, d^2, N) .+ 1
 end
 
-function _init_random_ipeps(::Honeycomb{:brickwall}, etype, D, d, N, Ni, Nj)
+function _init_random_ipeps(::Honeycomb{:brickwall_h}, etype, D, d, N, Ni, Nj)
     Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("Ni and Nj should be even for brickwall"))
     rand(etype, D, 1, D, D, d, N) .+ 1
+end
+
+function _init_random_ipeps(::Honeycomb{:brickwall_v}, etype, D, d, N, Ni, Nj)
+    Ni % 2 == 0 && Nj % 2 == 0 || throw(ArgumentError("Ni and Nj should be even for brickwall_v"))
+    rand(etype, 1, D, D, D, d, N) .+ 1
 end
 
 # --------------------------------------------------------------------------- #

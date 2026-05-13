@@ -1,9 +1,9 @@
-function enlarge_coupling(model::Kitaev{Honeycomb{:brickwall}}, ::Val{:uniform}, i, j)
+function enlarge_coupling(model::Kitaev{Honeycomb{:brickwall_h}}, ::Val{:uniform}, i, j)
     @unpack Jx, Jy, Jz = model
     return Jx, Jy, Jz
 end
 
-function enlarge_coupling(model::Kitaev{Honeycomb{:brickwall}}, ::Val{:plaquette}, i, j)
+function enlarge_coupling(model::Kitaev{Honeycomb{:brickwall_h}}, ::Val{:plaquette}, i, j)
     @unpack Jx, Jy, Jz, bondratio = model
     if (i,j) in [(1,2),(2,5)]
         Jy *= bondratio

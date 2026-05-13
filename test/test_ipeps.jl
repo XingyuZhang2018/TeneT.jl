@@ -22,7 +22,7 @@
         D, d = 2, 2
         tensors = [randn(D, 1, D, D, d) for _ in 1:4]
         A = StructArray(tensors, pattern)
-        A_out = _lattice_map(A, Honeycomb{:brickwall}(), pattern)
+        A_out = _lattice_map(A, Honeycomb{:brickwall_h}(), pattern)
         # _lattice_map iterates over data indices 1:length(unique(pattern))
         # and uses CartesianIndices(pattern) with linear indexing to determine parity.
         # For pattern [1 2; 3 4] (column-major):
@@ -167,7 +167,7 @@
         @test size(A_hm) == (D, D, D, D, d^2, N)
 
         # Honeycomb brickwall: (D,1,D,D,d,N)
-        A_hb = _init_random_ipeps(Honeycomb{:brickwall}(), Float64, D, d, N, Ni, Nj)
+        A_hb = _init_random_ipeps(Honeycomb{:brickwall_h}(), Float64, D, d, N, Ni, Nj)
         @test size(A_hb) == (D, 1, D, D, d, N)
 
         # Kagome :onehole — (D,D,D,D,d,N), requires Ni,Nj even
@@ -240,6 +240,161 @@
         result = _inner(x, dx1, dx2)
         @test result isa Real
         @test result ≈ real(dot(dx1, dx2))
+    end
+
+    @testset "_init_random_ipeps :brickwall_v" begin
+        D, d, N, Ni, Nj = 3, 2, 6, 6, 2
+        A = TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, Ni, Nj)
+        @test size(A) == (1, D, D, D, d, N)   # dim-1 on l leg
+        @test eltype(A) == Float64
+
+        # Constraint: Ni, Nj both even
+        @test_throws ArgumentError TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, 3, 2)
+        @test_throws ArgumentError TeneT._init_random_ipeps(Honeycomb{:brickwall_v}(), Float64, D, d, N, 2, 3)
+    end
+
+    @testset "_lattice_map :brickwall_v" begin
+        D, d = 3, 2
+        Ni, Nj = 4, 2
+        N = Ni * Nj
+        pattern = reshape(1:N, Ni, Nj)
+        A_raw = rand(Float64, 1, D, D, D, d, N)  # initial shape for :brickwall_v
+        A = TeneT.StructArray([A_raw[:,:,:,:,:,i] for i in 1:N], pattern)
+        Ar = TeneT._lattice_map(A, Honeycomb{:brickwall_v}(), pattern)
+
+        # Even-parity site: unchanged → shape (1,D,D,D,d)
+        # Odd-parity site: permutedims (3,4,1,2,5) → (D,D,1,D,d)
+        for i in 1:N
+            pos = findfirst(==(i), pattern)
+            if sum(Tuple(pos)) % 2 == 0
+                @test size(Ar[i]) == (1, D, D, D, d)
+            else
+                @test size(Ar[i]) == (D, D, 1, D, d)
+            end
+        end
+    end
+
+    @testset "gauge_transfer dispatches on lattice for :brickwall_v" begin
+        using LinearAlgebra: I
+        D, d = 2, 2
+        Ni, Nj = 2, 2
+        N = Ni * Nj
+        pattern = reshape(1:N, Ni, Nj)
+        # :brickwall_v shape (1, D, D, D, d, N) — dim-1 on l-leg
+        A = rand(Float64, 1, D, D, D, d, N)
+
+        # Identity gauges for :brickwall_v.  Gh[q] lives on the r-leg (post-permutation),
+        # whose size depends on parity:
+        #   even-parity site (no permutation): r-leg size = D3 = D  → Gh = I(D)
+        #   odd-parity site  (after (3,4,1,2,5) permutation): new r-leg = old l-leg = D1 = 1
+        #                                                    → Gh = I(1)
+        # Gv[q] lives on the d-leg, always size D2 = D in :brickwall_v.
+        Gh = [begin
+                  pos = findfirst(==(q), pattern)
+                  sum(Tuple(pos)) % 2 == 0 ? Matrix{Float64}(I, D, D) : Matrix{Float64}(I, 1, 1)
+              end for q in 1:N]
+        Gv = [Matrix{Float64}(I, D, D) for _ in 1:N]
+
+        mock_params = (pattern=pattern, model=(lattice=Honeycomb{:brickwall_v}(),))
+        A2 = TeneT.gauge_transfer(A, [Gh, Gv], mock_params)
+
+        # Identity gauges should leave A unchanged (and the routing through the lattice
+        # type ensures the gauges land on the right legs for both parities).
+        @test size(A2) == size(A)
+        @test A2 ≈ A
+
+        # Sanity: gauge_transfer with `:brickwall_h` (existing logic) still works as before.
+        # For :brickwall_h, Gh is uniform I(D) (r-leg always size D), while Gv is parity-mixed
+        # (d-leg size 1 at even-parity, D at odd-parity).
+        Ah = rand(Float64, D, 1, D, D, d, N)
+        Gh_h = [Matrix{Float64}(I, D, D) for _ in 1:N]
+        Gv_h = [begin
+                    pos = findfirst(==(q), pattern)
+                    sum(Tuple(pos)) % 2 == 0 ? Matrix{Float64}(I, 1, 1) : Matrix{Float64}(I, D, D)
+                end for q in 1:N]
+        mock_params_h = (pattern=pattern, model=(lattice=Honeycomb{:brickwall_h}(),))
+        Ah2 = TeneT.gauge_transfer(Ah, [Gh_h, Gv_h], mock_params_h)
+        @test size(Ah2) == size(Ah)
+        @test Ah2 ≈ Ah
+    end
+
+    @testset "enlarge_coupling J1J2p :brickwall_v" begin
+        # Uniform: J1h = J1v = J1 for all (i,j)
+        m_unif = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.5, J2p=0.3, couplingtype=:uniform)
+        @test TeneT.enlarge_coupling(m_unif, 1, 1) == (1.5, 1.5)
+        @test TeneT.enlarge_coupling(m_unif, 3, 2) == (1.5, 1.5)
+        @test TeneT.enlarge_coupling(m_unif, 6, 2) == (1.5, 1.5)
+
+        # Plaquette mode is intentionally deferred — calling it should error clearly
+        m_plaq = J1J2p(lattice=Honeycomb{:brickwall_v}(), J1=1.0, J2p=0.3,
+                       couplingtype=:plaquette, bondratio=0.5)
+        @test_throws ArgumentError TeneT.enlarge_coupling(m_plaq, 1, 1)
+    end
+
+    # ================================================================
+    # energy_value(::J1J2p{Honeycomb{:brickwall_v}}, ...) smoke test
+    # Exercises: dispatch + bond enumeration (J1V/J1H/J2//J2\\/J2V keys).
+    # Indices and absolute values are validated by the Stage-1 :h↔:v
+    # benchmark in examples/; this test only catches structural breakage
+    # (MethodErrors, wrong arity, missing bond keys).
+    # ================================================================
+    @testset "energy_value J1J2p :brickwall_v smoke" begin
+        using OptimKit: LBFGS
+        using TeneT: ObsEnv, energy_value, build_A,
+                     leading_boundary, initialize_env, J1J2p
+
+        Random.seed!(7)
+        D, χ = 2, 4
+        pattern = [1 4; 2 5; 3 6; 4 1; 5 2; 6 3]
+        model = J1J2p(lattice=Honeycomb{:brickwall_v}(),
+                      S=0.5, J1=1.0, J2p=0.3,
+                      ifrotate=false,
+                      couplingtype=:uniform, bondratio=1.0)
+        folder = mktempdir()
+        boundary_alg = VUMPS{TeneT.General}(ifupdown=true, ifsimple_eig=true,
+                                            maxiter=3, miniter=0,
+                                            maxiter_ad=1, miniter_ad=1,
+                                            tol=1e-3, verbosity=0, show_every=1000)
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
+                                  maxiter_restart=1, verbosity=0, folder=folder,
+                                  ifSU=false, SUτ=0.0, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        # Raw shape for :brickwall_v is (1, D, D, D, d, N) — dim-1 on l-leg.
+        # `pattern` has 6 unique site labels, so N = 6.
+        d, N = 2, 6
+        A_raw = (rand(Float64, 1, D, D, D, d, N) .- 0.5)
+        A_raw /= norm(A_raw)
+        A = build_A(A_raw, params)
+
+        rt = initialize_env(A_raw, D, χ, params)
+        rt, _ = leading_boundary(rt, A, params.boundary_alg)
+        env = ObsEnv(rt, A, params.boundary_alg)
+
+        e, e_dict = energy_value(model, A, env, params)
+        @test isfinite(e)
+        # All 5 bond categories should be present in the dict
+        @test haskey(e_dict, "bond_J1V_energy")
+        @test haskey(e_dict, "bond_J1H_energy")
+        @test haskey(e_dict, "bond_J2/_energy")
+        @test haskey(e_dict, "bond_J2\\_energy")
+        @test haskey(e_dict, "bond_J2V_energy")
+        # J1V is always-on → every (i,j) contributes
+        @test length(e_dict["bond_J1V_energy"]) == length(unique(pattern))
+        # Parity-conditional bonds populate half the sites
+        @test !isempty(e_dict["bond_J1H_energy"])
+        @test !isempty(e_dict["bond_J2/_energy"])
+        @test !isempty(e_dict["bond_J2\\_energy"])
+        @test !isempty(e_dict["bond_J2V_energy"])
+        # Each per-bond entry must be finite
+        for key in keys(e_dict)
+            for (_, v) in e_dict[key]
+                @test isfinite(v)
+            end
+        end
     end
 
 end

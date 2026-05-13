@@ -18,7 +18,7 @@ D, χ, χshift, maxiter_restart = 2, 16, 1, 100
 #            2 4 6 1 3 5]
 pattern = [1 3 5 7  9 11;
            2 4 6 8 10 12]
-model = FWavePRVB(lattice=Honeycomb(:brickwall), 
+model = FWavePRVB(lattice=Honeycomb(:brickwall_h), 
                   S=0.5, J1=0.5, K=1)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")

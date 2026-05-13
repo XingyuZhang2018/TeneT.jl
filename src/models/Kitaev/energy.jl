@@ -6,7 +6,7 @@ export Kitaev
 Kitaev model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
 """
 @kwdef mutable struct Kitaev{L<:AbstractLattice} <: HamiltonianModel
-    lattice::L = Honeycomb{:brickwall}()
+    lattice::L = Honeycomb{:brickwall_h}()
     S::Real = 1/2
     Jx::Real = -1.0
     Jy::Real = -1.0
@@ -15,7 +15,7 @@ Kitaev model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
     bondratio::Real = 1.0 # bondratio < 1.0 for plaquette >1.0 for dimer
 end
 
-function energy_value(model::Kitaev{Honeycomb{:brickwall}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+function energy_value(model::Kitaev{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(A[1])
     Ni, Nj = size(A)
