@@ -293,7 +293,7 @@ for (D, χ) in [(10, 256), (10, 512), (10, 768)]
     MPI.Barrier(comm)
 
     # ─── 1D timing ───
-    nrep = 3
+    nrep = 10  # increased from 3 — χ=512 1D measurement at nrep=3 was a clear outlier (128ms vs χ=768's 64ms)
     t_1d = @elapsed for _ in 1:nrep
         TeneT.FLmap_parallel(FL_full, ALu_full, ALd_full,
                               (M1_full, M2_full); ifparallel=true, forloop_iter)
