@@ -165,6 +165,82 @@ function FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local, M1, M2; grid, v
     return partial
 end
 
+# ─── Alt 1: AllGather both axes + single einsum ────────────────────────────
+"""
+    FLmap_parallel_2D_AG(FL_local, ALu_local, ALd_local, M1, M2; grid, verbose)
+
+Variant that AllGathers FL on **both** χ axes and ALd on its i axis,
+turning the 4-step SUMMA inner loop into a single einsum identical in
+shape to 1D's. Trades transient memory peak for kernel-launch reduction.
+
+Persistent memory per rank is the same as pure SUMMA (1/M² of 1D).
+Transient peak rises to ≈ full FL/ALd (matching 1D), but only during one
+FLmap call; releasable between calls.
+
+Phases:
+  0a/0b: same as SUMMA — col_comm AG ALu then row_comm Bcast → ALu_d_my
+  B:     col_comm AG FL on a-axis    → FL_a_full
+  B2:    row_comm AG FL_a_full on i-axis → FL_full
+  C:     col_comm AG ALd on i-axis   → ALd_full
+  A:     single einsum (FL × ALu first tree) → partial[d=slice_r1, g, h, l=slice_r2]
+"""
+function FLmap_parallel_2D_AG(FL_local, ALu_local, ALd_local, M1, M2; grid, verbose=false)
+    @assert grid.N1 == grid.N2 "AG v1 requires square grid"
+    M = grid.N1
+    chi_per_M = size(FL_local, 1)
+    D = size(FL_local, 2)
+    @assert size(ALu_local, 1) == chi_per_M
+    @assert size(ALd_local, 1) == chi_per_M
+
+    rank_world = MPI.Comm_rank(grid.world)
+    function tick!(label, t0)
+        verbose || return time()
+        CUDA.synchronize(); MPI.Barrier(grid.world)
+        rank_world == 0 && @printf("    %-32s %8.3f ms\n", label, (time()-t0)*1000)
+        return time()
+    end
+
+    verbose && rank_world == 0 && println("  --- 2D-AG-FLmap timing breakdown (χ=$(M*chi_per_M), M=$M) ---")
+    CUDA.synchronize(); MPI.Barrier(grid.world)
+    t0 = time()
+
+    # 0a: col_comm AG ALu on a-axis → (a=ALL, b, c, d=slice_r2)
+    ALu_a_full = allgather_dim_direct(ALu_local, 1, grid.col_comm)
+    t0 = tick!("Phase 0a (col_comm AG ALu)", t0)
+
+    # 0b: row_comm Bcast from diagonal → (a=ALL, b, c, d=slice_r1)
+    ALu_d_my = (grid.r2 == grid.r1) ? copy(ALu_a_full) : similar(ALu_a_full)
+    MPI.Bcast!(ALu_d_my, grid.r1, grid.row_comm)
+    t0 = tick!("Phase 0b (row_comm Bcast ALu)", t0)
+
+    # B: col_comm AG FL on a-axis → (a=ALL, e, f, i=slice_r2)
+    FL_a_full = allgather_dim_direct(FL_local, 1, grid.col_comm)
+    t0 = tick!("Phase B  (col_comm AG FL a)", t0)
+
+    # B2: row_comm AG FL_a_full on i-axis → (a=ALL, e, f, i=ALL)
+    FL_full = allgather_dim_direct(FL_a_full, 4, grid.row_comm)
+    t0 = tick!("Phase B2 (row_comm AG FL i)", t0)
+
+    # C: col_comm AG ALd on i-axis → (i=ALL, j, k, l=slice_r2)
+    ALd_full = allgather_dim_direct(ALd_local, 1, grid.col_comm)
+    t0 = tick!("Phase C  (col_comm AG ALd)", t0)
+
+    # A: single einsum with FL × ALu first tree
+    @tensor partial[d, g, h, l] := (
+        (
+            (
+                (FL_full[a, e, f, i] * ALu_d_my[a, b, c, d])
+                * M1[e, j, g, b, p]
+            )
+            * M2[f, k, h, c, p]
+        )
+        * ALd_full[i, j, k, l]
+    )
+    t0 = tick!("Phase A  single einsum", t0)
+
+    return partial
+end
+
 # ─── Build deterministic test tensors ──────────────────────────────────────
 # Use FIXED seed on EACH rank — gives identical full tensors across ranks.
 # Then each rank can extract its own slice for 2D, or use full for 1D.
@@ -181,9 +257,9 @@ function build_deterministic_full(D, χ, seed)
 end
 
 # ─── Main: run correctness + timing comparison ─────────────────────────────
-rank == 0 && @printf("%-30s %15s %15s %15s %10s\n",
-    "Config", "1D fwd (ms)", "2D-SUMMA (ms)", "ratio 2D/1D", "rel err")
-rank == 0 && println("─" ^ 90)
+rank == 0 && @printf("%-22s %12s %12s %12s %10s %10s %10s\n",
+    "Config", "1D (ms)", "SUMMA (ms)", "AG (ms)", "ratio S/1D", "ratio AG/1D", "rel err")
+rank == 0 && println("─" ^ 100)
 
 for (D, χ) in [(10, 64), (10, 128), (10, 256)]
     # forloop_iter=1: each rank takes one χ/nprocs slice. Avoids cuTENSOR
@@ -204,12 +280,15 @@ for (D, χ) in [(10, 64), (10, 128), (10, 256)]
     ALu_local = ALu_full[sa, :, :, sl] |> CuArray
     ALd_local = ALd_full[sa, :, :, sl] |> CuArray
 
-    # ─── Warmup ───
+    # ─── Warmup all three paths ───
     _ = TeneT.FLmap_parallel(FL_full, ALu_full, ALd_full,
                               (M1_full, M2_full); ifparallel=true, forloop_iter)
     CUDA.synchronize()
     _ = FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local,
                                  M1_full, M2_full; grid)
+    CUDA.synchronize()
+    _ = FLmap_parallel_2D_AG(FL_local, ALu_local, ALd_local,
+                              M1_full, M2_full; grid)
     CUDA.synchronize()
     MPI.Barrier(comm)
 
@@ -226,47 +305,58 @@ for (D, χ) in [(10, 64), (10, 128), (10, 256)]
     MPI.Barrier(comm)
 
     # ─── 2D-SUMMA timing ───
-    t_2d = @elapsed for _ in 1:nrep
+    t_2d_summa = @elapsed for _ in 1:nrep
         FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local,
                                  M1_full, M2_full; grid)
         CUDA.synchronize()
     end
-    t_2d /= nrep
+    t_2d_summa /= nrep
 
-    # ─── Correctness check ───
-    # 1D output: result_1d[d, g, h, l] FULL on each rank (shape (χ, D, D, χ))
+    GC.gc(); CUDA.reclaim()
+    MPI.Barrier(comm)
+
+    # ─── 2D-AG timing ───
+    t_2d_ag = @elapsed for _ in 1:nrep
+        FLmap_parallel_2D_AG(FL_local, ALu_local, ALd_local,
+                              M1_full, M2_full; grid)
+        CUDA.synchronize()
+    end
+    t_2d_ag /= nrep
+
+    # ─── Correctness check — compare both variants to 1D ───
     result_1d = TeneT.FLmap_parallel(FL_full, ALu_full, ALd_full,
                                       (M1_full, M2_full); ifparallel=true, forloop_iter)
     CUDA.synchronize()
-    # 2D output: result_2d[d=slice_r1, g, h, l=slice_r2] — shape (χ/M, D, D, χ/M)
-    result_2d = FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local,
-                                         M1_full, M2_full; grid)
+    result_summa = FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local,
+                                            M1_full, M2_full; grid)
+    result_ag = FLmap_parallel_2D_AG(FL_local, ALu_local, ALd_local,
+                                      M1_full, M2_full; grid)
     CUDA.synchronize()
 
-    # Compare 2D output to the corresponding slice of 1D output
-    sd = slice_of(grid.r1, M, χ)  # d slice for this rank's r1
-    sl_out = slice_of(grid.r2, M, χ)  # l slice
+    sd = slice_of(grid.r1, M, χ)
+    sl_out = slice_of(grid.r2, M, χ)
     result_1d_slice = result_1d[sd, :, :, sl_out]
 
-    abs_diff = Array(result_1d_slice .- result_2d)
-    rel_err = norm(abs_diff) / norm(Array(result_1d_slice))
+    rel_err_summa = norm(Array(result_1d_slice .- result_summa)) / norm(Array(result_1d_slice))
+    rel_err_ag    = norm(Array(result_1d_slice .- result_ag))    / norm(Array(result_1d_slice))
+    rel_err_max = max(MPI.Allreduce(rel_err_summa, max, comm),
+                      MPI.Allreduce(rel_err_ag,    max, comm))
 
-    # Allreduce rel_err to max across ranks
-    rel_err_max = MPI.Allreduce(rel_err, max, comm)
-
-    rank == 0 && @printf("D=%-2d χ=%-4d                  %15.2f %15.2f %15.3fx %10.2e\n",
-        D, χ, t_1d*1000, t_2d*1000, t_2d/t_1d, rel_err_max)
+    rank == 0 && @printf("D=%-2d χ=%-4d           %12.2f %12.2f %12.2f %10.3fx %10.3fx %10.2e\n",
+        D, χ, t_1d*1000, t_2d_summa*1000, t_2d_ag*1000,
+        t_2d_summa/t_1d, t_2d_ag/t_1d, rel_err_max)
     flush(stdout)
 
-    # ─── verbose breakdown: where does the 2D-SUMMA time go? ───
-    # Run one more SUMMA call with verbose=true so rank 0 prints the
-    # per-phase timing breakdown.
-    GC.gc(); CUDA.reclaim()
-    MPI.Barrier(comm)
+    # ─── verbose breakdown for both variants ───
+    GC.gc(); CUDA.reclaim(); MPI.Barrier(comm)
     _ = FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local,
                                  M1_full, M2_full; grid, verbose=true)
-    CUDA.synchronize()
-    flush(stdout)
+    CUDA.synchronize(); flush(stdout)
+
+    GC.gc(); CUDA.reclaim(); MPI.Barrier(comm)
+    _ = FLmap_parallel_2D_AG(FL_local, ALu_local, ALd_local,
+                              M1_full, M2_full; grid, verbose=true)
+    CUDA.synchronize(); flush(stdout)
 
     GC.gc(); CUDA.reclaim()
 end
