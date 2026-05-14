@@ -915,8 +915,19 @@ function allgather_dim_direct(tensor_local::AbstractArray{T,N}, dim::Int, comm) 
 
     result = similar(tensor_local, full_shape)
     elem_count = length(tensor_local)
-    counts = fill(Cint(elem_count), M)
 
+    # NCCL fast path: equal per-rank counts + CuArray + TENET_USE_NCCL=1.
+    # Avoids the `MPI.Allgatherv!` path's UCX/OpenMPI host-staging on
+    # sub-communicators (~5x speedup on cross-node col_comm at 13MB+).
+    # `_nccl_allgather_equal!` lazily creates a NCCL sub-comm cached per
+    # MPI comm (collective; all ranks of `comm` must call together —
+    # which is true here since `allgather_dim_direct` is a collective).
+    if _use_nccl() && tensor_local isa CuArray
+        # NCCL drives ordering via the CUDA stream — no explicit sync needed.
+        return _nccl_allgather_equal!(tensor_local, result, comm)
+    end
+
+    counts = fill(Cint(elem_count), M)
     # tensor_local is contiguous (dim == N path), so passing it as the send
     # buffer is safe for Allgatherv. Synchronize on both sides of MPI for
     # device-side data — MPI does not coordinate with the CUDA stream.
