@@ -38,33 +38,47 @@ C4v
     # FLmap/FRmap/ACmap. Mutually exclusive: set one OR the other, not both.
     whole_vumps_etype::Union{Nothing, Type} = nothing
 
-    # Checkpointing for AD, four granularities (fine → coarse), all default
-    # to `Plain()` (no checkpointing — fast, full tape). Opt in per level.
+    # Checkpointing for AD, four granularities (fine → coarse).
+    #
+    # `ifcheckpoint::Bool` is a master switch:
+    #   false (default) — every checkpoint defaults to Plain() (no
+    #                     checkpointing — fast, full tape). Good for
+    #                     small-D testing where everything fits.
+    #   true            — checkpoints default to the "R2 winner" production
+    #                     preset (D=10 χ=400 H200; 15% faster fg than
+    #                     all-Plain at production scale; see
+    #                     docs/2026-05-14-checkpoint-sweep-round2-B0-neighborhood.md).
+    #
+    # Individual `*_checkpoint` kwargs always win over the ifcheckpoint
+    # default — pass them explicitly to override per layer.
+    #
     #   segment_checkpoint — wraps each `_power_iter_segment` chunk inside
     #                         `simple_eig` (`checkpoint_every` power iters per
     #                         segment). Bounds the tape peak during a single
-    #                         simple_eig execution. Set `Recompute()` to enable.
+    #                         simple_eig execution. R2 default: OffloadRecompute.
     #   inner_checkpoint   — wraps each FLmap/FRmap/ACmap/Cmap call inside
     #                         power iteration. Supports Plain/Recompute only
-    #                         (Offload rejected at runtime).
+    #                         (Offload rejected at runtime). R2 default: Plain.
     #   eig_checkpoint     — wraps the per-row `simple_eig` in leftenv /
     #                         rightenv / ACenv. Plain keeps the fast closure
     #                         path; Recompute/Offload go through the
     #                         `_simple_eig_*map` explicit-args wrappers.
+    #                         R2 default: Recompute.
+    #   subop_checkpoint   — wraps each individual subop inside vumps_step
+    #                         (leftenv, rightenv, ACenv, Cenv, ALCtoAC,
+    #                         ACCtoALAR). Between eig and step in the
+    #                         granularity hierarchy. R2 default: OffloadRecompute.
     #   step_checkpoint    — wraps the whole `vumps_step`. Coarsest; typically
-    #                         the biggest VRAM lever (memory says so).
+    #                         the biggest VRAM lever. R2 default: OffloadRecompute.
+    #
     # Accepts `Plain()`/`Recompute()`/`Offload()` singletons, or a Symbol
     # (`:plain`, `:recompute`, `:offload`) via `Base.convert`.
-    segment_checkpoint::CheckpointMethod = Plain()
+    ifcheckpoint::Bool = false
+    segment_checkpoint::CheckpointMethod = ifcheckpoint ? OffloadRecompute() : Plain()
     inner_checkpoint::CheckpointMethod   = Plain()
-    eig_checkpoint::CheckpointMethod     = Plain()
-    # subop_checkpoint — wraps each individual subop inside vumps_step
-    # (leftenv, rightenv, ACenv, Cenv, ALCtoAC, ACCtoALAR). Sits between
-    # `eig_checkpoint` and `step_checkpoint` in the granularity hierarchy.
-    # OffloadRecompute at this level frees the simple_eig tape between subops,
-    # giving better GPU pool reuse during a single forward vumps_step.
-    subop_checkpoint::CheckpointMethod   = Plain()
-    step_checkpoint::CheckpointMethod    = Plain()
+    eig_checkpoint::CheckpointMethod     = ifcheckpoint ? Recompute() : Plain()
+    subop_checkpoint::CheckpointMethod   = ifcheckpoint ? OffloadRecompute() : Plain()
+    step_checkpoint::CheckpointMethod    = ifcheckpoint ? OffloadRecompute() : Plain()
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)

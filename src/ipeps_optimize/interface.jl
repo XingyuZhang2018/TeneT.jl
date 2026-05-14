@@ -52,19 +52,23 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     # src/autodiff/rules.jl already does per-chunk Recompute, so wrapping
     # each *map_parallel in checkpoint() would be redundant.
     #
+    # `ifcheckpoint::Bool` master switch (same role as on VUMPS):
+    #   false (default) — both default to Plain(); fastest at small scale.
+    #   true            — defaults become the R2-winner production preset
+    #                     (obs=Plain, bond=Recompute). Set BOTH this struct's
+    #                     and the boundary_alg's ifcheckpoint=true together.
+    #
     #   obs_checkpoint  — wraps `energy_value(model, A, env, params)` as a
-    #                      whole. Recompute alone does NOT reduce peak
-    #                      (only defers tape construction to backward).
-    #                      Offload is the useful mode: moves the ObsEnv
-    #                      tape to host RAM so later phases have more VRAM.
+    #                      whole. R2 default: Plain (faster than Recompute
+    #                      under 3-OR top from VUMPS).
     #   bond_checkpoint — wraps each bond term inside `_contract_barebones`
     #                      and each norm contraction (via `_contract_one`).
-    #                      THE main lever for multi-bond models: peak drops
-    #                      from (N_terms × bond_tape) to (1 × bond_tape).
-    #                      Use Recompute() — Offload is overkill at this
-    #                      granularity.
+    #                      THE main lever for multi-bond models. R2 default:
+    #                      Recompute (Plain runs out at production; OR/Off
+    #                      rejected by `_assert_bond_method`).
+    ifcheckpoint::Bool = false
     obs_checkpoint::CheckpointMethod  = Plain()
-    bond_checkpoint::CheckpointMethod = Plain()
+    bond_checkpoint::CheckpointMethod = ifcheckpoint ? Recompute() : Plain()
 
     # Preconditioning
     ifprecondition::Bool = false

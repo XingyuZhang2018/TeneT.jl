@@ -139,6 +139,35 @@
         @test v4.step_checkpoint === TeneT.Recompute()
     end
 
+    # ---- ifcheckpoint master switch (R2 production preset) ----
+    @testset "ifcheckpoint=true applies R2 winner preset" begin
+        # default: ifcheckpoint=false → all Plain
+        v0 = VUMPS{General}()
+        @test v0.ifcheckpoint == false
+        @test v0.step_checkpoint    === TeneT.Plain()
+        @test v0.subop_checkpoint   === TeneT.Plain()
+        @test v0.segment_checkpoint === TeneT.Plain()
+        @test v0.eig_checkpoint     === TeneT.Plain()
+        @test v0.inner_checkpoint   === TeneT.Plain()
+
+        # ifcheckpoint=true → R2 winner preset
+        v1 = VUMPS{General}(; ifcheckpoint = true)
+        @test v1.ifcheckpoint == true
+        @test v1.step_checkpoint    === TeneT.OffloadRecompute()
+        @test v1.subop_checkpoint   === TeneT.OffloadRecompute()
+        @test v1.segment_checkpoint === TeneT.OffloadRecompute()
+        @test v1.eig_checkpoint     === TeneT.Recompute()
+        @test v1.inner_checkpoint   === TeneT.Plain()  # always Plain
+
+        # Explicit override wins over preset
+        v2 = VUMPS{General}(; ifcheckpoint = true,
+                              step_checkpoint = TeneT.Plain(),
+                              eig_checkpoint  = TeneT.Offload())
+        @test v2.step_checkpoint    === TeneT.Plain()             # overridden
+        @test v2.subop_checkpoint   === TeneT.OffloadRecompute()  # from preset
+        @test v2.eig_checkpoint     === TeneT.Offload()            # overridden
+    end
+
     # ---- [1;;] iPEPS gradient regression ----
     # Earlier, leftenv/rightenv/ACenv had `eig_checkpoint isa Plain` branches that
     # built `f(x) = checkpoint(inner_checkpoint, FLmap, ..., ALu[i, :], ...)` with
