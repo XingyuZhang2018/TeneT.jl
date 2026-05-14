@@ -261,7 +261,7 @@ rank == 0 && @printf("%-22s %12s %12s %12s %10s %10s %10s\n",
     "Config", "1D (ms)", "SUMMA (ms)", "AG (ms)", "ratio S/1D", "ratio AG/1D", "rel err")
 rank == 0 && println("─" ^ 100)
 
-for (D, χ) in [(10, 64), (10, 128), (10, 256)]
+for (D, χ) in [(10, 256), (10, 512), (10, 768)]
     # forloop_iter=1: each rank takes one χ/nprocs slice. Avoids cuTENSOR
     # complaining when total_splits exceeds χ at small χ (the MWE point is
     # algorithm validation, not 1D forloop tuning).
