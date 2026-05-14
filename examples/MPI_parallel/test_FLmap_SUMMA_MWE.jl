@@ -124,13 +124,30 @@ function FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local, M1, M2; grid, v
             t_bcast_col += time() - ts
         end
 
-        # Local 5-tensor einsum, accumulate
+        # Local 5-tensor einsum, accumulate.
+        #
+        # Bracketing — force "FL × ALu first" tree.
+        #
+        # Default @tensor is left-to-right, so unbracketed would contract
+        # FL × ALd first (share i), producing intermediate (a, e, f, j, k, l)
+        # of size 256×10⁴×64 = 16M for SUMMA per-step (vs 4.1M for 1D
+        # because 1D's per-rank l=16 not 64). Peak intermediate after
+        # the next × M1 step is 260MB and ~90ms per step at χ=256.
+        #
+        # "FL × ALu first" contracts a (256): intermediate (e, f, i, b, c, d)
+        # = 10⁴ × 64² = 4.1M = 33MB. Then × M1 → 8.2M, × M2 → 4.1M,
+        # × ALd → 410K. Total FLOPs ~3.4× lower (2.1e10 vs 7.1e10).
         ts = time()
-        @tensor partial[d, g, h, l] += FL_t[a, e, f, i] *
-                                        ALd_t[i, j, k, l] *
-                                        M1[e, j, g, b, p] *
-                                        M2[f, k, h, c, p] *
-                                        ALu_d_my[a, b, c, d]
+        @tensor partial[d, g, h, l] += (
+            (
+                (
+                    (FL_t[a, e, f, i] * ALu_d_my[a, b, c, d])
+                    * M1[e, j, g, b, p]
+                )
+                * M2[f, k, h, c, p]
+            )
+            * ALd_t[i, j, k, l]
+        )
         if verbose
             CUDA.synchronize(); MPI.Barrier(grid.world)
             t_einsum += time() - ts
