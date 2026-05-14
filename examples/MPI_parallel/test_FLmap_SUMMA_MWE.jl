@@ -59,7 +59,7 @@ Algorithm (see docs/2026-05-12-summa-flmap-design.md):
   Phase B:  AllGather FL along col_comm (a → FULL on dim 1)
   Phase A:  SUMMA over i — M iterations of paired broadcasts + einsum
 """
-function FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local, M1, M2; grid)
+function FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local, M1, M2; grid, verbose=false)
     @assert grid.N1 == grid.N2 "SUMMA v1 requires square grid"
     M = grid.N1
     chi_per_M = size(FL_local, 1)
@@ -68,48 +68,81 @@ function FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local, M1, M2; grid)
     @assert size(ALu_local, 1) == chi_per_M
     @assert size(ALd_local, 1) == chi_per_M
 
+    # Timer helper: synchronize device + barrier on world comm before reading
+    # the clock so the measured interval reflects all-rank progress. Without
+    # the barrier, a fast rank reports nonsense for collective phases.
+    rank_world = MPI.Comm_rank(grid.world)
+    function tick!(label, t0)
+        verbose || return time()
+        CUDA.synchronize()
+        MPI.Barrier(grid.world)
+        rank_world == 0 && @printf("    %-32s %8.3f ms\n", label, (time()-t0)*1000)
+        return time()
+    end
+
+    verbose && rank_world == 0 && println("  --- SUMMA-FLmap timing breakdown (χ=$chi_full, M=$M) ---")
+    CUDA.synchronize(); MPI.Barrier(grid.world)
+    t0 = time()
+
     # ─── Phase 0a: AllGather ALu.a along col_comm[r2] ────────────────────
-    # Before: ALu_local[a=slice_r1, b, c, d=slice_r2] — shape (χ/M, D, D, χ/M)
-    # After:  ALu_a_full[a=ALL,     b, c, d=slice_r2] — shape (χ,   D, D, χ/M)
     ALu_a_full = allgather_dim_direct(ALu_local, 1, grid.col_comm)
+    t0 = tick!("Phase 0a (col_comm AG ALu)", t0)
 
     # ─── Phase 0b: Bcast within row_comm[r1] from rank with r2 == r1 ─────
-    # Source rank in row_comm[r1] is the col-coord r2 = r1 (the "diagonal" rank).
-    # Before bcast: source rank has ALu_a_full[a=ALL, d=slice_r1], others have d=slice_r2.
-    # After bcast:  ALL row_comm[r1] members have ALu_d_my[a=ALL, d=slice_r1].
     ALu_d_my = (grid.r2 == grid.r1) ? copy(ALu_a_full) :
                                        similar(ALu_a_full)
     MPI.Bcast!(ALu_d_my, grid.r1, grid.row_comm)
+    t0 = tick!("Phase 0b (row_comm Bcast ALu)", t0)
 
     # ─── Phase B: AllGather FL.a along col_comm[r2] ──────────────────────
-    # Before: FL_local[a=slice_r1, e, f, i=slice_r2] — shape (χ/M, D, D, χ/M)
-    # After:  FL_a_full[a=ALL,     e, f, i=slice_r2] — shape (χ,   D, D, χ/M)
     FL_a_full = allgather_dim_direct(FL_local, 1, grid.col_comm)
+    t0 = tick!("Phase B  (col_comm AG FL)", t0)
 
     # ─── Phase A: SUMMA over i (M iterations) ────────────────────────────
-    # partial[d=slice_r1, g, h, l=slice_r2] = sum_t (per-iter contribution)
     partial = CUDA.zeros(eltype(FL_local), chi_per_M, D, D, chi_per_M)
+    t0 = tick!("Phase A  alloc partial", t0)
 
+    t_bcast_row = 0.0
+    t_bcast_col = 0.0
+    t_einsum = 0.0
     for t in 0:M-1
-        # ─── FL_t = FL[a=ALL, e, f, i=slice_t] via Bcast in row_comm[r1] ──
-        # Source for i=slice_t in row_comm[r1] (varies r2) is the col-coord r2 = t.
+        # Bcast FL_t in row_comm
+        ts = time()
         FL_t = (grid.r2 == t) ? copy(FL_a_full) : similar(FL_a_full)
         MPI.Bcast!(FL_t, t, grid.row_comm)
+        if verbose
+            CUDA.synchronize(); MPI.Barrier(grid.world)
+            t_bcast_row += time() - ts
+        end
 
-        # ─── ALd_t = ALd[i=slice_t, j, k, l=slice_r2] via Bcast in col_comm[r2] ──
-        # Source for i=slice_t in col_comm[r2] (varies r1) is the row-coord r1 = t.
+        # Bcast ALd_t in col_comm
+        ts = time()
         ALd_t = (grid.r1 == t) ? copy(ALd_local) : similar(ALd_local)
         MPI.Bcast!(ALd_t, t, grid.col_comm)
+        if verbose
+            CUDA.synchronize(); MPI.Barrier(grid.world)
+            t_bcast_col += time() - ts
+        end
 
-        # ─── Local einsum, accumulate into partial ─────────────────────────
-        # FL_t[a, e, f, i_local] × ALd_t[i_local, j, k, l_local]
-        #   × M1[e, j, g, b, p] × M2[f, k, h, c, p] × ALu_d_my[a, b, c, d_local]
-        # Output: partial[d_local, g, h, l_local]
+        # Local 5-tensor einsum, accumulate
+        ts = time()
         @tensor partial[d, g, h, l] += FL_t[a, e, f, i] *
                                         ALd_t[i, j, k, l] *
                                         M1[e, j, g, b, p] *
                                         M2[f, k, h, c, p] *
                                         ALu_d_my[a, b, c, d]
+        if verbose
+            CUDA.synchronize(); MPI.Barrier(grid.world)
+            t_einsum += time() - ts
+        end
+    end
+    if verbose && rank_world == 0
+        @printf("    %-32s %8.3f ms  (per-step %.2f)\n",
+            "Phase A  inner: bcast row_comm", t_bcast_row*1000, t_bcast_row*1000/M)
+        @printf("    %-32s %8.3f ms  (per-step %.2f)\n",
+            "Phase A  inner: bcast col_comm", t_bcast_col*1000, t_bcast_col*1000/M)
+        @printf("    %-32s %8.3f ms  (per-step %.2f)\n",
+            "Phase A  inner: einsum (5-tens)", t_einsum*1000, t_einsum*1000/M)
     end
 
     return partial
@@ -206,6 +239,16 @@ for (D, χ) in [(10, 64), (10, 128), (10, 256)]
 
     rank == 0 && @printf("D=%-2d χ=%-4d                  %15.2f %15.2f %15.3fx %10.2e\n",
         D, χ, t_1d*1000, t_2d*1000, t_2d/t_1d, rel_err_max)
+    flush(stdout)
+
+    # ─── verbose breakdown: where does the 2D-SUMMA time go? ───
+    # Run one more SUMMA call with verbose=true so rank 0 prints the
+    # per-phase timing breakdown.
+    GC.gc(); CUDA.reclaim()
+    MPI.Barrier(comm)
+    _ = FLmap_parallel_2D_SUMMA(FL_local, ALu_local, ALd_local,
+                                 M1_full, M2_full; grid, verbose=true)
+    CUDA.synchronize()
     flush(stdout)
 
     GC.gc(); CUDA.reclaim()
