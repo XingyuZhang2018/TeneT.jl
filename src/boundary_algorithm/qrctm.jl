@@ -135,7 +135,7 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
     return env, err
 end
 
-ObsEnv(env::CTMEnv, M::StructArray, ::QRCTM) = env
+ObsEnv(env::CTMEnv, M::StructArray, ::QRCTM, model=nothing) = env
 
 # Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
 # See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.

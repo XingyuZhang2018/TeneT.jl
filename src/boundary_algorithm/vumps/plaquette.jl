@@ -292,7 +292,9 @@ end
 Construct a `PlaquetteVUMPSEnv` from a plaquette runtime.
 Computes the observation left environment `FLo` using `ifobs=true`.
 """
-function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
+function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette}, model=nothing)
+    # `model` accepted for call-site uniformity with VUMPS{General} ObsEnv;
+    # Plaquette has no obs_index trait, so the arg is ignored.
     @unpack AL, C, FL = rt
     _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
     return PlaquetteVUMPSEnv(AL, C, FL, FLo)

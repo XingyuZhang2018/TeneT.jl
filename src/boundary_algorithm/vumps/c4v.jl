@@ -225,7 +225,7 @@ function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     return rt, err
 end
 
-ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{C4v}) = rt
+ObsEnv(rt::C4vVUMPSEnv, M::StructArray, ::VUMPS{C4v}, model=nothing) = rt
 
 # Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
 # See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
