@@ -471,24 +471,24 @@
     # ================================================================
     @testset "split_honeycomb_merge SVD reverse" begin
         D, d = 3, 2
-        χfull = D * D * d
+        Dfull = D * D * d
 
         # --- :LU_RD convention: M = Σ_x A[L,U,σ_A,x] · B[x,R,D,σ_B] ---
-        A0 = randn(D, D, d, χfull)
-        B0 = randn(χfull, D, D, d)
+        A0 = randn(D, D, d, Dfull)
+        B0 = randn(Dfull, D, D, d)
         @tensor M6[L, Dn, R, U, sa, sb] := A0[L, U, sa, x] * B0[x, R, Dn, sb]
         M = reshape(M6, D, D, D, D, d^2)
 
         res = TeneT.split_honeycomb_merge(M; convention = :LU_RD)
-        @test size(res.A) == (D, D, d, χfull)
-        @test size(res.B) == (χfull, D, D, d)
-        @test length(res.S) == χfull
+        @test size(res.A) == (D, D, d, Dfull)
+        @test size(res.B) == (Dfull, D, D, d)
+        @test length(res.S) == Dfull
         @tensor Mr6[L, Dn, R, U, sa, sb] := res.A[L, U, sa, x] * res.B[x, R, Dn, sb]
         @test reshape(Mr6, D, D, D, D, d^2) ≈ M
 
         # --- :LD_RU convention: M = Σ_x A[L,D,σ_A,x] · B[x,R,U,σ_B] ---
-        A0 = randn(D, D, d, χfull)
-        B0 = randn(χfull, D, D, d)
+        A0 = randn(D, D, d, Dfull)
+        B0 = randn(Dfull, D, D, d)
         @tensor M6[L, Dn, R, U, sa, sb] := A0[L, Dn, sa, x] * B0[x, R, U, sb]
         M = reshape(M6, D, D, D, D, d^2)
 
@@ -496,8 +496,8 @@
         @tensor Mr6[L, Dn, R, U, sa, sb] := res.A[L, Dn, sa, x] * res.B[x, R, U, sb]
         @test reshape(Mr6, D, D, D, D, d^2) ≈ M
 
-        # --- truncation via χmax keeps exactly the requested bond ---
-        res_trunc = TeneT.split_honeycomb_merge(M; convention = :LD_RU, χmax = 5)
+        # --- truncation via Dtrunc keeps exactly the requested bond ---
+        res_trunc = TeneT.split_honeycomb_merge(M; convention = :LD_RU, Dtrunc = 5)
         @test size(res_trunc.A, 4) == 5
         @test size(res_trunc.B, 1) == 5
         @test length(res_trunc.S) == 5

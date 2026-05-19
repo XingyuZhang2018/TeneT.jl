@@ -145,12 +145,12 @@ _lattice_map(A, ::Honeycomb{:merge}, pattern) = A
 # --------------------------------------------------------------------------- #
 
 """
-    split_honeycomb_merge(M; convention=:LU_RD, χmax=0, cutoff=0.0)
+    split_honeycomb_merge(M; convention=:LU_RD, Dtrunc=0, cutoff=0.0)
 
 Reverse the Honeycomb sublattice merge.  Given a merged single-site tensor
 `M` of shape `(D, D, D, D, d²)`, return two sublattice tensors `A` and `B`,
 each carrying three virtual legs and one physical leg, joined by a freshly
-created internal virtual bond of dimension `χ ≤ D²·d`.
+created internal virtual bond of dimension `Dtrunc ≤ D²·d`.
 
 The merged physical index is interpreted in Julia's column-major reshape
 order — `σ_A` is the inner (fast) index and `σ_B` the outer:
@@ -172,19 +172,22 @@ Two leg-splitting conventions are supported (`convention` keyword):
 
       M[L, D, R, U, σ_AB] = Σ_x  A[L, D, σ_A, x] · B[x, R, U, σ_B]
 
-Truncation: keep all `D²d` singular values by default.  `χmax > 0` caps the
-internal bond; `cutoff > 0` discards `S[i] ≤ cutoff · S[1]`.  Singular
+Truncation: keep all `D²d` singular values by default.  `Dtrunc > 0` caps
+the internal bond; `cutoff > 0` discards `S[i] ≤ cutoff · S[1]`.  Singular
 values are distributed evenly between the two tensors (`A·√S` and `√S·B'`).
+
+(The new bond is intentionally not named `χ` to avoid clashing with the
+VUMPS boundary environment bond dimension.)
 
 Returns a NamedTuple `(A, B, S)`:
 
-* `A`: shape `(D, D, d, χ)` — index order `(extA1, extA2, σ_A, x_internal)`
-* `B`: shape `(χ, D, D, d)` — index order `(x_internal, extB1, extB2, σ_B)`
-* `S`: kept singular values (length `χ`)
+* `A`: shape `(D, D, d, Dtrunc)` — order `(extA1, extA2, σ_A, x_internal)`
+* `B`: shape `(Dtrunc, D, D, d)` — order `(x_internal, extB1, extB2, σ_B)`
+* `S`: kept singular values (length `Dtrunc`)
 """
 function split_honeycomb_merge(M::AbstractArray{T,5};
                                convention::Symbol = :LU_RD,
-                               χmax::Int = 0,
+                               Dtrunc::Int = 0,
                                cutoff::Real = 0.0) where T
     DL, DD, DR, DU, dphys = size(M)
     DL == DD == DR == DU || throw(ArgumentError(
@@ -208,24 +211,24 @@ function split_honeycomb_merge(M::AbstractArray{T,5};
         throw(ArgumentError("convention must be :LU_RD or :LD_RU, got $(convention)"))
     end
 
-    χfull = D * D * d
-    M_mat = reshape(M_perm, χfull, χfull)
+    Dfull = D * D * d
+    M_mat = reshape(M_perm, Dfull, Dfull)
     U, S, V = svd(M_mat)
 
-    χ = χmax > 0 ? min(χmax, length(S)) : length(S)
+    Dkeep = Dtrunc > 0 ? min(Dtrunc, length(S)) : length(S)
     if cutoff > 0
         smax = first(S)
-        χcut = findlast(s -> s > cutoff * smax, S)
-        χ = min(χ, χcut === nothing ? 1 : χcut)
+        Dcut = findlast(s -> s > cutoff * smax, S)
+        Dkeep = min(Dkeep, Dcut === nothing ? 1 : Dcut)
     end
 
-    Sχ  = S[1:χ]
-    sqs = sqrt.(Sχ)
-    A_mat = U[:, 1:χ] * Diagonal(sqs)              # (D²d, χ)
-    B_mat = Diagonal(sqs) * V[:, 1:χ]'             # (χ, D²d)
+    Skeep = S[1:Dkeep]
+    sqs   = sqrt.(Skeep)
+    A_mat = U[:, 1:Dkeep] * Diagonal(sqs)             # (D²d, Dkeep)
+    B_mat = Diagonal(sqs) * V[:, 1:Dkeep]'            # (Dkeep, D²d)
 
-    A = reshape(A_mat, D, D, d, χ)
-    B = reshape(B_mat, χ, D, D, d)
+    A = reshape(A_mat, D, D, d, Dkeep)
+    B = reshape(B_mat, Dkeep, D, D, d)
 
-    return (A = A, B = B, S = Sχ)
+    return (A = A, B = B, S = Skeep)
 end
