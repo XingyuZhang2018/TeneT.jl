@@ -139,3 +139,96 @@ Merge mapping: identity (sites are already independent tensors on
 the effective square lattice; the merge is encoded in the Hamiltonian).
 """
 _lattice_map(A, ::Honeycomb{:merge}, pattern) = A
+
+# --------------------------------------------------------------------------- #
+#  split_honeycomb_merge  —  reverse the A/B sublattice merge via SVD
+# --------------------------------------------------------------------------- #
+
+"""
+    split_honeycomb_merge(M; convention=:LU_RD, Dtrunc=0, cutoff=0.0)
+
+Reverse the Honeycomb sublattice merge.  Given a merged single-site tensor
+`M` of shape `(D, D, D, D, d²)`, return two sublattice tensors `A` and `B`,
+each carrying three virtual legs and one physical leg, joined by a freshly
+created internal virtual bond of dimension `Dtrunc ≤ D²·d`.
+
+The merged physical index is interpreted in Julia's column-major reshape
+order — `σ_A` is the inner (fast) index and `σ_B` the outer:
+
+    M[L, D, R, U, σ_AB]  with  σ_AB = σ_A + (σ_B - 1)·d
+
+Two leg-splitting conventions are supported (`convention` keyword):
+
+* `:LU_RD` (default; "anti-diagonal" merge) — A keeps the L and U bonds of
+  the effective cell, B keeps the R and D bonds:
+
+      M[L, D, R, U, σ_AB] = Σ_x  A[L, U, σ_A, x] · B[x, R, D, σ_B]
+
+  This matches the natural merge of u and v sublattices via the `a` bond
+  (u.R ↔ v.L) in the brickwall/featureless-honeycomb convention where
+  `u` has external legs (L, U) and `v` has external legs (R, D).
+
+* `:LD_RU` ("diagonal" merge) — A keeps L and D, B keeps R and U:
+
+      M[L, D, R, U, σ_AB] = Σ_x  A[L, D, σ_A, x] · B[x, R, U, σ_B]
+
+Truncation: keep all `D²d` singular values by default.  `Dtrunc > 0` caps
+the internal bond; `cutoff > 0` discards `S[i] ≤ cutoff · S[1]`.  Singular
+values are distributed evenly between the two tensors (`A·√S` and `√S·B'`).
+
+(The new bond is intentionally not named `χ` to avoid clashing with the
+VUMPS boundary environment bond dimension.)
+
+Returns a NamedTuple `(A, B, S)`:
+
+* `A`: shape `(D, D, d, Dtrunc)` — order `(extA1, extA2, σ_A, x_internal)`
+* `B`: shape `(Dtrunc, D, D, d)` — order `(x_internal, extB1, extB2, σ_B)`
+* `S`: kept singular values (length `Dtrunc`)
+"""
+function split_honeycomb_merge(M::AbstractArray{T,5};
+                               convention::Symbol = :LU_RD,
+                               Dtrunc::Int = 0,
+                               cutoff::Real = 0.0) where T
+    DL, DD, DR, DU, dphys = size(M)
+    DL == DD == DR == DU || throw(ArgumentError(
+        "All four virtual legs must have equal bond dimension, got sizes $(size(M)[1:4])"))
+    D = DL
+    d = isqrt(dphys)
+    d * d == dphys || throw(ArgumentError(
+        "Physical dimension $dphys is not a perfect square; cannot split as d⊗d"))
+
+    # Split physical leg: σ_A inner, σ_B outer (Julia column-major).
+    M6 = reshape(M, D, D, D, D, d, d)             # (L, D, R, U, σ_A, σ_B)
+
+    # Group legs into (A-side | B-side) according to the chosen convention.
+    if convention === :LU_RD
+        # A gets (L=1, U=4, σ_A=5);  B gets (R=3, D=2, σ_B=6)
+        M_perm = permutedims(M6, (1, 4, 5, 3, 2, 6))   # (L, U, σ_A | R, D, σ_B)
+    elseif convention === :LD_RU
+        # A gets (L=1, D=2, σ_A=5);  B gets (R=3, U=4, σ_B=6)
+        M_perm = permutedims(M6, (1, 2, 5, 3, 4, 6))   # (L, D, σ_A | R, U, σ_B)
+    else
+        throw(ArgumentError("convention must be :LU_RD or :LD_RU, got $(convention)"))
+    end
+
+    Dfull = D * D * d
+    M_mat = reshape(M_perm, Dfull, Dfull)
+    U, S, V = svd(M_mat)
+
+    Dkeep = Dtrunc > 0 ? min(Dtrunc, length(S)) : length(S)
+    if cutoff > 0
+        smax = first(S)
+        Dcut = findlast(s -> s > cutoff * smax, S)
+        Dkeep = min(Dkeep, Dcut === nothing ? 1 : Dcut)
+    end
+
+    Skeep = S[1:Dkeep]
+    sqs   = sqrt.(Skeep)
+    A_mat = U[:, 1:Dkeep] * Diagonal(sqs)             # (D²d, Dkeep)
+    B_mat = Diagonal(sqs) * V[:, 1:Dkeep]'            # (Dkeep, D²d)
+
+    A = reshape(A_mat, D, D, d, Dkeep)
+    B = reshape(B_mat, Dkeep, D, D, d)
+
+    return (A = A, B = B, S = Skeep)
+end
