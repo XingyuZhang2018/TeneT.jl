@@ -16,19 +16,19 @@ end
 # ============================================================================
 
 """
-    observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps, cor_len_method=:channel)
+    observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps, cor_len_method=:mps)
 
 Compute all observables (energy, magnetization, correlation length) for a
 given iPEPS tensor `A` at bond dimension `χ`. Initializes a VUMPS runtime,
 converges the boundary, and evaluates expectation values.
 
 `cor_len_method` chooses the correlation-length estimator (see
-[`cor_len_value`](@ref)): `:channel` (default, channel TM with bulk M;
-closer to the physical ξ at finite χ) or `:mps` (pure boundary-MPS
-transfer matrix; cheaper but χ-underestimates ξ).
+[`cor_len_value`](@ref)): `:mps` (default, pure boundary-MPS transfer
+matrix; cheap) or `:channel` (channel TM with bulk M; closer to the
+physical ξ at finite χ).
 """
 function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps,
-                    cor_len_method::Symbol=:channel)
+                    cor_len_method::Symbol=:mps)
     D = maximum(size(A)[1:4])
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
@@ -355,20 +355,20 @@ end
 # ============================================================================
 
 """
-    cor_len_value(env::VUMPSEnv, params, M; method=:channel)
+    cor_len_value(env::VUMPSEnv, params, M; method=:mps)
 
 Compute the correlation length from the transfer matrix eigenvalues
 of the VUMPS environment. `M` is the double-layer iPEPS tensor (used by
 `:channel`; ignored by `:mps`).
 
-- `method=:channel` (default): subleading eigenvalue of the channel
-  transfer matrix `AR · M · AR` (FRmap). Closer to the physical ξ at
-  finite χ (Rams–Czarnik–Cincio 2018).
-- `method=:mps`: subleading eigenvalue of the pure MPS transfer matrix
-  `AR ⊗ AR` (no bulk M). Gives the boundary-MPS correlation length
+- `method=:mps` (default): subleading eigenvalue of the pure MPS transfer
+  matrix `AR ⊗ AR` (no bulk M). The boundary-MPS correlation length
   ξ_MPS, a χ-bounded estimator that underestimates the physical ξ.
+- `method=:channel`: subleading eigenvalue of the channel transfer matrix
+  `AR · M · AR` (FRmap). Closer to the physical ξ at finite χ
+  (Rams–Czarnik–Cincio 2018).
 """
-function cor_len_value(env::VUMPSEnv, params, M; method::Symbol=:channel)
+function cor_len_value(env::VUMPSEnv, params, M; method::Symbol=:mps)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
 
     if method === :channel
@@ -399,7 +399,7 @@ function cor_len_value(env::VUMPSEnv, params, M; method::Symbol=:channel)
     return ξ
 end
 
-function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:channel)
+function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:mps)
     @unpack AL, C, FLu, FLo = env
 
     if method === :channel
@@ -429,7 +429,7 @@ function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:channe
     return ξ
 end
 
-function cor_len_value(env::OnesideVUMPSEnv, params, M; method::Symbol=:channel)
+function cor_len_value(env::OnesideVUMPSEnv, params, M; method::Symbol=:mps)
     @unpack AC, AR, FLu, FRu, FLo, FRo = env
     model = params.model
     Ni = size(AC, 1)
@@ -462,7 +462,7 @@ function cor_len_value(env::OnesideVUMPSEnv, params, M; method::Symbol=:channel)
     return ξ
 end
 
-function cor_len_value(env::C4vVUMPSEnv, params, M; method::Symbol=:channel)
+function cor_len_value(env::C4vVUMPSEnv, params, M; method::Symbol=:mps)
     @unpack AL, C, FL = env
 
     if method === :channel
@@ -496,7 +496,7 @@ function cor_len_value(env::C4vVUMPSEnv, params, M; method::Symbol=:channel)
 end
 
 """
-    cor_len_value(env::CTMEnv, params, M; method=:channel)
+    cor_len_value(env::CTMEnv, params, M; method=:mps)
 
 Compute the correlation length from the CTM corner transfer matrix. The CTM
 edge tensor `T` already contains the bulk M (via the projector contractions),
@@ -504,7 +504,7 @@ so the spectrum of `Lmap(C, T, T)` is effectively the channel TM spectrum and
 the `method` kwarg is accepted for API uniformity but does not alter the
 computation. `M` is ignored.
 """
-function cor_len_value(env::CTMEnv, params, M; method::Symbol=:channel)
+function cor_len_value(env::CTMEnv, params, M; method::Symbol=:mps)
     method ∈ (:mps, :channel) || error("cor_len_value: unknown method=$(method) (use :mps or :channel).")
     @unpack C, T = env
 
