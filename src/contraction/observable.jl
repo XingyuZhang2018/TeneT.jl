@@ -105,10 +105,41 @@ function oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad
     return Q
 end
 
+function oc_Q_22_getQ_CBE(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
+    χ, D = size(FLu)[[1,2]]
+    Dp = ceil(Int, χ/D^2)
+
+    LD = LDmap(FLo, ACd, Au21, Ad21)
+    _, R = qr_for_ad(_to_front(LD))
+    @tensor ARd[5,2,3,4] := R[5,1] * ARd[1,2,3,4]
+    DR = DRmap(ARd, FRo, Au22, Ad22)
+    _, R = qr_for_ad(_to_front(DR))
+    @tensor FRu[1,2,3,5] := FRu[1,2,3,4] * R[5,4]
+    RU = RUmap(FRu, ARu, Au12, Ad12)
+    _, R = qr_for_ad(_to_front(RU))
+    @tensor ACu[1,2,3,5] := ACu[1,2,3,4] * R[5,4]
+
+    # method 1: SVD
+    LU = LUmap(FLu, ACu, Au11, Ad11)
+    F = svd(_to_front(LU))
+    L = F.U[:,1:Dp] * Diagonal(F.S[1:Dp]) 
+    Q,  = qr_for_ad(reshape(L, χ*D^2, Dp*D^2))
+    Q = reshape(Q, χ, D, D, Dp*D^2)
+    return Q
+
+    # method 2: RSVD
+    # Q = Zygote.@ignore _arraytype(FLu)(randn(eltype(FLu), χ,D,D,χ))
+    # ACu = ACmap_parallel(ACu, FLu, Q, (Au11, Ad11); forloop_iter, ifparallel)
+    # Q, = qr_for_ad(_to_front(ACu))
+    # Q = reshape(Q, χ, D, D, χ)
+    # return Q
+end
+
 function oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
     χ = size(FLu ,1)
     D1 = size(Au21, 4)
     D2 = size(Ad21, 4)
+    # Q = oc_Q_22_getQ_CBE(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
     Q = Zygote.@ignore _arraytype(FLu)(randn(eltype(FLu), χ,D1,D2,χ))
     Q = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
     Q, _ = qrpos(reshape(Q, χ*D1*D2, χ))
