@@ -157,3 +157,52 @@ function qr_for_ad(A::AbstractMatrix{T}) where {T}
     Q = _arraytype(A)(Q)
     return Q, R
 end
+
+# ─── Randomized SVD ─────────────────────────────────────────────────────────
+
+_rsvd_random_eltype(::Type{T}) where {T<:AbstractFloat} = T
+_rsvd_random_eltype(::Type{Complex{T}}) where {T<:AbstractFloat} = Complex{T}
+_rsvd_random_eltype(::Type{T}) where {T<:Real} = Float64
+_rsvd_random_eltype(::Type{Complex{T}}) where {T<:Real} = ComplexF64
+
+_rsvd_orth(A::AbstractMatrix) = _mattype(A)(qr(A).Q)
+
+"""
+    rsvd(A, D_trunc; oversampling=10, niter=2, rng=Random.default_rng())
+    rsvd(A; D_trunc, oversampling=10, niter=2, rng=Random.default_rng())
+
+Compute a rank-`D_trunc` randomized singular value decomposition of matrix `A`.
+Returns an `SVD` factorization like `LinearAlgebra.svd`, with
+`F.U * Diagonal(F.S) * F.V' ≈ A`.
+
+`oversampling` adds extra random probe vectors before truncation, while `niter`
+sets the number of power iterations used to improve the singular subspace.
+"""
+function rsvd(A::AbstractMatrix, D_trunc::Integer;
+              oversampling::Integer=10,
+              niter::Integer=2,
+              rng=Random.default_rng())
+    m, n = size(A)
+    maxrank = min(m, n)
+    1 <= D_trunc <= maxrank || throw(ArgumentError("D_trunc must be between 1 and min(size(A)...) = $maxrank"))
+    oversampling >= 0 || throw(ArgumentError("oversampling must be non-negative"))
+    niter >= 0 || throw(ArgumentError("niter must be non-negative"))
+
+    blockdim = min(n, D_trunc + oversampling)
+    randtype = _rsvd_random_eltype(eltype(A))
+    Ω = _arraytype(A)(randn(rng, randtype, n, blockdim))
+
+    Q = _rsvd_orth(A * Ω)
+    for _ in 1:niter
+        Q = _rsvd_orth(A' * Q)
+        Q = _rsvd_orth(A * Q)
+    end
+
+    F = svd(Q' * A)
+    U = Q * F.U[:, 1:D_trunc]
+    S = F.S[1:D_trunc]
+    V = F.V[:, 1:D_trunc]
+    return SVD(U, S, V')
+end
+
+rsvd(A::AbstractMatrix; D_trunc::Integer, kwargs...) = rsvd(A, D_trunc; kwargs...)

@@ -107,6 +107,43 @@
             @test Q isa atype{ComplexF64, 2}
         end
 
+        @testset "rsvd" begin
+            Random.seed!(2024)
+            U0 = qr(randn(ComplexF64, 12, 3)).Q[:, 1:3]
+            V0 = qr(randn(ComplexF64, 8, 3)).Q[:, 1:3]
+            S0 = [8.0, 3.0, 0.5]
+            A = U0 * Diagonal(S0) * V0'
+
+            F = rsvd(A, 3; oversampling=2, niter=1, rng=Random.MersenneTwister(7))
+
+            @test F isa SVD
+
+            U, S, V = F
+
+            @test size(U) == (12, 3)
+            @test size(S) == (3,)
+            @test size(V) == (8, 3)
+            @test U' * U ≈ I atol=1e-10
+            @test V' * V ≈ I atol=1e-10
+            @test U * Diagonal(S) * V' ≈ A atol=1e-10
+            @test S ≈ S0 atol=1e-10
+
+            F_kw = rsvd(A; D_trunc=2, oversampling=1, niter=0, rng=Random.MersenneTwister(9))
+            U_kw, S_kw, V_kw = F_kw
+
+            @test size(U_kw) == (12, 2)
+            @test size(S_kw) == (2,)
+            @test size(V_kw) == (8, 2)
+            @test F_kw.U === U_kw
+            @test F_kw.S === S_kw
+            @test F_kw.V == V_kw
+            @test S_kw ≈ S0[1:2] atol=1e-10
+
+            @test_throws ArgumentError rsvd(A, 0)
+            @test_throws ArgumentError rsvd(A, 4; oversampling=-1)
+            @test_throws ArgumentError rsvd(A, 4; niter=-1)
+        end
+
         @testset "safesign" begin
             @test safesign(0.0) == 1.0
             @test safesign(0.0 + 0.0im) == 1.0 + 0.0im
