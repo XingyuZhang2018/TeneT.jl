@@ -11,7 +11,7 @@ using JLD2
 using TeneT: StructArray, randSA, cellones, ISA,
              _arraytype, _mattype, set_device_id!, get_device, get_device_id, device_count,
              atype_device!, for_gc, synchronize, reclaim, gc,
-             qrpos, lqpos, qr_for_ad, simple_eig, checkpoint, takagi_decomposition, safesign,
+             qrpos, lqpos, qr_for_ad, rsvd, simple_eig, checkpoint, takagi_decomposition, safesign,
              leg3, leg4, leg5, leg8,
              ALCtoAC_map, CTtoT, CTCtoT, _downcast_eltype, FLmap, FRmap, Lmap, Rmap, ACmap, Cmap, ACdmap, Mmap,
              FLmap_parallel, FRmap_parallel, ACmap_parallel, ACdmap_parallel,

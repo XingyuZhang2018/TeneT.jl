@@ -144,6 +144,117 @@
             @test_throws ArgumentError rsvd(A, 4; niter=-1)
         end
 
+        @testset "rsvd linear map" begin
+            Random.seed!(2028)
+            U0 = qr(randn(ComplexF64, 12, 3)).Q[:, 1:3]
+            V0 = qr(randn(ComplexF64, 8, 3)).Q[:, 1:3]
+            S0 = [8.0, 3.0, 0.5]
+            A = U0 * Diagonal(S0) * V0'
+            m, n = size(A)
+            calls_f = Ref(0)
+            calls_fadj = Ref(0)
+            f(X::AbstractMatrix) = (calls_f[] += 1; A * X)
+            fadj(Y::AbstractMatrix) = (calls_fadj[] += 1; A' * Y)
+            fmap(X::AbstractMatrix, flag) = flag === Val(true) ? fadj(X) : f(X)
+            Omega = randn(ComplexF64, n, 5)
+
+            F = rsvd(f, fadj, m, n, 3; oversampling=2, niter=1, Omega=Omega)
+            @test F isa SVD
+            @test size(F.U) == (m, 3)
+            @test size(F.S) == (3,)
+            @test size(F.V) == (n, 3)
+            @test F.S ≈ S0 atol=1e-10
+            @test F.U * Diagonal(F.S) * F.V' ≈ A atol=1e-10
+            @test calls_f[] == 2
+            @test calls_fadj[] == 2
+
+            F_tuple = rsvd((f, fadj), m, n, 3; oversampling=2, niter=0, Omega=Omega)
+            @test F_tuple.S ≈ S0 atol=1e-10
+            @test F_tuple.U * Diagonal(F_tuple.S) * F_tuple.V' ≈ A atol=1e-10
+
+            F_map = rsvd(fmap, m, n, 3; oversampling=2, niter=0, Omega=Omega)
+            @test F_map.S ≈ S0 atol=1e-10
+            @test F_map.U * Diagonal(F_map.S) * F_map.V' ≈ A atol=1e-10
+
+            F_auto = rsvd(f, fadj, m, n, 3; oversampling=3, niter=1, T=ComplexF64, rng=Random.MersenneTwister(11))
+            @test F_auto.S ≈ S0 atol=1e-10
+            @test F_auto.U * Diagonal(F_auto.S) * F_auto.V' ≈ A atol=1e-10
+
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 0)
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 9)
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 3; oversampling=-1)
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 3; niter=-1)
+            @test_throws DimensionMismatch rsvd(f, fadj, m, n, 3; Omega=randn(ComplexF64, n - 1, 5))
+        end
+
+        @testset "svd linear map" begin
+            Random.seed!(2026)
+            A = randn(ComplexF64, 9, 5)
+            f(x) = A * x
+            fadj(y) = A' * y
+            fmap(x, flag) = flag === Val(true) ? fadj(x) : f(x)
+            x0 = randn(ComplexF64, size(A, 1))
+            F_ref = svd(A, 3)
+
+            F = svd(f, fadj, x0, 3; krylovdim=8, maxiter=2, tol=1e-12)
+            @test F isa SVD
+            @test size(F.U) == (9, 3)
+            @test size(F.S) == (3,)
+            @test size(F.V) == (5, 3)
+            @test F.S ≈ F_ref.S atol=1e-10
+            @test A * F.V ≈ F.U * Diagonal(F.S) atol=1e-10
+            @test A' * F.U ≈ F.V * Diagonal(F.S) atol=1e-10
+
+            F_tuple = svd((f, fadj), x0, 3; krylovdim=8, maxiter=2, tol=1e-12)
+            @test F_tuple.S ≈ F.S atol=1e-10
+            @test A * F_tuple.V ≈ F_tuple.U * Diagonal(F_tuple.S) atol=1e-10
+
+            F_map = svd(fmap, x0, 3; krylovdim=8, maxiter=2, tol=1e-12)
+            @test F_map.S ≈ F.S atol=1e-10
+            @test A * F_map.V ≈ F_map.U * Diagonal(F_map.S) atol=1e-10
+
+            F_dim = svd(f, fadj, size(A, 1), 3; T=ComplexF64, krylovdim=8, maxiter=2, tol=1e-12)
+            @test F_dim.S ≈ F_ref.S atol=1e-10
+
+            @test_throws ArgumentError svd(f, fadj, x0, 0)
+            @test_throws ArgumentError svd((f, fadj), x0, 6; krylovdim=8, maxiter=2, tol=1e-12)
+        end
+
+        @testset "svd D_trunc" begin
+            Random.seed!(2025)
+            A = randn(ComplexF64, 9, 5)
+            F = svd(A)
+            F_full = svd(A; full=true)
+            F_trunc = svd(A; D_trunc=3)
+            F_trunc_pos = svd(A, 3)
+            F_trunc_full = svd(A; D_trunc=3, full=true)
+            F_trunc_pos_full = svd(A, 3; full=true)
+
+            @test F_trunc isa SVD
+            @test F_trunc_pos isa SVD
+            @test size(F_full.U) == (9, 9)
+            @test size(F_full.V) == (5, 5)
+            @test size(F_trunc.U) == (9, 3)
+            @test size(F_trunc.S) == (3,)
+            @test size(F_trunc.V) == (5, 3)
+            @test size(F_trunc_pos.U) == (9, 3)
+            @test size(F_trunc_pos.S) == (3,)
+            @test size(F_trunc_pos.V) == (5, 3)
+            @test size(F_trunc_full.U) == (9, 3)
+            @test size(F_trunc_full.V) == (5, 3)
+            @test size(F_trunc_pos_full.U) == (9, 3)
+            @test size(F_trunc_pos_full.V) == (5, 3)
+            @test F_trunc.S ≈ F.S[1:3]
+            @test F_trunc_pos.S ≈ F_trunc.S
+            @test F_trunc_pos.U * Diagonal(F_trunc_pos.S) * F_trunc_pos.V' ≈ F_trunc.U * Diagonal(F_trunc.S) * F_trunc.V'
+            @test F_trunc.U * Diagonal(F_trunc.S) * F_trunc.V' ≈ F.U[:, 1:3] * Diagonal(F.S[1:3]) * F.V[:, 1:3]'
+
+            @test_throws ArgumentError svd(A; D_trunc=0)
+            @test_throws ArgumentError svd(A; D_trunc=6)
+            @test_throws ArgumentError svd(A, 0)
+            @test_throws ArgumentError svd(A, 6)
+        end
+
         @testset "safesign" begin
             @test safesign(0.0) == 1.0
             @test safesign(0.0 + 0.0im) == 1.0 + 0.0im

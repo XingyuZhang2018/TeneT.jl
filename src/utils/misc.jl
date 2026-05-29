@@ -158,6 +158,87 @@ function qr_for_ad(A::AbstractMatrix{T}) where {T}
     return Q, R
 end
 
+# ─── Truncated SVD wrapper ──────────────────────────────────────────────────
+
+function _check_D_trunc(D_trunc::Integer, maxrank::Integer)
+    1 <= D_trunc <= maxrank || throw(ArgumentError("D_trunc must be between 1 and $maxrank"))
+    return D_trunc
+end
+
+function _truncate_svd(F::SVD, D_trunc::Integer)
+    k = _check_D_trunc(D_trunc, length(F.S))
+    return SVD(F.U[:, 1:k], F.S[1:k], F.Vt[1:k, :])
+end
+
+function _svdsolve_to_svd(vals, lvecs, rvecs, D_trunc::Integer)
+    k = _check_D_trunc(D_trunc, length(vals))
+    U = hcat(lvecs[1:k]...)
+    V = hcat(rvecs[1:k]...)
+    return SVD(U, vals[1:k], V')
+end
+
+function _linear_map_maxrank(f, x0::AbstractVector)
+    m = length(x0)
+    n = try
+        if f isa Tuple && length(f) == 2
+            length(f[2](zero(x0)))
+        else
+            length(f(zero(x0), Val(true)))
+        end
+    catch
+        m
+    end
+    return min(m, n)
+end
+
+"""
+    svd(A::AbstractMatrix, D_trunc; kwargs...)
+    svd(A::AbstractMatrix; D_trunc, kwargs...)
+    svd(f, fadj, x0::AbstractVector, D_trunc; kwargs...)
+    svd((f, fadj), x0::AbstractVector, D_trunc; kwargs...)
+
+Compute `LinearAlgebra.svd(A; kwargs...)` and truncate the returned factorization
+to rank `D_trunc`. Without `D_trunc`, this delegates to the standard
+`LinearAlgebra.svd` implementation.
+
+For a matrix-free linear map, pass the forward action `f(x) = A * x`, the adjoint
+action `fadj(y) = A' * y`, and an initial vector `x0` in the codomain of `f`.
+"""
+function LinearAlgebra.svd(A::AbstractMatrix; D_trunc=nothing, kwargs...)
+    F = invoke(LinearAlgebra.svd, Tuple{AbstractVecOrMat{eltype(A)}}, A; kwargs...)
+    return D_trunc === nothing ? F : _truncate_svd(F, D_trunc)
+end
+
+function LinearAlgebra.svd(A::AbstractMatrix, D_trunc::Integer; kwargs...)
+    F = svd(A; kwargs...)
+    return _truncate_svd(F, D_trunc)
+end
+
+function LinearAlgebra.svd(f, x0::AbstractVector, D_trunc::Integer;
+                           which=:LR,
+                           warn_not_converged::Bool=true,
+                           kwargs...)
+    _check_D_trunc(D_trunc, _linear_map_maxrank(f, x0))
+    vals, lvecs, rvecs, info = svdsolve(f, x0, D_trunc, which; kwargs...)
+    warn_not_converged && info.converged < D_trunc &&
+        @warn "svdsolve converged $(info.converged) / $D_trunc singular values" normres=info.normres
+    return _svdsolve_to_svd(vals, lvecs, rvecs, D_trunc)
+end
+
+function LinearAlgebra.svd(f, m::Integer, D_trunc::Integer;
+                           T::Type=Float64,
+                           which=:LR,
+                           warn_not_converged::Bool=true,
+                           kwargs...)
+    return svd(f, rand(T, m), D_trunc; which, warn_not_converged, kwargs...)
+end
+
+LinearAlgebra.svd(f, fadj, x0::AbstractVector, D_trunc::Integer; kwargs...) =
+    svd((f, fadj), x0, D_trunc; kwargs...)
+
+LinearAlgebra.svd(f, fadj, m::Integer, D_trunc::Integer; kwargs...) =
+    svd((f, fadj), m, D_trunc; kwargs...)
+
 # ─── Randomized SVD ─────────────────────────────────────────────────────────
 
 _rsvd_random_eltype(::Type{T}) where {T<:AbstractFloat} = T
@@ -167,9 +248,29 @@ _rsvd_random_eltype(::Type{Complex{T}}) where {T<:Real} = ComplexF64
 
 _rsvd_orth(A::AbstractMatrix) = _mattype(A)(qr(A).Q)
 
+function _rsvd_probe(n::Integer, blockdim::Integer, randtype::Type;
+                     atype=Array,
+                     rng=Random.default_rng(),
+                     Omega=nothing)
+    if Omega === nothing
+        return atype(randn(rng, randtype, n, blockdim))
+    end
+    size(Omega) == (n, blockdim) ||
+        throw(DimensionMismatch("Omega must have size ($n, $blockdim), got $(size(Omega))"))
+    return Omega
+end
+
+function _check_rsvd_block(Y::AbstractMatrix, nrows::Integer, ncols::Integer, name::String)
+    size(Y) == (nrows, ncols) ||
+        throw(DimensionMismatch("$name returned size $(size(Y)), expected ($nrows, $ncols)"))
+    return Y
+end
+
 """
     rsvd(A, D_trunc; oversampling=10, niter=2, rng=Random.default_rng())
     rsvd(A; D_trunc, oversampling=10, niter=2, rng=Random.default_rng())
+    rsvd(f, fadj, m, n, D_trunc; oversampling=10, niter=2, atype=Array, T=Float64, Omega=nothing)
+    rsvd((f, fadj), m, n, D_trunc; kwargs...)
 
 Compute a rank-`D_trunc` randomized singular value decomposition of matrix `A`.
 Returns an `SVD` factorization like `LinearAlgebra.svd`, with
@@ -177,6 +278,7 @@ Returns an `SVD` factorization like `LinearAlgebra.svd`, with
 
 `oversampling` adds extra random probe vectors before truncation, while `niter`
 sets the number of power iterations used to improve the singular subspace.
+For matrix-free use, `f` and `fadj` should support block matrix inputs.
 """
 function rsvd(A::AbstractMatrix, D_trunc::Integer;
               oversampling::Integer=10,
@@ -184,13 +286,13 @@ function rsvd(A::AbstractMatrix, D_trunc::Integer;
               rng=Random.default_rng())
     m, n = size(A)
     maxrank = min(m, n)
-    1 <= D_trunc <= maxrank || throw(ArgumentError("D_trunc must be between 1 and min(size(A)...) = $maxrank"))
+    D_trunc = _check_D_trunc(D_trunc, maxrank)
     oversampling >= 0 || throw(ArgumentError("oversampling must be non-negative"))
     niter >= 0 || throw(ArgumentError("niter must be non-negative"))
 
     blockdim = min(n, D_trunc + oversampling)
     randtype = _rsvd_random_eltype(eltype(A))
-    Ω = _arraytype(A)(randn(rng, randtype, n, blockdim))
+    Ω = _rsvd_probe(n, blockdim, randtype; atype=_arraytype(A), rng)
 
     Q = _rsvd_orth(A * Ω)
     for _ in 1:niter
@@ -206,3 +308,43 @@ function rsvd(A::AbstractMatrix, D_trunc::Integer;
 end
 
 rsvd(A::AbstractMatrix; D_trunc::Integer, kwargs...) = rsvd(A, D_trunc; kwargs...)
+
+function rsvd(f, fadj, m::Integer, n::Integer, D_trunc::Integer; kwargs...)
+    return rsvd((f, fadj), m, n, D_trunc; kwargs...)
+end
+
+function rsvd(fpair::Tuple, m::Integer, n::Integer, D_trunc::Integer;
+              oversampling::Integer=10,
+              niter::Integer=2,
+              rng=Random.default_rng(),
+              atype=Array,
+              T::Type=Float64,
+              Omega=nothing)
+    length(fpair) == 2 || throw(ArgumentError("fpair must be a tuple (f, fadj)"))
+    f, fadj = fpair
+    maxrank = min(m, n)
+    D_trunc = _check_D_trunc(D_trunc, maxrank)
+    oversampling >= 0 || throw(ArgumentError("oversampling must be non-negative"))
+    niter >= 0 || throw(ArgumentError("niter must be non-negative"))
+
+    blockdim = min(n, D_trunc + oversampling)
+    randtype = _rsvd_random_eltype(T)
+    Ω = _rsvd_probe(n, blockdim, randtype; atype, rng, Omega)
+
+    Y = _check_rsvd_block(f(Ω), m, blockdim, "f(Omega)")
+    Q = _rsvd_orth(Y)
+    for _ in 1:niter
+        Z = _check_rsvd_block(fadj(Q), n, size(Q, 2), "fadj(Q)")
+        Q = _rsvd_orth(_check_rsvd_block(f(Z), m, size(Z, 2), "f(fadj(Q))"))
+    end
+
+    Z = _check_rsvd_block(fadj(Q), n, size(Q, 2), "fadj(Q)")
+    F = svd(Z')
+    U = Q * F.U[:, 1:D_trunc]
+    S = F.S[1:D_trunc]
+    V = F.V[:, 1:D_trunc]
+    return SVD(U, S, V')
+end
+
+rsvd(f, m::Integer, n::Integer, D_trunc::Integer; kwargs...) =
+    rsvd((X -> f(X, Val(false)), X -> f(X, Val(true))), m, n, D_trunc; kwargs...)
