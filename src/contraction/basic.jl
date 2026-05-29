@@ -338,3 +338,18 @@ function Mdmap(AC, ACd, FL, FR, Md)
     @tensor result[e,j,g,b,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Md[f,k,h,c,p])
     return result
 end
+
+LDmap(L, D, M1::leg5, M2::leg5) = @tensor result[1,2,3,7,8,12] := L[1,5,6,9] * D[9,10,11,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+DRmap(D, R, M1::leg5, M2::leg5) = @tensor result[9,5,6,2,3,4] := D[9,10,11,12] * R[4,7,8,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+RUmap(R, U, M1::leg5, M2::leg5) = @tensor result[12,10,11,5,6,1] := U[1,2,3,4] * R[4,7,8,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+LUmap(L, U, M1::leg5, M2::leg5) = @tensor result[9,10,11,7,8,4] := L[1,5,6,9] * U[1,2,3,4] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+
+LDmap(L, D, M::leg5) = LDmap(L, D, M, conj(M))
+DRmap(D, R, M::leg5) = DRmap(D, R, M, conj(M))
+RUmap(R, U, M::leg5) = RUmap(R, U, M, conj(M))
+LUmap(L, U, M::leg5) = LUmap(L, U, M, conj(M))
+
+LDmap(L, D, M::Tuple{leg5,leg5}) = LDmap(L, D, M[1], M[2])
+DRmap(D, R, M::Tuple{leg5,leg5}) = DRmap(D, R, M[1], M[2])
+RUmap(R, U, M::Tuple{leg5,leg5}) = RUmap(R, U, M[1], M[2])
+LUmap(L, U, M::Tuple{leg5,leg5}) = LUmap(L, U, M[1], M[2])

@@ -1,5 +1,21 @@
+# 2026-05-27: pin cuda=12.8 (matches Sofia CUDA/12.8.0 module). CUTENSOR_jll
+# v2.5.0 ships only cuda+12.0/13.0 binaries — for host cuda+12.8, the
+# cuda_comparison_strategy in CUTENSOR_jll/.pkg/platform_augmentation.jl
+# picks cuda+12.0 (major==12, minor 12.0<=12.8).
+#
+# Without an explicit version, CUDA.jl auto-detect on Sofia returns nothing
+# → host_platform becomes "cuda=none" → cuTENSOR.is_available()=false →
+# `UndefVarError: libcutensor not defined`. Worked accidentally before May 26
+# because an earlier precompile cache had a valid platform string baked in;
+# Sofia maintenance invalidated that cache and the new precompile inherited
+# the broken auto-detect=nothing state. DO NOT revert to `__clear__`.
+#
+# Pair this with `LD_LIBRARY_PATH` cleanup in the submit scripts that strips
+# CUDA/12.8.0 paths — otherwise system libcublasLt.so.12 shadows the artifact
+# libcudart and you get CUBLAS_STATUS_EXECUTION_FAILED on the first kernel.
 [CUDA_Runtime_jll]
-__clear__ = ["local", "version"]
+local = "false"
+version = "12.8"
 
 [MPIPreferences]
 __clear__ = ["preloads_env_switch"]

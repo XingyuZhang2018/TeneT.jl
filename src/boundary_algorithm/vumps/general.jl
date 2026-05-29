@@ -5,12 +5,12 @@
 # ─── Reshape helpers ──────────────────────────────────────────────────────────
 
 function _to_tail(t)
-    χ = size(t)[end]
+    χ = size(t, 1)
     return reshape(t, χ, Int(prod(size(t))/χ))
 end
 
 function _to_front(t)
-    χ = size(t, 1)
+    χ = size(t)[end]
     return reshape(t, Int(prod(size(t))/χ), χ)
 end
 
