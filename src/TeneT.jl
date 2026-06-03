@@ -81,6 +81,8 @@ include("boundary_algorithm/qrctm.jl")
 
 include("models/basic_op.jl")
 include("models/basic_interactions.jl")
+include("models/2D_Classical/MPO.jl")
+include("models/2D_Classical/obs.jl")
 include("models/Heisenberg/energy.jl")
 include("models/Heisenberg/order_init.jl")
 include("models/Kitaev/energy.jl")
@@ -129,6 +131,7 @@ export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
 export C4v_restriction, local_min_norm
 
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
+export init_env, leading_boundary
 export GradientOptimize, optimise_ipeps
 export observable
 

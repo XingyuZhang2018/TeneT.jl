@@ -170,6 +170,7 @@ end
     include("test_utils.jl")
     include("test_checkpoint.jl")
     include("test_contraction.jl")
+    include("test_2d_classical.jl")
     include("test_boundary.jl")
     include("test_autodiff.jl")
     include("test_ipeps.jl")
