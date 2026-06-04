@@ -200,24 +200,31 @@ function _c3v_qr(C, R)
 end
 
 function _c3v_update_edge(V, R, M; inner_etype=nothing)
+    return _c3v_update_edge(V, R, M, M; inner_etype)
+end
+
+function _c3v_update_edge(V, R, M1, M2; inner_etype=nothing)
     if inner_etype === nothing || inner_etype == real(eltype(R))
         Vc = conj(V)
-        Mc = conj(M)
+        M1c = conj(M1)
+        M2c = conj(M2)
         @tensor Rnew[t,jj,kk,c] := Vc[i,a,b,t] * R[i,j,k,l] *
-                                   M[j,a,p,x] * Mc[k,b,q,x] *
-                                   M[jj,aa,p,y] * Mc[kk,bb,q,y] *
+                                   M1[j,a,p,x] * M1c[k,b,q,x] *
+                                   M2[jj,aa,p,y] * M2c[kk,bb,q,y] *
                                    V[l,aa,bb,c]
         return Rnew
     else
         T_out = eltype(R)
         Vt = _downcast_eltype(inner_etype, V)
         Rt = _downcast_eltype(inner_etype, R)
-        Mt = _downcast_eltype(inner_etype, M)
+        M1t = _downcast_eltype(inner_etype, M1)
+        M2t = _downcast_eltype(inner_etype, M2)
         Vc = conj(Vt)
-        Mc = conj(Mt)
+        M1c = conj(M1t)
+        M2c = conj(M2t)
         @tensor Rnew_t[t,jj,kk,c] := Vc[i,a,b,t] * Rt[i,j,k,l] *
-                                     Mt[j,a,p,x] * Mc[k,b,q,x] *
-                                     Mt[jj,aa,p,y] * Mc[kk,bb,q,y] *
+                                     M1t[j,a,p,x] * M1c[k,b,q,x] *
+                                     M2t[jj,aa,p,y] * M2c[kk,bb,q,y] *
                                      Vt[l,aa,bb,c]
         return T_out.(Rnew_t)
     end
@@ -311,6 +318,137 @@ function leading_boundary(env::C3vCTMEnv, M::StructArray, alg::QRCTMRG{C3v})
 end
 
 ObsEnv(env::C3vCTMEnv, M::StructArray, ::QRCTMRG{C3v}, model=nothing) = env
+
+# ── C3v honeycomb two-site QRCTMRG ────────────────────────
+
+function _c3v_two_site_tensors(M::StructArray)
+    length(M.data) == 2 ||
+        throw(ArgumentError("QRCTMRG{C3vTwoSite} expects exactly two site tensors."))
+    return _c3v_site_tensor(M.data[1]), _c3v_site_tensor(M.data[2])
+end
+
+function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C3vTwoSite})
+    MA, MB = _c3v_two_site_tensors(M)
+    envA = init_env(StructArray([MA], [1;;]), χ, QRCTMRG{C3v}(; _qrctmrg_c3v_kwargs(alg)...))
+    envB = init_env(StructArray([MB], [1;;]), χ, QRCTMRG{C3v}(; _qrctmrg_c3v_kwargs(alg)...))
+    return C3vTwoSiteCTMEnv(envA.C, envA.R, envB.C, envB.R)
+end
+
+function _qrctmrg_c3v_kwargs(alg)
+    return (
+        tol=alg.tol,
+        maxiter=alg.maxiter,
+        miniter=alg.miniter,
+        maxiter_ad=alg.maxiter_ad,
+        miniter_ad=alg.miniter_ad,
+        show_every=alg.show_every,
+        verbosity=alg.verbosity,
+        maxiter_power=alg.maxiter_power,
+        ifsimple_eig=alg.ifsimple_eig,
+        ifparallel=alg.ifparallel,
+        step_checkpoint=alg.step_checkpoint,
+        forloop_iter=alg.forloop_iter,
+        inner_etype=alg.inner_etype,
+        inner_etype_final_steps=alg.inner_etype_final_steps,
+        simple_eig_polish_steps=alg.simple_eig_polish_steps,
+        whole_vumps_etype=alg.whole_vumps_etype,
+    )
+end
+
+function _c3v_step_sector(C, R, M1, M2, alg::QRCTMRG{C3vTwoSite})
+    V, Rfac = _c3v_qr(C, R)
+    Rnew = _c3v_update_edge(V, R, M1, M2; inner_etype=alg.inner_etype)
+    Cnew = _c3v_update_corner(Rnew, Rfac, V)
+    Rnew /= ignore_derivatives(() -> norm(Rnew))
+    Cnew /= ignore_derivatives(() -> norm(Cnew))
+    err = ignore_derivatives(() -> norm(Cnew - C))
+    return Cnew, Rnew, err
+end
+
+function qrctmrg_step(env::C3vTwoSiteCTMEnv, M::Tuple, alg::QRCTMRG{C3vTwoSite})
+    MA, MB = M
+    CA, RA, errA = _c3v_step_sector(env.CA, env.RA, MA, MB, alg)
+    CB, RB, errB = _c3v_step_sector(env.CB, env.RB, MB, MA, alg)
+    err = ignore_derivatives(() -> max(errA, errB))
+    return C3vTwoSiteCTMEnv(CA, RA, CB, RB), err
+end
+
+function leading_boundary(env::C3vTwoSiteCTMEnv, M::StructArray, alg::QRCTMRG{C3vTwoSite})
+    MA, MB = _c3v_two_site_tensors(M)
+    t = ignore_derivatives(() -> time())
+    local err
+
+    T_orig = eltype(env.RA)
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        env = C3vTwoSiteCTMEnv(_downcast_eltype(W, env.CA), _downcast_eltype(W, env.RA),
+                               _downcast_eltype(W, env.CB), _downcast_eltype(W, env.RB))
+        MA = _downcast_eltype(W, MA)
+        MB = _downcast_eltype(W, MB)
+    end
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+    end
+
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTMRG{C3vTwoSite} iteration without AD...")
+    ignore_derivatives() do
+        for i in 1:alg.maxiter
+            env, err = qrctmrg_step(env, (MA, MB), alg_wholemode)
+            alg.verbosity >= 3 && i % alg.show_every == 0 &&
+                ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3vTwoSite}@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            if err < alg.tol && i >= alg.miniter
+                alg.verbosity >= 2 &&
+                    ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3vTwoSite} conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+                break
+            end
+        end
+    end
+
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTMRG{C3vTwoSite} iteration with AD...")
+    alg_ad = alg_wholemode
+    alg_ad_coarse = alg
+    if want_whole || alg.inner_etype !== nothing
+        alg_ad_coarse = deepcopy(alg_wholemode)
+        alg_ad_coarse.inner_etype = nothing
+    end
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
+    for i in 1:alg.maxiter_ad
+        alg_this_iter = alg_ad
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active && in_polish
+            alg_this_iter = alg_ad_coarse
+        end
+        if want_whole && in_polish && eltype(env.RA) != T_orig
+            env = C3vTwoSiteCTMEnv(_downcast_eltype(real(T_orig), env.CA),
+                                   _downcast_eltype(real(T_orig), env.RA),
+                                   _downcast_eltype(real(T_orig), env.CB),
+                                   _downcast_eltype(real(T_orig), env.RB))
+            MA = _downcast_eltype(real(T_orig), MA)
+            MB = _downcast_eltype(real(T_orig), MB)
+        end
+        env, err = checkpoint(alg.step_checkpoint, qrctmrg_step, env, (MA, MB), alg_this_iter)
+        alg.verbosity >= 3 && i % alg.show_every == 0 &&
+            ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3vTwoSite}@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        if err < alg.tol && i >= alg.miniter_ad
+            alg.verbosity >= 2 &&
+                ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3vTwoSite} conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            break
+        end
+    end
+    if want_whole && eltype(env.RA) != T_orig
+        env = C3vTwoSiteCTMEnv(_downcast_eltype(real(T_orig), env.CA),
+                               _downcast_eltype(real(T_orig), env.RA),
+                               _downcast_eltype(real(T_orig), env.CB),
+                               _downcast_eltype(real(T_orig), env.RB))
+    end
+    return env, err
+end
+
+ObsEnv(env::C3vTwoSiteCTMEnv, M::StructArray, ::QRCTMRG{C3vTwoSite}, model=nothing) = env
 
 # Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
 # See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
