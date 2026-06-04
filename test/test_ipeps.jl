@@ -497,6 +497,27 @@
         mag, _ = TeneT.magnetization_value(model, A, rt, params)
         @test isfinite(real(e))
         @test isfinite(real(mag))
+
+        function c3v_ref_L(C, T, A, O)
+            @tensor RC[i,b,c,a] := T[i,b,c,l] * C[l,a]
+            @tensor CRC[i,j,k,m] := C[i,q] * RC[q,j,k,m]
+            @tensor L[a,p,q,m] := conj(RC[i,b,c,a]) * CRC[i,j,k,m] *
+                                  A[j,b,p,x] * O[x,y] * conj(A[k,c,q,y])
+            return L
+        end
+        c3v_ref_contract(L1, L2) = begin
+            @tensor result[] := L1[a,p,q,m] * L2[m,p,q,a]
+            only(result)
+        end
+
+        Iop = Matrix{eltype(A[1])}(I, d, d)
+        LI = c3v_ref_L(rt.C, rt.T, A[1], Iop)
+        nref = c3v_ref_contract(LI, LI)
+        terms = TeneT._heisenberg_bond_terms(model, Array)
+        eref = sum(c * c3v_ref_contract(c3v_ref_L(rt.C, rt.T, A[1], OL),
+                                        c3v_ref_L(rt.C, rt.T, A[1], OR))
+                   for (c, OL, OR) in terms) / nref * 3 / 2
+        @test e ≈ eref
     end
 
 end

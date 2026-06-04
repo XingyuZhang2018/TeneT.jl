@@ -17,7 +17,7 @@ pattern = [1 2;
 #            2 4]
 model = Heisenberg(lattice=Honeycomb(:brickwall_h),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
-                   ifrotate=false,
+                   ifrotate=true,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/VUMPS_General/$etype/seed$seed/")
@@ -62,8 +62,18 @@ A = init_ipeps(;atype, etype, No, D, χ, params)
 function restriction_ipeps(A)
    # A = C4v_restriction(A)
    # A /= norm(A)
-   A = local_min_norm(A, params)
-   return A
+   # A = local_min_norm(A, params)
+   B = Zygote.Buffer(A)
+   B[:,:,:,:,:,1] = A[:,:,:,:,:,1]
+   B[:,:,:,:,:,1] = (B[:,:,:,:,:,1] +
+         permutedims(B[:,:,:,:,:,1], (3, 2, 4, 1, 5)) +
+         permutedims(B[:,:,:,:,:,1], (4, 2, 1, 3, 5)) +
+         permutedims(B[:,:,:,:,:,1], (1, 2, 4, 3, 5)) +
+         permutedims(B[:,:,:,:,:,1], (3, 2, 1, 4, 5)) +
+         permutedims(B[:,:,:,:,:,1], (4, 2, 3, 1, 5))) / 6
+   B[:,:,:,:,:,2] = B[:,:,:,:,:,1]
+   B = copy(B)
+   return B/norm(B)
 end
 
 optimise_ipeps(A, χ, χshift, params; restriction_ipeps);

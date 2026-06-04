@@ -100,6 +100,25 @@ FLmap(FL, ALu, ALd, M::leg5; inner_etype=nothing) =
 FLmap(FL, ALu, ALd, M::Tuple{leg5,leg5}; inner_etype=nothing) =
     FLmap(FL, ALu, ALd, M[1], M[2]; inner_etype)
 
+function FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4, M3::leg4, M4::leg4; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(FL))
+        @tensor result[3,8,88,9] := FL[1,4,44,5] * ALu[1,2,22,3] * M1[4,7,2,10] * M2[44,77,22,10] * M3[6,8,7,11] * M4[66,88,77,11] * ALd[5,6,66,9]
+        return result
+    else
+        T_out = eltype(FL)
+        FL_t  = _downcast_eltype(inner_etype, FL)
+        ALu_t = _downcast_eltype(inner_etype, ALu)
+        ALd_t = _downcast_eltype(inner_etype, ALd)
+        M1_t  = _downcast_eltype(inner_etype, M1)
+        M2_t  = _downcast_eltype(inner_etype, M2)
+        @tensor result_t[3,8,88,9] := FL_t[1,4,44,5] * ALu_t[1,2,22,3] * M1_t[4,7,2,10] * M2_t[44,77,22,10] * M3[6,8,7,11] * M4[66,88,77,11] * ALd_t[5,6,66,9]
+        return T_out.(result_t)
+    end
+end
+
+FLmap_C3v(FL, ALu, ALd, M::leg4; inner_etype=nothing) =
+    FLmap_C3v(FL, ALu, ALd, M, conj(M), M, conj(M); inner_etype)
+
 """
     FRm = FRmap(ARu, ARd, M, FR, i)
 

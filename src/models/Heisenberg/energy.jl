@@ -130,30 +130,6 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
     return etol*2, e_dict
 end
 
-function _contract_c3v_bond(C, T, A, O1, O2; ifparallel=false, forloop_iter=1)
-    @tensor AO1[a,b,c,f] := A[a,b,c,e] * O1[e,f]
-    @tensor AO2[a,b,c,f] := A[a,b,c,e] * O2[e,f]
-    Ac = conj(A)
-    @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
-                        C[x3,x4] * T[x4,b,bb,x5] *
-                        C[x5,x6] * T[x6,d,dd,x7] *
-                        C[x7,x8] * T[x8,e,ee,x1] *
-                        AO1[a,b,s,p1] * AO2[d,e,s,p2] *
-                        Ac[aa,bb,ss,p1] * Ac[dd,ee,ss,p2]
-    return only(result)
-end
-
-function _contract_c3v_bond_norm(C, T, A; ifparallel=false, forloop_iter=1)
-    Ac = conj(A)
-    @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
-                        C[x3,x4] * T[x4,b,bb,x5] *
-                        C[x5,x6] * T[x6,d,dd,x7] *
-                        C[x7,x8] * T[x8,e,ee,x1] *
-                        A[a,b,s,p1] * A[d,e,s,p2] *
-                        Ac[aa,bb,ss,p1] * Ac[dd,ee,ss,p2]
-    return only(result)
-end
-
 function energy_value(model::Heisenberg{Honeycomb{:c3v}}, A, env::CTMEnv, params::iPEPSOptimize)
     @unpack C, T = env
     A1 = A[1]

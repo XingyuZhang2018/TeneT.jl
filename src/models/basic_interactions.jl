@@ -169,3 +169,22 @@ function _kagome_site_op(O, sublattice, d)
     @tensor out[a,b,c,d,e,f] := ops[1][a,d] * ops[2][b,e] * ops[3][c,f]
     return reshape(real(out), d^3, d^3)
 end
+
+function _contract_c3v_bond(C, T, A, O1, O2; ifparallel=false, forloop_iter=1)
+    @tensor AO1[a,b,c,f] := A[a,b,c,e] * O1[e,f]
+    @tensor AO2[a,b,c,f] := A[a,b,c,e] * O2[e,f]
+    Ac = conj(A)
+    @tensor TC[1,2,3,4] := T[1,2,3,5] * C[5,4]
+    @tensor CTC[1,2,3,4] := C[1,5] * TC[5,2,3,4]
+    @tensor half1[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * AO1[2,4,7,8] * Ac[22,44,77,8]
+    @tensor half2[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * AO2[2,4,7,8] * Ac[22,44,77,8]
+    return dot(half1,half2)
+end
+
+function _contract_c3v_bond_norm(C, T, A; ifparallel=false, forloop_iter=1)
+    Ac = conj(A)
+    @tensor TC[1,2,3,4] := T[1,2,3,5] * C[5,4]
+    @tensor CTC[1,2,3,4] := C[1,5] * TC[5,2,3,4]
+    @tensor half[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * A[2,4,7,8] * Ac[22,44,77,8]
+    return dot(half,half)
+end

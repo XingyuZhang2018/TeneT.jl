@@ -346,7 +346,7 @@
 
         @testset "QRCTMRG{C3v}" begin
             D, d = 2, 2
-            M_c3v = StructArray([atype(rand(ComplexF64, D, D, D, d))], [1;;])
+            M_c3v = StructArray([atype(rand(Float64, D, D, D, d))], [1;;])
             alg_c3v = QRCTMRG{C3v}(; verbosity=0, maxiter=2,
                                      maxiter_ad=1, miniter_ad=1,
                                      tol=1e-8)
@@ -359,10 +359,42 @@
             end
 
             @testset "init accepts singleton rank-5 brickwall tensor" begin
-                M_c3v_brickwall = StructArray([atype(rand(ComplexF64, D, 1, D, D, d))], [1;;])
+                M_c3v_brickwall = StructArray([atype(rand(Float64, D, 1, D, D, d))], [1;;])
                 rt = init_env(M_c3v_brickwall, chi, alg_c3v)
                 @test rt isa CTMEnv
                 @test size(rt.T) == (chi, D, D, chi)
+            end
+
+            @testset "one step matches QRCTM reference" begin
+                local chi_step = 4
+                C0 = atype(randn(Float64, chi_step, chi_step))
+                C0 = C0 / norm(C0)
+                T0 = atype(randn(Float64, chi_step, D, D, chi_step))
+                T0 = T0 / norm(T0)
+                M0 = randn(Float64, D, D, D, d)
+                M0 = (M0 +
+                      permutedims(M0, (2, 3, 1, 4)) +
+                      permutedims(M0, (3, 1, 2, 4)) +
+                      permutedims(M0, (1, 3, 2, 4)) +
+                      permutedims(M0, (2, 1, 3, 4)) +
+                      permutedims(M0, (3, 2, 1, 4))) / 6
+                M0 = atype(M0 / norm(M0))
+
+                env, _ = qrctmrg_step(CTMEnv(C0, T0), M0, alg_c3v)
+
+                @tensor CR[i,j,k,m] := C0[i,q] * T0[q,j,k,m]
+                V, Rfac = qr_for_ad(reshape(CR, div(prod(size(CR)), size(CR, 1)), size(CR, 1)))
+                V = reshape(V, size(T0))
+                @tensor Tref[t,jj,kk,c] := V[i,a,b,t] * T0[i,j,k,l] *
+                                           M0[j,a,p,x] * M0[k,b,q,x] *
+                                           M0[jj,aa,p,y] * M0[kk,bb,q,y] *
+                                           V[l,aa,bb,c]
+                @tensor Cref[c,r] := Tref[t,j,k,c] * Rfac[t,b] * V[b,j,k,r]
+                Tref = Tref / norm(Tref)
+                Cref = Cref / norm(Cref)
+
+                @test Array(env.T) ≈ Array(Tref) atol=1e-10 rtol=1e-10
+                @test Array(env.C) ≈ Array(Cref) atol=1e-10 rtol=1e-10
             end
 
             @testset "iteration returns finite error" begin

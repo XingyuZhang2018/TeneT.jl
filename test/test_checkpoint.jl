@@ -168,6 +168,29 @@
         @test v2.eig_checkpoint     === TeneT.Offload()            # overridden
     end
 
+    @testset "initialize_env loads QRCTMRG env without ifparallelupdown" begin
+        D, d, chi = 2, 2, 4
+        folder = mktempdir()
+        model = Heisenberg(lattice=Honeycomb(:c3v), S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                           ifrotate=true, couplingtype=:uniform, bondratio=1.0)
+        boundary_alg = QRCTMRG{C3v}(; verbosity=0, maxiter=1, maxiter_ad=0,
+                                    miniter=0, miniter_ad=0)
+        params = GradientOptimize(; model, pattern=[1;;], boundary_alg,
+                                   optimizer=nothing, folder, verbosity=0,
+                                   ifload_env=true, ifsave_env=false,
+                                   ifsave_lbfgs=false, ifload_lbfgs=false)
+        A = rand(Float64, D, D, D, d, 1)
+        envdir = joinpath(folder, "D$(D)", "environment")
+        mkpath(envdir)
+        saved = CTMEnv(fill(2.0, chi, chi), fill(3.0, chi, D, D, chi))
+        save_rt(envdir, saved; file="χ$(chi).jld2")
+
+        loaded = initialize_env(A, D, chi, params)
+
+        @test loaded.C == saved.C
+        @test loaded.T == saved.T
+    end
+
     # ---- [1;;] iPEPS gradient regression ----
     # Earlier, leftenv/rightenv/ACenv had `eig_checkpoint isa Plain` branches that
     # built `f(x) = checkpoint(inner_checkpoint, FLmap, ..., ALu[i, :], ...)` with

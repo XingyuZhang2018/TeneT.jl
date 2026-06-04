@@ -13,23 +13,23 @@ pattern = [1;;]
 
 model = Heisenberg(lattice=Honeycomb(:c3v),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
-                   ifrotate=false,
+                   ifrotate=true,
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTMRG_C3v/$etype/seed$seed/")
 
 boundary_alg = QRCTMRG{C3v}(ifparallel=false,
-                            step_checkpoint=Offload(),
+                            step_checkpoint=Plain(),
                             forloop_iter=1,
-                            maxiter=10, miniter=0,
-                            maxiter_ad=1, miniter_ad=1,
+                            maxiter=30, miniter=0,
+                            maxiter_ad=20, miniter_ad=20,
                             show_every=5, tol=1e-10,
                             verbosity=3)
 
 params = GradientOptimize(model=model,
                           pattern=pattern,
                           boundary_alg=boundary_alg,
-                          optimizer=LBFGS(200; maxiter=1, verbosity=4, gradtol=1e-7,
+                          optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7,
                                            linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
                           maxiter_restart=1,
@@ -38,7 +38,7 @@ params = GradientOptimize(model=model,
                           ifSU=false, SUτ=0,
                           ifprecondition=false, iter_precond=0,
                           reuse_env=true,
-                          ifsave_env=false, ifload_env=false,
+                          ifsave_env=true, ifload_env=true,
                           ifsave_lbfgs=false, ifload_lbfgs=false)
 
 A = init_ipeps(; atype, etype, No, D, χ, params)
