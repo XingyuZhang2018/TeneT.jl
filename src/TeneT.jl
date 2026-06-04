@@ -73,7 +73,7 @@ include("models/oneside_traits.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")
 include("boundary_algorithm/vumps/c4v.jl")
-include("boundary_algorithm/qrctm.jl")
+include("boundary_algorithm/qrctmrg.jl")
 
 # ============================================================================
 # Hamiltonian models
@@ -121,10 +121,10 @@ include("ipeps_optimize/optimize.jl")
 # ============================================================================
 
 export VUMPS
-export QRCTM
+export QRCTMRG
 
 export Square, Honeycomb, Kagome
-export General, C4v, Plaquette
+export General, C4v, C3v, C3vTwoSite, Plaquette
 
 export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
 

@@ -20,16 +20,16 @@ model = J1J2(lattice=Square(),
              ifrotate=true, 
              couplingtype=:uniform, bondratio=1.0)
 No = 0
-folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTM/$etype/seed$seed/")
-boundary_alg = QRCTM(ifparallel=false,
-                     forloop_iter=1,
-                     maxiter=3, 
-                     miniter=0, 
-                     maxiter_ad=20,
-                     miniter_ad=20,
-                     show_every=10,
-                     tol=1e-10,
-                     verbosity=3,
+folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTMRG_C4v/$etype/seed$seed/")
+boundary_alg = QRCTMRG{C4v}(ifparallel=false,
+                            forloop_iter=1,
+                            maxiter=3, 
+                            miniter=0, 
+                            maxiter_ad=20,
+                            miniter_ad=20,
+                            show_every=10,
+                            tol=1e-10,
+                            verbosity=3,
 )
 params = GradientOptimize(model=model,
                           pattern=pattern,

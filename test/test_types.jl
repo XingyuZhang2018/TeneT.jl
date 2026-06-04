@@ -24,6 +24,8 @@
     @testset "ContractionMode types" begin
         @test TeneT.General() isa TeneT.ContractionMode
         @test TeneT.Plaquette() isa TeneT.ContractionMode
+        @test TeneT.C3v() isa TeneT.ContractionMode
+        @test TeneT.C3vTwoSite() isa TeneT.ContractionMode
     end
 
     # ---- Algorithm types ----
@@ -31,7 +33,10 @@
         @test VUMPS{General}() isa TeneT.Algorithm
         @test VUMPS{Plaquette{Square}}() isa TeneT.Algorithm
         @test VUMPS{C4v}() isa TeneT.Algorithm
-        @test QRCTM() isa TeneT.Algorithm
+        @test QRCTMRG{C4v}() isa TeneT.Algorithm
+        @test QRCTMRG(C4v()) isa QRCTMRG{C4v}
+        @test QRCTMRG{C3v}() isa TeneT.Algorithm
+        @test QRCTMRG{C3vTwoSite}() isa TeneT.Algorithm
     end
 
     # ---- iPEPSOptimize hierarchy ----
@@ -95,9 +100,9 @@
         @test alg4.inner_etype === Float32
     end
 
-    # ---- QRCTM default fields ----
-    @testset "QRCTM default fields" begin
-        q = QRCTM()
+    # ---- QRCTMRG default fields ----
+    @testset "QRCTMRG default fields" begin
+        q = QRCTMRG{C4v}()
         @test q.tol == 1e-10
         @test q.maxiter == 100
         @test q.miniter == 1

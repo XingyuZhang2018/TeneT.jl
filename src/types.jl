@@ -7,10 +7,12 @@ struct Honeycomb{Mode} <: AbstractLattice end
 Honeycomb(s::Symbol) = Honeycomb{s}()
 struct Kagome{Mode} <: AbstractLattice end
 Kagome(s::Symbol) = Kagome{s}()
+Kagome() = Kagome{:merge}()
 
 # Filesystem-safe string representations (avoid : { } characters for Windows paths)
 Base.show(io::IO, ::Square)              = print(io, "Square")
 Base.show(io::IO, ::Honeycomb{M}) where M = print(io, "Honeycomb_", M)
+Base.show(io::IO, ::Kagome{:merge})      = print(io, "Kagome")
 Base.show(io::IO, ::Kagome{M}) where M    = print(io, "Kagome_", M)
 
 # Two Kagome embeddings sharing identical bond / energy / plot logic.
@@ -24,7 +26,10 @@ abstract type HamiltonianModel end
 abstract type ContractionMode end
 struct General <: ContractionMode end
 struct C4v <: ContractionMode end
+struct C3v <: ContractionMode end
+struct C3vTwoSite <: ContractionMode end
 struct Plaquette{Mode} <: ContractionMode end
+Plaquette() = Plaquette{Square}()
 Plaquette(L::AbstractLattice) = Plaquette{typeof(L)}()
 
 # Boundary algorithm base type

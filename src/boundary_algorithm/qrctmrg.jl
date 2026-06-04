@@ -1,4 +1,4 @@
-# QRCTM boundary algorithm
+# QRCTMRG boundary algorithm
 #
 # QR-based Corner Transfer Matrix method.
 # Uses QR decomposition of the combined C*T tensor to obtain the projector U,
@@ -6,14 +6,14 @@
 
 # ── initialization ─────────────────────────────────────────
 
-# function init_env(M::StructArray, χ::Int, alg::QRCTM)
+# function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C4v})
 #     M = M[1][:,:,:,:,:,1]
 #     return init_env(M, χ, alg)
 # end
 
-function init_env(M::StructArray, χ::Int, alg::QRCTM)
+function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C4v})
     M = M[1]
-    eltype(M) <: Complex && throw(ArgumentError("QRCTM only supports real-valued tensors for now."))
+    eltype(M) <: Complex && throw(ArgumentError("QRCTMRG{C4v} only supports real-valued tensors for now."))
 
     D = size(M, 1)
     if ndims(M) == 4
@@ -30,11 +30,11 @@ function init_env(M::StructArray, χ::Int, alg::QRCTM)
 end
 
 """
-    qrctm_step(env::CTMEnv, M::AbstractArray, alg::QRCTM)
+    qrctmrg_step(env::CTMEnv, M::AbstractArray, alg::QRCTMRG{C4v})
 
-One CTM left-move step for the QRCTM algorithm.
+One CTM left-move step for the QRCTMRG{C4v} algorithm.
 """
-function qrctm_step(env::CTMEnv, M::AbstractArray, alg::QRCTM)
+function qrctmrg_step(env::CTMEnv, M::AbstractArray, alg::QRCTMRG{C4v})
     C = env.C
     T = env.T
 
@@ -56,13 +56,13 @@ end
 # ── iteration + boundary ───────────────────────────────────
 
 # Core implementation operating on plain tensors (avoids StructArray overhead in AD)
-function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
+function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTMRG{C4v})
     M = M[1]
     t = ignore_derivatives(() -> time())
     local err
 
     # Whole-VUMPS precision mode: pre-cast env (C, T) and M at entry, run
-    # whole qrctm_step (FLmap + QR + norm) in it, cast back for polish iters.
+    # whole qrctmrg_step (FLmap + QR + norm) in it, cast back for polish iters.
     T_orig = eltype(env.T)
     want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
     if want_whole
@@ -78,24 +78,24 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
         alg_wholemode.inner_etype = nothing
     end
 
-    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTM iteration without AD...")
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTMRG iteration without AD...")
     ignore_derivatives() do
         for i in 1:alg.maxiter
-        env, err = qrctm_step(env, M, alg_wholemode)
+        env, err = qrctmrg_step(env, M, alg_wholemode)
         alg.verbosity >= 3 && i % alg.show_every == 0 &&
-            ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            ignore_derivatives(() -> @info @sprintf("QRCTMRG@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter
             alg.verbosity >= 2 &&
-                ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+                ignore_derivatives(() -> @info @sprintf("QRCTMRG conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter
-            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTMRG cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     end
 
-    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTM iteration with AD...")
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTMRG iteration with AD...")
     # Coarse polish: final inner_etype_final_steps AD iters use full original precision.
     alg_ad = alg_wholemode
     alg_ad_coarse = alg
@@ -117,14 +117,14 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
                          _downcast_eltype(real(T_orig), env.T))
             M = _downcast_eltype(real(T_orig), M)
         end
-        env, err = checkpoint(alg.step_checkpoint, qrctm_step, env, M, alg_this_iter)
-        alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("QRCTM@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        env, err = checkpoint(alg.step_checkpoint, qrctmrg_step, env, M, alg_this_iter)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("QRCTMRG@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         if err < alg.tol && i >= alg.miniter_ad
-            alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("QRCTM conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("QRCTMRG conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
             break
         end
         if i == alg.maxiter_ad
-            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTM cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("QRCTMRG cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
         end
     end
     # Exit guard: if whole-VUMPS mode active and we never hit polish, cast back.
@@ -135,7 +135,7 @@ function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTM)
     return env, err
 end
 
-ObsEnv(env::CTMEnv, M::StructArray, ::QRCTM, model=nothing) = env
+ObsEnv(env::CTMEnv, M::StructArray, ::QRCTMRG{C4v}, model=nothing) = env
 
 # Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
 # See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.

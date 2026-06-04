@@ -165,7 +165,7 @@ function energy_value(model::J1J2{Square}, A, env::C4vVUMPSEnv, params::iPEPSOpt
 end
 
 function energy_value(model::J1J2{Square}, A, env::CTMEnv, params::iPEPSOptimize)
-    model.ifrotate == true || throw(ArgumentError("model.ifrotate must be true for QRCTM energy evaluation"))
+    model.ifrotate == true || throw(ArgumentError("model.ifrotate must be true for QRCTMRG{C4v} energy evaluation"))
 
     @unpack C, T = env
     @unpack J1, J2 = model

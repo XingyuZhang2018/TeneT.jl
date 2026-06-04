@@ -317,12 +317,12 @@
         end
 
         # ==================================================================
-        # QRCTM
+        # QRCTMRG{C4v}
         # ==================================================================
-        @testset "QRCTM" begin
-            alg_qr = QRCTM(; verbosity=0, maxiter=100,
-                             maxiter_ad=1, miniter_ad=1,
-                             tol=1e-8)
+        @testset "QRCTMRG{C4v}" begin
+            alg_qr = QRCTMRG{C4v}(; verbosity=0, maxiter=100,
+                                   maxiter_ad=1, miniter_ad=1,
+                                   tol=1e-8)
 
             @testset "init returns CTMEnv" begin
                 rt = init_env(M1, chi, alg_qr)
@@ -381,7 +381,7 @@
                 end
 
                 @testset "CTMEnv GPU roundtrip" begin
-                    alg_qr = QRCTM(; verbosity=0, maxiter=10, tol=1e-6)
+                    alg_qr = QRCTMRG{C4v}(; verbosity=0, maxiter=10, tol=1e-6)
                     rt = init_env(M1, chi, alg_qr)
                     rt_cpu = Array(rt)
                     rt_gpu = atype(rt_cpu)

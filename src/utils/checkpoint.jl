@@ -301,7 +301,7 @@ end
 # generated closure whose struct fields capture the forward-pass values it
 # needs to compute the gradient (e.g. input arrays, intermediate activations).
 # By default those captures pin GPU memory until the outer Zygote backward
-# finally calls `pb(ȳ)`. For a deep iPEPS gradient (QRCTM AD loop + energy
+# finally calls `pb(ȳ)`. For a deep iPEPS gradient (QRCTMRG AD loop + energy
 # observable), that held memory can dominate GPU peak usage.
 #
 # `Offload()` walks `pb`'s captured struct fields reflectively and replaces

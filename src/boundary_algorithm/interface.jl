@@ -101,11 +101,11 @@ Corner Transfer Matrix Renormalization Group algorithm.
 end
 
 """
-    QRCTM <: Algorithm
+    QRCTMRG{F} <: Algorithm
 
-QR-based Corner Transfer Matrix algorithm.
+QR-based Corner Transfer Matrix Renormalization Group algorithm.
 """
-@kwdef mutable struct QRCTM <: Algorithm
+@kwdef mutable struct QRCTMRG{F <: ContractionMode} <: Algorithm
     tol::Float64 = 1e-10
     maxiter::Int = 100
     miniter::Int = 1
@@ -118,9 +118,9 @@ QR-based Corner Transfer Matrix algorithm.
 
     ifsimple_eig::Bool = true
     ifparallel::Bool = false
-    # Per-step checkpoint method wrapping `qrctm_step` inside the AD loop.
+    # Per-step checkpoint method wrapping `qrctmrg_step` inside the AD loop.
     # Plain()            — no checkpointing (default)
-    # Recompute()        — rerun qrctm_step on backward (trades compute for memory)
+    # Recompute()        — rerun qrctmrg_step on backward (trades compute for memory)
     # OffloadRecompute() — copy args to host after forward, copy back + rerun on backward
     # Offload()          — pb-capture walker swaps GPU captures for CPU copies; on
     #                      backward reload + run original pb (no forward recompute).
@@ -128,10 +128,13 @@ QR-based Corner Transfer Matrix algorithm.
     forloop_iter::Int = 1
 
     # Mixed-precision fields (same semantics as VUMPS; see VUMPS struct doc).
-    # QRCTM doesn't use simple_eig, so simple_eig_polish_steps is functionally
+    # QRCTMRG doesn't use simple_eig, so simple_eig_polish_steps is functionally
     # inactive but kept for API symmetry.
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0
     simple_eig_polish_steps::Int = 0
     whole_vumps_etype::Union{Nothing, Type} = nothing
 end
+
+# Convenience: QRCTMRG(C4v(); kwargs...) mirrors VUMPS(C4v(); kwargs...).
+QRCTMRG(::F; kwargs...) where {F <: ContractionMode} = QRCTMRG{F}(; kwargs...)
