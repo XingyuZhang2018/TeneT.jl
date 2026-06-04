@@ -154,43 +154,20 @@ function _c3v_site_tensor(M::AbstractArray)
     end
 end
 
-function _pad_c3v_corner(C, χ::Int)
-    size(C, 1) <= χ && size(C, 2) <= χ ||
-        throw(ArgumentError("χ=$χ is smaller than the C3v initial corner size $(size(C))."))
-    Cp = similar(C, χ, χ)
-    Cp .= 0
-    Cp[1:size(C, 1), 1:size(C, 2)] .= C
-    return Cp
-end
-
-function _pad_c3v_edge(R, χ::Int)
-    size(R, 1) <= χ && size(R, 3) <= χ ||
-        throw(ArgumentError("χ=$χ is smaller than the C3v initial edge size $(size(R))."))
-    Rp = similar(R, χ, size(R, 2), χ)
-    Rp .= 0
-    Rp[1:size(R, 1), :, 1:size(R, 3)] .= R
-    return Rp
-end
-
 function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C3v})
     M = _c3v_site_tensor(M[1])
     D = size(M, 1)
     size(M, 2) == D && size(M, 3) == D ||
         throw(ArgumentError("QRCTMRG{C3v} expects equal virtual dimensions; got $(size(M)[1:3])."))
 
-    @tensor C4[a,d,b,e] := M[a,b,c,x] * conj(M[d,e,c,x])
-    Csmall = reshape(C4, D^2, D^2)
-
-    @tensor M2[a,d,b,e,c,f] := M[a,b,c,x] * conj(M[d,e,f,x])
-    M2layer = reshape(M2, D^2, D^2, D^2)
-    @tensor Rsmall[i,k,a] := Csmall[i,j] * M2layer[a,j,k]
-
-    C = _pad_c3v_corner(Csmall, χ)
-    R = reshape(_pad_c3v_edge(Rsmall, χ), χ, D, D, χ)
+    C = rand!(similar(M, χ, χ))
+    C += C'
+    R = rand!(similar(M, χ, D, D, χ))
+    R += conj(permutedims(R, (4, 2, 3, 1)))
 
     C /= ignore_derivatives(() -> norm(C))
     R /= ignore_derivatives(() -> norm(R))
-    return C3vCTMEnv(C, R)
+    return CTMEnv(C, R)
 end
 
 function _c3v_qr(C, R)
@@ -236,29 +213,29 @@ function _c3v_update_corner(Rnew, Rfac, V)
     return Cnew
 end
 
-function qrctmrg_step(env::C3vCTMEnv, M::AbstractArray, alg::QRCTMRG{C3v})
+function qrctmrg_step(env::CTMEnv, M::AbstractArray, alg::QRCTMRG{C3v})
     M = _c3v_site_tensor(M)
-    V, Rfac = _c3v_qr(env.C, env.R)
-    Rnew = _c3v_update_edge(V, env.R, M; inner_etype=alg.inner_etype)
+    V, Rfac = _c3v_qr(env.C, env.T)
+    Rnew = _c3v_update_edge(V, env.T, M; inner_etype=alg.inner_etype)
     Cnew = _c3v_update_corner(Rnew, Rfac, V)
 
     Rnew /= ignore_derivatives(() -> norm(Rnew))
     Cnew /= ignore_derivatives(() -> norm(Cnew))
     err = ignore_derivatives(() -> norm(Cnew - env.C))
 
-    return C3vCTMEnv(Cnew, Rnew), err
+    return CTMEnv(Cnew, Rnew), err
 end
 
-function leading_boundary(env::C3vCTMEnv, M::StructArray, alg::QRCTMRG{C3v})
+function leading_boundary(env::CTMEnv, M::StructArray, alg::QRCTMRG{C3v})
     M = _c3v_site_tensor(M[1])
     t = ignore_derivatives(() -> time())
     local err
 
-    T_orig = eltype(env.R)
+    T_orig = eltype(env.T)
     want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
     if want_whole
         W = alg.whole_vumps_etype
-        env = C3vCTMEnv(_downcast_eltype(W, env.C), _downcast_eltype(W, env.R))
+        env = CTMEnv(_downcast_eltype(W, env.C), _downcast_eltype(W, env.T))
         M = _downcast_eltype(W, M)
     end
     alg_wholemode = alg
@@ -296,9 +273,9 @@ function leading_boundary(env::C3vCTMEnv, M::StructArray, alg::QRCTMRG{C3v})
         if mixed_active && in_polish
             alg_this_iter = alg_ad_coarse
         end
-        if want_whole && in_polish && eltype(env.R) != T_orig
-            env = C3vCTMEnv(_downcast_eltype(real(T_orig), env.C),
-                            _downcast_eltype(real(T_orig), env.R))
+        if want_whole && in_polish && eltype(env.T) != T_orig
+            env = CTMEnv(_downcast_eltype(real(T_orig), env.C),
+                         _downcast_eltype(real(T_orig), env.T))
             M = _downcast_eltype(real(T_orig), M)
         end
         env, err = checkpoint(alg.step_checkpoint, qrctmrg_step, env, M, alg_this_iter)
@@ -310,14 +287,14 @@ function leading_boundary(env::C3vCTMEnv, M::StructArray, alg::QRCTMRG{C3v})
             break
         end
     end
-    if want_whole && eltype(env.R) != T_orig
-        env = C3vCTMEnv(_downcast_eltype(real(T_orig), env.C),
-                        _downcast_eltype(real(T_orig), env.R))
+    if want_whole && eltype(env.T) != T_orig
+        env = CTMEnv(_downcast_eltype(real(T_orig), env.C),
+                     _downcast_eltype(real(T_orig), env.T))
     end
     return env, err
 end
 
-ObsEnv(env::C3vCTMEnv, M::StructArray, ::QRCTMRG{C3v}, model=nothing) = env
+ObsEnv(env::CTMEnv, M::StructArray, ::QRCTMRG{C3v}, model=nothing) = env
 
 # ── C3v honeycomb two-site QRCTMRG ────────────────────────
 
@@ -331,7 +308,7 @@ function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C3vTwoSite})
     MA, MB = _c3v_two_site_tensors(M)
     envA = init_env(StructArray([MA], [1;;]), χ, QRCTMRG{C3v}(; _qrctmrg_c3v_kwargs(alg)...))
     envB = init_env(StructArray([MB], [1;;]), χ, QRCTMRG{C3v}(; _qrctmrg_c3v_kwargs(alg)...))
-    return C3vTwoSiteCTMEnv(envA.C, envA.R, envB.C, envB.R)
+    return C3vTwoSiteCTMEnv(envA.C, envA.T, envB.C, envB.T)
 end
 
 function _qrctmrg_c3v_kwargs(alg)

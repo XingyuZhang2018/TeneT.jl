@@ -131,17 +131,6 @@ struct CTMEnv{CT<:AbstractArray{<:Number,2}, ET<:Union{AbstractArray{<:Number,3}
 end
 
 """
-    C3vCTMEnv{CT, RT}
-
-Native honeycomb C3v CTM environment for a single site. `C` is the corner
-matrix and `R` is the three-leg edge tensor reshaped as `(χ, D, D, χ)`.
-"""
-struct C3vCTMEnv{CT<:AbstractArray{<:Number,2}, RT<:AbstractArray{<:Number,4}}
-    C::CT
-    R::RT
-end
-
-"""
     C3vTwoSiteCTMEnv{CT, RT}
 
 Bipartite honeycomb C3v CTM environment. `(CA, RA)` and `(CB, RB)` are the
@@ -184,10 +173,6 @@ Array(rt::CTMEnv)    = CTMEnv(Array(rt.C), Array(rt.T))
 CuArray(rt::CTMEnv)  = CTMEnv(CuArray(rt.C), CuArray(rt.T))
 ROCArray(rt::CTMEnv) = CTMEnv(ROCArray(rt.C), ROCArray(rt.T))
 
-Array(rt::C3vCTMEnv)    = C3vCTMEnv(Array(rt.C), Array(rt.R))
-CuArray(rt::C3vCTMEnv)  = C3vCTMEnv(CuArray(rt.C), CuArray(rt.R))
-ROCArray(rt::C3vCTMEnv) = C3vCTMEnv(ROCArray(rt.C), ROCArray(rt.R))
-
 Array(rt::C3vTwoSiteCTMEnv) =
     C3vTwoSiteCTMEnv(Array(rt.CA), Array(rt.RA), Array(rt.CB), Array(rt.RB))
 CuArray(rt::C3vTwoSiteCTMEnv) =
@@ -205,7 +190,6 @@ _atype_of(rt::VUMPSRuntime) = _atype_of(rt.AL)
 _atype_of(rt::PlaquetteVUMPSRuntime) = _atype_of(rt.AL)
 _atype_of(env::OnesideVUMPSEnv) = _atype_of(env.AC)
 _atype_of(rt::C4vVUMPSEnv) = _atype_of(rt.AL)
-_atype_of(rt::C3vCTMEnv) = _atype_of(rt.C)
 _atype_of(rt::C3vTwoSiteCTMEnv) = _atype_of(rt.CA)
 
 # _offload_to_host: walk struct, replace each device leaf with a CPU copy.
@@ -221,8 +205,6 @@ _offload_to_host(env::OnesideVUMPSEnv) = OnesideVUMPSEnv(
     _offload_to_host(env.FLo), _offload_to_host(env.FRo))
 _offload_to_host(rt::C4vVUMPSEnv) =
     C4vVUMPSEnv(_offload_to_host(rt.AL), _offload_to_host(rt.C), _offload_to_host(rt.FL))
-_offload_to_host(rt::C3vCTMEnv) =
-    C3vCTMEnv(_offload_to_host(rt.C), _offload_to_host(rt.R))
 _offload_to_host(rt::C3vTwoSiteCTMEnv) =
     C3vTwoSiteCTMEnv(_offload_to_host(rt.CA), _offload_to_host(rt.RA),
                      _offload_to_host(rt.CB), _offload_to_host(rt.RB))
@@ -242,8 +224,6 @@ _to_atype(atype, env::OnesideVUMPSEnv) = OnesideVUMPSEnv(
     _to_atype(atype, env.FLo), _to_atype(atype, env.FRo))
 _to_atype(atype, rt::C4vVUMPSEnv) =
     C4vVUMPSEnv(_to_atype(atype, rt.AL), _to_atype(atype, rt.C), _to_atype(atype, rt.FL))
-_to_atype(atype, rt::C3vCTMEnv) =
-    C3vCTMEnv(_to_atype(atype, rt.C), _to_atype(atype, rt.R))
 _to_atype(atype, rt::C3vTwoSiteCTMEnv) =
     C3vTwoSiteCTMEnv(_to_atype(atype, rt.CA), _to_atype(atype, rt.RA),
                      _to_atype(atype, rt.CB), _to_atype(atype, rt.RB))
@@ -288,12 +268,6 @@ end
 function update!(env::CTMEnv, env′::CTMEnv)
     env.C .= env′.C
     env.T .= env′.T
-    return env
-end
-
-function update!(env::C3vCTMEnv, env′::C3vCTMEnv)
-    env.C .= env′.C
-    env.R .= env′.R
     return env
 end
 

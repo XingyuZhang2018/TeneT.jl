@@ -351,25 +351,25 @@
                                      maxiter_ad=1, miniter_ad=1,
                                      tol=1e-8)
 
-            @testset "init returns C3vCTMEnv" begin
+            @testset "init returns CTMEnv" begin
                 rt = init_env(M_c3v, chi, alg_c3v)
-                @test rt isa C3vCTMEnv
+                @test rt isa CTMEnv
                 @test size(rt.C) == (chi, chi)
-                @test size(rt.R) == (chi, D, D, chi)
+                @test size(rt.T) == (chi, D, D, chi)
             end
 
             @testset "iteration returns finite error" begin
                 rt = init_env(M_c3v, chi, alg_c3v)
                 rt, err = leading_boundary(rt, M_c3v, alg_c3v)
-                @test rt isa C3vCTMEnv
+                @test rt isa CTMEnv
                 @test isfinite(real(err))
             end
 
-            @testset "ObsEnv returns C3vCTMEnv" begin
+            @testset "ObsEnv returns CTMEnv" begin
                 rt = init_env(M_c3v, chi, alg_c3v)
                 rt, _ = leading_boundary(rt, M_c3v, alg_c3v)
                 env = ObsEnv(rt, M_c3v, alg_c3v)
-                @test env isa C3vCTMEnv
+                @test env isa CTMEnv
             end
         end
 
