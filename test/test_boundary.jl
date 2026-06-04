@@ -344,6 +344,35 @@
             end
         end
 
+        @testset "QRCTMRG{C3v}" begin
+            D, d = 2, 2
+            M_c3v = StructArray([atype(rand(ComplexF64, D, D, D, d))], [1;;])
+            alg_c3v = QRCTMRG{C3v}(; verbosity=0, maxiter=2,
+                                     maxiter_ad=1, miniter_ad=1,
+                                     tol=1e-8)
+
+            @testset "init returns C3vCTMEnv" begin
+                rt = init_env(M_c3v, chi, alg_c3v)
+                @test rt isa C3vCTMEnv
+                @test size(rt.C) == (chi, chi)
+                @test size(rt.R) == (chi, D, D, chi)
+            end
+
+            @testset "iteration returns finite error" begin
+                rt = init_env(M_c3v, chi, alg_c3v)
+                rt, err = leading_boundary(rt, M_c3v, alg_c3v)
+                @test rt isa C3vCTMEnv
+                @test isfinite(real(err))
+            end
+
+            @testset "ObsEnv returns C3vCTMEnv" begin
+                rt = init_env(M_c3v, chi, alg_c3v)
+                rt, _ = leading_boundary(rt, M_c3v, alg_c3v)
+                env = ObsEnv(rt, M_c3v, alg_c3v)
+                @test env isa C3vCTMEnv
+            end
+        end
+
         # ==================================================================
         # Environment helpers
         # ==================================================================

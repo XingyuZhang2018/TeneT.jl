@@ -137,6 +137,181 @@ end
 
 ObsEnv(env::CTMEnv, M::StructArray, ::QRCTMRG{C4v}, model=nothing) = env
 
+# ── C3v honeycomb single-site QRCTMRG ──────────────────────
+
+function _c3v_site_tensor(M::AbstractArray)
+    if ndims(M) == 4
+        return M
+    elseif ndims(M) == 5
+        singleton_legs = findall(==(1), size(M)[1:4])
+        length(singleton_legs) == 1 ||
+            throw(ArgumentError("QRCTMRG{C3v} rank-5 input must have exactly one singleton virtual leg."))
+        leg = only(singleton_legs)
+        inds = ntuple(i -> i == leg ? 1 : (:), 5)
+        return dropdims(@view(M[inds...]); dims=leg)
+    else
+        throw(ArgumentError("QRCTMRG{C3v} expects a rank-4 `(D,D,D,d)` tensor or rank-5 tensor with one singleton virtual leg."))
+    end
+end
+
+function _pad_c3v_corner(C, χ::Int)
+    size(C, 1) <= χ && size(C, 2) <= χ ||
+        throw(ArgumentError("χ=$χ is smaller than the C3v initial corner size $(size(C))."))
+    Cp = similar(C, χ, χ)
+    Cp .= 0
+    Cp[1:size(C, 1), 1:size(C, 2)] .= C
+    return Cp
+end
+
+function _pad_c3v_edge(R, χ::Int)
+    size(R, 1) <= χ && size(R, 3) <= χ ||
+        throw(ArgumentError("χ=$χ is smaller than the C3v initial edge size $(size(R))."))
+    Rp = similar(R, χ, size(R, 2), χ)
+    Rp .= 0
+    Rp[1:size(R, 1), :, 1:size(R, 3)] .= R
+    return Rp
+end
+
+function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C3v})
+    M = _c3v_site_tensor(M[1])
+    D = size(M, 1)
+    size(M, 2) == D && size(M, 3) == D ||
+        throw(ArgumentError("QRCTMRG{C3v} expects equal virtual dimensions; got $(size(M)[1:3])."))
+
+    @tensor C4[a,d,b,e] := M[a,b,c,x] * conj(M[d,e,c,x])
+    Csmall = reshape(C4, D^2, D^2)
+
+    @tensor M2[a,d,b,e,c,f] := M[a,b,c,x] * conj(M[d,e,f,x])
+    M2layer = reshape(M2, D^2, D^2, D^2)
+    @tensor Rsmall[i,k,a] := Csmall[i,j] * M2layer[a,j,k]
+
+    C = _pad_c3v_corner(Csmall, χ)
+    R = reshape(_pad_c3v_edge(Rsmall, χ), χ, D, D, χ)
+
+    C /= ignore_derivatives(() -> norm(C))
+    R /= ignore_derivatives(() -> norm(R))
+    return C3vCTMEnv(C, R)
+end
+
+function _c3v_qr(C, R)
+    @tensor CR[i,j,k,m] := C[i,q] * R[q,j,k,m]
+    V, Rfac = qr_for_ad(_to_front(CR))
+    return reshape(V, size(R)), Rfac
+end
+
+function _c3v_update_edge(V, R, M; inner_etype=nothing)
+    if inner_etype === nothing || inner_etype == real(eltype(R))
+        Vc = conj(V)
+        Mc = conj(M)
+        @tensor Rnew[t,jj,kk,c] := Vc[i,a,b,t] * R[i,j,k,l] *
+                                   M[j,a,p,x] * Mc[k,b,q,x] *
+                                   M[jj,aa,p,y] * Mc[kk,bb,q,y] *
+                                   V[l,aa,bb,c]
+        return Rnew
+    else
+        T_out = eltype(R)
+        Vt = _downcast_eltype(inner_etype, V)
+        Rt = _downcast_eltype(inner_etype, R)
+        Mt = _downcast_eltype(inner_etype, M)
+        Vc = conj(Vt)
+        Mc = conj(Mt)
+        @tensor Rnew_t[t,jj,kk,c] := Vc[i,a,b,t] * Rt[i,j,k,l] *
+                                     Mt[j,a,p,x] * Mc[k,b,q,x] *
+                                     Mt[jj,aa,p,y] * Mc[kk,bb,q,y] *
+                                     Vt[l,aa,bb,c]
+        return T_out.(Rnew_t)
+    end
+end
+
+function _c3v_update_corner(Rnew, Rfac, V)
+    Rnewc = conj(Rnew)
+    @tensor Cnew[c,r] := Rnewc[t,j,k,c] * Rfac[t,b] * V[b,j,k,r]
+    return Cnew
+end
+
+function qrctmrg_step(env::C3vCTMEnv, M::AbstractArray, alg::QRCTMRG{C3v})
+    M = _c3v_site_tensor(M)
+    V, Rfac = _c3v_qr(env.C, env.R)
+    Rnew = _c3v_update_edge(V, env.R, M; inner_etype=alg.inner_etype)
+    Cnew = _c3v_update_corner(Rnew, Rfac, V)
+
+    Rnew /= ignore_derivatives(() -> norm(Rnew))
+    Cnew /= ignore_derivatives(() -> norm(Cnew))
+    err = ignore_derivatives(() -> norm(Cnew - env.C))
+
+    return C3vCTMEnv(Cnew, Rnew), err
+end
+
+function leading_boundary(env::C3vCTMEnv, M::StructArray, alg::QRCTMRG{C3v})
+    M = _c3v_site_tensor(M[1])
+    t = ignore_derivatives(() -> time())
+    local err
+
+    T_orig = eltype(env.R)
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        env = C3vCTMEnv(_downcast_eltype(W, env.C), _downcast_eltype(W, env.R))
+        M = _downcast_eltype(W, M)
+    end
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+    end
+
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTMRG{C3v} iteration without AD...")
+    ignore_derivatives() do
+        for i in 1:alg.maxiter
+            env, err = qrctmrg_step(env, M, alg_wholemode)
+            alg.verbosity >= 3 && i % alg.show_every == 0 &&
+                ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3v}@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            if err < alg.tol && i >= alg.miniter
+                alg.verbosity >= 2 &&
+                    ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3v} conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+                break
+            end
+        end
+    end
+
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start QRCTMRG{C3v} iteration with AD...")
+    alg_ad = alg_wholemode
+    alg_ad_coarse = alg
+    if want_whole || alg.inner_etype !== nothing
+        alg_ad_coarse = deepcopy(alg_wholemode)
+        alg_ad_coarse.inner_etype = nothing
+    end
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
+    for i in 1:alg.maxiter_ad
+        alg_this_iter = alg_ad
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active && in_polish
+            alg_this_iter = alg_ad_coarse
+        end
+        if want_whole && in_polish && eltype(env.R) != T_orig
+            env = C3vCTMEnv(_downcast_eltype(real(T_orig), env.C),
+                            _downcast_eltype(real(T_orig), env.R))
+            M = _downcast_eltype(real(T_orig), M)
+        end
+        env, err = checkpoint(alg.step_checkpoint, qrctmrg_step, env, M, alg_this_iter)
+        alg.verbosity >= 3 && i % alg.show_every == 0 &&
+            ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3v}@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        if err < alg.tol && i >= alg.miniter_ad
+            alg.verbosity >= 2 &&
+                ignore_derivatives(() -> @info @sprintf("QRCTMRG{C3v} conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            break
+        end
+    end
+    if want_whole && eltype(env.R) != T_orig
+        env = C3vCTMEnv(_downcast_eltype(real(T_orig), env.C),
+                        _downcast_eltype(real(T_orig), env.R))
+    end
+    return env, err
+end
+
+ObsEnv(env::C3vCTMEnv, M::StructArray, ::QRCTMRG{C3v}, model=nothing) = env
+
 # Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
 # See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
 function imag_error(env::CTMEnv, A, iSy, params::iPEPSOptimize)
