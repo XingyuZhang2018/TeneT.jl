@@ -432,6 +432,12 @@ ObsEnv(env::C3vTwoSiteCTMEnv, M::StructArray, ::QRCTMRG{C3vTwoSite}, model=nothi
 function imag_error(env::CTMEnv, A, iSy, params::iPEPSOptimize)
     @unpack C, T = env
     @unpack forloop_iter, ifparallel = params.boundary_alg
+    if params.model.lattice isa Honeycomb{:c3v}
+        A1 = A[1]
+        n = _contract_one(_contract_c3v_one_site_norm, (C, T, A1), params)
+        My = checkpoint(params.bond_checkpoint, _contract_c3v_one_site, C, T, A1, iSy; ifparallel, forloop_iter) / n
+        return abs(My)
+    end
     To = CTCtoT(C, T)
     A1 = A[1]
     My = contract_o_11(To, T, A1, T, To, iSy; ifparallel, forloop_iter)

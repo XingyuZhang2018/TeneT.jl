@@ -29,7 +29,7 @@ physical ξ at finite χ).
 """
 function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps,
                     cor_len_method::Symbol=:mps)
-    D = maximum(size(A)[1:4])
+    D = _ipeps_bond_dimension(A)
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
 
     _G_cache[] = nothing
@@ -232,6 +232,51 @@ function magnetization_value(model, A, env::CTMEnv, params)
     params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
     m_dict["1,1"] = Dict("Mx" => Mag[1], "My" => Mag[2], "Mz" => Mag[3], "|M|" => Mnorm)
 
+    return Mnorm, m_dict
+end
+
+function _contract_c3v_one_site(C, T, A, O; ifparallel=false, forloop_iter=1)
+    @tensor AO[a,b,c,f] := A[a,b,c,e] * O[e,f]
+    Ac = conj(A)
+    @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
+                        C[x3,x4] * T[x4,b,bb,x5] *
+                        C[x5,x6] * T[x6,c,cc,x1] *
+                        AO[a,b,c,p] * Ac[aa,bb,cc,p]
+    return only(result)
+end
+
+function _contract_c3v_one_site_norm(C, T, A; ifparallel=false, forloop_iter=1)
+    Ac = conj(A)
+    @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
+                        C[x3,x4] * T[x4,b,bb,x5] *
+                        C[x5,x6] * T[x6,c,cc,x1] *
+                        A[a,b,c,p] * Ac[aa,bb,cc,p]
+    return only(result)
+end
+
+function magnetization_value(model::Heisenberg{Honeycomb{:c3v}}, A, env::CTMEnv, params)
+    @unpack C, T = env
+    @unpack ifparallel, forloop_iter = params.boundary_alg
+    A1 = A[1]
+    atype = _arraytype(A1)
+    etype = eltype(A1)
+
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
+
+    n = _contract_one(_contract_c3v_one_site_norm, (C, T, A1), params)
+    Mx = checkpoint(params.bond_checkpoint, _contract_c3v_one_site, C, T, A1, Sx; ifparallel, forloop_iter) / n
+    My = etype <: Real ? 0.0 :
+         checkpoint(params.bond_checkpoint, _contract_c3v_one_site, C, T, A1, Sy; ifparallel, forloop_iter) / n
+    Mz = checkpoint(params.bond_checkpoint, _contract_c3v_one_site, C, T, A1, Sz; ifparallel, forloop_iter) / n
+
+    Mag = [Mx, My, Mz]
+    Mnorm = norm(Mag)
+    params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")
+
+    m_dict = Dict{String, Any}("1,1" => Dict("Mx" => Mx, "My" => My, "Mz" => Mz, "|M|" => Mnorm))
     return Mnorm, m_dict
 end
 

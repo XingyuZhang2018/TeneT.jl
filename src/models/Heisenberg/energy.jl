@@ -130,6 +130,49 @@ function energy_value(model::Heisenberg{Square}, A, env::CTMEnv, params::iPEPSOp
     return etol*2, e_dict
 end
 
+function _contract_c3v_bond(C, T, A, O1, O2; ifparallel=false, forloop_iter=1)
+    @tensor AO1[a,b,c,f] := A[a,b,c,e] * O1[e,f]
+    @tensor AO2[a,b,c,f] := A[a,b,c,e] * O2[e,f]
+    Ac = conj(A)
+    @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
+                        C[x3,x4] * T[x4,b,bb,x5] *
+                        C[x5,x6] * T[x6,d,dd,x7] *
+                        C[x7,x8] * T[x8,e,ee,x1] *
+                        AO1[a,b,s,p1] * AO2[d,e,s,p2] *
+                        Ac[aa,bb,ss,p1] * Ac[dd,ee,ss,p2]
+    return only(result)
+end
+
+function _contract_c3v_bond_norm(C, T, A; ifparallel=false, forloop_iter=1)
+    Ac = conj(A)
+    @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
+                        C[x3,x4] * T[x4,b,bb,x5] *
+                        C[x5,x6] * T[x6,d,dd,x7] *
+                        C[x7,x8] * T[x8,e,ee,x1] *
+                        A[a,b,s,p1] * A[d,e,s,p2] *
+                        Ac[aa,bb,ss,p1] * Ac[dd,ee,ss,p2]
+    return only(result)
+end
+
+function energy_value(model::Heisenberg{Honeycomb{:c3v}}, A, env::CTMEnv, params::iPEPSOptimize)
+    @unpack C, T = env
+    A1 = A[1]
+    atype = _arraytype(A1)
+    terms = _heisenberg_bond_terms(model, atype)
+
+    e = _contract_barebones(_contract_c3v_bond, (C, T, A1), terms, params)
+    n = _contract_one(_contract_c3v_bond_norm, (C, T, A1), params)
+    e_bond = e / n
+    etol = 3 * e_bond / 2
+
+    e_dict = Dict{String, Dict{String, Any}}(
+        "bond_C3v_energy" => Dict("1,1" => e_bond),
+    )
+
+    params.verbosity >= 3 && println("energy per site = $(etol)")
+    return etol, e_dict
+end
+
 function energy_value(model::Heisenberg{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])

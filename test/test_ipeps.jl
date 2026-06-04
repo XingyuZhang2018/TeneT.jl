@@ -170,6 +170,10 @@
         A_hb = _init_random_ipeps(Honeycomb{:brickwall_h}(), Float64, D, d, N, Ni, Nj)
         @test size(A_hb) == (D, 1, D, D, d, N)
 
+        # Honeycomb C3v: native three-leg tensor (D,D,D,d,N)
+        A_c3v = _init_random_ipeps(Honeycomb{:c3v}(), Float64, D, d, 1, 1, 1)
+        @test size(A_c3v) == (D, D, D, d, 1)
+
         # Kagome :onehole — (D,D,D,D,d,N), requires Ni,Nj even
         A_kh = _init_random_ipeps(Kagome(:onehole), Float64, D, d, N, Ni, Nj)
         @test size(A_kh) == (D, D, D, D, d, N)
@@ -219,6 +223,7 @@
         @test fieldnames(VUMPSEnv) == (:ACu, :ARu, :ACd, :ARd, :FLu, :FRu, :FLo, :FRo)
         @test fieldnames(PlaquetteVUMPSEnv) == (:AL, :C, :FLu, :FLo)
         @test fieldnames(CTMEnv) == (:C, :T)
+        @test fieldnames(C3vTwoSiteCTMEnv) == (:CA, :TA, :CB, :TB)
     end
 
     # ================================================================
@@ -464,6 +469,34 @@
                 @test isfinite(v)
             end
         end
+    end
+
+    @testset "Honeycomb C3v QRCTMRG energy smoke" begin
+        using OptimKit: LBFGS
+        D, d, χ = 2, 2, 4
+        pattern = [1;;]
+        model = Heisenberg(lattice=Honeycomb{:c3v}(),
+                           S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                           ifrotate=false,
+                           couplingtype=:uniform, bondratio=1.0)
+        alg = QRCTMRG{C3v}(; verbosity=0, maxiter=1, maxiter_ad=0,
+                            miniter=0, miniter_ad=0)
+        params = GradientOptimize(model=model, pattern=pattern, boundary_alg=alg,
+                                  optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
+                                  verbosity=0, ifload_env=false, ifplot=false)
+
+        Araw = rand(Float64, D, D, D, d, 1)
+        A = TeneT.build_A(Araw, params)
+        @test size(A[1]) == (D, D, D, d)
+
+        rt = init_env(A, χ, alg)
+        rt, err = leading_boundary(rt, A, alg)
+        @test isfinite(real(err))
+
+        e, _ = TeneT.energy_value(model, A, rt, params)
+        mag, _ = TeneT.magnetization_value(model, A, rt, params)
+        @test isfinite(real(e))
+        @test isfinite(real(mag))
     end
 
 end

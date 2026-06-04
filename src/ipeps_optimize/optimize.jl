@@ -55,7 +55,7 @@ function _imag_error_op(A, params)
     iSy = real(1im * const_Sy(params.model.S))
     d = size(iSy, 1)
     Id = Matrix{Float64}(I, d, d)
-    n_sites = round(Int, log(d, size(A[1], 5)))
+    n_sites = round(Int, log(d, size(A[1], ndims(A[1]))))
     return _arraytype(A[1])(reduce(kron, fill(Id, n_sites - 1); init = iSy))
 end
 
@@ -163,7 +163,7 @@ This loop repeats up to `params.maxiter_restart` times.
 """
 function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
                         restriction_ipeps=_restriction_ipeps)
-    D = maximum(size(A)[1:4])
+    D = _ipeps_bond_dimension(A)
     rt = initialize_env(A, D, χ, params; restriction_ipeps)
     rt′ = deepcopy(rt)
     fδEierr = [1.0, 1.0, 0.0, 0.0]

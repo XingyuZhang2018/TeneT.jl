@@ -22,6 +22,16 @@ function build_A(A::AbstractArray{T, 6}, params::iPEPSOptimize) where T
     end
 end
 
+function build_A(A::AbstractArray{T, 5}, params::iPEPSOptimize) where T
+    params.model.lattice isa Honeycomb{:c3v} ||
+        throw(ArgumentError("5D raw iPEPS tensors are only supported for Honeycomb{:c3v}."))
+    Ar = StructArray([A[:,:,:,:,i] for i in 1:length(unique(params.pattern))], params.pattern)
+    return _lattice_map(Ar, params.model.lattice, params.pattern)
+end
+
+_ipeps_bond_dimension(A::AbstractArray) =
+    ndims(A) == 5 ? maximum(size(A)[1:3]) : maximum(size(A)[1:4])
+
 """
     build_A(A, params::iPEPSOptimize, rt)
 
@@ -139,3 +149,4 @@ Merge mapping: identity (sites are already independent tensors on
 the effective square lattice; the merge is encoded in the Hamiltonian).
 """
 _lattice_map(A, ::Honeycomb{:merge}, pattern) = A
+_lattice_map(A, ::Honeycomb{:c3v}, pattern) = A
