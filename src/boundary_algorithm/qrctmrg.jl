@@ -147,7 +147,7 @@ function _c3v_site_tensor(M::AbstractArray)
         length(singleton_legs) == 1 ||
             throw(ArgumentError("QRCTMRG{C3v} rank-5 input must have exactly one singleton virtual leg."))
         leg = only(singleton_legs)
-        inds = ntuple(i -> i == leg ? 1 : (:), 5)
+        inds = ntuple(i -> i == leg ? (1:1) : (:), 5)
         return dropdims(@view(M[inds...]); dims=leg)
     else
         throw(ArgumentError("QRCTMRG{C3v} expects a rank-4 `(D,D,D,d)` tensor or rank-5 tensor with one singleton virtual leg."))
@@ -344,10 +344,10 @@ end
 
 function qrctmrg_step(env::C3vTwoSiteCTMEnv, M::Tuple, alg::QRCTMRG{C3vTwoSite})
     MA, MB = M
-    CA, RA, errA = _c3v_step_sector(env.CA, env.RA, MA, MB, alg)
-    CB, RB, errB = _c3v_step_sector(env.CB, env.RB, MB, MA, alg)
+    CA, TA, errA = _c3v_step_sector(env.CA, env.TA, MA, MB, alg)
+    CB, TB, errB = _c3v_step_sector(env.CB, env.TB, MB, MA, alg)
     err = ignore_derivatives(() -> max(errA, errB))
-    return C3vTwoSiteCTMEnv(CA, RA, CB, RB), err
+    return C3vTwoSiteCTMEnv(CA, TA, CB, TB), err
 end
 
 function leading_boundary(env::C3vTwoSiteCTMEnv, M::StructArray, alg::QRCTMRG{C3vTwoSite})
@@ -355,12 +355,12 @@ function leading_boundary(env::C3vTwoSiteCTMEnv, M::StructArray, alg::QRCTMRG{C3
     t = ignore_derivatives(() -> time())
     local err
 
-    T_orig = eltype(env.RA)
+    T_orig = eltype(env.TA)
     want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
     if want_whole
         W = alg.whole_vumps_etype
-        env = C3vTwoSiteCTMEnv(_downcast_eltype(W, env.CA), _downcast_eltype(W, env.RA),
-                               _downcast_eltype(W, env.CB), _downcast_eltype(W, env.RB))
+        env = C3vTwoSiteCTMEnv(_downcast_eltype(W, env.CA), _downcast_eltype(W, env.TA),
+                               _downcast_eltype(W, env.CB), _downcast_eltype(W, env.TB))
         MA = _downcast_eltype(W, MA)
         MB = _downcast_eltype(W, MB)
     end
@@ -399,11 +399,11 @@ function leading_boundary(env::C3vTwoSiteCTMEnv, M::StructArray, alg::QRCTMRG{C3
         if mixed_active && in_polish
             alg_this_iter = alg_ad_coarse
         end
-        if want_whole && in_polish && eltype(env.RA) != T_orig
+        if want_whole && in_polish && eltype(env.TA) != T_orig
             env = C3vTwoSiteCTMEnv(_downcast_eltype(real(T_orig), env.CA),
-                                   _downcast_eltype(real(T_orig), env.RA),
+                                   _downcast_eltype(real(T_orig), env.TA),
                                    _downcast_eltype(real(T_orig), env.CB),
-                                   _downcast_eltype(real(T_orig), env.RB))
+                                   _downcast_eltype(real(T_orig), env.TB))
             MA = _downcast_eltype(real(T_orig), MA)
             MB = _downcast_eltype(real(T_orig), MB)
         end
@@ -416,11 +416,11 @@ function leading_boundary(env::C3vTwoSiteCTMEnv, M::StructArray, alg::QRCTMRG{C3
             break
         end
     end
-    if want_whole && eltype(env.RA) != T_orig
+    if want_whole && eltype(env.TA) != T_orig
         env = C3vTwoSiteCTMEnv(_downcast_eltype(real(T_orig), env.CA),
-                               _downcast_eltype(real(T_orig), env.RA),
+                               _downcast_eltype(real(T_orig), env.TA),
                                _downcast_eltype(real(T_orig), env.CB),
-                               _downcast_eltype(real(T_orig), env.RB))
+                               _downcast_eltype(real(T_orig), env.TB))
     end
     return env, err
 end

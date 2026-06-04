@@ -358,6 +358,13 @@
                 @test size(rt.T) == (chi, D, D, chi)
             end
 
+            @testset "init accepts singleton rank-5 brickwall tensor" begin
+                M_c3v_brickwall = StructArray([atype(rand(ComplexF64, D, 1, D, D, d))], [1;;])
+                rt = init_env(M_c3v_brickwall, chi, alg_c3v)
+                @test rt isa CTMEnv
+                @test size(rt.T) == (chi, D, D, chi)
+            end
+
             @testset "iteration returns finite error" begin
                 rt = init_env(M_c3v, chi, alg_c3v)
                 rt, err = leading_boundary(rt, M_c3v, alg_c3v)
@@ -388,9 +395,9 @@
                 rt = init_env(M_twosite, chi, alg_c3v2)
                 @test rt isa C3vTwoSiteCTMEnv
                 @test size(rt.CA) == (chi, chi)
-                @test size(rt.RA) == (chi, D, D, chi)
+                @test size(rt.TA) == (chi, D, D, chi)
                 @test size(rt.CB) == (chi, chi)
-                @test size(rt.RB) == (chi, D, D, chi)
+                @test size(rt.TB) == (chi, D, D, chi)
             end
 
             @testset "iteration returns finite error" begin
