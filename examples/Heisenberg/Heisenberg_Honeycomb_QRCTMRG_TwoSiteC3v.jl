@@ -1,3 +1,4 @@
+#doesn't work currently, the symmetrization is not working well, and the optimization is not converging.
 using TeneT
 using Random
 using CUDA
@@ -15,7 +16,7 @@ pattern = [1 2;
 
 model = Heisenberg(lattice=Honeycomb(:c3v),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
-                   ifrotate=true, #doesn't work for ifrotate=false
+                   ifrotate=true, 
                    couplingtype=:uniform, bondratio=1.0)
 No = 0
 folder = joinpath(pkgdir(TeneT), "data/$model/$pattern/QRCTMRG_C3vTwoSite/$etype/seed$seed/")
@@ -58,8 +59,10 @@ function restriction_ipeps(A)
     B = Zygote.Buffer(A)
     A1 = _c3v_symmetrize_site(A[:,:,:,:,1])
     A1 /= norm(A1)
+    A2 = _c3v_symmetrize_site(A[:,:,:,:,2])
+    A2 /= norm(A2)
     B[:,:,:,:,1] = A1
-    B[:,:,:,:,2] = A1
+    B[:,:,:,:,2] = A2
     B = copy(B)
     return B / norm(B)
 end
