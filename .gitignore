@@ -7,5 +7,6 @@
 *.jld2
 data
 docs/plans/
+docs/superpowers/
 /project
 .worktrees/
