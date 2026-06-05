@@ -240,8 +240,8 @@ function _contract_c3v_one_site(C, T, A, O; ifparallel=false, forloop_iter=1)
     Ac = conj(A)
     @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
                         C[x3,x4] * T[x4,b,bb,x5] *
-                        C[x5,x6] * T[x6,c,cc,x1] *
-                        AO[a,b,c,p] * Ac[aa,bb,cc,p]
+                        AO[a,b,c,p] * Ac[aa,bb,cc,p] * 
+                        C[x5,x6] * T[x6,c,cc,x1]
     return only(result)
 end
 
@@ -249,8 +249,8 @@ function _contract_c3v_one_site_norm(C, T, A; ifparallel=false, forloop_iter=1)
     Ac = conj(A)
     @tensor result[] := C[x1,x2] * T[x2,a,aa,x3] *
                         C[x3,x4] * T[x4,b,bb,x5] *
-                        C[x5,x6] * T[x6,c,cc,x1] *
-                        A[a,b,c,p] * Ac[aa,bb,cc,p]
+                        A[a,b,c,p] * Ac[aa,bb,cc,p] * 
+                        C[x5,x6] * T[x6,c,cc,x1]
     return only(result)
 end
 
