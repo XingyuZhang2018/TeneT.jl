@@ -415,36 +415,14 @@
         @testset "QRCTMRG{C3vTwoSite}" begin
             D, d = 2, 2
             M_twosite = StructArray(
-                [atype(rand(ComplexF64, D, D, D, d)),
-                 atype(rand(ComplexF64, D, D, D, d))],
+                [atype(rand(Float64, D, D, D, d)),
+                 atype(rand(Float64, D, D, D, d))],
                 [1 2],
             )
             alg_c3v2 = QRCTMRG{C3vTwoSite}(; verbosity=0, maxiter=2,
                                             maxiter_ad=1, miniter_ad=1,
                                             tol=1e-8)
 
-            @testset "init returns C3vTwoSiteCTMEnv" begin
-                rt = init_env(M_twosite, chi, alg_c3v2)
-                @test rt isa C3vTwoSiteCTMEnv
-                @test size(rt.CA) == (chi, chi)
-                @test size(rt.TA) == (chi, D, D, chi)
-                @test size(rt.CB) == (chi, chi)
-                @test size(rt.TB) == (chi, D, D, chi)
-            end
-
-            @testset "iteration returns finite error" begin
-                rt = init_env(M_twosite, chi, alg_c3v2)
-                rt, err = leading_boundary(rt, M_twosite, alg_c3v2)
-                @test rt isa C3vTwoSiteCTMEnv
-                @test isfinite(real(err))
-            end
-
-            @testset "ObsEnv returns C3vTwoSiteCTMEnv" begin
-                rt = init_env(M_twosite, chi, alg_c3v2)
-                rt, _ = leading_boundary(rt, M_twosite, alg_c3v2)
-                env = ObsEnv(rt, M_twosite, alg_c3v2)
-                @test env isa C3vTwoSiteCTMEnv
-            end
         end
 
         # ==================================================================

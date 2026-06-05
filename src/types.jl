@@ -12,7 +12,6 @@ Kagome() = Kagome{:merge}()
 # Filesystem-safe string representations (avoid : { } characters for Windows paths)
 Base.show(io::IO, ::Square)              = print(io, "Square")
 Base.show(io::IO, ::Honeycomb{M}) where M = print(io, "Honeycomb_", M)
-Base.show(io::IO, ::Kagome{:merge})      = print(io, "Kagome")
 Base.show(io::IO, ::Kagome{M}) where M    = print(io, "Kagome_", M)
 
 # Two Kagome embeddings sharing identical bond / energy / plot logic.

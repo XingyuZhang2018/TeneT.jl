@@ -130,19 +130,6 @@ struct CTMEnv{CT<:AbstractArray{<:Number,2}, ET<:Union{AbstractArray{<:Number,3}
     T::ET
 end
 
-"""
-    C3vTwoSiteCTMEnv{CT, TT}
-
-Bipartite honeycomb C3v CTM environment. `(CA, TA)` and `(CB, TB)` are the
-two alternating A→B and B→A boundary sectors.
-"""
-struct C3vTwoSiteCTMEnv{CT<:AbstractArray{<:Number,2}, TT<:AbstractArray{<:Number,4}}
-    CA::CT
-    TA::TT
-    CB::CT
-    TB::TT
-end
-
 # ── GPU/CPU array conversions ────────────────────────────────────────
 Array(rt::VUMPSRuntime)    = VUMPSRuntime(Array(rt.AL), Array(rt.AR), Array(rt.C), Array(rt.FL), Array(rt.FR))
 CuArray(rt::VUMPSRuntime)  = VUMPSRuntime(CuArray(rt.AL), CuArray(rt.AR), CuArray(rt.C), CuArray(rt.FL), CuArray(rt.FR))
@@ -173,12 +160,9 @@ Array(rt::CTMEnv)    = CTMEnv(Array(rt.C), Array(rt.T))
 CuArray(rt::CTMEnv)  = CTMEnv(CuArray(rt.C), CuArray(rt.T))
 ROCArray(rt::CTMEnv) = CTMEnv(ROCArray(rt.C), ROCArray(rt.T))
 
-Array(rt::C3vTwoSiteCTMEnv) =
-    C3vTwoSiteCTMEnv(Array(rt.CA), Array(rt.TA), Array(rt.CB), Array(rt.TB))
-CuArray(rt::C3vTwoSiteCTMEnv) =
-    C3vTwoSiteCTMEnv(CuArray(rt.CA), CuArray(rt.TA), CuArray(rt.CB), CuArray(rt.TB))
-ROCArray(rt::C3vTwoSiteCTMEnv) =
-    C3vTwoSiteCTMEnv(ROCArray(rt.CA), ROCArray(rt.TA), ROCArray(rt.CB), ROCArray(rt.TB))
+Array(rt::Tuple{CTMEnv,CTMEnv})    = Array.(rt)
+CuArray(rt::Tuple{CTMEnv,CTMEnv})  = CuArray.(rt)
+ROCArray(rt::Tuple{CTMEnv,CTMEnv}) = ROCArray.(rt)
 
 # ── Host-offload methods for checkpoint(Offload(), ...) ───────────────────
 # Specialisations that let `checkpoint(Offload(), ...)` walk StructArray and
@@ -190,7 +174,6 @@ _atype_of(rt::VUMPSRuntime) = _atype_of(rt.AL)
 _atype_of(rt::PlaquetteVUMPSRuntime) = _atype_of(rt.AL)
 _atype_of(env::OnesideVUMPSEnv) = _atype_of(env.AC)
 _atype_of(rt::C4vVUMPSEnv) = _atype_of(rt.AL)
-_atype_of(rt::C3vTwoSiteCTMEnv) = _atype_of(rt.CA)
 
 # _offload_to_host: walk struct, replace each device leaf with a CPU copy.
 _offload_to_host(S::StructArray) = StructArray(map(_offload_to_host, S.data), S.pattern)
@@ -205,9 +188,6 @@ _offload_to_host(env::OnesideVUMPSEnv) = OnesideVUMPSEnv(
     _offload_to_host(env.FLo), _offload_to_host(env.FRo))
 _offload_to_host(rt::C4vVUMPSEnv) =
     C4vVUMPSEnv(_offload_to_host(rt.AL), _offload_to_host(rt.C), _offload_to_host(rt.FL))
-_offload_to_host(rt::C3vTwoSiteCTMEnv) =
-    C3vTwoSiteCTMEnv(_offload_to_host(rt.CA), _offload_to_host(rt.TA),
-                     _offload_to_host(rt.CB), _offload_to_host(rt.TB))
 
 # _to_atype: rebuild an on-device copy from the CPU snapshot using the
 # detected atype. Takes no `ref` to the original, so the pullback closure
@@ -224,9 +204,6 @@ _to_atype(atype, env::OnesideVUMPSEnv) = OnesideVUMPSEnv(
     _to_atype(atype, env.FLo), _to_atype(atype, env.FRo))
 _to_atype(atype, rt::C4vVUMPSEnv) =
     C4vVUMPSEnv(_to_atype(atype, rt.AL), _to_atype(atype, rt.C), _to_atype(atype, rt.FL))
-_to_atype(atype, rt::C3vTwoSiteCTMEnv) =
-    C3vTwoSiteCTMEnv(_to_atype(atype, rt.CA), _to_atype(atype, rt.TA),
-                     _to_atype(atype, rt.CB), _to_atype(atype, rt.TB))
 
 # ── In-place update helpers ──────────────────────────────────────────
 function update!(env::VUMPSRuntime, env′::VUMPSRuntime)
@@ -238,8 +215,7 @@ function update!(env::VUMPSRuntime, env′::VUMPSRuntime)
     return env
 end
 
-function update!(env::Tuple{VUMPSRuntime,VUMPSRuntime},
-                 env′::Tuple{VUMPSRuntime,VUMPSRuntime})
+function update!(env::Tuple, env′::Tuple)
     update!(env[1], env′[1])
     update!(env[2], env′[2])
     return env
@@ -271,10 +247,3 @@ function update!(env::CTMEnv, env′::CTMEnv)
     return env
 end
 
-function update!(env::C3vTwoSiteCTMEnv, env′::C3vTwoSiteCTMEnv)
-    env.CA .= env′.CA
-    env.TA .= env′.TA
-    env.CB .= env′.CB
-    env.TB .= env′.TB
-    return env
-end

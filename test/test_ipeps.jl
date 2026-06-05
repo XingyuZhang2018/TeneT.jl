@@ -223,7 +223,6 @@
         @test fieldnames(VUMPSEnv) == (:ACu, :ARu, :ACd, :ARd, :FLu, :FRu, :FLo, :FRo)
         @test fieldnames(PlaquetteVUMPSEnv) == (:AL, :C, :FLu, :FLo)
         @test fieldnames(CTMEnv) == (:C, :T)
-        @test fieldnames(C3vTwoSiteCTMEnv) == (:CA, :TA, :CB, :TB)
     end
 
     # ================================================================
@@ -519,5 +518,4 @@
                    for (c, OL, OR) in terms) / nref * 3 / 2
         @test e ≈ eref
     end
-
 end

@@ -70,7 +70,7 @@ function _init_random_ipeps(::Honeycomb{:merge}, etype, D, d, N, Ni, Nj)
 end
 
 function _init_random_ipeps(::Honeycomb{:c3v}, etype, D, d, N, Ni, Nj)
-    N == 1 || throw(ArgumentError("Honeycomb{:c3v} expects a one-site pattern."))
+    N in (1, 2) || throw(ArgumentError("Honeycomb{:c3v} expects a one-site or two-site pattern."))
     rand(etype, D, D, D, d, N) .+ 1
 end
 

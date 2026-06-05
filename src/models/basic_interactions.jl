@@ -188,3 +188,30 @@ function _contract_c3v_bond_norm(C, T, A; ifparallel=false, forloop_iter=1)
     @tensor half[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * A[2,4,7,8] * Ac[22,44,77,8]
     return dot(half,half)
 end
+
+function _contract_c3v_bond(C1, T1, C2, T2, A1, A2, O1, O2; ifparallel=false, forloop_iter=1)
+    @tensor AO1[a,b,c,f] := A1[a,b,c,e] * O1[e,f]
+    @tensor AO2[a,b,c,f] := A2[a,b,c,e] * O2[e,f]
+
+    @tensor TC[1,2,3,4] := T1[1,2,3,5] * C2[5,4]
+    @tensor CTC[1,2,3,4] := C1[1,5] * TC[5,2,3,4]
+    @tensor half1[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * AO1[2,4,7,8] * conj(A1[22,44,77,8])
+
+    @tensor TC[1,2,3,4] := T2[1,2,3,5] * C2[5,4]
+    @tensor CTC[1,2,3,4] := C1[1,5] * TC[5,2,3,4]
+    @tensor half2[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * AO2[2,4,7,8] * conj(A2[22,44,77,8])
+
+    return dot(half1, half2)
+end
+
+function _contract_c3v_bond_norm(C1, T1, C2, T2, A1, A2; ifparallel=false, forloop_iter=1)
+    @tensor TC[1,2,3,4] := T1[1,2,3,5] * C2[5,4]
+    @tensor CTC[1,2,3,4] := C1[1,5] * TC[5,2,3,4]
+    @tensor half1[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * A1[2,4,7,8] * conj(A1[22,44,77,8])
+
+    @tensor TC[1,2,3,4] := T2[1,2,3,5] * C2[5,4]
+    @tensor CTC[1,2,3,4] := C1[1,5] * TC[5,2,3,4]
+    @tensor half2[6,7,77,3] := TC[1,4,44,6] * CTC[1,2,22,3] * A2[2,4,7,8] * conj(A2[22,44,77,8])
+    
+    return dot(half1,half2)
+end

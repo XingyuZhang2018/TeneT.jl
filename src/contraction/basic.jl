@@ -118,6 +118,8 @@ end
 
 FLmap_C3v(FL, ALu, ALd, M::leg4; inner_etype=nothing) =
     FLmap_C3v(FL, ALu, ALd, M, conj(M), M, conj(M); inner_etype)
+FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4; inner_etype=nothing) =
+    FLmap_C3v(FL, ALu, ALd, M1, conj(M1), M2, conj(M2); inner_etype)
 
 """
     FRm = FRmap(ARu, ARd, M, FR, i)

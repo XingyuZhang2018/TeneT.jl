@@ -149,6 +149,29 @@ function energy_value(model::Heisenberg{Honeycomb{:c3v}}, A, env::CTMEnv, params
     return etol, e_dict
 end
 
+function energy_value(model::Heisenberg{Honeycomb{:c3v}}, A, env::Tuple{CTMEnv, CTMEnv}, params::iPEPSOptimize)
+    env1, env2 = env
+    C1, T1 = env1.C, env1.T
+    C2, T2 = env2.C, env2.T
+    A1 = A[1]
+    A2 = A[2]
+    atype = _arraytype(A1)
+    terms = _heisenberg_bond_terms(model, atype)
+
+    e = _contract_barebones(_contract_c3v_bond, (C1, T1, C2, T2, A1, A2), terms, params)
+    n = _contract_one(_contract_c3v_bond_norm, (C1, T1, C2, T2, A1, A2), params)
+    e_bond = e / n
+    etol = 3 * e_bond / 2
+
+    e_dict = Dict{String, Dict{String, Any}}(
+        "bond_C3v_energy" => Dict("1,1" => e_bond),
+    )
+
+    params.verbosity >= 3 && println("energy per site = $(etol)")
+    return etol, e_dict
+end
+
+
 function energy_value(model::Heisenberg{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(ACu[1])
