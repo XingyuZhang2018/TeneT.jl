@@ -14,6 +14,22 @@
                                 ifload_lbfgs=false)
     end
 
+    @testset "forloop iteration source" begin
+        params = _tm_test_params(
+            model=Heisenberg(lattice=Honeycomb{:brickwall_h}(),
+                             S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                             ifrotate=false),
+            alg=VUMPS{General}(; verbosity=0, ifupdown=false,
+                               forloop_iter=7),
+        )
+        params.forloop_iter = 3
+
+        @test TeneT._tm_forloop_iter(params) == 7
+
+        compatibility_params = (boundary_alg=(;), forloop_iter=3)
+        @test TeneT._tm_forloop_iter(compatibility_params) == 3
+    end
+
     @testset "export and input guards" begin
         @test :TM_spectrum in names(TeneT)
 
@@ -25,6 +41,24 @@
 
         c4v_params = _tm_test_params(model=brickwall,
                                      alg=VUMPS{C4v}(; verbosity=0))
+        invalid_inputs = (
+            (0, 0.0, χ, "TM_spectrum requires n > 0; got 0."),
+            (1, 0.0, 0, "TM_spectrum requires χ > 0; got 0."),
+            (1, Inf, χ, "TM_spectrum requires finite k; got Inf."),
+            (1, NaN, χ, "TM_spectrum requires finite k; got NaN."),
+        )
+        for (n_invalid, k_invalid, χ_invalid, message) in invalid_inputs
+            err = try
+                TeneT.TM_spectrum(n_invalid, k_invalid, A, χ_invalid,
+                                  c4v_params)
+                nothing
+            catch e
+                e
+            end
+            @test err isa ArgumentError
+            @test sprint(showerror, err) == "ArgumentError: $message"
+        end
+
         c4v_err = try
             TeneT.TM_spectrum(1, 0.0, A, χ, c4v_params)
             nothing
@@ -69,6 +103,22 @@
         @test isfile(trivial)
         @test readlines(trivial) == ["0.125000000000000",
                                      "0.250000000000000"]
+
+        rational_folder = joinpath(params.folder, "D3_χ5", "TM_spectrum",
+                                   "trivial")
+        rational = joinpath(rational_folder, "k1_over_3.log")
+        rational_result = try
+            TeneT._write_tm_spectrum([0.375], 1 // 3, 3, 5, params;
+                                     ifdomainwall=false)
+        catch e
+            e
+        end
+        @test rational_result == rational
+        @test readdir(rational_folder) == ["k1_over_3.log"]
+        @test isfile(rational)
+        if isfile(rational)
+            @test readlines(rational) == ["0.375000000000000"]
+        end
 
         TeneT._write_tm_spectrum([0.5], 0.0, 2, 4, params;
                                  ifdomainwall=true)
