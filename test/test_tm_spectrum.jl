@@ -177,6 +177,7 @@
                                   tol=1e-3, ifupdown=true,
                                   ifsimple_eig=true)
             params = _tm_test_params(; model, alg, pattern)
+            params.ifsave_env = true
             A = TeneT._init_random_ipeps(lattice, Float64, D, d, N,
                                          size(pattern)...)
             A ./= norm(A)
@@ -186,12 +187,26 @@
             @test all(isfinite, Δ)
             @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
                                   "trivial", "k0.0.log"))
+            @test isfile(joinpath(params.folder, "D2", "environment",
+                                  "χ4.jld2"))
 
             Δdw = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=true)
             @test length(Δdw) == 1
             @test all(isfinite, Δdw)
             @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
                                   "non-trivial", "k0.0.log"))
+            for file in ("χ4_1.jld2", "χ4_2.jld2")
+                @test isfile(joinpath(params.folder, "D2", "environment",
+                                      file))
+            end
+
+            params.ifload_env = true
+            loaded = TeneT._tm_initialize_named_env(
+                A, D, χ, params, "χ4_1.jld2";
+                restriction_ipeps=TeneT._restriction_ipeps,
+            )
+            @test loaded isa Tuple
+            @test all(rt -> rt isa TeneT.VUMPSRuntime, loaded)
         end
     end
 end
