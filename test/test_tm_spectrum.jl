@@ -25,7 +25,15 @@
 
         c4v_params = _tm_test_params(model=brickwall,
                                      alg=VUMPS{C4v}(; verbosity=0))
-        @test_throws ArgumentError TeneT.TM_spectrum(1, 0.0, A, χ, c4v_params)
+        c4v_err = try
+            TeneT.TM_spectrum(1, 0.0, A, χ, c4v_params)
+            nothing
+        catch e
+            e
+        end
+        @test c4v_err isa ArgumentError
+        @test occursin("TM_spectrum currently supports only VUMPS{General}",
+                       sprint(showerror, c4v_err))
 
         square_model = Heisenberg(lattice=Square(),
                                   S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
@@ -33,7 +41,17 @@
         square_params = _tm_test_params(model=square_model,
                                         alg=VUMPS{General}(; verbosity=0,
                                                            ifupdown=false))
-        @test_throws ArgumentError TeneT.TM_spectrum(1, 0.0, A, χ, square_params)
+        square_err = try
+            TeneT.TM_spectrum(1, 0.0, A, χ, square_params)
+            nothing
+        catch e
+            e
+        end
+        @test square_err isa ArgumentError
+        @test occursin(
+            "TM_spectrum currently supports only Honeycomb{:brickwall_h} and Honeycomb{:brickwall_v}",
+            sprint(showerror, square_err),
+        )
     end
 
     @testset "spectrum writer paths" begin
