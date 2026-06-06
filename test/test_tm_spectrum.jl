@@ -43,7 +43,14 @@
                                      alg=VUMPS{C4v}(; verbosity=0))
         invalid_inputs = (
             (0, 0.0, χ, "TM_spectrum requires n > 0; got 0."),
-            (1, 0.0, 0, "TM_spectrum requires χ > 0; got 0."),
+            (1, 0.0, 0,
+             "TM_spectrum requires χ to be a positive Int; got 0 of type Int64."),
+            (1, 0.0, 2.5,
+             "TM_spectrum requires χ to be a positive Int; got 2.5 of type Float64."),
+            (1, 0.0, 2 // 1,
+             "TM_spectrum requires χ to be a positive Int; got 2//1 of type Rational{Int64}."),
+            (1, 0.0, true,
+             "TM_spectrum requires χ to be a positive Int; got true of type Bool."),
             (1, Inf, χ, "TM_spectrum requires finite k; got Inf."),
             (1, NaN, χ, "TM_spectrum requires finite k; got NaN."),
         )
@@ -118,6 +125,31 @@
         @test isfile(rational)
         if isfile(rational)
             @test readlines(rational) == ["0.375000000000000"]
+        end
+
+        @test TeneT._tm_k_filename(0.0) == "0.0"
+        @test TeneT._tm_k_filename(1 // 3) == "1_over_3"
+
+        large_k = setprecision(BigFloat, 4096) do
+            BigFloat(1) / BigFloat(3)
+        end
+        large_name = TeneT._tm_k_filename(large_k)
+        @test large_name == TeneT._tm_k_filename(large_k)
+        @test ncodeunits("k$large_name.log") <= 100
+
+        large_folder = joinpath(params.folder, "D6_χ7", "TM_spectrum",
+                                "trivial")
+        large_path = joinpath(large_folder, "k$large_name.log")
+        large_result = try
+            TeneT._write_tm_spectrum([0.625], large_k, 6, 7, params;
+                                     ifdomainwall=false)
+        catch e
+            e
+        end
+        @test large_result == large_path
+        @test isfile(large_path)
+        if isfile(large_path)
+            @test readlines(large_path) == ["0.625000000000000"]
         end
 
         TeneT._write_tm_spectrum([0.5], 0.0, 2, 4, params;

@@ -17,8 +17,8 @@ end
 function _validate_tm_spectrum_inputs(n, k, χ, params::iPEPSOptimize)
     n > 0 ||
         throw(ArgumentError("TM_spectrum requires n > 0; got $n."))
-    χ > 0 ||
-        throw(ArgumentError("TM_spectrum requires χ > 0; got $χ."))
+    χ isa Int && χ > 0 ||
+        throw(ArgumentError("TM_spectrum requires χ to be a positive Int; got $χ of type $(typeof(χ))."))
     isfinite(k) ||
         throw(ArgumentError("TM_spectrum requires finite k; got $k."))
 
@@ -29,9 +29,37 @@ _tm_forloop_iter(params) =
     hasproperty(params.boundary_alg, :forloop_iter) ?
     params.boundary_alg.forloop_iter : params.forloop_iter
 
-_tm_k_filename(k::Rational) = "$(numerator(k))_over_$(denominator(k))"
-_tm_k_filename(k::Real) =
+const _TM_K_FILENAME_MAX_BYTES = 95
+const _TM_K_FILENAME_PREFIX_BYTES = 72
+
+_tm_k_string(k::Rational) = "$(numerator(k))_over_$(denominator(k))"
+_tm_k_string(k::Real) =
     replace(string(k), r"""[<>:"/\\|?*\x00-\x1f]""" => "_")
+
+function _tm_filename_hash(value)
+    hash = UInt64(0xcbf29ce484222325)
+    for byte in codeunits(value)
+        hash = (hash ⊻ UInt64(byte)) * UInt64(0x00000100000001b3)
+    end
+    return string(hash; base=16, pad=16)
+end
+
+function _tm_filename_prefix(value, maxbytes)
+    last_valid = 0
+    for index in eachindex(value)
+        nextind(value, index) - 1 > maxbytes && break
+        last_valid = index
+    end
+    return last_valid == 0 ? "" : value[firstindex(value):last_valid]
+end
+
+function _tm_k_filename(k::Real)
+    value = _tm_k_string(k)
+    ncodeunits(value) <= _TM_K_FILENAME_MAX_BYTES && return value
+
+    prefix = _tm_filename_prefix(value, _TM_K_FILENAME_PREFIX_BYTES)
+    return "$(prefix)_$(_tm_filename_hash(value))"
+end
 
 function _write_tm_spectrum(Δ, k, D, χ, params::iPEPSOptimize; ifdomainwall)
     sector = ifdomainwall ? "non-trivial" : "trivial"
