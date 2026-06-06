@@ -137,6 +137,6 @@ export C4v_restriction, local_min_norm
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
 export init_env, leading_boundary
 export GradientOptimize, optimise_ipeps
-export observable
+export observable, TM_spectrum
 
 end # module TeneT
