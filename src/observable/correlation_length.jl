@@ -1,0 +1,172 @@
+# ============================================================================
+# Correlation length
+# ============================================================================
+
+"""
+    cor_len_value(env::VUMPSEnv, params, M; method=:mps)
+
+Compute the correlation length from the transfer matrix eigenvalues
+of the VUMPS environment. `M` is the double-layer iPEPS tensor (used by
+`:channel`; ignored by `:mps`).
+
+- `method=:mps` (default): subleading eigenvalue of the pure MPS transfer
+  matrix `AR ⊗ AR` (no bulk M). The boundary-MPS correlation length
+  ξ_MPS, a χ-bounded estimator that underestimates the physical ξ.
+- `method=:channel`: subleading eigenvalue of the channel transfer matrix
+  `AR · M · AR` (FRmap). Closer to the physical ξ at finite χ
+  (Rams–Czarnik–Cincio 2018).
+"""
+function cor_len_value(env::VUMPSEnv, params, M; method::Symbol=:mps)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+
+    if method === :channel
+        @unpack forloop_iter = params
+        @unpack ifparallel = params.boundary_alg
+        ir = obs_index(typeof(params.model), 1, size(ARu, 1))
+        f = FR -> FRmap(1, FR, ARu[1,:], ARd[ir,:], M[1,:]; ifparallel, forloop_iter)
+        v_init = FRu[1, 1]
+    elseif method === :mps
+        f = C -> Lmap(1, C, ARu[1,:], ARd[1,:])
+        v_init = cellones(ACu)[1]
+    else
+        error("cor_len_value: unknown method=$(method) (use :mps or :channel)")
+    end
+
+    λcs, _, info = eigsolve(f, v_init, 5, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len ($method) not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ ($method) = $(ξ)")
+    return ξ
+end
+
+function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:mps)
+    @unpack AL, C, FLu, FLo = env
+
+    if method === :channel
+        @unpack forloop_iter = params
+        @unpack ifparallel = params.boundary_alg
+        ir = obs_index(typeof(params.model), 1, size(AL, 1))
+        f = FL -> FLmap(1, FL, AL[1,:], AL[ir,:], M[1,:]; ifparallel, forloop_iter)
+        v_init = FLu[1, 1]
+    elseif method === :mps
+        f = C -> Rmap(1, C, AL[1,:], conj(AL[1,:]))
+        v_init = cellones(AL)[1]
+    else
+        error("cor_len_value: unknown method=$(method) (use :mps or :channel)")
+    end
+
+    λcs, _, info = eigsolve(f, v_init, 5, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len ($method) not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ ($method) = $(ξ)")
+    return ξ
+end
+
+function cor_len_value(env::OnesideVUMPSEnv, params, M; method::Symbol=:mps)
+    @unpack AC, AR, FLu, FRu, FLo, FRo = env
+    model = params.model
+    Ni = size(AC, 1)
+    ir = obs_index(typeof(model), 1, Ni)
+
+    if method === :channel
+        @unpack forloop_iter = params
+        @unpack ifparallel = params.boundary_alg
+        f = FR -> FRmap(1, FR, AR[1,:], AR[ir,:], M[1,:]; ifparallel, forloop_iter)
+        v_init = FRu[1, 1]
+    elseif method === :mps
+        f = C -> Lmap(1, C, AR[1,:], AR[ir,:])
+        v_init = cellones(AC)[1]
+    else
+        error("cor_len_value: unknown method=$(method) (use :mps or :channel)")
+    end
+
+    λcs, _, info = eigsolve(f, v_init, 5, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len ($method) not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ ($method) = $(ξ)")
+    return ξ
+end
+
+function cor_len_value(env::C4vVUMPSEnv, params, M; method::Symbol=:mps)
+    @unpack AL, C, FL = env
+
+    if method === :channel
+        @unpack forloop_iter = params
+        @unpack ifparallel = params.boundary_alg
+        # C4v is 1x1: single-site FLmap_parallel. M may be a StructArray
+        # (from observable() / build_A) or a raw tensor; unwrap to single.
+        M_tensor = M isa StructArray ? M[1, 1] : M
+        f = FLi -> FLmap_parallel(FLi, AL, conj(AL), M_tensor; ifparallel, forloop_iter)
+        v_init = FL
+    elseif method === :mps
+        f = c -> Lmap(c, AL, conj(AL))
+        v_init = C
+    else
+        error("cor_len_value: unknown method=$(method) (use :mps or :channel)")
+    end
+
+    λcs, _, info = eigsolve(f, v_init, 5, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len ($method) not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ ($method) = $(ξ)")
+    return ξ
+end
+
+"""
+    cor_len_value(env::CTMEnv, params, M; method=:mps)
+
+Compute the correlation length from the CTM corner transfer matrix. The CTM
+edge tensor `T` already contains the bulk M (via the projector contractions),
+so the spectrum of `Lmap(C, T, T)` is effectively the channel TM spectrum and
+the `method` kwarg is accepted for API uniformity but does not alter the
+computation. `M` is ignored.
+"""
+function cor_len_value(env::CTMEnv, params, M; method::Symbol=:mps)
+    method ∈ (:mps, :channel) || error("cor_len_value: unknown method=$(method) (use :mps or :channel).")
+    @unpack C, T = env
+
+    λcs, _, info = eigsolve(C->Lmap(C, T, T), C, 5, :LM; maxiter=100, ishermitian=false)
+    info.converged == 0 && @warn "cor_len not converged"
+    λ2 = 0
+    for i in 2:length(λcs)
+        if !(norm(λcs[i]) ≈ norm(λcs[1]))
+            λ2 = λcs[i]
+            break
+        end
+    end
+
+    ξ = -1/log(abs(λ2/λcs[1]))
+    params.verbosity >= 4 && println("ξ = $(ξ)")
+    return ξ
+end
