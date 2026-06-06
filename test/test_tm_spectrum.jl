@@ -161,35 +161,37 @@
     end
 
     @testset "small VUMPS General brickwall spectra" begin
-        Random.seed!(17)
-        D, d, χ = 2, 2, 4
-        pattern = [1 2; 2 1]
-        N = length(unique(pattern))
-        model = Heisenberg(lattice=Honeycomb{:brickwall_h}(),
-                           S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
-                           ifrotate=false)
-        alg = VUMPS{General}(; verbosity=0,
-                              maxiter=2, miniter=0,
-                              maxiter_ad=0, miniter_ad=0,
-                              power_iter=2, show_every=1000,
-                              tol=1e-3, ifupdown=true,
-                              ifsimple_eig=true)
-        params = _tm_test_params(; model, alg, pattern)
-        A = TeneT._init_random_ipeps(Honeycomb{:brickwall_h}(),
-                                     Float64, D, d, N,
-                                     size(pattern)...)
-        A ./= norm(A)
+        for (seed, lattice) in ((17, Honeycomb{:brickwall_h}()),
+                                (23, Honeycomb{:brickwall_v}()))
+            Random.seed!(seed)
+            D, d, χ = 2, 2, 4
+            pattern = [1 2; 2 1]
+            N = length(unique(pattern))
+            model = Heisenberg(lattice=lattice,
+                               S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                               ifrotate=false)
+            alg = VUMPS{General}(; verbosity=0,
+                                  maxiter=2, miniter=0,
+                                  maxiter_ad=0, miniter_ad=0,
+                                  power_iter=2, show_every=1000,
+                                  tol=1e-3, ifupdown=true,
+                                  ifsimple_eig=true)
+            params = _tm_test_params(; model, alg, pattern)
+            A = TeneT._init_random_ipeps(lattice, Float64, D, d, N,
+                                         size(pattern)...)
+            A ./= norm(A)
 
-        Δ = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=false)
-        @test length(Δ) == 1
-        @test all(isfinite, Δ)
-        @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
-                              "trivial", "k0.0.log"))
+            Δ = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=false)
+            @test length(Δ) == 1
+            @test all(isfinite, Δ)
+            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+                                  "trivial", "k0.0.log"))
 
-        Δdw = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=true)
-        @test length(Δdw) == 1
-        @test all(isfinite, Δdw)
-        @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
-                              "non-trivial", "k0.0.log"))
+            Δdw = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=true)
+            @test length(Δdw) == 1
+            @test all(isfinite, Δdw)
+            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+                                  "non-trivial", "k0.0.log"))
+        end
     end
 end
