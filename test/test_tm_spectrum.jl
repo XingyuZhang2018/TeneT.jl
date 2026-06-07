@@ -78,6 +78,11 @@
             @test Array(gpu_result) ==
                   reshape(collect(1.0:16.0), 2, 2, 2, 2) .+ im
         end
+
+        promoted = TeneT._tm_promote_like(ones(2, 2, 2, 2),
+                                           fill(1.0im, 1))
+        @test eltype(promoted) === ComplexF64
+        @test promoted == ones(2, 2, 2, 2)
     end
 
     @testset "export and input guards" begin

@@ -54,6 +54,14 @@ function _tm_add_normalized(destination, term, normalization)
     return result
 end
 
+function _tm_promote_like(array, reference)
+    T = promote_type(eltype(array), eltype(reference))
+    T === eltype(array) && return array
+    promoted = similar(array, T)
+    vec(promoted) .= vec(array)
+    return promoted
+end
+
 function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
     return leftenv(ALu, ALd, M, FL; alg=params.boundary_alg)
 end
@@ -267,7 +275,8 @@ function _tm_left_sources(FL, B, AL, AR, M, Mn;
     T = eltype(B[1])
     sources = [atype(zeros(T, size(FL[1, j])...)) for j in 1:Nj]
     @inbounds for j in 1:Nj
-        value = FLmap_parallel(FL[1, j], B[j], conj(AL[partner_row, j]),
+        seed = _tm_promote_like(FL[1, j], B[j])
+        value = FLmap_parallel(seed, B[j], conj(AL[partner_row, j]),
                                M[1, j]; ifparallel, forloop_iter) / Mn[1, j]
         sources[mod1(j + 1, Nj)] += value
         for column in (j + 1):Nj
@@ -319,7 +328,8 @@ function _tm_right_sources(FR, B, AL, AR, M, Mn;
     T = eltype(B[1])
     sources = [atype(zeros(T, size(FR[1, j])...)) for j in 1:Nj]
     @inbounds for j in Nj:-1:1
-        value = FRmap_parallel(FR[1, j], B[j], conj(AR[partner_row, j]),
+        seed = _tm_promote_like(FR[1, j], B[j])
+        value = FRmap_parallel(seed, B[j], conj(AR[partner_row, j]),
                                M[1, j]; ifparallel, forloop_iter) / Mn[1, j]
         sources[mod1(j - 1, Nj)] += value
         for column in (j - 1):-1:1
@@ -383,12 +393,14 @@ function _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
         synchronize(HB[j])
         vec(HB[j]) ./= normalization
 
-        term = ACmap(1, AR[1, j], [left_B[j], FL[2:end, j]...],
+        right_tensor = _tm_promote_like(AR[1, j], left_B[j])
+        term = ACmap(1, right_tensor, [left_B[j], FL[2:end, j]...],
                      FR[:, j], M[:, j]; ifparallel, forloop_iter)
         synchronize(term)
         HB[j] = _tm_add_normalized(HB[j], term, normalization)
 
-        term = ACmap(1, AL[1, j], FL[:, j],
+        left_tensor = _tm_promote_like(AL[1, j], right_B[j])
+        term = ACmap(1, left_tensor, FL[:, j],
                      [right_B[j], FR[2:end, j]...],
                      M[:, j]; ifparallel, forloop_iter)
         synchronize(term)
