@@ -51,6 +51,19 @@
         @test TeneT._tm_partner_row(oneside_params, 2, 2) == 1
     end
 
+    @testset "real TM normalizations" begin
+        λs = TeneT.StructArray(ComplexF64[1 + 1e-14im, 2 - 2e-14im],
+                               [1 2; 2 1])
+        Mn = TeneT._tm_real_normalizations(λs)
+
+        @test eltype(Mn.data) <: Real
+        @test Mn.pattern == λs.pattern
+        @test Mn.data == [1.0, 2.0]
+        @test TeneT._tm_bloch_phase(0.0) isa Real
+        @test TeneT._tm_bloch_phase(pi) isa Real
+        @test TeneT._tm_bloch_phase(0.2pi) isa Complex
+    end
+
     @testset "export and input guards" begin
         @test :TM_spectrum in names(TeneT)
 

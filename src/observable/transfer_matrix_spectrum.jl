@@ -31,6 +31,15 @@ _tm_forloop_iter(params) =
 
 _tm_partner_row(::iPEPSOptimize, i, Ni) = mod1(i + 1, Ni)
 
+_tm_real_normalizations(values::StructArray) =
+    StructArray(real.(values.data), values.pattern)
+
+function _tm_bloch_phase(k)
+    phase = cis(k)
+    tolerance = 16eps(typeof(real(phase)))
+    return abs(imag(phase)) <= tolerance ? real(phase) : phase
+end
+
 function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
     return leftenv(ALu, ALd, M, FL; alg=params.boundary_alg)
 end
@@ -194,13 +203,15 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
                                     left_rl, right_rl, left_lr, right_lr,
                                     params)
 
-        Mn = similar(λs)
+        Mn = _tm_real_normalizations(λs)
         @inbounds for p in 1:length(AL1)
             i, j = Tuple(findfirst(==(p), AL1.pattern))
             ir = _tm_partner_row(params, i, Ni)
-            Mn[i, j] = contract_n_11(FL2[i, j], AC2[i, j], M[i, j],
-                                     conj(AC2[ir, j]), FR2[i, j];
-                                     forloop_iter, ifparallel)
+            Mn[i, j] = real(contract_n_11(
+                FL2[i, j], AC2[i, j], M[i, j],
+                conj(AC2[ir, j]), FR2[i, j];
+                forloop_iter, ifparallel,
+            ))
         end
         VL = _tm_initial_vl(AL1)
         return M, Mn, AL1, AR2, FL1, FR2,
@@ -220,13 +231,15 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
     _tm_normalize_environments!(FL, FR, C,
                                 left_rl, right_rl, left_lr, right_lr, params)
 
-    Mn = similar(λs)
+    Mn = _tm_real_normalizations(λs)
     @inbounds for p in 1:length(AL)
         i, j = Tuple(findfirst(==(p), AL.pattern))
         ir = _tm_partner_row(params, i, Ni)
-        Mn[i, j] = contract_n_11(FL[i, j], AC[i, j], M[i, j],
-                                 conj(AC[ir, j]), FR[i, j];
-                                 forloop_iter, ifparallel)
+        Mn[i, j] = real(contract_n_11(
+            FL[i, j], AC[i, j], M[i, j],
+            conj(AC[ir, j]), FR[i, j];
+            forloop_iter, ifparallel,
+        ))
     end
     VL = _tm_initial_vl(AL)
     return M, Mn, AL, AR, FL, FR,
@@ -265,8 +278,9 @@ function _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
     sources = _tm_left_sources(FL, B, AL, AR, M, Mn;
                                partner_row, ifparallel, forloop_iter)
     result = zero(sources)
+    phase = _tm_bloch_phase(-k)
     result[1], info = linsolve(sources[1]) do trial
-        trial * exp(-1.0im * k) -
+        trial * phase -
         FLmap(1, trial, AR[1, :], conj(AL[partner_row, :]), M[1, :];
               ifparallel, forloop_iter) / prod(Mn[1, :]) +
         _tm_left_project(trial, right_rl[1, Nj], left_rl[1, 1])
@@ -316,8 +330,9 @@ function _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
     sources = _tm_right_sources(FR, B, AL, AR, M, Mn;
                                 partner_row, ifparallel, forloop_iter)
     result = zero(sources)
+    phase = _tm_bloch_phase(k)
     result[Nj], info = linsolve(sources[Nj]) do trial
-        trial * exp(1.0im * k) -
+        trial * phase -
         FRmap(Nj, trial, AL[1, :], conj(AR[partner_row, :]), M[1, :];
               ifparallel, forloop_iter) / prod(Mn[1, :]) +
         _tm_right_project(right_lr[1, Nj], left_lr[1, 1], trial)
@@ -382,7 +397,7 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
     boundary_χ = size(AL[1], 1)
     partner_row = _tm_partner_row(params, 1, size(AL, 1))
     atype = _arraytype(A)
-    excitation_type = typeof(complex(zero(eltype(A))))
+    excitation_type = eltype(A)
     ifparallel = params.boundary_alg.ifparallel
     forloop_iter = _tm_forloop_iter(params)
     excitation_shapes = [(boundary_χ * (size(AL[1, j], 2)^2 - 1),
@@ -403,13 +418,14 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
     X = atype(rand(excitation_type, tangent_dimension))
 
     function effective_map(x)
+        map_type = promote_type(eltype(x), typeof(_tm_bloch_phase(k * π)))
         Xparts = unpack_excitation(x)
-        B = [atype(zeros(excitation_type, size(AL[1, j])...)) for j in 1:Nj]
+        B = [atype(zeros(map_type, size(AL[1, j])...)) for j in 1:Nj]
         @inbounds for j in 1:Nj
             if size(AL[1, j], 2) != 1
                 @tensor Bj[a, s, d, b] := VL[1, j][a, s, d, c] *
                                            Xparts[j][c, b]
-                B[j] = Bj
+                B[j] .= Bj
             end
         end
         HB = _tm_effective_map(k * π, AL, AR, B, M, Mn, FL, FR,
@@ -420,7 +436,7 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
                                                conj(VL[1, j])[a, b, e, d]
                          part
                      else
-                         atype(zeros(excitation_type, 0, boundary_χ))
+                         atype(zeros(map_type, 0, boundary_χ))
                      end for j in 1:Nj]
         return pack_excitation(projected)
     end
