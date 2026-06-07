@@ -11,6 +11,9 @@
 #SBATCH --array=0-1
 
 source /etc/profile
+source /etc/profile.d/modules.sh
+module purge
+module load OpenMPI/5.0.7-GCC-14.2.0
 set -euo pipefail
 
 WD=/sofia/scratch/pilot/pilot_2026_0002/xz
