@@ -62,6 +62,22 @@
         @test TeneT._tm_bloch_phase(0.0) isa Real
         @test TeneT._tm_bloch_phase(pi) isa Real
         @test TeneT._tm_bloch_phase(0.2pi) isa Complex
+
+        destination = reshape(collect(1.0:16.0), 2, 2, 2, 2)
+        term = fill(2.0im, size(destination))
+        result = TeneT._tm_add_normalized(destination, term, 2.0)
+        @test eltype(result) === ComplexF64
+        @test result == reshape(collect(1.0:16.0), 2, 2, 2, 2) .+ im
+
+        if CUDA.functional()
+            gpu_result = TeneT._tm_add_normalized(
+                CuArray(reshape(collect(1.0:16.0), 2, 2, 2, 2)),
+                CUDA.fill(2.0im, 2, 2, 2, 2),
+                2.0,
+            )
+            @test Array(gpu_result) ==
+                  reshape(collect(1.0:16.0), 2, 2, 2, 2) .+ im
+        end
     end
 
     @testset "export and input guards" begin

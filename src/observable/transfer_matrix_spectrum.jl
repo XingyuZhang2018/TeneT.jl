@@ -40,6 +40,20 @@ function _tm_bloch_phase(k)
     return abs(imag(phase)) <= tolerance ? real(phase) : phase
 end
 
+function _tm_add_normalized(destination, term, normalization)
+    T = promote_type(eltype(destination), eltype(term),
+                     typeof(inv(normalization)))
+    result = if T === eltype(destination)
+        destination
+    else
+        promoted = similar(destination, T)
+        vec(promoted) .= vec(destination)
+        promoted
+    end
+    vec(result) .+= vec(term) ./ normalization
+    return result
+end
+
 function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
     return leftenv(ALu, ALd, M, FL; alg=params.boundary_alg)
 end
@@ -364,16 +378,16 @@ function _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
         normalization = prod(Mn[:, j])
         HB[j] = ACmap(1, B[j], FL[:, j], FR[:, j], M[:, j];
                       ifparallel, forloop_iter)
-        HB[j] ./= normalization
+        vec(HB[j]) ./= normalization
 
         term = ACmap(1, AR[1, j], [left_B[j], FL[2:end, j]...],
                      FR[:, j], M[:, j]; ifparallel, forloop_iter)
-        HB[j] = HB[j] + term / normalization
+        HB[j] = _tm_add_normalized(HB[j], term, normalization)
 
         term = ACmap(1, AL[1, j], FL[:, j],
                      [right_B[j], FR[2:end, j]...],
                      M[:, j]; ifparallel, forloop_iter)
-        HB[j] .+= term ./ normalization
+        HB[j] = _tm_add_normalized(HB[j], term, normalization)
     end
     return HB
 end
