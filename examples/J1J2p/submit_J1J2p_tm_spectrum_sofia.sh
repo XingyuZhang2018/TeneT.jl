@@ -42,7 +42,7 @@ echo "Sector=$SECTOR chi=$CHI nlevels=$NLEVELS"
 echo "Checkpoint=$CHECKPOINT"
 echo "Run root=$RUN_ROOT"
 
-"$JULIA" --project="$REPO" \
+"$JULIA" -g2 --project="$REPO" \
     "$REPO/examples/J1J2p/J1J2p_tm_spectrum_sofia.jl" \
     "$CHECKPOINT" "$RUN_ROOT" "$CHI" "$NLEVELS" "$SECTOR" "$SEED"
 
