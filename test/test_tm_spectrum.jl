@@ -30,7 +30,7 @@
         @test TeneT._tm_forloop_iter(compatibility_params) == 3
     end
 
-    @testset "Oneside row pairing" begin
+    @testset "TM excitation row pairing" begin
         model = J1J2p(lattice=Honeycomb{:brickwall_v}(),
                        S=0.5, J1=1.0, J2p=0.5,
                        ifrotate=false, couplingtype=:uniform)
@@ -46,11 +46,9 @@
             pattern=pattern,
         )
 
-        @test !TeneT._tm_is_oneside(general_params)
-        @test TeneT._tm_is_oneside(oneside_params)
         @test TeneT._tm_partner_row(general_params, 1, 2) == 2
-        @test TeneT._tm_partner_row(oneside_params, 1, 2) == 1
-        @test TeneT._tm_partner_row(oneside_params, 2, 2) == 2
+        @test TeneT._tm_partner_row(oneside_params, 1, 2) == 2
+        @test TeneT._tm_partner_row(oneside_params, 2, 2) == 1
     end
 
     @testset "export and input guards" begin

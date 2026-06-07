@@ -29,27 +29,14 @@ _tm_forloop_iter(params) =
     hasproperty(params.boundary_alg, :forloop_iter) ?
     params.boundary_alg.forloop_iter : params.forloop_iter
 
-_tm_is_oneside(params::iPEPSOptimize) = !params.boundary_alg.ifupdown
-
-_tm_partner_row(params::iPEPSOptimize, i, Ni) =
-    _tm_is_oneside(params) ?
-    obs_index(typeof(params.model), i, Ni) :
-    mod1(i + 1, Ni)
+_tm_partner_row(::iPEPSOptimize, i, Ni) = mod1(i + 1, Ni)
 
 function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
-    oneside = _tm_is_oneside(params)
-    return leftenv(ALu, ALd, M, FL;
-                   ifobs=oneside,
-                   model=oneside ? params.model : nothing,
-                   alg=params.boundary_alg)
+    return leftenv(ALu, ALd, M, FL; alg=params.boundary_alg)
 end
 
 function _tm_rightenv(ARu, ARd, M, FR, params::iPEPSOptimize)
-    oneside = _tm_is_oneside(params)
-    return rightenv(ARu, ARd, M, FR;
-                    ifobs=oneside,
-                    model=oneside ? params.model : nothing,
-                    alg=params.boundary_alg)
+    return rightenv(ARu, ARd, M, FR; alg=params.boundary_alg)
 end
 
 const _TM_K_FILENAME_MAX_BYTES = 95
@@ -160,7 +147,7 @@ function _tm_normalize_environments!(FL, FR, C, mixed_left_1, mixed_right_1,
         @tensor denominator[] := FL[i, jr][a, c, f, d] *
                                  conj(C[ir, j])[d, e] * C[i, j][a, b] *
                                  FR[i, j][b, c, f, e]
-        FR[i, j] ./= only(denominator)
+        FR[i, j] ./= sum(denominator)
         mixed_right_1[i, j] ./=
             sum(mixed_left_1[i, jr] .* mixed_right_1[i, j])
         mixed_right_2[i, j] ./=
@@ -269,7 +256,7 @@ end
 
 function _tm_left_project(EL, FR, E)
     @tensor overlap[] := EL[a, b, c, d] * FR[a, b, c, d]
-    return only(overlap) .* E
+    return sum(overlap) .* E
 end
 
 function _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
@@ -320,7 +307,7 @@ end
 
 function _tm_right_project(FR, E, EL)
     @tensor overlap[] := E[a, b, c, d] * EL[a, b, c, d]
-    return only(overlap) .* FR
+    return sum(overlap) .* FR
 end
 
 function _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
