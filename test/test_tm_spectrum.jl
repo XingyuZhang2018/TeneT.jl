@@ -1,5 +1,5 @@
 @testset "TM_spectrum observable" begin
-    using TeneT: Heisenberg
+    using TeneT: Heisenberg, J1J2p
 
     function _tm_test_params(; model, alg, pattern=[1;;])
         return GradientOptimize(model=model,
@@ -28,6 +28,29 @@
 
         compatibility_params = (boundary_alg=(;), forloop_iter=3)
         @test TeneT._tm_forloop_iter(compatibility_params) == 3
+    end
+
+    @testset "Oneside row pairing" begin
+        model = J1J2p(lattice=Honeycomb{:brickwall_v}(),
+                       S=0.5, J1=1.0, J2p=0.5,
+                       ifrotate=false, couplingtype=:uniform)
+        pattern = [1 2; 2 1]
+        general_params = _tm_test_params(
+            model=model,
+            alg=VUMPS{General}(; verbosity=0, ifupdown=true),
+            pattern=pattern,
+        )
+        oneside_params = _tm_test_params(
+            model=model,
+            alg=VUMPS{General}(; verbosity=0, ifupdown=false),
+            pattern=pattern,
+        )
+
+        @test !TeneT._tm_is_oneside(general_params)
+        @test TeneT._tm_is_oneside(oneside_params)
+        @test TeneT._tm_partner_row(general_params, 1, 2) == 2
+        @test TeneT._tm_partner_row(oneside_params, 1, 2) == 1
+        @test TeneT._tm_partner_row(oneside_params, 2, 2) == 2
     end
 
     @testset "export and input guards" begin
@@ -207,6 +230,75 @@
             )
             @test loaded isa Tuple
             @test all(rt -> rt isa TeneT.VUMPSRuntime, loaded)
+        end
+    end
+
+    @testset "small VUMPS Oneside brickwall spectra" begin
+        function oneside_restriction(A)
+            B = similar(A)
+            for site in axes(A, 6)
+                tensor = A[:, :, :, :, :, site]
+                B[:, :, :, :, :, site] =
+                    tensor + permutedims(tensor, (1, 4, 3, 2, 5))
+            end
+            return B / norm(B)
+        end
+
+        cases = (
+            (31,
+             Heisenberg(lattice=Honeycomb{:brickwall_h}(),
+                        S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
+                        ifrotate=false),
+             TeneT._restriction_ipeps),
+            (37,
+             J1J2p(lattice=Honeycomb{:brickwall_v}(),
+                    S=0.5, J1=1.0, J2p=0.5,
+                    ifrotate=false, couplingtype=:uniform),
+             oneside_restriction),
+        )
+
+        for (seed, model, restriction_ipeps) in cases
+            Random.seed!(seed)
+            lattice = model.lattice
+            D, d, χ = 2, 2, 4
+            pattern = [1 2; 2 1]
+            N = length(unique(pattern))
+            alg = VUMPS{General}(; verbosity=0,
+                                  maxiter=2, miniter=0,
+                                  maxiter_ad=0, miniter_ad=0,
+                                  power_iter=2, show_every=1000,
+                                  tol=1e-3, ifupdown=false,
+                                  ifsimple_eig=true)
+            params = _tm_test_params(; model, alg, pattern)
+            params.ifsave_env = true
+            A = TeneT._init_random_ipeps(lattice, Float64, D, d, N,
+                                         size(pattern)...)
+            A ./= norm(A)
+
+            Δ = TM_spectrum(1, 0.0, A, χ, params;
+                            restriction_ipeps, ifdomainwall=false)
+            @test length(Δ) == 1
+            @test all(isfinite, Δ)
+            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+                                  "trivial", "k0.0.log"))
+            @test isfile(joinpath(params.folder, "D2", "environment",
+                                  "χ4.jld2"))
+
+            Δdw = TM_spectrum(1, 0.0, A, χ, params;
+                              restriction_ipeps, ifdomainwall=true)
+            @test length(Δdw) == 1
+            @test all(isfinite, Δdw)
+            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+                                  "non-trivial", "k0.0.log"))
+            for file in ("χ4_1.jld2", "χ4_2.jld2")
+                path = joinpath(params.folder, "D2", "environment", file)
+                @test isfile(path)
+                params.ifload_env = true
+                loaded = TeneT._tm_initialize_named_env(
+                    A, D, χ, params, file; restriction_ipeps,
+                )
+                @test loaded isa TeneT.VUMPSRuntime
+            end
         end
     end
 end

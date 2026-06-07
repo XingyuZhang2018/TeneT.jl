@@ -29,6 +29,29 @@ _tm_forloop_iter(params) =
     hasproperty(params.boundary_alg, :forloop_iter) ?
     params.boundary_alg.forloop_iter : params.forloop_iter
 
+_tm_is_oneside(params::iPEPSOptimize) = !params.boundary_alg.ifupdown
+
+_tm_partner_row(params::iPEPSOptimize, i, Ni) =
+    _tm_is_oneside(params) ?
+    obs_index(typeof(params.model), i, Ni) :
+    mod1(i + 1, Ni)
+
+function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
+    oneside = _tm_is_oneside(params)
+    return leftenv(ALu, ALd, M, FL;
+                   ifobs=oneside,
+                   model=oneside ? params.model : nothing,
+                   alg=params.boundary_alg)
+end
+
+function _tm_rightenv(ARu, ARd, M, FR, params::iPEPSOptimize)
+    oneside = _tm_is_oneside(params)
+    return rightenv(ARu, ARd, M, FR;
+                    ifobs=oneside,
+                    model=oneside ? params.model : nothing,
+                    alg=params.boundary_alg)
+end
+
 const _TM_K_FILENAME_MAX_BYTES = 95
 const _TM_K_FILENAME_PREFIX_BYTES = 72
 
@@ -128,12 +151,12 @@ function _tm_converge_env(A, M, D, χ, params::iPEPSOptimize;
 end
 
 function _tm_normalize_environments!(FL, FR, C, mixed_left_1, mixed_right_1,
-                                     mixed_left_2, mixed_right_2)
+                                     mixed_left_2, mixed_right_2, params)
     Ni, Nj = size(FL)
     @inbounds for p in 1:length(FL)
         i, j = Tuple(findfirst(==(p), FL.pattern))
         jr = mod1(j + 1, Nj)
-        ir = mod1(i + 1, Ni)
+        ir = _tm_partner_row(params, i, Ni)
         @tensor denominator[] := FL[i, jr][a, c, f, d] *
                                  conj(C[ir, j])[d, e] * C[i, j][a, b] *
                                  FR[i, j][b, c, f, e]
@@ -176,21 +199,18 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
             @warn "using domain-wall ansatz but overlap = $overlap_norm"
         end
 
-        _, left_rl = leftenv(AR2, conj(AL1), M, FL1;
-                             alg=params.boundary_alg)
-        _, right_rl = rightenv(AR2, conj(AL1), M, FR2;
-                               alg=params.boundary_alg)
-        _, left_lr = leftenv(AL1, conj(AR2), M, FL1;
-                             alg=params.boundary_alg)
-        λs, right_lr = rightenv(AL1, conj(AR2), M, FR2;
-                                alg=params.boundary_alg)
+        _, left_rl = _tm_leftenv(AR2, conj(AL1), M, FL1, params)
+        _, right_rl = _tm_rightenv(AR2, conj(AL1), M, FR2, params)
+        _, left_lr = _tm_leftenv(AL1, conj(AR2), M, FL1, params)
+        λs, right_lr = _tm_rightenv(AL1, conj(AR2), M, FR2, params)
         _tm_normalize_environments!(FL2, FR2, C2,
-                                    left_rl, right_rl, left_lr, right_lr)
+                                    left_rl, right_rl, left_lr, right_lr,
+                                    params)
 
         Mn = similar(λs)
         @inbounds for p in 1:length(AL1)
             i, j = Tuple(findfirst(==(p), AL1.pattern))
-            ir = mod1(i + 1, Ni)
+            ir = _tm_partner_row(params, i, Ni)
             Mn[i, j] = contract_n_11(FL2[i, j], AC2[i, j], M[i, j],
                                      conj(AC2[ir, j]), FR2[i, j];
                                      forloop_iter, ifparallel)
@@ -206,17 +226,17 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
     AC = ALCtoAC(AL, C)
     Ni, _ = size(AL)
 
-    _, left_rl = leftenv(AR, conj(AL), M, FL; alg=params.boundary_alg)
-    _, right_rl = rightenv(AR, conj(AL), M, FR; alg=params.boundary_alg)
-    _, left_lr = leftenv(AL, conj(AR), M, FL; alg=params.boundary_alg)
-    λs, right_lr = rightenv(AL, conj(AR), M, FR; alg=params.boundary_alg)
+    _, left_rl = _tm_leftenv(AR, conj(AL), M, FL, params)
+    _, right_rl = _tm_rightenv(AR, conj(AL), M, FR, params)
+    _, left_lr = _tm_leftenv(AL, conj(AR), M, FL, params)
+    λs, right_lr = _tm_rightenv(AL, conj(AR), M, FR, params)
     _tm_normalize_environments!(FL, FR, C,
-                                left_rl, right_rl, left_lr, right_lr)
+                                left_rl, right_rl, left_lr, right_lr, params)
 
     Mn = similar(λs)
     @inbounds for p in 1:length(AL)
         i, j = Tuple(findfirst(==(p), AL.pattern))
-        ir = mod1(i + 1, Ni)
+        ir = _tm_partner_row(params, i, Ni)
         Mn[i, j] = contract_n_11(FL[i, j], AC[i, j], M[i, j],
                                  conj(AC[ir, j]), FR[i, j];
                                  forloop_iter, ifparallel)
@@ -226,18 +246,19 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
            left_rl, right_rl, left_lr, right_lr, VL
 end
 
-function _tm_left_sources(FL, B, AL, AR, M, Mn; ifparallel, forloop_iter)
-    Ni, Nj = size(AL)
+function _tm_left_sources(FL, B, AL, AR, M, Mn;
+                          partner_row, ifparallel, forloop_iter)
+    _, Nj = size(AL)
     atype = _arraytype(B[1])
     T = eltype(B[1])
     sources = [atype(zeros(T, size(FL[1, j])...)) for j in 1:Nj]
     @inbounds for j in 1:Nj
-        value = FLmap_parallel(FL[1, j], B[j], conj(AL[mod1(2, Ni), j]),
+        value = FLmap_parallel(FL[1, j], B[j], conj(AL[partner_row, j]),
                                M[1, j]; ifparallel, forloop_iter) / Mn[1, j]
         sources[mod1(j + 1, Nj)] += value
         for column in (j + 1):Nj
             value = FLmap_parallel(value, AR[1, column],
-                                   conj(AL[mod1(2, Ni), column]),
+                                   conj(AL[partner_row, column]),
                                    M[1, column]; ifparallel, forloop_iter) /
                     Mn[1, column]
             sources[mod1(column + 1, Nj)] += value
@@ -252,14 +273,14 @@ function _tm_left_project(EL, FR, E)
 end
 
 function _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
-                            ifparallel, forloop_iter)
-    Ni, Nj = size(FL)
+                            partner_row, ifparallel, forloop_iter)
+    _, Nj = size(FL)
     sources = _tm_left_sources(FL, B, AL, AR, M, Mn;
-                               ifparallel, forloop_iter)
+                               partner_row, ifparallel, forloop_iter)
     result = zero(sources)
     result[1], info = linsolve(sources[1]) do trial
         trial * exp(-1.0im * k) -
-        FLmap(1, trial, AR[1, :], conj(AL[mod1(2, Ni), :]), M[1, :];
+        FLmap(1, trial, AR[1, :], conj(AL[partner_row, :]), M[1, :];
               ifparallel, forloop_iter) / prod(Mn[1, :]) +
         _tm_left_project(trial, right_rl[1, Nj], left_rl[1, 1])
     end
@@ -268,7 +289,7 @@ function _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
 
     @inbounds for j in 2:Nj
         result[j] = FLmap_parallel(result[j - 1], AR[1, j - 1],
-                                   conj(AL[mod1(2, Ni), j - 1]),
+                                   conj(AL[partner_row, j - 1]),
                                    M[1, j - 1];
                                    ifparallel, forloop_iter) / Mn[1, j - 1]
         result[j] += sources[j]
@@ -276,18 +297,19 @@ function _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
     return result
 end
 
-function _tm_right_sources(FR, B, AL, AR, M, Mn; ifparallel, forloop_iter)
-    Ni, Nj = size(FR)
+function _tm_right_sources(FR, B, AL, AR, M, Mn;
+                           partner_row, ifparallel, forloop_iter)
+    _, Nj = size(FR)
     atype = _arraytype(B[1])
     T = eltype(B[1])
     sources = [atype(zeros(T, size(FR[1, j])...)) for j in 1:Nj]
     @inbounds for j in Nj:-1:1
-        value = FRmap_parallel(FR[1, j], B[j], conj(AR[mod1(2, Ni), j]),
+        value = FRmap_parallel(FR[1, j], B[j], conj(AR[partner_row, j]),
                                M[1, j]; ifparallel, forloop_iter) / Mn[1, j]
         sources[mod1(j - 1, Nj)] += value
         for column in (j - 1):-1:1
             value = FRmap_parallel(value, AL[1, column],
-                                   conj(AR[mod1(2, Ni), column]),
+                                   conj(AR[partner_row, column]),
                                    M[1, column]; ifparallel, forloop_iter) /
                     Mn[1, column]
             sources[mod1(column - 1, Nj)] += value
@@ -302,14 +324,14 @@ function _tm_right_project(FR, E, EL)
 end
 
 function _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
-                             ifparallel, forloop_iter)
-    Ni, Nj = size(FR)
+                             partner_row, ifparallel, forloop_iter)
+    _, Nj = size(FR)
     sources = _tm_right_sources(FR, B, AL, AR, M, Mn;
-                                ifparallel, forloop_iter)
+                                partner_row, ifparallel, forloop_iter)
     result = zero(sources)
     result[Nj], info = linsolve(sources[Nj]) do trial
         trial * exp(1.0im * k) -
-        FRmap(Nj, trial, AL[1, :], conj(AR[mod1(2, Ni), :]), M[1, :];
+        FRmap(Nj, trial, AL[1, :], conj(AR[partner_row, :]), M[1, :];
               ifparallel, forloop_iter) / prod(Mn[1, :]) +
         _tm_right_project(right_lr[1, Nj], left_lr[1, 1], trial)
     end
@@ -318,7 +340,7 @@ function _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
 
     @inbounds for j in (Nj - 1):-1:1
         result[j] = FRmap_parallel(result[j + 1], AL[1, j + 1],
-                                   conj(AR[mod1(2, Ni), j + 1]),
+                                   conj(AR[partner_row, j + 1]),
                                    M[1, j + 1];
                                    ifparallel, forloop_iter) / Mn[1, j + 1]
         result[j] += sources[j]
@@ -328,13 +350,13 @@ end
 
 function _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
                            left_rl, right_rl, left_lr, right_lr;
-                           ifparallel, forloop_iter)
+                           partner_row, ifparallel, forloop_iter)
     _, Nj = size(AL)
     HB = zero(B)
     left_B = _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
-                                ifparallel, forloop_iter)
+                                partner_row, ifparallel, forloop_iter)
     right_B = _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
-                                  ifparallel, forloop_iter)
+                                  partner_row, ifparallel, forloop_iter)
 
     @inbounds for j in 1:Nj
         HB[j] = ACmap(1, B[j], FL[:, j], FR[:, j], M[:, j];
@@ -355,8 +377,9 @@ end
                 ifdomainwall=false)
 
 Compute the leading `n` transfer-matrix excitation gaps at momentum `k * π`.
-This implementation supports `VUMPS{General}` on horizontal and vertical
-honeycomb brickwall lattices, in either the trivial or domain-wall sector.
+This implementation supports full and one-sided `VUMPS{General}` modes on
+horizontal and vertical honeycomb brickwall lattices, in either the trivial
+or domain-wall sector.
 The returned gaps are also written below
 `params.folder/D<bond>_χ<boundary>/TM_spectrum`.
 """
@@ -370,6 +393,7 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
 
     _, Nj = size(AL)
     boundary_χ = size(AL[1], 1)
+    partner_row = _tm_partner_row(params, 1, size(AL, 1))
     atype = _arraytype(A)
     excitation_type = typeof(complex(zero(eltype(A))))
     ifparallel = params.boundary_alg.ifparallel
@@ -403,7 +427,7 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
         end
         HB = _tm_effective_map(k * π, AL, AR, B, M, Mn, FL, FR,
                                left_rl, right_rl, left_lr, right_lr;
-                               ifparallel, forloop_iter)
+                               partner_row, ifparallel, forloop_iter)
         projected = [if size(AL[1, j], 2) != 1
                          @tensor part[d, c] := HB[j][a, b, e, c] *
                                                conj(VL[1, j])[a, b, e, d]
