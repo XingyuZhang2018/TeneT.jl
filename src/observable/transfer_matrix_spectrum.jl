@@ -371,22 +371,27 @@ function _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
     HB = similar(B)
     left_B = _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
                                 partner_row, ifparallel, forloop_iter)
+    synchronize(left_B[1])
     right_B = _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
                                   partner_row, ifparallel, forloop_iter)
+    synchronize(right_B[1])
 
     @inbounds for j in 1:Nj
         normalization = prod(Mn[:, j])
         HB[j] = ACmap(1, B[j], FL[:, j], FR[:, j], M[:, j];
                       ifparallel, forloop_iter)
+        synchronize(HB[j])
         vec(HB[j]) ./= normalization
 
         term = ACmap(1, AR[1, j], [left_B[j], FL[2:end, j]...],
                      FR[:, j], M[:, j]; ifparallel, forloop_iter)
+        synchronize(term)
         HB[j] = _tm_add_normalized(HB[j], term, normalization)
 
         term = ACmap(1, AL[1, j], FL[:, j],
                      [right_B[j], FR[2:end, j]...],
                      M[:, j]; ifparallel, forloop_iter)
+        synchronize(term)
         HB[j] = _tm_add_normalized(HB[j], term, normalization)
     end
     return HB
