@@ -11,8 +11,6 @@
 #SBATCH --array=0-1
 
 source /etc/profile
-source /etc/profile.d/modules.sh
-module load GDRCopy/2.4.4-GCCcore-14.2.0 UCX-CUDA/1.18.0-GCCcore-14.2.0-CUDA-12.8.0 OpenMPI/5.0.7-GCC-14.2.0
 set -euo pipefail
 
 WD=/sofia/scratch/pilot/pilot_2026_0002/xz
