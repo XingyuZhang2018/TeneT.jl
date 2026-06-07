@@ -40,6 +40,18 @@ function _tm_bloch_phase(k)
     return abs(imag(phase)) <= tolerance ? real(phase) : phase
 end
 
+function _tm_pack_excitation(parts)
+    isempty(parts) && return Float64[]
+    result = similar(vec(first(parts)), sum(length, parts))
+    offset = 1
+    for part in parts
+        count = length(part)
+        copyto!(result, offset, vec(part), 1, count)
+        offset += count
+    end
+    return result
+end
+
 function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
     return leftenv(ALu, ALd, M, FL; alg=params.boundary_alg)
 end
@@ -414,7 +426,6 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
                 zip(excitation_offsets, excitation_lengths, excitation_shapes)]
     end
 
-    pack_excitation(parts) = reduce(vcat, vec.(parts))
     X = atype(rand(excitation_type, tangent_dimension))
 
     function effective_map(x)
@@ -438,7 +449,7 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
                      else
                          atype(zeros(map_type, 0, boundary_χ))
                      end for j in 1:Nj]
-        return pack_excitation(projected)
+        return _tm_pack_excitation(projected)
     end
 
     eigenvalues, _, info = eigsolve(effective_map, X, n, :LM;

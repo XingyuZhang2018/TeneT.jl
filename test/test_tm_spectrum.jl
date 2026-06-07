@@ -62,6 +62,19 @@
         @test TeneT._tm_bloch_phase(0.0) isa Real
         @test TeneT._tm_bloch_phase(pi) isa Real
         @test TeneT._tm_bloch_phase(0.2pi) isa Complex
+
+        parts = [reshape(ComplexF64[1 + 2im, 3 + 4im], 1, 2),
+                 reshape(ComplexF64[5 + 6im, 7 + 8im], 2, 1)]
+        @test TeneT._tm_pack_excitation(parts) ==
+              ComplexF64[1 + 2im, 3 + 4im, 5 + 6im, 7 + 8im]
+
+        if CUDA.functional()
+            gpu_parts = CuArray.(parts)
+            packed = TeneT._tm_pack_excitation(gpu_parts)
+            @test packed isa CuArray{ComplexF64, 1}
+            @test Array(packed) ==
+                  ComplexF64[1 + 2im, 3 + 4im, 5 + 6im, 7 + 8im]
+        end
     end
 
     @testset "export and input guards" begin
