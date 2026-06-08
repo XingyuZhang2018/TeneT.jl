@@ -118,7 +118,7 @@ function write_outputs(results)
     return nothing
 end
 
-grid = collect(-1.0:0.2:1.0)
+grid = collect(-1.0:0.1:1.0)
 compute_order = [0.0; filter(k -> !iszero(k), grid)]
 results = Dict{Float64, Vector{Float64}}()
 
