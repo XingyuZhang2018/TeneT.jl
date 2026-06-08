@@ -55,6 +55,11 @@
         # Conjugate
         Sc = conj(S1)
         @test Array(Sc[1,1]) ≈ conj(Array(S1[1,1]))
+
+        # Real part
+        Sr = real(S1)
+        @test Sr.pattern == S1.pattern
+        @test Array(Sr[1,1]) ≈ real.(Array(S1[1,1]))
     end
 
     @testset "rmul! and axpy!" for atype in ATYPES

@@ -31,9 +31,6 @@ _tm_forloop_iter(params) =
 
 _tm_partner_row(::iPEPSOptimize, i, Ni) = mod1(i + 1, Ni)
 
-_tm_real_normalizations(values::StructArray) =
-    StructArray(real.(values.data), values.pattern)
-
 function _tm_bloch_phase(k)
     phase = cis(k)
     tolerance = 16eps(typeof(real(phase)))
@@ -62,49 +59,12 @@ function _tm_promote_like(array, reference)
     return promoted
 end
 
-function _tm_leftenv(ALu, ALd, M, FL, params::iPEPSOptimize)
-    return leftenv(ALu, ALd, M, FL; alg=params.boundary_alg)
-end
+_tm_k_filename(k::Rational) = "$(numerator(k))_over_$(denominator(k))"
+_tm_k_filename(k::Real) = string(k)
 
-function _tm_rightenv(ARu, ARd, M, FR, params::iPEPSOptimize)
-    return rightenv(ARu, ARd, M, FR; alg=params.boundary_alg)
-end
-
-const _TM_K_FILENAME_MAX_BYTES = 95
-const _TM_K_FILENAME_PREFIX_BYTES = 72
-
-_tm_k_string(k::Rational) = "$(numerator(k))_over_$(denominator(k))"
-_tm_k_string(k::Real) =
-    replace(string(k), r"""[<>:"/\\|?*\x00-\x1f]""" => "_")
-
-function _tm_filename_hash(value)
-    hash = UInt64(0xcbf29ce484222325)
-    for byte in codeunits(value)
-        hash = (hash ⊻ UInt64(byte)) * UInt64(0x00000100000001b3)
-    end
-    return string(hash; base=16, pad=16)
-end
-
-function _tm_filename_prefix(value, maxbytes)
-    last_valid = 0
-    for index in eachindex(value)
-        nextind(value, index) - 1 > maxbytes && break
-        last_valid = index
-    end
-    return last_valid == 0 ? "" : value[firstindex(value):last_valid]
-end
-
-function _tm_k_filename(k::Real)
-    value = _tm_k_string(k)
-    ncodeunits(value) <= _TM_K_FILENAME_MAX_BYTES && return value
-
-    prefix = _tm_filename_prefix(value, _TM_K_FILENAME_PREFIX_BYTES)
-    return "$(prefix)_$(_tm_filename_hash(value))"
-end
-
-function _write_tm_spectrum(Δ, k, D, χ, params::iPEPSOptimize; ifdomainwall)
+function _write_tm_spectrum(Δ, k, D, params::iPEPSOptimize; ifdomainwall)
     sector = ifdomainwall ? "non-trivial" : "trivial"
-    folder = joinpath(params.folder, "D$(D)_χ$(χ)", "TM_spectrum", sector)
+    folder = joinpath(params.folder, "D$(D)", "TM_spectrum", sector)
     isdir(folder) || mkpath(folder)
     obs_log = joinpath(folder, "k$(_tm_k_filename(k)).log")
     open(obs_log, "w") do io
@@ -217,15 +177,19 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
             @warn "using domain-wall ansatz but overlap = $overlap_norm"
         end
 
-        _, left_rl = _tm_leftenv(AR2, conj(AL1), M, FL1, params)
-        _, right_rl = _tm_rightenv(AR2, conj(AL1), M, FR2, params)
-        _, left_lr = _tm_leftenv(AL1, conj(AR2), M, FL1, params)
-        λs, right_lr = _tm_rightenv(AL1, conj(AR2), M, FR2, params)
+        _, left_rl = leftenv(AR2, conj(AL1), M, FL1;
+                             alg=params.boundary_alg)
+        _, right_rl = rightenv(AR2, conj(AL1), M, FR2;
+                               alg=params.boundary_alg)
+        _, left_lr = leftenv(AL1, conj(AR2), M, FL1;
+                             alg=params.boundary_alg)
+        λs, right_lr = rightenv(AL1, conj(AR2), M, FR2;
+                                alg=params.boundary_alg)
         _tm_normalize_environments!(FL2, FR2, C2,
                                     left_rl, right_rl, left_lr, right_lr,
                                     params)
 
-        Mn = _tm_real_normalizations(λs)
+        Mn = real(λs)
         @inbounds for p in 1:length(AL1)
             i, j = Tuple(findfirst(==(p), AL1.pattern))
             ir = _tm_partner_row(params, i, Ni)
@@ -246,14 +210,15 @@ function _tm_excitation_env(A, χ, params::iPEPSOptimize;
     AC = ALCtoAC(AL, C)
     Ni, _ = size(AL)
 
-    _, left_rl = _tm_leftenv(AR, conj(AL), M, FL, params)
-    _, right_rl = _tm_rightenv(AR, conj(AL), M, FR, params)
-    _, left_lr = _tm_leftenv(AL, conj(AR), M, FL, params)
-    λs, right_lr = _tm_rightenv(AL, conj(AR), M, FR, params)
+    _, left_rl = leftenv(AR, conj(AL), M, FL; alg=params.boundary_alg)
+    _, right_rl = rightenv(AR, conj(AL), M, FR; alg=params.boundary_alg)
+    _, left_lr = leftenv(AL, conj(AR), M, FL; alg=params.boundary_alg)
+    λs, right_lr = rightenv(AL, conj(AR), M, FR;
+                            alg=params.boundary_alg)
     _tm_normalize_environments!(FL, FR, C,
                                 left_rl, right_rl, left_lr, right_lr, params)
 
-    Mn = _tm_real_normalizations(λs)
+    Mn = real(λs)
     @inbounds for p in 1:length(AL)
         i, j = Tuple(findfirst(==(p), AL.pattern))
         ir = _tm_partner_row(params, i, Ni)
@@ -295,6 +260,22 @@ function _tm_left_project(EL, FR, E)
     return sum(overlap) .* E
 end
 
+"""
+    _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn; ...)
+
+Sum all contractions in which the tangent tensor `B` lies to the right of
+the open left environment. The diagram also shows the tensor index layout:
+
+```text
+ ┌───B────┬─             a ────┬──── c
+ │   │    │              │     b     │
+ E───M────s─             ├─ d ─┼─ e ─┤
+ │   │    │              │     g     │
+ └───AL*──┴─             f ────┴──── h
+```
+
+The Bloch phase closes the geometric series across repeated unit cells.
+"""
 function _tm_left_resolvent(k, FL, B, AL, AR, left_rl, right_rl, M, Mn;
                             partner_row, ifparallel, forloop_iter)
     _, Nj = size(FL)
@@ -348,6 +329,22 @@ function _tm_right_project(FR, E, EL)
     return sum(overlap) .* FR
 end
 
+"""
+    _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn; ...)
+
+Sum all contractions in which the tangent tensor `B` lies to the left of
+the open right environment. The diagram also shows the tensor index layout:
+
+```text
+─┬───B───┐               a ────┬──── c
+ │   │   │               │     b     │
+─s───M───Ǝ               ├─ d ─┼─ e ─┤
+ │   │   │               │     g     │
+─┴───AR*─┘               f ────┴──── h
+```
+
+The Bloch phase closes the geometric series across repeated unit cells.
+"""
 function _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
                              partner_row, ifparallel, forloop_iter)
     _, Nj = size(FR)
@@ -374,6 +371,47 @@ function _tm_right_resolvent(k, FR, B, AL, AR, left_lr, right_lr, M, Mn;
     return result
 end
 
+"""
+    _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
+                      left_rl, right_rl, left_lr, right_lr; ...)
+
+Apply the effective tangent-space transfer map. It contains the local
+contraction and the two nonlocal geometric-series contributions:
+
+```text
+1. B and the output tangent tensor on the same site of M
+
+    ┌───Bu──┐
+    │   │   │
+    E───M───Ǝ
+    │   │   │
+    └───Bd──┘
+
+2. B and the output tangent tensor on different sites
+
+    ┌───Bu──┬───A───┐
+    │   │   │   │   │
+    E───M──s2───M───Ǝ
+    │   │   │   │   │
+    └───A*──┴───Bd──┘
+
+    ┌───A───┬───Bu──┐
+    │   │   │   │   │
+    E───M──s3───M───Ǝ
+    │   │   │   │   │
+    └───Bd──┴───A*──┘
+
+s2 is the Bloch-weighted geometric series:
+
+      ───         ─┬─              ─┬──┬─              ─┬──┬──┬─
+                   │                │  │                │  │  │
+ eⁱ⁰ᵏ ─── + eⁱ¹ᵏ  ─┼─    +    eⁱ²ᵏ ─┼──┼─    +    eⁱ³ᵏ ─┼──┼──┼─ + ...
+                   │                │  │                │  │  │
+      ───         ─┴─              ─┴──┴─              ─┴──┴──┴─
+```
+
+The right contribution `s3` is the reflected series.
+"""
 function _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
                            left_rl, right_rl, left_lr, right_lr;
                            partner_row, ifparallel, forloop_iter)
@@ -386,10 +424,12 @@ function _tm_effective_map(k, AL, AR, B, M, Mn, FL, FR,
 
     @inbounds for j in 1:Nj
         normalization = prod(Mn[:, j])
+        # Local term: input and output tangent tensors occupy the same site.
         HB[j] = ACmap(1, B[j], FL[:, j], FR[:, j], M[:, j];
                       ifparallel, forloop_iter)
         vec(HB[j]) ./= normalization
 
+        # Nonlocal terms: the tangent tensors are separated to the left/right.
         right_tensor = _tm_promote_like(AR[1, j], left_B[j])
         term = ACmap(1, right_tensor, [left_B[j], FL[2:end, j]...],
                      FR[:, j], M[:, j]; ifparallel, forloop_iter)
@@ -413,7 +453,7 @@ This implementation supports full and one-sided `VUMPS{General}` modes on
 horizontal and vertical honeycomb brickwall lattices, in either the trivial
 or domain-wall sector.
 The returned gaps are also written below
-`params.folder/D<bond>_χ<boundary>/TM_spectrum`.
+`params.folder/D<bond>/TM_spectrum`.
 """
 function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
                      restriction_ipeps=_restriction_ipeps,
@@ -471,6 +511,6 @@ function TM_spectrum(n::Int, k::Real, A, χ, params::iPEPSOptimize;
         @warn "TM_spectrum eigsolve converged $(info.converged) of $n eigenvalues"
     Δ = -log.(abs.(eigenvalues[1:n]))
     D = _ipeps_bond_dimension(A)
-    _write_tm_spectrum(Δ, k, D, χ, params; ifdomainwall)
+    _write_tm_spectrum(Δ, k, D, params; ifdomainwall)
     return Δ
 end

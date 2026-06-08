@@ -56,6 +56,7 @@ CUDA.CuArray(S::StructArray) = StructArray(CUDA.CuArray.(S.data), S.pattern)
 AMDGPU.ROCArray(S::StructArray) = StructArray(AMDGPU.ROCArray.(S.data), S.pattern)
 LinearAlgebra.norm(S::StructArray) = norm(S.data)
 LinearAlgebra.norm(a::Nothing) = 0
+Base.real(S::StructArray) = StructArray(real.(S.data), S.pattern)
 LinearAlgebra.conj(S::StructArray) = StructArray(conj(S.data), S.pattern)
 Base.isapprox(S::StructArray, T::StructArray; atol=1e-12) = ==(S.pattern, T.pattern) && isapprox(S.data, T.data; atol=atol)
 Base.:+(A::StructArray, B::StructArray) = StructArray(A.data + B.data, A.pattern)

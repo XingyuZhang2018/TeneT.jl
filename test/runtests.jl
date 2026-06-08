@@ -175,6 +175,7 @@ end
     include("test_autodiff.jl")
     include("test_ipeps.jl")
     include("test_tm_spectrum.jl")
+    include("test_tm_spectrum_plot.jl")
     include("test_patch.jl")
 
     if get(ENV, "TENET_TEST_MPI", "false") == "true"

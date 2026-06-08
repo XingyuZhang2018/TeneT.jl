@@ -54,7 +54,7 @@
     @testset "real TM normalizations" begin
         λs = TeneT.StructArray(ComplexF64[1 + 1e-14im, 2 - 2e-14im],
                                [1 2; 2 1])
-        Mn = TeneT._tm_real_normalizations(λs)
+        Mn = real(λs)
 
         @test eltype(Mn.data) <: Real
         @test Mn.pattern == λs.pattern
@@ -158,19 +158,19 @@
             alg=VUMPS{General}(; verbosity=0, ifupdown=false),
         )
 
-        TeneT._write_tm_spectrum([0.125, 0.25], 0.0, 2, 4, params;
+        TeneT._write_tm_spectrum([0.125, 0.25], 0.0, 2, params;
                                  ifdomainwall=false)
-        trivial = joinpath(params.folder, "D2_χ4", "TM_spectrum",
+        trivial = joinpath(params.folder, "D2", "TM_spectrum",
                            "trivial", "k0.0.log")
         @test isfile(trivial)
         @test readlines(trivial) == ["0.125000000000000",
                                      "0.250000000000000"]
 
-        rational_folder = joinpath(params.folder, "D3_χ5", "TM_spectrum",
+        rational_folder = joinpath(params.folder, "D3", "TM_spectrum",
                                    "trivial")
         rational = joinpath(rational_folder, "k1_over_3.log")
         rational_result = try
-            TeneT._write_tm_spectrum([0.375], 1 // 3, 3, 5, params;
+            TeneT._write_tm_spectrum([0.375], 1 // 3, 3, params;
                                      ifdomainwall=false)
         catch e
             e
@@ -185,31 +185,9 @@
         @test TeneT._tm_k_filename(0.0) == "0.0"
         @test TeneT._tm_k_filename(1 // 3) == "1_over_3"
 
-        large_k = setprecision(BigFloat, 4096) do
-            BigFloat(1) / BigFloat(3)
-        end
-        large_name = TeneT._tm_k_filename(large_k)
-        @test large_name == TeneT._tm_k_filename(large_k)
-        @test ncodeunits("k$large_name.log") <= 100
-
-        large_folder = joinpath(params.folder, "D6_χ7", "TM_spectrum",
-                                "trivial")
-        large_path = joinpath(large_folder, "k$large_name.log")
-        large_result = try
-            TeneT._write_tm_spectrum([0.625], large_k, 6, 7, params;
-                                     ifdomainwall=false)
-        catch e
-            e
-        end
-        @test large_result == large_path
-        @test isfile(large_path)
-        if isfile(large_path)
-            @test readlines(large_path) == ["0.625000000000000"]
-        end
-
-        TeneT._write_tm_spectrum([0.5], 0.0, 2, 4, params;
+        TeneT._write_tm_spectrum([0.5], 0.0, 2, params;
                                  ifdomainwall=true)
-        nontrivial = joinpath(params.folder, "D2_χ4", "TM_spectrum",
+        nontrivial = joinpath(params.folder, "D2", "TM_spectrum",
                               "non-trivial", "k0.0.log")
         @test isfile(nontrivial)
         @test readlines(nontrivial) == ["0.500000000000000"]
@@ -240,7 +218,7 @@
             Δ = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=false)
             @test length(Δ) == 1
             @test all(isfinite, Δ)
-            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+            @test isfile(joinpath(params.folder, "D2", "TM_spectrum",
                                   "trivial", "k0.0.log"))
             @test isfile(joinpath(params.folder, "D2", "environment",
                                   "χ4.jld2"))
@@ -248,7 +226,7 @@
             Δdw = TM_spectrum(1, 0.0, A, χ, params; ifdomainwall=true)
             @test length(Δdw) == 1
             @test all(isfinite, Δdw)
-            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+            @test isfile(joinpath(params.folder, "D2", "TM_spectrum",
                                   "non-trivial", "k0.0.log"))
             for file in ("χ4_1.jld2", "χ4_2.jld2")
                 @test isfile(joinpath(params.folder, "D2", "environment",
@@ -311,7 +289,7 @@
                             restriction_ipeps, ifdomainwall=false)
             @test length(Δ) == 1
             @test all(isfinite, Δ)
-            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+            @test isfile(joinpath(params.folder, "D2", "TM_spectrum",
                                   "trivial", "k0.0.log"))
             @test isfile(joinpath(params.folder, "D2", "environment",
                                   "χ4.jld2"))
@@ -320,7 +298,7 @@
                               restriction_ipeps, ifdomainwall=true)
             @test length(Δdw) == 1
             @test all(isfinite, Δdw)
-            @test isfile(joinpath(params.folder, "D2_χ4", "TM_spectrum",
+            @test isfile(joinpath(params.folder, "D2", "TM_spectrum",
                                   "non-trivial", "k0.0.log"))
             for file in ("χ4_1.jld2", "χ4_2.jld2")
                 path = joinpath(params.folder, "D2", "environment", file)

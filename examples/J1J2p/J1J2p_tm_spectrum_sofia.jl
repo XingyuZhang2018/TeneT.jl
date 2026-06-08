@@ -1,6 +1,5 @@
 using TeneT
 using CUDA
-using CairoMakie
 using JLD2
 using LinearAlgebra
 using Random
@@ -75,12 +74,12 @@ A = CuArray(JLD2.load(checkpoint, "bcipeps"))
 A = oneside_restriction(A)
 D = TeneT._ipeps_bond_dimension(A)
 ifdomainwall = sector == "non-trivial"
-result_dir = joinpath(run_root, "D$(D)_χ$(chi)", "TM_spectrum", sector)
+result_dir = joinpath(run_root, "D$(D)", "TM_spectrum", sector)
 mkpath(result_dir)
 
 function spectrum_log(k_over_pi)
     filename = "k$(TeneT._tm_k_filename(k_over_pi)).log"
-    return joinpath(run_root, "D$(D)_χ$(chi)", "TM_spectrum", sector, filename)
+    return joinpath(run_root, "D$(D)", "TM_spectrum", sector, filename)
 end
 
 function read_completed_point(k_over_pi)
@@ -102,19 +101,14 @@ function write_outputs(results)
         end
     end
 
-    fig = Figure(size=(960, 640))
-    ax = Axis(
-        fig[1, 1],
+    plot_TM_spectrum(
+        results;
+        save_path=joinpath(result_dir, "spectrum.png"),
+        xlimits=(-1, 1),
         xlabel="k / pi",
         ylabel="gap",
         title="J1-J2p honeycomb, J2p=0.5, D=$D, chi=$chi, $sector",
     )
-    for band in 1:nlevels
-        values = [results[k][band] for k in ordered_k]
-        scatterlines!(ax, ordered_k, values; markersize=6, linewidth=1.5)
-    end
-    xlims!(ax, -1, 1)
-    save(joinpath(result_dir, "spectrum.png"), fig)
     return nothing
 end
 

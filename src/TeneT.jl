@@ -118,6 +118,7 @@ include("observable/correlation_length.jl")
 include("observable/wp_order.jl")
 include("observable/transfer_matrix_spectrum.jl")
 include("visualization/plot_obs.jl")
+include("visualization/plot_tm_spectrum.jl")
 include("ipeps_optimize/optimize.jl")
 
 # ============================================================================
@@ -137,6 +138,6 @@ export C4v_restriction, local_min_norm
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
 export init_env, leading_boundary
 export GradientOptimize, optimise_ipeps
-export observable, TM_spectrum
+export observable, TM_spectrum, plot_TM_spectrum
 
 end # module TeneT
