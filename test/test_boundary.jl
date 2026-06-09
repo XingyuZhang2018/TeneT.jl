@@ -242,11 +242,12 @@
 
         # ==================================================================
         # ObsEnv(::VUMPSRuntime, M, VUMPS{General}(ifupdown=false), model)
-        # returns OnesideVUMPSEnv. Exercises the one-sided env shape via the
-        # unified General algorithm (the old VUMPS{Oneside} path).
+        # uses a model trait to select OnesideVUMPSEnv only for models that
+        # need it. Exercises the one-sided env shape via the unified General
+        # algorithm (the old VUMPS{Oneside} path).
         # ==================================================================
-        @testset "ObsEnv VUMPS{General} ifupdown=false + model -> OnesideVUMPSEnv" begin
-            using TeneT: J1J2p, init_env, leading_boundary, ObsEnv, OnesideVUMPSEnv
+        @testset "ObsEnv VUMPS{General} ifupdown=false model trait selects env shape" begin
+            using TeneT: Heisenberg, J1J2p, init_env, leading_boundary, ObsEnv, OnesideVUMPSEnv
             Random.seed!(42)
             χ, D = 4, 2
             pattern = [1 2; 2 1]
@@ -262,7 +263,7 @@
             @test rt_conv isa TeneT.VUMPSRuntime
             @test isfinite(err) || err == 0
 
-            # With `model` passed → OnesideVUMPSEnv (uses obs_index trait)
+            # J1J2p :brickwall_v opts into OnesideVUMPSEnv (uses obs_index trait)
             env = ObsEnv(rt_conv, M, alg, m)
             @test env isa OnesideVUMPSEnv
             @test size(env.AC) == size(M)
@@ -275,6 +276,13 @@
             # Without `model` → legacy VUMPSEnv shape (backward compat)
             env_legacy = ObsEnv(rt_conv, M, alg)
             @test env_legacy isa TeneT.VUMPSEnv
+
+            # Passing an ordinary model should still keep the legacy VUMPSEnv
+            # shape; `model` is needed for obs_index only, not as a blanket
+            # opt-in to OnesideVUMPSEnv.
+            m_default = Heisenberg(lattice=Square(), Jx=1.0, Jy=1.0, Jz=1.0)
+            env_default_model = ObsEnv(rt_conv, M, alg, m_default)
+            @test env_default_model isa TeneT.VUMPSEnv
         end
 
         # ==================================================================

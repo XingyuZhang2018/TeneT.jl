@@ -38,3 +38,4 @@ end
 # is u-d self-symmetric (A[l,d,r,u,p] = A[l,u,r,d,p]), so down at row i equals
 # up at row i (no reflection). See docs/plans/2026-05-12-vertical-brickwall-oneside-design.md S2.2.
 obs_index(::Type{<:J1J2p{Honeycomb{:brickwall_v}}}, i, Ni) = i
+uses_oneside_obs_env(::Type{<:J1J2p{Honeycomb{:brickwall_v}}}) = true

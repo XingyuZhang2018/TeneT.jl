@@ -16,3 +16,13 @@ Per-model overrides go in the model's `order_init.jl`. For example,
 `ir = i` because each iPEPS tensor is u-d self-symmetric.
 """
 obs_index(::Type{<:HamiltonianModel}, i, Ni) = Ni + 1 - i
+
+"""
+    uses_oneside_obs_env(::Type{<:Model}) -> Bool
+
+Whether a single-runtime `ObsEnv` should return `OnesideVUMPSEnv` instead of
+the legacy `VUMPSEnv` shape. This is separate from `obs_index`: ordinary
+models may still pass through `model` to select the default reflected row
+without opting into the memory-saving one-sided environment layout.
+"""
+uses_oneside_obs_env(::Type{<:HamiltonianModel}) = false

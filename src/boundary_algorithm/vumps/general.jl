@@ -1049,12 +1049,13 @@ Build an observation environment from a single VUMPS runtime (i.e. when
 `alg.ifupdown == false`, so no separate down runtime was converged).
 
 Two return shapes:
-- If `model === nothing`, returns the legacy `VUMPSEnv` filling ACd/ARd with
-  AC/AR (the U-D-symmetric default; the down row partner is implicit `Ni+1-i`).
-- If a `model` is given, returns an `OnesideVUMPSEnv` (no ACd/ARd; down row
-  partner determined per-call by `obs_index(typeof(model), i, Ni)`). Used by
-  `optimise_ipeps` / `observable` / `precondition` to opt the J1J2p
-  `:brickwall_v` self-symmetric model into the memory-saving env shape.
+- If `model === nothing` or `uses_oneside_obs_env(typeof(model)) == false`,
+  returns the legacy `VUMPSEnv` filling ACd/ARd with AC/AR (the U-D-symmetric
+  default; the down row partner is implicit `Ni+1-i`).
+- If `uses_oneside_obs_env(typeof(model))`, returns an `OnesideVUMPSEnv` (no
+  ACd/ARd; down row partner determined per-call by `obs_index(typeof(model), i,
+  Ni)`). Used by `optimise_ipeps` / `observable` / `precondition` to opt the
+  J1J2p `:brickwall_v` self-symmetric model into the memory-saving env shape.
 """
 function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt.FL, rt.FR])
@@ -1062,10 +1063,10 @@ function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
     _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg, model)
-    if model === nothing
-        return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
-    else
+    if model !== nothing && uses_oneside_obs_env(typeof(model))
         return OnesideVUMPSEnv(AC, AR, FL, FR, FLo, FRo)
+    else
+        return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
     end
 end
 
