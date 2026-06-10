@@ -82,10 +82,11 @@ G[a,b,c,g,h,l] = H[a,e,f,j,k,l] · M1[e,j,g,b,p] · M2[f,k,h,c,p]      # fold, o
 
 At step k = 0..N2-1, rank (r1,r2) holds FL block `t_k = mod(r2+k, N2)`, contracts
 it with the local ALd slice, accumulates into the resident **pre-fold** block H
-(size (χ/N1)·D⁴·(χ/N2)), then ring-shifts the FL block along `row_comm` with
-double buffering. After a full cycle the FL blocks are back home (the backward
-replay relies on this invariant; the caller's input block is never mutated —
-shifts operate on internal copies).
+(size (χ/N1)·D⁴·(χ/N2)), then ring-shifts the FL block along `row_comm` into a
+fresh exact-size receive buffer. The forward performs N2−1 shifts (the final
+return-home shift is elided); the backward replays the rotation from the
+captured input block, which is the home block by definition. The caller's
+input block is never mutated — shifts operate on internal copies.
 
 The M1/M2 fold happens **once, after the ring** — its cost is independent of the
 i-block extent, so folding inside the loop would redo it N2 times (overhead

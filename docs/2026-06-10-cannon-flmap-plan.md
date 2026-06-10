@@ -17,7 +17,13 @@
 - All MPI tests rely on **identical random tensors on every rank**: `Random.seed!` with a fixed value immediately before each `rand` group. Never branch on `rank` before generating test tensors.
 - Local tests run on **CPU Arrays** (CUDA-aware MPI does not exist on Windows MS-MPI). GPU coverage comes from the Sofia driver.
 - `synchronize(x)` (TeneT's, `src/utils/gpu.jl:108`) is a no-op for Array, stream-sync for CuArray. Call it before every `MPI.Isend`/after compute, exactly as the existing collectives do.
-- MPI tags: this feature uses `_TAG_BASE + 700/710/720/730` (existing code stops at 600).
+- MPI tags: this feature uses `_TAG_BASE + 700/710/720/730`. Isolation from the
+  existing collectives comes from distinct communicators (`row_comm`/`col_comm`
+  vs `COMM_WORLD`/`local_comm`), not from numeric tag spacing — the existing
+  `_TAG_BASE + 600 + step` ring crosses 700 beyond ~100 ranks.
+- NOTE: code snippets below reflect the state at each task's dispatch; later
+  review fixes (fold-after-ring, single-sync reduce-scatter) are in git
+  history and the design doc, which is authoritative.
 
 ---
 

@@ -4,7 +4,7 @@
 using MPI, CUDA, Zygote, LinearAlgebra, Random, Printf
 using TeneT
 using TeneT: cannon_grid, cannon_scatter, cannon_gather, FLmap_cannon,
-             FLmap, FLmap_parallel, split_ranges, synchronize
+             FLmap, FLmap_parallel, split_ranges
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
