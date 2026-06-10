@@ -6,9 +6,10 @@
 #   result block:  result[d_range(r1), :, :, l_range(r2)]
 # ALu / ALd / M are fully replicated (AL distribution comes with the later
 # leftenv integration round). Stage 1 rotates FL blocks along the row ring
-# while accumulating the stationary intermediate G; stage 2 contracts with
-# ALu and reduce-scatters along the column. Output distribution = input
-# distribution, so the map iterates without redistribution.
+# while accumulating the pre-fold intermediate H; M is folded once after the
+# ring, then stage 2 contracts with ALu and reduce-scatters along the column.
+# Output distribution = input distribution, so the map iterates without
+# redistribution.
 
 struct CannonGrid
     N1::Int
@@ -130,4 +131,116 @@ function cannon_gather(blk::AbstractArray, grid::CannonGrid)
         view(full, inds...) .= seg
     end
     return full
+end
+
+# ─── Ring / column communication ──────────────────────────────────────────
+
+# Send `cur` to the left row neighbor (r2-1) and receive the next block from
+# the right (r2+1). Fresh exact-size buffer per step (uneven χ blocks differ
+# in size; CUDA pool makes the allocation cheap). Never mutates `cur`.
+function _cannon_row_shift(cur, grid::CannonGrid, recv_size; tag = _TAG_BASE + 700)
+    dest = mod(grid.r2 - 1, grid.N2)
+    src  = mod(grid.r2 + 1, grid.N2)
+    recv = similar(cur, recv_size)
+    synchronize(cur)
+    req_r = MPI.Irecv!(recv, grid.row_comm; source = src, tag = tag)
+    req_s = MPI.Isend(cur, grid.row_comm; dest = dest, tag = tag)
+    MPI.Waitall([req_s, req_r])
+    return recv
+end
+
+# Sum `partial` (full d leg, local l block) over the column and keep the local
+# d block. Direct algorithm: each rank sends every other rank its chunk and
+# accumulates the N1-1 contributions for its own chunk. Chunk extraction via
+# getindex (allocating) keeps MPI buffers contiguous.
+function _cannon_col_reduce_scatter(partial, grid::CannonGrid, d_rs)
+    N1, r1 = grid.N1, grid.r1
+    acc = partial[d_rs[r1 + 1], :, :, :]
+    N1 == 1 && return acc
+    synchronize(partial)
+    reqs = MPI.Request[]
+    recvbufs = Vector{typeof(acc)}(undef, N1)
+    for j in 0:N1-1
+        j == r1 && continue
+        rb = similar(acc)
+        recvbufs[j + 1] = rb
+        push!(reqs, MPI.Irecv!(rb, grid.col_comm; source = j, tag = _TAG_BASE + 710))
+    end
+    sendbufs = Vector{Any}(undef, N1)   # keep alive until Waitall
+    for j in 0:N1-1
+        j == r1 && continue
+        sb = partial[d_rs[j + 1], :, :, :]
+        synchronize(sb)
+        sendbufs[j + 1] = sb
+        push!(reqs, MPI.Isend(sb, grid.col_comm; dest = j, tag = _TAG_BASE + 710))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N1-1
+        j == r1 && continue
+        acc .+= recvbufs[j + 1]
+    end
+    return acc
+end
+
+# ─── Forward ──────────────────────────────────────────────────────────────
+
+# Shared by FLmap_cannon and its rrule. Returns (result_blk, H); the rrule
+# captures the pre-fold H for the composite fold∘stage2 pullback.
+function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
+    N1, N2, r1, r2 = grid.N1, grid.N2, grid.r1, grid.r2
+    χ = size(ALu, 1)
+    a_rs = split_ranges(χ, N1)
+    i_rs = split_ranges(χ, N2)
+    l_rng = i_rs[r2 + 1]
+    @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == length(l_rng) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
+
+    # Stage 1: rotate FL blocks along the row ring, accumulate the stationary
+    # pre-fold intermediate H (M is folded once after the ring).
+    Dj, Dk = size(ALd, 2), size(ALd, 3)
+    H = similar(FL_blk, length(a_rs[r1 + 1]), size(FL_blk, 2), size(FL_blk, 3),
+                Dj, Dk, length(l_rng))
+    H .= 0
+    cur = FL_blk
+    for k in 0:N2-1
+        t = mod(r2 + k, N2)
+        ALd_slice = view(ALd, i_rs[t + 1], :, :, l_rng)
+        _cannon_stage1_add!(H, cur, ALd_slice)
+        if k < N2 - 1
+            t_next = mod(r2 + k + 1, N2)
+            cur = _cannon_row_shift(cur, grid,
+                (length(a_rs[r1 + 1]), size(FL_blk, 2), size(FL_blk, 3), length(i_rs[t_next + 1])))
+        end
+    end
+
+    # Fold M once, contract a/b/c with the local row slice of replicated ALu,
+    # then reduce-scatter the full-d partial along the column.
+    G = _cannon_fold(H, M1, M2)
+    ALu_slice = view(ALu, a_rs[r1 + 1], :, :, :)
+    partial = _cannon_stage2(G, ALu_slice)
+    result = _cannon_col_reduce_scatter(partial, grid, a_rs)
+    return result, H
+end
+
+"""
+    FLmap_cannon(FL_blk, ALu, ALd, M, grid; inner_etype=nothing) -> result_blk
+
+Distributed FLmap on an N1×N2 Cannon grid. `FL_blk` and the returned block
+follow the convention: first χ leg split N1-ways by r1, last χ leg split
+N2-ways by r2. `M` is a leg5 tensor or an `(M1, M2)` tuple; ALu/ALd/M are
+replicated on every rank. Collective over `grid.comm`.
+See docs/2026-06-10-cannon-flmap-design.md.
+"""
+function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; inner_etype = nothing)
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    T_orig = eltype(FL_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        FL_blk = _downcast_eltype(inner_etype, FL_blk)
+        ALu = _downcast_eltype(inner_etype, ALu)
+        ALd = _downcast_eltype(inner_etype, ALd)
+        M1 = _downcast_eltype(inner_etype, M1)
+        M2 = _downcast_eltype(inner_etype, M2)
+    end
+    result, _ = _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid)
+    return do_cast ? T_orig.(result) : result
 end

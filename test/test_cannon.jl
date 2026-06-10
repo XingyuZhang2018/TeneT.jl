@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2
+using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -65,6 +65,26 @@ end
         @test blk == FL[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
         FL2 = cannon_gather(blk, g)
         @test FL2 ≈ FL
+    end
+end
+
+@testset "FLmap_cannon forward" begin
+    for (N1, N2) in ((2, 2), (1, 4), (4, 1)), χ in (16, 18)
+        D = 3
+        FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=600 + χ + 10N1)
+        g = cannon_grid(N1, N2)
+        ref = FLmap(FL, ALu, ALd, M1, M2)
+        out_blk = FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g)
+        a_rs = split_ranges(χ, N1); i_rs = split_ranges(χ, N2)
+        @test size(out_blk) == (length(a_rs[g.r1 + 1]), D, D, length(i_rs[g.r2 + 1]))
+        @test cannon_gather(out_blk, g) ≈ ref rtol = 1e-12
+        # single-M entry point (M2 = conj(M1) internally)
+        out1 = cannon_gather(FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, M1, g), g)
+        @test out1 ≈ FLmap(FL, ALu, ALd, M1) rtol = 1e-12
+        # iterability: feed the output block straight back in
+        out2_blk = FLmap_cannon(out_blk, ALu, ALd, (M1, M2), g)
+        ref2 = FLmap(ref, ALu, ALd, M1, M2)
+        @test cannon_gather(out2_blk, g) ≈ ref2 rtol = 1e-11
     end
 end
 
