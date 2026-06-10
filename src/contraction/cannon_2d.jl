@@ -82,3 +82,52 @@ function _cannon_stage2(G, ALu)
     @tensor P[d, g, h, l] := G[a, b, c, g, h, l] * ALu[a, b, c, d]
     return P
 end
+
+# ─── Boundary shims: full ↔ distributed blocks ────────────────────────────
+
+"""
+    cannon_scatter(T_full, grid) -> block
+
+Local block of a replicated tensor: first leg split N1-ways (by r1), last leg
+split N2-ways (by r2). Pure indexing — no communication.
+"""
+function cannon_scatter(T_full::AbstractArray, grid::CannonGrid)
+    n = ndims(T_full)
+    a_rs = split_ranges(size(T_full, 1), grid.N1)
+    i_rs = split_ranges(size(T_full, n), grid.N2)
+    inds = ntuple(j -> j == 1 ? a_rs[grid.r1 + 1] :
+                       (j == n ? i_rs[grid.r2 + 1] : Colon()), n)
+    return T_full[inds...]
+end
+
+"""
+    cannon_gather(blk, grid) -> full
+
+Reassemble the full tensor from all ranks' blocks (allgatherv on flattened
+blocks, then per-block placement). Test/integration shim — not on the hot path.
+"""
+function cannon_gather(blk::AbstractArray, grid::CannonGrid)
+    n = ndims(blk)
+    χ1 = MPI.Allreduce(size(blk, 1), +, grid.col_comm)
+    χ2 = MPI.Allreduce(size(blk, n), +, grid.row_comm)
+    a_rs = split_ranges(χ1, grid.N1)
+    i_rs = split_ranges(χ2, grid.N2)
+    mid = size(blk)[2:n-1]
+    P = grid.N1 * grid.N2
+    counts = Cint[length(a_rs[divrem(r, grid.N2)[1] + 1]) * prod(mid) *
+                  length(i_rs[divrem(r, grid.N2)[2] + 1]) for r in 0:P-1]
+    displs = cumsum([0; counts[1:end-1]])
+    buf = similar(blk, sum(counts))
+    copyto!(view(buf, displs[grid.rank + 1] + 1 : displs[grid.rank + 1] + counts[grid.rank + 1]),
+            vec(blk))
+    allgatherv_p2p!(buf, counts, grid.comm)
+    full = similar(blk, χ1, mid..., χ2)
+    for r in 0:P-1
+        s, t = divrem(r, grid.N2)
+        seg = reshape(view(buf, displs[r + 1] + 1 : displs[r + 1] + counts[r + 1]),
+                      length(a_rs[s + 1]), mid..., length(i_rs[t + 1]))
+        inds = ntuple(j -> j == 1 ? a_rs[s + 1] : (j == n ? i_rs[t + 1] : Colon()), n)
+        view(full, inds...) .= seg
+    end
+    return full
+end

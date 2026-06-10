@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, FLmap, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2
+using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -52,6 +52,20 @@ end
     _cannon_stage1_add!(H2, FL[:, :, :, 1:3], ALd[1:3, :, :, :])
     _cannon_stage1_add!(H2, FL[:, :, :, 4:8], ALd[4:8, :, :, :])
     @test H2 ≈ H rtol = 1e-12
+end
+
+@testset "scatter/gather roundtrip" begin
+    for (N1, N2) in ((2, 2), (1, 4), (4, 1)), χ in (16, 18)   # 18: uneven blocks
+        Random.seed!(500 + χ + 10N1)
+        g = cannon_grid(N1, N2)
+        FL = rand(ComplexF64, χ, 4, 4, χ)
+        blk = cannon_scatter(FL, g)
+        a_rs = split_ranges(χ, N1); i_rs = split_ranges(χ, N2)
+        @test size(blk) == (length(a_rs[g.r1 + 1]), 4, 4, length(i_rs[g.r2 + 1]))
+        @test blk == FL[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
+        FL2 = cannon_gather(blk, g)
+        @test FL2 ≈ FL
+    end
 end
 
 println("rank $rank: test_cannon.jl done")
