@@ -99,10 +99,12 @@ FLOPs exactly serial/P.
 partial[d,g,h, l∈block r2] = G[a,b,c,g,h,l] · ALu[a∈block r1, b,c,d]   # d full-length
 ```
 
-Ring reduce-scatter over the N1 ranks of `col_comm`: sum partials and split along
-`d_range`, leaving rank (r1,r2) with `result[d_range(r1), :, :, l_range(r2)]`.
-d-blocks are strided in column-major memory → stage through a contiguous
-pre-allocated buffer (`_comm_recvbuf` pattern) before each Isend.
+Direct pairwise reduce-scatter over the N1 ranks of `col_comm`: each rank sends
+every peer that peer's d-range chunk (made contiguous by a `getindex` copy) and
+sums the N1−1 incoming contributions for its own chunk — identical per-rank
+volume to a ring reduce-scatter but a single latency step, and the same
+all-to-all pattern `allgatherv_p2p!` Phase 1 already uses intra-node. Rank
+(r1,r2) ends with `result[d_range(r1), :, :, l_range(r2)]`.
 
 ### Cost model (per rank, per map call)
 
