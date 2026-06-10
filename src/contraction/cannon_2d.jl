@@ -23,6 +23,13 @@ end
 
 const _cannon_grid_cache = Ref{Union{Nothing, CannonGrid}}(nothing)
 
+"""
+    cannon_grid(N1, N2; comm=MPI.COMM_WORLD) -> CannonGrid
+
+Build (and cache) the N1×N2 process grid with row/col sub-communicators.
+Collective over `comm` on cache miss — must be called by all ranks with
+identical `N1, N2`.
+"""
 function cannon_grid(N1::Integer, N2::Integer; comm = MPI.COMM_WORLD)
     g = _cannon_grid_cache[]
     if g !== nothing && g.N1 == N1 && g.N2 == N2 && g.comm == comm
@@ -37,4 +44,31 @@ function cannon_grid(N1::Integer, N2::Integer; comm = MPI.COMM_WORLD)
     g = CannonGrid(N1, N2, r1, r2, rank, comm, row_comm, col_comm)
     _cannon_grid_cache[] = g
     return g
+end
+
+# ─── Stage kernels (leg5) ─────────────────────────────────────────────────
+#
+# FLmap splits into two stages so distributed FLOPs stay exactly serial/P:
+#   stage 1 contracts the i leg and folds in M (G is the only big transient,
+#   sized (χ/N1)·D⁴·(χ/N2) — the serial intermediate / P);
+#   stage 2 contracts a/b/c with ALu, leaving a full-length d leg for the
+#   column reduce-scatter.
+
+function _cannon_stage1(FL, ALd, M1, M2)
+    @tensor G[a, b, c, g, h, l] := FL[a, e, f, i] * ALd[i, j, k, l] *
+                                   M1[e, j, g, b, p] * M2[f, k, h, c, p]
+    return G
+end
+
+# In-place accumulating variant for the forward ring (avoids a second G-sized
+# temporary). Backward uses the non-mutating version through Zygote.pullback.
+function _cannon_stage1_add!(G, FL, ALd, M1, M2)
+    @tensor G[a, b, c, g, h, l] += FL[a, e, f, i] * ALd[i, j, k, l] *
+                                   M1[e, j, g, b, p] * M2[f, k, h, c, p]
+    return G
+end
+
+function _cannon_stage2(G, ALu)
+    @tensor P[d, g, h, l] := G[a, b, c, g, h, l] * ALu[a, b, c, d]
+    return P
 end
