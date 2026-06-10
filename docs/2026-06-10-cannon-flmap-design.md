@@ -225,3 +225,59 @@ error-prone), then reduce-scatter strided staging, then `inner_etype` precision.
 leftenv/simple_eig integration, AL tensor distribution, NCCL p2p fast path,
 leg4/leg8 kernels, 8×8 cross-node stress testing — all listed as follow-up
 routes, not v1 deliverables.
+
+---
+
+## Results (2026-06-10, Sofia 4×H200, job 1261428)
+
+Branch `claude/sad-saha-3ec6bf` @ e89394d, dedicated clone
+`xz/TeneT_cannon_sadsaha` (production checkout untouched). χ=400, D=10,
+ComplexF64, leg5 tuple, 2×2 grid. Job elapsed 1:46 including 4-rank
+precompile. Level-1 CPU suite (mpiexec 4 ranks): 116 assertions/rank green.
+
+### Parity — PASS
+
+| Gate | Measured |
+|------|----------|
+| forward rel err ≤ 1e-10 | **6.81e-15** |
+| gradient max rel err ≤ 1e-8 (dFL, dALu, dALd, dM1, dM2) | **8.48e-15** |
+
+### Timing (max over ranks, warmed)
+
+| Path | forward | fwd+bwd |
+|------|---------|---------|
+| slice (`FLmap_parallel`, forloop_iter=1) | 0.268 s | 0.918 s |
+| **Cannon 2×2** | **0.130 s** | **0.566 s** |
+
+Cannon is 2.1× faster forward and 1.6× faster fwd+bwd at 2×2 — better than
+the "≤ ~1.5× of slice" acceptance bar. (Slice's allgatherv of the full
+result over the UCX 3-phase path is the likely cost driver; `TENET_USE_NCCL`
+was not set for either path.)
+
+### Memory (device used = total − available, retained after each section)
+
+| Point | rank0 / max |
+|-------|-------------|
+| tensors allocated | 1.48 GB |
+| slice fwd+bwd retained | 82.3 / 82.4 GB |
+| after reclaim | 4.07 GB |
+| cannon fwd+bwd retained | 96.7 GB |
+
+Honest reading: at map level this driver does NOT demonstrate a memory win —
+the cannon section retains more because the test scaffolding materializes
+full tensors on every rank (`cannon_scatter`/`cannon_gather` per timed call)
+and three live pullback closures each capture an H block (≈6.4 GB). The
+backward transient is ≈(4+d)·|H| by design (serial/P). The memory story —
+environment never materialized, eigensolver copies and AD tape shrunk by P —
+belongs to the leftenv integration round where the boundary shims disappear
+from the hot path.
+
+### Follow-up notes for the leftenv round
+
+- Replace the per-step `Zygote.pullback(_cannon_stage1, …)` with the
+  two-line hand adjoint (saves ~10-20% backward FLOPs, one |H| alloc/step).
+- `bp2 = nothing` after dH extraction releases ~|H| of pool pressure during
+  the ring replay.
+- Recompute-H option: store the N2 visiting FL blocks (χ²D²/N1 total,
+  50-100× smaller than H) instead of capturing H; rebuilds H from stage-1
+  forwards already paid in the backward and halves backward ring traffic.
