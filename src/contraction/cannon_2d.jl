@@ -184,6 +184,40 @@ function _cannon_col_reduce_scatter(partial, grid::CannonGrid, d_rs)
     return acc
 end
 
+# Adjoint of _cannon_col_reduce_scatter: gather all column ranks' d-blocks
+# into a full-d tensor (identical on every column rank). All buffers are
+# allocated before the single synchronize, matching the reduce-scatter's
+# ordering discipline.
+function _cannon_col_allgather(dblk, grid::CannonGrid, d_rs)
+    N1, r1 = grid.N1, grid.r1
+    nmid = ndims(dblk) - 1
+    χ = sum(length, d_rs)
+    full = similar(dblk, χ, size(dblk)[2:end]...)
+    view(full, d_rs[r1 + 1], ntuple(_ -> Colon(), nmid)...) .= dblk
+    N1 == 1 && return full
+    recvbufs = Vector{typeof(full)}(undef, N1)
+    for j in 0:N1-1
+        j == r1 && continue
+        recvbufs[j + 1] = similar(dblk, length(d_rs[j + 1]), size(dblk)[2:end]...)
+    end
+    synchronize(dblk)
+    reqs = MPI.Request[]
+    for j in 0:N1-1
+        j == r1 && continue
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.col_comm; source = j, tag = _TAG_BASE + 730))
+    end
+    for j in 0:N1-1
+        j == r1 && continue
+        push!(reqs, MPI.Isend(dblk, grid.col_comm; dest = j, tag = _TAG_BASE + 730))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N1-1
+        j == r1 && continue
+        view(full, d_rs[j + 1], ntuple(_ -> Colon(), nmid)...) .= recvbufs[j + 1]
+    end
+    return full
+end
+
 # ─── Forward ──────────────────────────────────────────────────────────────
 
 # Shared by FLmap_cannon and its rrule. Returns (result_blk, H); the rrule

@@ -377,6 +377,90 @@ function ChainRulesCore.rrule(::typeof(cannon_gather), blk::AbstractArray, grid:
     return full, gather_back
 end
 
+# The whole differentiated region is collective: every rank must execute the
+# same pullback sequence (rank-uniform control flow), or the grid deadlocks.
+function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid::CannonGrid;
+                              inner_etype = nothing)
+    is_tuple = M isa Tuple
+    M1, M2 = is_tuple ? M : (M, conj(M))
+    T_orig = eltype(FL_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    FL_c  = do_cast ? _downcast_eltype(inner_etype, FL_blk) : FL_blk
+    ALu_c = do_cast ? _downcast_eltype(inner_etype, ALu) : ALu
+    ALd_c = do_cast ? _downcast_eltype(inner_etype, ALd) : ALd
+    M1_c  = do_cast ? _downcast_eltype(inner_etype, M1) : M1
+    M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
+
+    result_c, H = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid)
+    result = do_cast ? T_orig.(result_c) : result_c
+
+    function cannon_back(dresult)
+        N1, N2, r1, r2 = grid.N1, grid.N2, grid.r1, grid.r2
+        χ = size(ALu_c, 1)
+        a_rs = split_ranges(χ, N1)
+        i_rs = split_ranges(χ, N2)
+        l_rng = i_rs[r2 + 1]
+
+        d_c = unthunk(dresult)
+        d_c = do_cast ? _boundary_cast(inner_etype, d_c) : d_c
+
+        # 1. Adjoint of the column reduce-scatter: allgather dresult blocks.
+        dpartial = _cannon_col_allgather(d_c, grid, a_rs)
+
+        # 2. Post-ring pullback (local, once; H captured from forward): the
+        #    composite fold∘stage2 yields dH, the dALu slice, and dM1/dM2 in
+        #    one shot — fold-after-ring means M gradients are not per-step sums.
+        ALu_slice = view(ALu_c, a_rs[r1 + 1], :, :, :)
+        _, bp2 = pullback((h, alu, m1, m2) -> _cannon_stage2(_cannon_fold(h, m1, m2), alu),
+                          H, ALu_slice, M1_c, M2_c)
+        dH, dALu_slice, dM1, dM2 = bp2(dpartial)
+        dALu = zero(ALu_c)
+        view(dALu, a_rs[r1 + 1], :, :, :) .= dALu_slice
+
+        # 3. Stage-1 reverse: replay the FL rotation with each block's dFL
+        #    accumulator travelling alongside it. The accumulator for block t
+        #    starts (zeros) at its home rank, collects one contribution per
+        #    rank in the row, and the final shift lands it home — so dFL
+        #    stays distributed, matching the input convention.
+        dALd = zero(ALd_c)
+        cur = FL_c
+        dacc = zero(FL_c)
+        for k in 0:N2-1
+            t = mod(r2 + k, N2)
+            ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_rng)
+            _, bp1 = pullback(_cannon_stage1, cur, ALd_slice)
+            dcur_k, dALd_k = bp1(dH)
+            dacc .+= dcur_k
+            view(dALd, i_rs[t + 1], :, :, l_rng) .+= dALd_k
+            if N2 > 1
+                t_next = mod(r2 + k + 1, N2)
+                sz = (length(a_rs[r1 + 1]), size(FL_c, 2), size(FL_c, 3),
+                      length(i_rs[t_next + 1]))
+                if k < N2 - 1   # last replay shift of cur is unnecessary
+                    cur = _cannon_row_shift(cur, grid, sz; tag = _TAG_BASE + 700)
+                end
+                dacc = _cannon_row_shift(dacc, grid, sz; tag = _TAG_BASE + 720)
+            end
+        end
+
+        # 4. Replicated-input gradients: per-rank slices summed/stitched by a
+        #    single allreduce each (picks up the NCCL fast path when enabled).
+        allreduce_p2p!(dALu, +, grid.comm)
+        allreduce_p2p!(dALd, +, grid.comm)
+        allreduce_p2p!(dM1, +, grid.comm)
+        allreduce_p2p!(dM2, +, grid.comm)
+
+        dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
+        dFL = dacc
+        if do_cast
+            dFL = T_orig.(dFL); dALu = T_orig.(dALu); dALd = T_orig.(dALd)
+            dM = is_tuple ? (T_orig.(dM[1]), T_orig.(dM[2])) : T_orig.(dM)
+        end
+        return NoTangent(), dFL, dALu, dALd, dM, NoTangent()
+    end
+    return result, cannon_back
+end
+
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     atype = _arraytype(M)

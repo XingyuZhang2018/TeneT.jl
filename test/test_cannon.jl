@@ -105,4 +105,37 @@ end
     end
 end
 
+@testset "FLmap_cannon gradient parity" begin
+    for (N1, N2) in ((2, 2), (1, 4), (4, 1)), χ in (16, 18)
+        D = 3
+        FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=800 + χ + 10N1)
+        g = cannon_grid(N1, N2)
+
+        loss_ref(FL, ALu, ALd, M1, M2) =
+            real(sum(W .* FLmap(FL, ALu, ALd, M1, M2)))
+        loss_can(FL, ALu, ALd, M1, M2) =
+            real(sum(W .* cannon_gather(
+                FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g), g)))
+
+        l_ref, back_ref = Zygote.pullback(loss_ref, FL, ALu, ALd, M1, M2)
+        l_can, back_can = Zygote.pullback(loss_can, FL, ALu, ALd, M1, M2)
+        @test l_can ≈ l_ref rtol = 1e-12
+        g_ref = back_ref(1.0)
+        g_can = back_can(1.0)
+        for (i, name) in enumerate(("dFL", "dALu", "dALd", "dM1", "dM2"))
+            @test isapprox(g_can[i], g_ref[i]; rtol = 1e-10)
+        end
+
+        # single-M entry: checks the dM = dM1 + conj(dM2) composition
+        loss1_ref(FL, M) = real(sum(W .* FLmap(FL, ALu, ALd, M)))
+        loss1_can(FL, M) = real(sum(W .* cannon_gather(
+            FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, M, g), g)))
+        _, b1r = Zygote.pullback(loss1_ref, FL, M1)
+        _, b1c = Zygote.pullback(loss1_can, FL, M1)
+        gr, gc = b1r(1.0), b1c(1.0)
+        @test isapprox(gc[1], gr[1]; rtol = 1e-10)   # dFL
+        @test isapprox(gc[2], gr[2]; rtol = 1e-10)   # dM
+    end
+end
+
 println("rank $rank: test_cannon.jl done")
