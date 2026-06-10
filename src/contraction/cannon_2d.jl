@@ -152,27 +152,29 @@ end
 # Sum `partial` (full d leg, local l block) over the column and keep the local
 # d block. Direct algorithm: each rank sends every other rank its chunk and
 # accumulates the N1-1 contributions for its own chunk. Chunk extraction via
-# getindex (allocating) keeps MPI buffers contiguous.
+# getindex (allocating) keeps MPI buffers contiguous. All buffers are
+# allocated and filled before the single synchronize, so stream-ordered
+# allocations are complete before any Irecv! is posted.
 function _cannon_col_reduce_scatter(partial, grid::CannonGrid, d_rs)
     N1, r1 = grid.N1, grid.r1
+    N1 == 1 && return partial
     acc = partial[d_rs[r1 + 1], :, :, :]
-    N1 == 1 && return acc
-    synchronize(partial)
-    reqs = MPI.Request[]
     recvbufs = Vector{typeof(acc)}(undef, N1)
+    sendbufs = Vector{typeof(acc)}(undef, N1)
     for j in 0:N1-1
         j == r1 && continue
-        rb = similar(acc)
-        recvbufs[j + 1] = rb
-        push!(reqs, MPI.Irecv!(rb, grid.col_comm; source = j, tag = _TAG_BASE + 710))
+        recvbufs[j + 1] = similar(acc)
+        sendbufs[j + 1] = partial[d_rs[j + 1], :, :, :]
     end
-    sendbufs = Vector{Any}(undef, N1)   # keep alive until Waitall
+    synchronize(partial)            # one sync covers allocs + chunk copies
+    reqs = MPI.Request[]
     for j in 0:N1-1
         j == r1 && continue
-        sb = partial[d_rs[j + 1], :, :, :]
-        synchronize(sb)
-        sendbufs[j + 1] = sb
-        push!(reqs, MPI.Isend(sb, grid.col_comm; dest = j, tag = _TAG_BASE + 710))
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.col_comm; source = j, tag = _TAG_BASE + 710))
+    end
+    for j in 0:N1-1
+        j == r1 && continue
+        push!(reqs, MPI.Isend(sendbufs[j + 1], grid.col_comm; dest = j, tag = _TAG_BASE + 710))
     end
     MPI.Waitall(reqs)
     for j in 0:N1-1
@@ -195,16 +197,18 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
     @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == length(l_rng) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
 
     # Stage 1: rotate FL blocks along the row ring, accumulate the stationary
-    # pre-fold intermediate H (M is folded once after the ring).
-    Dj, Dk = size(ALd, 2), size(ALd, 3)
-    H = similar(FL_blk, length(a_rs[r1 + 1]), size(FL_blk, 2), size(FL_blk, 3),
-                Dj, Dk, length(l_rng))
-    H .= 0
+    # pre-fold intermediate H (M is folded once after the ring). First step
+    # writes H directly (:=); later steps accumulate (+=).
+    local H
     cur = FL_blk
     for k in 0:N2-1
         t = mod(r2 + k, N2)
         ALd_slice = view(ALd, i_rs[t + 1], :, :, l_rng)
-        _cannon_stage1_add!(H, cur, ALd_slice)
+        if k == 0
+            H = _cannon_stage1(cur, ALd_slice)
+        else
+            _cannon_stage1_add!(H, cur, ALd_slice)
+        end
         if k < N2 - 1
             t_next = mod(r2 + k + 1, N2)
             cur = _cannon_row_shift(cur, grid,
