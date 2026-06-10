@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, FLmap, split_ranges, _cannon_stage1, _cannon_stage2
+using TeneT: cannon_grid, CannonGrid, FLmap, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -41,10 +41,17 @@ end
 @testset "stage kernels == FLmap (local, no MPI)" begin
     χ, D = 8, 3
     FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=101)
-    G = _cannon_stage1(FL, ALd, M1, M2)
+    H = _cannon_stage1(FL, ALd)
+    G = _cannon_fold(H, M1, M2)
     P = _cannon_stage2(G, ALu)
     ref = FLmap(FL, ALu, ALd, M1, M2)
     @test P ≈ ref rtol = 1e-12
+    # accumulating variant: zero-init + two i-block adds == full contraction
+    # (pins the += semantics and the linearity invariant the forward ring uses)
+    H2 = zero(H)
+    _cannon_stage1_add!(H2, FL[:, :, :, 1:3], ALd[1:3, :, :, :])
+    _cannon_stage1_add!(H2, FL[:, :, :, 4:8], ALd[4:8, :, :, :])
+    @test H2 ≈ H rtol = 1e-12
 end
 
 println("rank $rank: test_cannon.jl done")

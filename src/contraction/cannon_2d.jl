@@ -48,22 +48,32 @@ end
 
 # ─── Stage kernels (leg5) ─────────────────────────────────────────────────
 #
-# FLmap splits into two stages so distributed FLOPs stay exactly serial/P:
-#   stage 1 contracts the i leg and folds in M (G is the only big transient,
-#   sized (χ/N1)·D⁴·(χ/N2) — the serial intermediate / P);
+# FLmap splits into ring + fold + stage 2 so distributed FLOPs stay exactly
+# serial/P:
+#   ring (stage 1) contracts the i leg only, accumulating the pre-fold
+#     intermediate H. The M fold is deliberately NOT in the ring: its cost is
+#     independent of the i-block extent, so folding per step would redo it N2
+#     times (overhead growing with grid size);
+#   fold contracts M1/M2 into H once per map call;
 #   stage 2 contracts a/b/c with ALu, leaving a full-length d leg for the
-#   column reduce-scatter.
+#     column reduce-scatter.
+# Transient accounting: peak is ≈ (2+d)·|H| during the fold (@tensor pairwise
+# temporaries) — the serial transient peak / P.
 
-function _cannon_stage1(FL, ALd, M1, M2)
-    @tensor G[a, b, c, g, h, l] := FL[a, e, f, i] * ALd[i, j, k, l] *
-                                   M1[e, j, g, b, p] * M2[f, k, h, c, p]
-    return G
+function _cannon_stage1(FL, ALd)
+    @tensor H[a, e, f, j, k, l] := FL[a, e, f, i] * ALd[i, j, k, l]
+    return H
 end
 
-# In-place accumulating variant for the forward ring (avoids a second G-sized
+# In-place accumulating variant for the forward ring (avoids a second H-sized
 # temporary). Backward uses the non-mutating version through Zygote.pullback.
-function _cannon_stage1_add!(G, FL, ALd, M1, M2)
-    @tensor G[a, b, c, g, h, l] += FL[a, e, f, i] * ALd[i, j, k, l] *
+function _cannon_stage1_add!(H, FL, ALd)
+    @tensor H[a, e, f, j, k, l] += FL[a, e, f, i] * ALd[i, j, k, l]
+    return H
+end
+
+function _cannon_fold(H, M1, M2)
+    @tensor G[a, b, c, g, h, l] := H[a, e, f, j, k, l] *
                                    M1[e, j, g, b, p] * M2[f, k, h, c, p]
     return G
 end
