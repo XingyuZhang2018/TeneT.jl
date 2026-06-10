@@ -138,4 +138,23 @@ end
     end
 end
 
+@testset "inner_etype Float32 boundary cast" begin
+    χ, D = 16, 3
+    FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=900)
+    g = cannon_grid(2, 2)
+    ref = FLmap(FL, ALu, ALd, M1, M2)
+    out = cannon_gather(
+        FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; inner_etype = Float32), g)
+    @test eltype(out) == ComplexF64          # upcast at exit
+    @test out ≈ ref rtol = 1e-4              # F32 accuracy
+
+    loss(FL) = real(sum(W .* cannon_gather(
+        FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; inner_etype = Float32), g)))
+    loss_ref(FL) = real(sum(W .* FLmap(FL, ALu, ALd, M1, M2)))
+    dFL = Zygote.pullback(loss, FL)[2](1.0)[1]
+    dFL_ref = Zygote.pullback(loss_ref, FL)[2](1.0)[1]
+    @test eltype(dFL) == ComplexF64
+    @test dFL ≈ dFL_ref rtol = 1e-3
+end
+
 println("rank $rank: test_cannon.jl done")
