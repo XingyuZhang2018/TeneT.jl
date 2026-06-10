@@ -88,4 +88,21 @@ end
     end
 end
 
+@testset "scatter/gather rrules" begin
+    for (N1, N2) in ((2, 2), (1, 4))
+        Random.seed!(700 + 10N1)
+        g = cannon_grid(N1, N2)
+        χ = 12
+        FL = rand(ComplexF64, χ, 3, 3, χ)
+        W  = rand(ComplexF64, χ, 3, 3, χ)
+        # identity chain: gather(scatter(x)) == x, so dFL must equal the plain pullback of the loss
+        loss(x) = real(sum(W .* cannon_gather(cannon_scatter(x, g), g)))
+        l, back = Zygote.pullback(loss, FL)
+        @test l ≈ real(sum(W .* FL))
+        dFL = back(1.0)[1]
+        l_ref, back_ref = Zygote.pullback(x -> real(sum(W .* x)), FL)
+        @test dFL ≈ back_ref(1.0)[1]
+    end
+end
+
 println("rank $rank: test_cannon.jl done")

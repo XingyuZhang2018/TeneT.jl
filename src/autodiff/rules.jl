@@ -341,6 +341,42 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     return result, back
 end
 
+# ─── AD rules for Cannon 2D distributed FLmap ─────────────────────────────
+# Design: docs/2026-06-10-cannon-flmap-design.md §2. Communication adjoints:
+# reduce-scatter ↔ allgather, ring shift ↔ reverse-replayed ring shift,
+# replicated input ↔ allreduce(+) of per-rank gradient slices.
+
+function ChainRulesCore.rrule(::typeof(cannon_scatter), T_full::AbstractArray, grid::CannonGrid)
+    blk = cannon_scatter(T_full, grid)
+    n = ndims(T_full)
+    a_rs = split_ranges(size(T_full, 1), grid.N1)
+    i_rs = split_ranges(size(T_full, n), grid.N2)
+    inds = ntuple(j -> j == 1 ? a_rs[grid.r1 + 1] :
+                       (j == n ? i_rs[grid.r2 + 1] : Colon()), n)
+    function scatter_back(dblk)
+        dfull = zero(T_full)
+        view(dfull, inds...) .= unthunk(dblk)
+        # Blocks are disjoint across ranks: allreduce stitches them into the
+        # full replicated-input gradient on every rank.
+        allreduce_p2p!(dfull, +, grid.comm)
+        return NoTangent(), dfull, NoTangent()
+    end
+    return blk, scatter_back
+end
+
+function ChainRulesCore.rrule(::typeof(cannon_gather), blk::AbstractArray, grid::CannonGrid)
+    full = cannon_gather(blk, grid)
+    n = ndims(blk)
+    a_rs = split_ranges(size(full, 1), grid.N1)
+    i_rs = split_ranges(size(full, n), grid.N2)
+    inds = ntuple(j -> j == 1 ? a_rs[grid.r1 + 1] :
+                       (j == n ? i_rs[grid.r2 + 1] : Colon()), n)
+    # Downstream of gather is replicated computation → identical dfull on every
+    # rank; the adjoint is just "take my block".
+    gather_back(dfull) = (NoTangent(), unthunk(dfull)[inds...], NoTangent())
+    return full, gather_back
+end
+
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     atype = _arraytype(M)
