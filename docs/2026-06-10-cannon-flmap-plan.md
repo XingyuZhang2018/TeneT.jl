@@ -186,16 +186,23 @@ git commit -m "feat: add CannonGrid 2D process grid for distributed FLmap"
 - Modify: `src/contraction/cannon_2d.jl`
 - Modify: `test/test_cannon.jl`
 
-**Step 1: Append the failing test** to `test/test_cannon.jl` (and add `_cannon_stage1`, `_cannon_stage2` to the import line):
+**Step 1: Append the failing test** to `test/test_cannon.jl` (and add `_cannon_stage1`, `_cannon_stage1_add!`, `_cannon_fold`, `_cannon_stage2` to the import line):
 
 ```julia
 @testset "stage kernels == FLmap (local, no MPI)" begin
     χ, D = 8, 3
     FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=101)
-    G = _cannon_stage1(FL, ALd, M1, M2)
+    H = _cannon_stage1(FL, ALd)
+    G = _cannon_fold(H, M1, M2)
     P = _cannon_stage2(G, ALu)
     ref = FLmap(FL, ALu, ALd, M1, M2)
     @test P ≈ ref rtol = 1e-12
+    # accumulating variant: zero-init + two i-block adds == full contraction
+    # (pins the += semantics and the linearity invariant the forward ring uses)
+    H2 = zero(H)
+    _cannon_stage1_add!(H2, FL[:, :, :, 1:3], ALd[1:3, :, :, :])
+    _cannon_stage1_add!(H2, FL[:, :, :, 4:8], ALd[4:8, :, :, :])
+    @test H2 ≈ H rtol = 1e-12
 end
 ```
 
@@ -209,22 +216,32 @@ Expected: FAIL — `_cannon_stage1` not defined.
 ```julia
 # ─── Stage kernels (leg5) ─────────────────────────────────────────────────
 #
-# FLmap splits into two stages so distributed FLOPs stay exactly serial/P:
-#   stage 1 contracts the i leg and folds in M (G is the only big transient,
-#   sized (χ/N1)·D⁴·(χ/N2) — the serial intermediate / P);
+# FLmap splits into ring + fold + stage 2 so distributed FLOPs stay exactly
+# serial/P:
+#   ring (stage 1) contracts the i leg only, accumulating the pre-fold
+#     intermediate H. The M fold is deliberately NOT in the ring: its cost is
+#     independent of the i-block extent, so folding per step would redo it N2
+#     times (overhead growing with grid size);
+#   fold contracts M1/M2 into H once per map call;
 #   stage 2 contracts a/b/c with ALu, leaving a full-length d leg for the
-#   column reduce-scatter.
+#     column reduce-scatter.
+# Transient accounting: peak is ≈ (2+d)·|H| during the fold (@tensor pairwise
+# temporaries) — the serial transient peak / P.
 
-function _cannon_stage1(FL, ALd, M1, M2)
-    @tensor G[a, b, c, g, h, l] := FL[a, e, f, i] * ALd[i, j, k, l] *
-                                   M1[e, j, g, b, p] * M2[f, k, h, c, p]
-    return G
+function _cannon_stage1(FL, ALd)
+    @tensor H[a, e, f, j, k, l] := FL[a, e, f, i] * ALd[i, j, k, l]
+    return H
 end
 
-# In-place accumulating variant for the forward ring (avoids a second G-sized
+# In-place accumulating variant for the forward ring (avoids a second H-sized
 # temporary). Backward uses the non-mutating version through Zygote.pullback.
-function _cannon_stage1_add!(G, FL, ALd, M1, M2)
-    @tensor G[a, b, c, g, h, l] += FL[a, e, f, i] * ALd[i, j, k, l] *
+function _cannon_stage1_add!(H, FL, ALd)
+    @tensor H[a, e, f, j, k, l] += FL[a, e, f, i] * ALd[i, j, k, l]
+    return H
+end
+
+function _cannon_fold(H, M1, M2)
+    @tensor G[a, b, c, g, h, l] := H[a, e, f, j, k, l] *
                                    M1[e, j, g, b, p] * M2[f, k, h, c, p]
     return G
 end
@@ -425,8 +442,8 @@ end
 
 # ─── Forward ──────────────────────────────────────────────────────────────
 
-# Shared by FLmap_cannon and its rrule. Returns (result_blk, G); the rrule
-# captures G for the stage-2 pullback.
+# Shared by FLmap_cannon and its rrule. Returns (result_blk, H); the rrule
+# captures the pre-fold H for the composite fold∘stage2 pullback.
 function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
     N1, N2, r1, r2 = grid.N1, grid.N2, grid.r1, grid.r2
     χ = size(ALu, 1)
@@ -435,16 +452,17 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
     l_rng = i_rs[r2 + 1]
     @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == length(l_rng) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
 
-    # Stage 1: rotate FL blocks along the row ring, accumulate stationary G.
-    Dg, Dh = size(M1, 3), size(M2, 3)
-    Db, Dc = size(M1, 4), size(M2, 4)
-    G = similar(FL_blk, length(a_rs[r1 + 1]), Db, Dc, Dg, Dh, length(l_rng))
-    G .= 0
+    # Stage 1: rotate FL blocks along the row ring, accumulate the stationary
+    # pre-fold intermediate H (M is folded once after the ring).
+    Dj, Dk = size(ALd, 2), size(ALd, 3)
+    H = similar(FL_blk, length(a_rs[r1 + 1]), size(FL_blk, 2), size(FL_blk, 3),
+                Dj, Dk, length(l_rng))
+    H .= 0
     cur = FL_blk
     for k in 0:N2-1
         t = mod(r2 + k, N2)
         ALd_slice = view(ALd, i_rs[t + 1], :, :, l_rng)
-        _cannon_stage1_add!(G, cur, ALd_slice, M1, M2)
+        _cannon_stage1_add!(H, cur, ALd_slice)
         if k < N2 - 1
             t_next = mod(r2 + k + 1, N2)
             cur = _cannon_row_shift(cur, grid,
@@ -452,12 +470,13 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
         end
     end
 
-    # Stage 2: contract a/b/c with the local row slice of replicated ALu,
+    # Fold M once, contract a/b/c with the local row slice of replicated ALu,
     # then reduce-scatter the full-d partial along the column.
+    G = _cannon_fold(H, M1, M2)
     ALu_slice = view(ALu, a_rs[r1 + 1], :, :, :)
     partial = _cannon_stage2(G, ALu_slice)
     result = _cannon_col_reduce_scatter(partial, grid, a_rs)
-    return result, G
+    return result, H
 end
 
 """
@@ -673,7 +692,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
     M1_c  = do_cast ? _downcast_eltype(inner_etype, M1) : M1
     M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
 
-    result_c, G = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid)
+    result_c, H = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function cannon_back(dresult)
@@ -689,10 +708,13 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         # 1. Adjoint of the column reduce-scatter: allgather dresult blocks.
         dpartial = _cannon_col_allgather(d_c, grid, a_rs)
 
-        # 2. Stage-2 pullback (local; G captured from forward).
+        # 2. Post-ring pullback (local, once; H captured from forward): the
+        #    composite fold∘stage2 yields dH, the dALu slice, and dM1/dM2 in
+        #    one shot — fold-after-ring means M gradients are not per-step sums.
         ALu_slice = view(ALu_c, a_rs[r1 + 1], :, :, :)
-        _, bp2 = pullback(_cannon_stage2, G, ALu_slice)
-        dG, dALu_slice = bp2(dpartial)
+        _, bp2 = pullback((h, alu, m1, m2) -> _cannon_stage2(_cannon_fold(h, m1, m2), alu),
+                          H, ALu_slice, M1_c, M2_c)
+        dH, dALu_slice, dM1, dM2 = bp2(dpartial)
         dALu = zero(ALu_c)
         view(dALu, a_rs[r1 + 1], :, :, :) .= dALu_slice
 
@@ -702,19 +724,15 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         #    rank in the row, and the final shift lands it home — so dFL
         #    stays distributed, matching the input convention.
         dALd = zero(ALd_c)
-        dM1 = zero(M1_c)
-        dM2 = zero(M2_c)
         cur = FL_c
         dacc = zero(FL_c)
         for k in 0:N2-1
             t = mod(r2 + k, N2)
             ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_rng)
-            _, bp1 = pullback(_cannon_stage1, cur, ALd_slice, M1_c, M2_c)
-            dcur_k, dALd_k, dM1_k, dM2_k = bp1(dG)
+            _, bp1 = pullback(_cannon_stage1, cur, ALd_slice)
+            dcur_k, dALd_k = bp1(dH)
             dacc .+= dcur_k
             view(dALd, i_rs[t + 1], :, :, l_rng) .+= dALd_k
-            dM1 .+= dM1_k
-            dM2 .+= dM2_k
             if N2 > 1
                 t_next = mod(r2 + k + 1, N2)
                 sz = (length(a_rs[r1 + 1]), size(FL_c, 2), size(FL_c, 3),

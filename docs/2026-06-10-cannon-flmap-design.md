@@ -73,19 +73,25 @@ so power iteration feeds the output straight back in; the environment never
 materializes in full. ALu, ALd, M stay fully replicated this round (AL
 distribution belongs to the leftenv integration round).
 
-### Forward — stage 1 (contract i, fold in M; FL blocks rotate along the row)
+### Forward — stage 1 (contract i; FL blocks rotate along the row; M folded ONCE after the ring)
 
 ```
-G[a,b,c,g,h,l] = Σ_t  FL[a,e,f, i∈block t] · ALd[i∈block t, j,k, l∈block r2]
-                      · M1[e,j,g,b,p] · M2[f,k,h,c,p]
+H[a,e,f,j,k,l] = Σ_t  FL[a,e,f, i∈block t] · ALd[i∈block t, j,k, l∈block r2]
+G[a,b,c,g,h,l] = H[a,e,f,j,k,l] · M1[e,j,g,b,p] · M2[f,k,h,c,p]      # fold, once
 ```
 
 At step k = 0..N2-1, rank (r1,r2) holds FL block `t_k = mod(r2+k, N2)`, contracts
-it with the local ALd slice, accumulates into the resident G block (size
-(χ/N1)·D⁴·(χ/N2) — the serial intermediate / P), then ring-shifts the FL block
-along `row_comm` with double buffering. After a full cycle the FL blocks are back
-home (the backward replay relies on this invariant; the caller's input block is
-never mutated — shifts operate on internal copies).
+it with the local ALd slice, accumulates into the resident **pre-fold** block H
+(size (χ/N1)·D⁴·(χ/N2)), then ring-shifts the FL block along `row_comm` with
+double buffering. After a full cycle the FL blocks are back home (the backward
+replay relies on this invariant; the caller's input block is never mutated —
+shifts operate on internal copies).
+
+The M1/M2 fold happens **once, after the ring** — its cost is independent of the
+i-block extent, so folding inside the loop would redo it N2 times (overhead
+growing with grid size: ~1.33× total FLOPs at 2×2, ~3.3× at 8×8 — the same
+disease that disqualified the one-shot approach C). Fold-after-ring keeps total
+FLOPs exactly serial/P.
 
 ### Forward — stage 2 (contract a; column reduce-scatter)
 
@@ -103,12 +109,14 @@ pre-allocated buffer (`_comm_recvbuf` pattern) before each Isend.
 | Quantity | Value |
 |----------|-------|
 | Communication | ≈ χ²D²(1/N1 + 1/N2) · sizeof(T) — at 2×2 comparable to the slice scheme's allgather; **1/4 at 8×8, 1/6 at 12×12** |
-| FLOPs | exactly serial / P (no redundancy) |
-| Peak transient memory | 2χ²D²/P (FL double buffer) + χ²D⁴/P (G) + χ²D²/N2 (stage-2 partial) |
+| FLOPs | exactly serial / P (fold-after-ring; no redundancy) |
+| Peak transient memory | ≈ (2+d)·χ²D⁴/P during the M fold (`@tensor`'s pairwise temporaries: H + H·M1 intermediate + G) — i.e. the serial transient peak / P. Ring phase itself is ~2·χ²D⁴/P (H + per-step FL·ALd temp); FL double buffer 2χ²D²/P and stage-2 partial χ²D²/N2 are lower-order. |
 
-At χ=400, D=10, ComplexF64, 2×2: G ≈ 6.4 GB vs 25.6 GB for the serial
-intermediate. The existing `forloop_iter`-style sub-slicing (subdividing the
-local l range inside stage 1) is orthogonal and composable.
+At χ=400, D=10, d=2, ComplexF64, 2×2: per-rank transient peak ≈ 25.6 GB vs
+~102 GB serial — both dominated by the pre-fold D⁴ intermediates; the
+distributed value is the serial value / P. The existing `forloop_iter`-style
+sub-slicing (subdividing the local l range inside stage 1) is orthogonal and
+composable.
 
 ---
 
@@ -133,17 +141,19 @@ hard-coded. Zygote never sees MPI or in-place mutation.
 
 1. **Column allgather**: `dpartial[d full, g, h, l∈r2] = allgather(dresult, col_comm)`
    — adjoint of reduce-scatter.
-2. **Stage-2 pullback** (local): `pullback(stage2_kernel)` on `dpartial` yields
-   `dG` and the a_r1 slice contribution to `dALu`. The G block is captured in the
-   rrule closure (χ²D⁴/P; a recompute-stage-1 option can trade memory for compute
-   later — design hook only).
+2. **Post-ring pullback** (local, once): one composite
+   `pullback((H, ALu_s, M1, M2) -> stage2(fold(H, M1, M2), ALu_s))` applied to
+   `dpartial` yields `dH`, the a_r1 slice contribution to `dALu`, and **dM1/dM2
+   in one shot** (fold-after-ring means the M gradients are not per-step sums).
+   The H block is captured in the rrule closure (χ²D⁴/P; a recompute option can
+   trade memory for compute later — design hook only).
 3. **Stage-1 reverse ring**: replay the FL rotation with each FL block's **dFL
-   accumulator travelling alongside it**. Each step: `pullback(stage1_kernel)(dG)`
-   adds the dFL contribution into the paired accumulator and accumulates local
-   `dALd[i∈t_k, :, :, l∈r2]` and dM1/dM2 contributions; then (FL block, dFL block)
-   shift together. After a full cycle every dFL block lands on its home rank —
-   **dFL stays distributed**, matching "distributed input → distributed gradient".
-   Backward message volume ≈ 2× forward.
+   accumulator travelling alongside it**. Each step: the cheap two-tensor
+   `pullback(stage1_kernel)(dH)` adds the dFL contribution into the paired
+   accumulator and accumulates the local `dALd[i∈t_k, :, :, l∈r2]` contribution;
+   then (FL block, dFL block) shift together. After a full cycle every dFL block
+   lands on its home rank — **dFL stays distributed**, matching "distributed
+   input → distributed gradient". Backward message volume ≈ 2× forward.
 4. **Replicated-arg gradient reduction**: dALu (only the a_r1 slice nonzero per
    rank), dALd (only the l_r2 slice nonzero), dM1/dM2 — all via
    `allreduce_p2p!(+, COMM_WORLD)`, which sums overlapping slices and stitches
