@@ -138,6 +138,23 @@ end
     end
 end
 
+@testset "bare-sum loss (structured Fill cotangent)" begin
+    χ, D = 16, 3
+    FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=950)
+    g = cannon_grid(2, 2)
+    blk = cannon_scatter(FL, g)
+    # a bare `sum` loss produces a FillArrays cotangent — exercises the
+    # densify guard in the FLmap_cannon rrule (MPI needs a real device buffer)
+    l_blk, back = Zygote.pullback(x -> real(sum(FLmap_cannon(x, ALu, ALd, (M1, M2), g))), blk)
+    dblk = back(1.0)[1]
+    dFL_ref = Zygote.pullback(x -> real(sum(FLmap(x, ALu, ALd, M1, M2))), FL)[2](1.0)[1]
+    a_rs = split_ranges(χ, 2); i_rs = split_ranges(χ, 2)
+    @test dblk ≈ dFL_ref[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]] rtol = 1e-10
+    # global loss = Σ over ranks of the local block sums
+    l_glob = MPI.Allreduce(l_blk, +, comm)
+    @test l_glob ≈ real(sum(FLmap(FL, ALu, ALd, M1, M2))) rtol = 1e-12
+end
+
 @testset "inner_etype Float32 boundary cast" begin
     χ, D = 16, 3
     FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=900)

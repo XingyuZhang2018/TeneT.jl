@@ -402,6 +402,14 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         l_rng = i_rs[r2 + 1]
 
         d_c = unthunk(dresult)
+        # Densify structured cotangents (e.g. FillArrays.Fill from a bare
+        # `sum` loss): the column allgather hands d_c straight to MPI.Isend,
+        # which needs a real device buffer.
+        if !(d_c isa DenseArray)
+            buf = similar(FL_c, eltype(d_c), size(d_c))
+            buf .= d_c
+            d_c = buf
+        end
         d_c = do_cast ? _boundary_cast(inner_etype, d_c) : d_c
 
         # 1. Adjoint of the column reduce-scatter: allgather dresult blocks.
