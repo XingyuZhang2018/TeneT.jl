@@ -170,6 +170,47 @@ function _kagome_site_op(O, sublattice, d)
     return reshape(real(out), d^3, d^3)
 end
 
+# ── Honeycomb merge: d²×d² operator construction from Heisenberg terms ──
+
+"""
+    _honeycomb_merge_onsite_op(terms, pos1, pos2, d, atype)
+
+Build a d²×d² onsite operator for an intra-cell bond between the two merged
+honeycomb sublattice sites. `pos1` is where OL acts and `pos2` is where OR
+acts; both positions are in `{1,2}`.
+"""
+function _honeycomb_merge_onsite_op(terms, pos1, pos2, d, atype)
+    Id = Matrix{Float64}(I, d, d)
+    h = zeros(Float64, d^2, d^2)
+    for (c, OL, OR) in terms
+        ops = [Id, Id]
+        ops[pos1] = Array(OL)
+        ops[pos2] = Array(OR)
+        @tensor o[a,b,c,d] := ops[1][a,c] * ops[2][b,d]
+        h += c * reshape(real(o), d^2, d^2)
+    end
+    return atype(h)
+end
+
+"""
+    _honeycomb_merge_intercell_terms(terms, sublattice_left, sublattice_right, d, atype)
+
+Build `(coefficient, OL_d², OR_d²)` terms for an inter-cell bond in the
+two-site honeycomb merge representation.
+"""
+function _honeycomb_merge_intercell_terms(terms, sublattice_left, sublattice_right, d, atype)
+    Id = Matrix{Float64}(I, d, d)
+    result = Tuple{Real, AbstractMatrix, AbstractMatrix}[]
+    for (c, OL, OR) in terms
+        ops_l = [Id, Id]; ops_l[sublattice_left] = Array(OL)
+        ops_r = [Id, Id]; ops_r[sublattice_right] = Array(OR)
+        @tensor ol[a,b,c,d] := ops_l[1][a,c] * ops_l[2][b,d]
+        @tensor or_t[a,b,c,d] := ops_r[1][a,c] * ops_r[2][b,d]
+        push!(result, (c, atype(real(reshape(ol, d^2, d^2))), atype(real(reshape(or_t, d^2, d^2)))))
+    end
+    return result
+end
+
 function _contract_c3v_bond(C, T, A, O1, O2; ifparallel=false, forloop_iter=1)
     @tensor AO1[a,b,c,f] := A[a,b,c,e] * O1[e,f]
     @tensor AO2[a,b,c,f] := A[a,b,c,e] * O2[e,f]

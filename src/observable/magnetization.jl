@@ -327,3 +327,59 @@ function magnetization_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv
     params.verbosity >= 4 && println("|M|_mean = $(M_mean)")
     return M_mean, m_dict
 end
+
+function magnetization_value(model::J1J2p{Honeycomb{:merge}}, A, env::VUMPSEnv, params)
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    @unpack ifparallel = params.boundary_alg
+    @unpack forloop_iter = params
+    atype = _arraytype(ACu[1])
+    etype = eltype(ACu[1])
+    S = model.S
+    Sx = atype(const_Sx(S))
+    Sy = atype(const_Sy(S))
+    Sz = atype(const_Sz(S))
+    d = size(Sx, 1)
+    Id = atype(Matrix{Float64}(I, d, d))
+
+    Sx1 = reshape((@tensor Sx1[1,2,3,4] := Sx[1,3] * Id[2,4]), d^2, d^2)
+    Sy1 = reshape((@tensor Sy1[1,2,3,4] := Sy[1,3] * Id[2,4]), d^2, d^2)
+    Sz1 = reshape((@tensor Sz1[1,2,3,4] := Sz[1,3] * Id[2,4]), d^2, d^2)
+
+    Sx2 = reshape((@tensor Sx2[1,2,3,4] := Id[1,3] * Sx[2,4]), d^2, d^2)
+    Sy2 = reshape((@tensor Sy2[1,2,3,4] := Id[1,3] * Sy[2,4]), d^2, d^2)
+    Sz2 = reshape((@tensor Sz2[1,2,3,4] := Id[1,3] * Sz[2,4]), d^2, d^2)
+
+    Ni, Nj = size(ACu)
+    len = length(ACu.data)
+    m_dict = Dict{String, Any}()
+    Mnorm1 = zeros(etype, Ni, Nj)
+    Mnorm2 = zeros(etype, Ni, Nj)
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), ACu.pattern))
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        ir = Ni + 1 - i
+        Mx1 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx1; ifparallel, forloop_iter)
+        My1 = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy1; ifparallel, forloop_iter)
+        Mz1 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz1; ifparallel, forloop_iter)
+
+        Mx2 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sx2; ifparallel, forloop_iter)
+        My2 = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sy2; ifparallel, forloop_iter)
+        Mz2 = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], Sz2; ifparallel, forloop_iter)
+
+        n = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]; ifparallel, forloop_iter)
+
+        Mag1 = [Mx1/n, My1/n, Mz1/n]
+        Mnorm1[i,j] = norm(Mag1)
+        params.verbosity >= 4 && println("M1 = $(Mag1)\n|M1| = $(Mnorm1)")
+        Mag2 = [Mx2/n, My2/n, Mz2/n]
+        Mnorm2[i,j] = norm(Mag2)
+        params.verbosity >= 4 && println("M2 = $(Mag2)\n|M2| = $(Mnorm2)")
+
+        m_dict["$(i),$(j),1"] = Dict("Mx" => Mag1[1], "My" => Mag1[2], "Mz" => Mag1[3], "|M|" => Mnorm1[i,j])
+        m_dict["$(i),$(j),2"] = Dict("Mx" => Mag2[1], "My" => Mag2[2], "Mz" => Mag2[3], "|M|" => Mnorm2[i,j])
+    end
+
+    M_mean = sum(Mnorm1 + Mnorm2) / (2 * len)
+    params.verbosity >= 4 && println("|M|_mean = $(M_mean)")
+    return M_mean, m_dict
+end

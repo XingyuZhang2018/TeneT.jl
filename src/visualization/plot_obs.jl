@@ -289,6 +289,122 @@ function plot_lattice_obs(e_dict, m_dict, lattice_type, pattern::Matrix{Int};
 end
 
 # ============================================================================
+# Honeycomb merge lattice visualization
+# ============================================================================
+
+function plot_lattice_obs(e_dict, m_dict, lattice_type::Honeycomb{:merge}, pattern::Matrix{Int};
+                          save_path::String, save_format::String="png", χ::Int=0, n_repeat::Int=3,
+                          e_scalar::Real=NaN, mag_scalar::Real=NaN, ξ_scalar::Real=NaN, S::Real=0.5)
+    isdir(save_path) || mkpath(save_path)
+    Ni, Nj = size(pattern)
+
+    unique_sites = Dict{Int, Tuple{Int,Int}}()
+    for (key, _) in m_dict
+        parts = split(key, ",")
+        length(parts) >= 3 || continue
+        i, j = parse(Int, parts[1]), parse(Int, parts[2])
+        unique_sites[pattern[i, j]] = (i, j)
+    end
+
+    all_coords = Dict{Tuple{Int,Int,Int}, Tuple{Float64,Float64}}()
+    all_mdata  = Dict{Tuple{Int,Int,Int}, Dict{String, Any}}()
+    is_original = Dict{Tuple{Int,Int,Int}, Bool}()
+
+    for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+        for ci in 1:Ni, cj in 1:Nj
+            gi = ci + di * Ni
+            gj = cj + dj * Nj
+            pval = pattern[ci, cj]
+            oi, oj = unique_sites[pval]
+            orig = (di == 0 && dj == 0)
+            for k in 1:2
+                all_coords[(gi, gj, k)] = _honeycomb_merge_site_xy(gi, gj, k)
+                all_mdata[(gi, gj, k)] = m_dict["$oi,$oj,$k"]
+                is_original[(gi, gj, k)] = orig
+            end
+        end
+    end
+
+    all_evals = Float64[]
+    for (_, bond_data) in e_dict
+        for (_, ev) in bond_data
+            push!(all_evals, abs(real(ev)))
+        end
+    end
+    e_max = isempty(all_evals) ? 1.0 : maximum(all_evals)
+    e_min = isempty(all_evals) ? 0.0 : minimum(all_evals)
+
+    all_xs = [c[1] for c in values(all_coords)]
+    all_ys = [c[2] for c in values(all_coords)]
+    xspan = maximum(all_xs) - minimum(all_xs) + 2.0
+    yspan = maximum(all_ys) - minimum(all_ys) + 2.0
+    fig_size = max(700, round(Int, max(xspan, yspan) * 110))
+    fig = Figure(size=(fig_size, fig_size), fontsize=13, backgroundcolor=:white)
+    info = "χ=$χ"
+    isnan(e_scalar) || (info *= "  E=$(round(e_scalar; sigdigits=8))")
+    isnan(mag_scalar) || (info *= "  |M|=$(round(mag_scalar; sigdigits=6))")
+    isnan(ξ_scalar) || (info *= "  ξ=$(round(ξ_scalar; sigdigits=6))")
+    ax = Axis(fig[1, 1]; title="Honeycomb Merge Observables  ($info)", aspect=DataAspect(),
+              backgroundcolor=:white)
+    hidedecorations!(ax)
+    hidespines!(ax)
+
+    _draw_honeycomb_merge_bonds!(ax, all_coords, e_dict, pattern, unique_sites,
+                                 Ni, Nj, n_repeat, e_min, e_max)
+
+    for (k, (x, y)) in all_coords
+        alpha = is_original[k] ? 1.0 : 0.4
+        ms = is_original[k] ? 18 : 12
+        scatter!(ax, [x], [y]; color=(:gray70, alpha), markersize=ms,
+                 strokewidth=is_original[k] ? 1.5 : 0.5,
+                 strokecolor=(:gray40, alpha))
+    end
+
+    arrow_scale = S > 1e-10 ? 0.35 / S : 0.0
+    for (k, (x, y)) in all_coords
+        mdata = all_mdata[k]
+        amx = real(mdata["Mx"]) * arrow_scale
+        amz = real(mdata["Mz"]) * arrow_scale
+        amag = sqrt(amx^2 + amz^2)
+        amag < 1e-8 && continue
+        alpha = is_original[k] ? 0.9 : 0.35
+        lw = is_original[k] ? 2.0 : 1.0
+        as = is_original[k] ? 10 : 6
+        arrows!(ax, [x - amx/2], [y - amz/2], [amx], [amz];
+                color=(:black, alpha), linewidth=lw,
+                arrowsize=as, arrowcolor=(:black, alpha))
+    end
+
+    for (k, (x, y)) in all_coords
+        is_original[k] || continue
+        ci, cj = mod1(k[1], Ni), mod1(k[2], Nj)
+        sublat = k[3]
+        text!(ax, x, y + 0.2; text="($ci,$cj,$sublat)", fontsize=9, color=:gray20,
+              align=(:center, :bottom))
+    end
+
+    xmargin = max(1.5, xspan * 0.12)
+    ymargin = max(1.5, yspan * 0.12)
+    xlims!(ax, minimum(all_xs) - xmargin, maximum(all_xs) + xmargin)
+    ylims!(ax, minimum(all_ys) - ymargin, maximum(all_ys) + ymargin)
+
+    legend_entries = []
+    for (bond_type, _) in e_dict
+        col = _bond_color(bond_type)
+        push!(legend_entries, (bond_type, col))
+    end
+    if !isempty(legend_entries)
+        elems = [LineElement(color=col, linewidth=4) for (_, col) in legend_entries]
+        labels = [bt for (bt, _) in legend_entries]
+        Legend(fig[1, 2], elems, labels; framevisible=false, labelsize=10, patchsize=(20, 4))
+    end
+
+    outfile = joinpath(save_path, "lattice_χ$χ.$(save_format)")
+    save(outfile, fig; px_per_unit=2)
+    return fig
+end
+
+# ============================================================================
 # Kagome lattice visualization
 # ============================================================================
 
@@ -757,6 +873,16 @@ function _kagome_site_xy(i, j, k)
     return (-ry, -rx)
 end
 
+function _honeycomb_merge_site_xy(i, j, k)
+    ax = Float64(j - 1) * sqrt(3) + Float64(i - 1) * sqrt(3) / 2
+    ay = -Float64(i - 1) * 1.5
+    if k == 1
+        return (ax, ay)
+    else
+        return (ax + sqrt(3) / 2, ay - 0.5)
+    end
+end
+
 function _site_xy(::Square, i, j)
     return (Float64(j) * 1.5, -Float64(i) * 1.5)
 end
@@ -776,6 +902,7 @@ const _BOND_COLORS = Dict(
     "bond_H" => :royalblue, "bond_V" => :forestgreen,
     # J1J2
     "bond_J1H" => :royalblue, "bond_J1V" => :forestgreen,
+    "bond_J1_onsite" => :gray50,
     "bond_J2H" => :orange, "bond_J2V" => :orange, "bond_J2\\" => :purple, "bond_J2/" => :hotpink,
     "bond_J3\\" => :gray60, "bond_J3/" => :gray60, "bond_J3|" => :gray40,
     # Heisenberg Kagome :merge
@@ -806,6 +933,78 @@ function _bond_linewidth(eval, e_min, e_max)
     end
     t = ae / e_max   # 0 to 1 based on absolute magnitude
     return 3.0 + t * 18.0
+end
+
+function _bond_offsets_honeycomb_merge(bond_type::String)
+    if occursin("J1_onsite", bond_type)
+        return 1, 2, (0, 0), (0, 0)
+    elseif occursin("J1H", bond_type)
+        return 2, 1, (0, 0), (0, 1)
+    elseif occursin("J1V", bond_type)
+        return 2, 1, (0, 0), (1, 0)
+    elseif occursin("J2H", bond_type)
+        return 1, 1, (0, 0), (0, 1)
+    elseif occursin("J2V", bond_type)
+        return 1, 1, (0, 0), (1, 0)
+    elseif _is_cross_diagonal(bond_type)
+        return 1, 1, (0, 1), (1, 0)
+    else
+        return 1, 2, (0, 0), (0, 0)
+    end
+end
+
+function _draw_honeycomb_merge_bonds!(ax, all_coords, e_dict, pattern, unique_sites,
+                                      Ni, Nj, n_repeat, e_min, e_max)
+    pval_positions = Dict{Int, Vector{Tuple{Int,Int}}}()
+    for ci in 1:Ni, cj in 1:Nj
+        pv = pattern[ci, cj]
+        push!(get!(pval_positions, pv, Tuple{Int,Int}[]), (ci, cj))
+    end
+
+    for (bond_type, bond_data) in e_dict
+        color = _bond_color(bond_type)
+        k1, k2, (off1i, off1j), (off2i, off2j) = _bond_offsets_honeycomb_merge(bond_type)
+        for (pos_str, eval) in bond_data
+            parts = split(pos_str, ",")
+            oi, oj = parse(Int, parts[1]), parse(Int, parts[2])
+            pv = pattern[oi, oj]
+            lw = _bond_linewidth(eval, e_min, e_max)
+
+            for (ci, cj) in pval_positions[pv]
+                for di in 0:(n_repeat-1), dj in 0:(n_repeat-1)
+                    gi1 = ci + di * Ni + off1i
+                    gj1 = cj + dj * Nj + off1j
+                    gi2 = ci + di * Ni + off2i
+                    gj2 = cj + dj * Nj + off2j
+
+                    haskey(all_coords, (gi1, gj1, k1)) || continue
+                    haskey(all_coords, (gi2, gj2, k2)) || continue
+
+                    x1, y1 = all_coords[(gi1, gj1, k1)]
+                    x2, y2 = all_coords[(gi2, gj2, k2)]
+
+                    is_orig = (di == 0 && dj == 0)
+                    alpha = is_orig ? 0.85 : 0.3
+                    lines!(ax, [x1, x2], [y1, y2]; color=(color, alpha),
+                           linewidth=lw, linecap=:round)
+
+                    if is_orig
+                        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                        dx, dy = x2 - x1, y2 - y1
+                        blen = sqrt(dx^2 + dy^2)
+                        if blen > 1e-6
+                            nx, ny = -dy / blen * 0.12, dx / blen * 0.12
+                        else
+                            nx, ny = 0.1, 0.0
+                        end
+                        text!(ax, mx + nx, my + ny;
+                              text="$(round(real(eval); sigdigits=4))",
+                              fontsize=8, align=(:center, :center), color=:gray30)
+                    end
+                end
+            end
+        end
+    end
 end
 
 function _draw_lattice_bonds!(ax, ::Union{Honeycomb{:brickwall_h}, Honeycomb{:brickwall_v}},

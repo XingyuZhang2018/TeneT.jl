@@ -15,6 +15,112 @@ J1-J2p Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-nei
     bondratio::Real = 1.0 # only used when couplingtype is not :uniform
 end
 
+"""
+    energy_value(model::J1J2p{Honeycomb{:merge}}, A, env::VUMPSEnv, params)
+
+Two-site honeycomb merge geometry on an effective square lattice. Each square
+cell contains two honeycomb sublattice sites on one merged physical leg:
+`1(cell)-2(cell)` is the intra-cell J1 bond, while `2(cell)-1(right)` and
+`2(cell)-1(down)` are the inter-cell J1 bonds. J2p is placed on sublattice 1
+only, matching the "one triangular sublattice" convention of the brickwall
+J1J2p implementation.
+"""
+function energy_value(model::J1J2p{Honeycomb{:merge}}, A, env::VUMPSEnv, params::iPEPSOptimize)
+    model.ifrotate && throw(ArgumentError("J1J2p{Honeycomb{:merge}} supports only ifrotate=false."))
+    @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
+    @unpack J2p = model
+
+    Ni, Nj = size(A)
+    len = length(A)
+    atype = _arraytype(A[1])
+    d = Int(2 * model.S + 1)
+    size(A[1], 5) == d^2 ||
+        throw(ArgumentError("Honeycomb{:merge} expects merged physical dimension d^2=$(d^2); got $(size(A[1], 5))."))
+
+    terms = _heisenberg_bond_terms(model, Array; ifrotate=false)
+    h_J1_onsite = _honeycomb_merge_onsite_op(terms, 1, 2, d, atype)
+    terms_J1_inter = _honeycomb_merge_intercell_terms(terms, 2, 1, d, atype)
+    terms_J2p = _honeycomb_merge_intercell_terms(terms, 1, 1, d, atype)
+
+    e_dict = Dict{String, Dict{String, Any}}(
+        "bond_J1_onsite_energy" => Dict{String, Any}(),
+        "bond_J1H_energy"       => Dict{String, Any}(),
+        "bond_J1V_energy"       => Dict{String, Any}(),
+        "bond_J2H_energy"       => Dict{String, Any}(),
+        "bond_J2V_energy"       => Dict{String, Any}(),
+        "bond_J2/_energy"       => Dict{String, Any}()
+    )
+
+    etol = 0.0
+    for p in 1:len
+        i, j = Tuple(findfirst(==(p), A.pattern))
+        params.verbosity >= 4 && println("===========$i,$j===========")
+        J1o, J1h, J1v = enlarge_coupling(model, i, j)
+
+        # J1 onsite: sublattice 1 and 2 in the same merged cell.
+        ir = Ni + 1 - i
+        args11 = (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j])
+        e = _contract_one(contract_o_11, (args11..., h_J1_onsite), params)
+        n = _contract_one(contract_n_11, args11, params)
+        params.verbosity >= 4 && println("bond_J1_onsite = $(J1o * e/n)")
+        etol += J1o * e/n
+        e_dict["bond_J1_onsite_energy"]["$(i),$(j)"] = J1o * e/n
+
+        # Horizontal inter-cell bonds:
+        # J1H: 2(cell) ↔ 1(right); J2H: 1(cell) ↔ 1(right).
+        ir = Ni + 1 - i
+        jr = mod1(j + 1, Nj)
+        args12 = (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j],
+                  FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr])
+        n12 = _contract_one(contract_n_12, args12, params)
+
+        e = _contract_barebones(contract_o_12, args12, terms_J1_inter, params)
+        params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n12)")
+        etol += J1h * e/n12
+        e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n12
+
+        e = _contract_barebones(contract_o_12, args12, terms_J2p, params)
+        params.verbosity >= 4 && println("bond_J2H = $(J2p * e/n12)")
+        etol += J2p * e/n12
+        e_dict["bond_J2H_energy"]["$(i),$(j)"] = J2p * e/n12
+
+        # Vertical inter-cell bonds:
+        # J1V: 2(cell) ↔ 1(down); J2V: 1(cell) ↔ 1(down).
+        ir = mod1(i + 1, Ni)
+        irr = mod1(Ni - i, Ni)
+        args21 = (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j],
+                  FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j])
+        n21 = _contract_one(contract_n_21, args21, params)
+
+        e = _contract_barebones(contract_o_21, args21, terms_J1_inter, params)
+        params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n21)")
+        etol += J1v * e/n21
+        e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n21
+
+        e = _contract_barebones(contract_o_21, args21, terms_J2p, params)
+        params.verbosity >= 4 && println("bond_J2V = $(J2p * e/n21)")
+        etol += J2p * e/n21
+        e_dict["bond_J2V_energy"]["$(i),$(j)"] = J2p * e/n21
+
+        # J2p plaquette diagonal on sublattice 1: 1(right) ↔ 1(down).
+        ir = mod1(i + 1, Ni)
+        irr = mod1(Ni - i, Ni)
+        jr = mod1(j + 1, Nj)
+        args22 = (FLu[i,j], FLo[ir,j], ACu[i,j], ACd[irr,j],
+                  FRu[i,jr], FRo[ir,jr], ARu[i,jr], ARd[irr,jr],
+                  A[i,j], A[i,jr], A[ir,j], A[ir,jr])
+        e = _contract_barebones(contract_o_22_2, args22, terms_J2p, params)
+        n = _contract_one(contract_n_22, args22, params)
+        params.verbosity >= 4 && println("bond_J2/ = $(J2p * e/n)")
+        etol += J2p * e/n
+        e_dict["bond_J2/_energy"]["$(i),$(j)"] = J2p * e/n
+    end
+
+    energy_per_site = etol / (2 * len)
+    params.verbosity >= 3 && println("energy per site = $energy_per_site")
+    return energy_per_site, e_dict
+end
+
 function energy_value(model::J1J2p{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack J2p = model

@@ -9,6 +9,8 @@
 @non_differentiable _kitaev_bond_terms(kwargs...)
 @non_differentiable _kagome_onsite_op(kwargs...)
 @non_differentiable _kagome_intercell_terms(kwargs...)
+@non_differentiable _honeycomb_merge_onsite_op(kwargs...)
+@non_differentiable _honeycomb_merge_intercell_terms(kwargs...)
 
 # p2p collectives — pure data-movement primitives, no AD through them.
 @non_differentiable allgatherv_p2p!(buf, counts, comm)

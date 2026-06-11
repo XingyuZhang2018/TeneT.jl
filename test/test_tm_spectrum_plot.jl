@@ -59,3 +59,29 @@ using CairoMakie
         end
     end
 end
+
+@testset "Honeycomb merge observable visualization" begin
+    mktempdir() do folder
+        chi = Char(0x03c7)
+        open(joinpath(folder, string(chi, "8.log")), "w") do io
+            write(io, "energy_per_site:\n-0.100000000000000\n")
+            for bond_type in ("bond_J1_onsite_energy", "bond_J1H_energy",
+                              "bond_J1V_energy", "bond_J2H_energy",
+                              "bond_J2V_energy", "bond_J2/_energy")
+                write(io, "$bond_type: i j energy\n")
+                write(io, "1,1 -0.010000000000000\t\n")
+            end
+            write(io, "magnetization_norm_per_site:\n0.200000000000000\n")
+            write(io, "magnetization: i j |M| Mx My Mz\n")
+            write(io, "1,1,1 0.200000000000000 0.100000000000000 0.000000000000000 0.170000000000000\n")
+            write(io, "1,1,2 0.200000000000000 -0.100000000000000 0.000000000000000 -0.170000000000000\n")
+            write(io, "correlation_length:\n0.300000000000000\n")
+        end
+
+        TeneT.plot_observables(folder, Honeycomb(:merge), [1;;]; save_format="png", S=0.5)
+        @test isfile(joinpath(folder, "convergence.png"))
+        @test filesize(joinpath(folder, "convergence.png")) > 0
+        @test isfile(joinpath(folder, string("lattice_", chi, "8.png")))
+        @test filesize(joinpath(folder, string("lattice_", chi, "8.png"))) > 0
+    end
+end
