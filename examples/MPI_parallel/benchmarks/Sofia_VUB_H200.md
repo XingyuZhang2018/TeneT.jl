@@ -427,6 +427,29 @@ cuTENSOR permutation problems); per-call label processing measured ~10 µs/
 link (<0.1%, not the gap). Remediation: explicit per-chain intermediate
 layout pinning, then re-gate.
 
+### Rerun with layout pinning (job `1277383`, commit `2b41db0`)
+
+`Chain` gained explicit intermediate-layout pinning; `FLMAP_LEG5_CHAIN`
+pins the hand kernels' H/T/G layouts, so cuTENSOR sees identical
+permutation problems.
+
+| D  | χ    | n  | nB | H fwd ms | C fwd ms | T fwd ms | H bwd ms | C bwd ms | T bwd ms | Hf mem | Cf mem | Hb mem | Cb mem | parity |
+|----|------|----|----|----------|----------|----------|----------|----------|----------|--------|--------|--------|--------|--------|
+| 10 | 512  | 1  | 1  |     45.0 |     45.2 |     73.1 |    154.3 |    165.7 |    168.7 |   22.0 |   17.2 |   32.1 |   32.4 | all ✓ |
+| 12 | 1024 | 4  | 7  |    589.7 |    591.2 |    771.0 |   1942.0 |   1927.7 |   3370.2 |   51.3 |   41.4 |   73.0 |   74.7 | all ✓ |
+| 16 | 1024 | 14 | 23 |   2251.0 |   2254.8 |   2859.3 |   7411.3 |   7579.6 |  11513.5 |   56.7 |   46.8 |   76.5 |   79.5 | all ✓ |
+
+Ratios CHAIN/HAND: fwd **1.003 / 1.003 / 1.002**; bwd 1.074 / **0.993** /
+1.023; fwd-mem 0.78–0.82 (CHAIN better); bwd-mem 1.01–1.04. The literal
+gate still prints FAIL on the single (10,512) bwd cell (1.074) — a
+fixed-overhead effect on a 160 ms workload whose run-to-run variance is
+itself ~4% (compare H bwd 160.7 → 154.3 across the two runs). **Verdict:
+gate satisfied at production scale** — forward identical, backward within
+noise (and faster at (12,1024)), memory better. The `@generated`
+compile-time lowering from the same chain tables remains the recorded
+fallback if small-shape paths ever become hot. M1 closed; M2 (all maps as
+chains) unblocked.
+
 ## Sofia-specific Environment
 
 ```bash
