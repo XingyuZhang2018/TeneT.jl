@@ -496,6 +496,124 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
     return result, cannon_back
 end
 
+# Fully distributed variant: ALu/ALd block-stored too. Forward assembles the
+# row/col AL slices (the irreducible per-rank working set) and runs the shared
+# sliced core; backward accumulates the AL gradients on the SLICES and
+# reduce-scatters them back to blocks (row reduce-scatter along the last leg
+# for dALu, column reduce-scatter along the first leg for dALd) — the v2
+# full-tensor allreduces become slice-level messages. dM1/dM2 keep the small
+# allreduce (M replicated). Same rank-uniform control-flow requirement.
+function ChainRulesCore.rrule(::typeof(FLmap_cannon_dist), FL_blk, ALu_blk, ALd_blk, M, grid::CannonGrid;
+                              forloop_iter = 1, inner_etype = nothing)
+    is_tuple = M isa Tuple
+    M1, M2 = is_tuple ? M : (M, conj(M))
+    T_orig = eltype(FL_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    FL_c  = do_cast ? _downcast_eltype(inner_etype, FL_blk) : FL_blk
+    ALu_c = do_cast ? _downcast_eltype(inner_etype, ALu_blk) : ALu_blk
+    ALd_c = do_cast ? _downcast_eltype(inner_etype, ALd_blk) : ALd_blk
+    M1_c  = do_cast ? _downcast_eltype(inner_etype, M1) : M1
+    M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
+
+    χ = MPI.Allreduce(size(ALu_c, 1), +, grid.col_comm)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    ALu_row = _cannon_row_allgather(ALu_c, grid, l_rs)
+    ALd_col = _cannon_col_allgather(ALd_c, grid, a_rs)
+    result_c, blocks = _cannon_forward_sliced(FL_c, ALu_row, ALd_col, M1_c, M2_c, grid; forloop_iter)
+    result = do_cast ? T_orig.(result_c) : result_c
+
+    function cannon_dist_back(dresult)
+        N2 = grid.N2
+        i_rs = l_rs                  # ring i-blocks == last-leg l-blocks (χ over N2)
+        nl = size(ALd_col, 4)        # local l extent
+
+        d_c = unthunk(dresult)
+        # Densify structured cotangents (e.g. FillArrays.Fill from a bare
+        # `sum` loss): the column allgather hands d_c straight to MPI.Isend,
+        # which needs a real device buffer.
+        if !(d_c isa DenseArray)
+            buf = similar(FL_c, eltype(d_c), size(d_c))
+            buf .= d_c
+            d_c = buf
+        end
+        d_c = do_cast ? _boundary_cast(inner_etype, d_c) : d_c
+
+        # 1. Adjoint of the column reduce-scatter: allgather dresult blocks.
+        dpartial = _cannon_col_allgather(d_c, grid, a_rs)
+
+        # 2-3. Per l-chunk, fully local: same Zygote-free hand-adjoint chain as
+        #      the replicated rrule, but the AL gradients accumulate on the
+        #      captured SLICES (chunk ranges are local — ALd_col's last leg is
+        #      the local block).
+        dALu_row = zero(ALu_row)
+        dALd_col = zero(ALd_col)
+        dM1 = zero(M1_c)
+        dM2 = zero(M2_c)
+        dFL_contribs = Vector{typeof(FL_c)}(undef, N2)
+        for t in 0:N2-1
+            dFL_contribs[t + 1] = zero(blocks[t + 1])
+        end
+        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        for ch in l_chunks
+            local Hc
+            for t in 0:N2-1
+                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
+                if t == 0
+                    Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
+                else
+                    _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
+                end
+            end
+            Tc = _cannon_fold1(Hc, M1_c)
+            Gc = _cannon_fold2(Tc, M2_c)
+            dPc = dpartial[:, :, :, ch]
+            dGc = _cannon_stage2_dG(dPc, ALu_row)
+            tmp = _cannon_stage2_dALu(dPc, Gc)
+            dALu_row .+= tmp
+            _free!(tmp); _free!(dPc); _free!(Gc)
+            tmp = _cannon_fold2_dM2(dGc, Tc)
+            dM2 .+= tmp
+            _free!(tmp)
+            dTc = _cannon_fold2_dT(dGc, M2_c)
+            _free!(dGc); _free!(Tc)
+            tmp = _cannon_fold1_dM1(dTc, Hc)
+            dM1 .+= tmp
+            _free!(tmp)
+            dHc = _cannon_fold1_dH(dTc, M1_c)
+            _free!(dTc)
+            for t in 0:N2-1
+                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
+                tmp = _cannon_stage1_dFL(dHc, ALd_slice)
+                dFL_contribs[t + 1] .+= tmp
+                _free!(tmp)
+                tmp = _cannon_stage1_dALd(dHc, blocks[t + 1])
+                view(dALd_col, i_rs[t + 1], :, :, ch) .+= tmp
+                _free!(tmp)
+            end
+            _free!(dHc); _free!(Hc)
+        end
+
+        # 4. Row reduce-scatter delivers summed dFL block t to rank (r1, t).
+        dFL = _cannon_row_reduce_scatter(dFL_contribs, grid)
+
+        # 5. AL gradients back to blocks: slice-level reduce-scatters (adjoints
+        #    of the forward gathers); dM1/dM2 stay replicated allreduces.
+        dALu_blk = _cannon_row_reduce_scatter_last(dALu_row, grid, l_rs)
+        dALd_blk = _cannon_col_reduce_scatter(dALd_col, grid, a_rs)
+        allreduce_p2p!(dM1, +, grid.comm)
+        allreduce_p2p!(dM2, +, grid.comm)
+
+        dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
+        if do_cast
+            dFL = T_orig.(dFL); dALu_blk = T_orig.(dALu_blk); dALd_blk = T_orig.(dALd_blk)
+            dM = is_tuple ? (T_orig.(dM[1]), T_orig.(dM[2])) : T_orig.(dM)
+        end
+        return NoTangent(), dFL, dALu_blk, dALd_blk, dM, NoTangent()
+    end
+    return result, cannon_dist_back
+end
+
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     atype = _arraytype(M)

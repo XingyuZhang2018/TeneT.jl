@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, cannon_dot, cannon_norm, simple_eig, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_fold1, _cannon_fold2, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd, _cannon_fold1_dH, _cannon_fold1_dM1, _cannon_fold2_dT, _cannon_fold2_dM2, _cannon_stage2_dG, _cannon_stage2_dALu
+using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, cannon_dot, cannon_norm, simple_eig, FLmap, FLmap_cannon, FLmap_cannon_dist, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_fold1, _cannon_fold2, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd, _cannon_fold1_dH, _cannon_fold1_dM1, _cannon_fold2_dT, _cannon_fold2_dM2, _cannon_stage2_dG, _cannon_stage2_dALu
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -273,6 +273,41 @@ end
     phase = v_full[imax] / FL_ref_n[imax]
     @test abs(phase) ≈ 1 rtol = 1e-6
     @test v_full ≈ FL_ref_n .* phase rtol = 1e-6
+    # _dist signature iterates too: one map application on blocks (with ALu/ALd
+    # also distributed) matches the block of the serial map — input/output
+    # distribution match, so the output feeds straight back in.
+    ALub = cannon_scatter(ALu, g); ALdb = cannon_scatter(ALd, g)
+    w_dist = FLmap_cannon_dist(v, ALub, ALdb, (M1, M2), g)
+    @test w_dist ≈ cannon_scatter(FLmap(v_full, ALu, ALd, M1, M2), g) rtol = 1e-10
+end
+
+@testset "FLmap_cannon_dist == FLmap (AL distributed)" begin
+    for (N1, N2) in ((2, 2), (1, 4), (4, 1)), χ in (16, 18), n in (1, 3)
+        D = 3
+        FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=1400 + χ + 10N1 + n)
+        g = cannon_grid(N1, N2)
+        ref = FLmap(FL, ALu, ALd, M1, M2)
+        FLb = cannon_scatter(FL, g); ALub = cannon_scatter(ALu, g); ALdb = cannon_scatter(ALd, g)
+        out = cannon_gather(FLmap_cannon_dist(FLb, ALub, ALdb, (M1, M2), g; forloop_iter = n), g)
+        @test out ≈ ref rtol = 1e-12
+
+        # gradient parity vs serial — all five, with AL gradients compared block-wise.
+        # Block-local weighted sum: the global loss is the sum over ranks (the
+        # blocks tile W .* result disjointly), identical to the serial
+        # full-tensor loss; each rank's cotangent is its W block.
+        loss_ref(FL, ALu, ALd, M1, M2) = real(sum(W .* FLmap(FL, ALu, ALd, M1, M2)))
+        Wb = cannon_scatter(W, g)
+        loss_dist(FLb, ALub, ALdb, M1, M2) = real(sum(Wb .* FLmap_cannon_dist(FLb, ALub, ALdb, (M1, M2), g; forloop_iter = n)))
+        g_ref = Zygote.pullback(loss_ref, FL, ALu, ALd, M1, M2)[2](1.0)
+        g_dist = Zygote.pullback(loss_dist, FLb, ALub, ALdb, M1, M2)[2](1.0)
+        a_rs = split_ranges(χ, N1); i_rs = split_ranges(χ, N2)
+        blkof(x) = x[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
+        @test g_dist[1] ≈ blkof(g_ref[1]) rtol = 1e-10   # dFL block
+        @test g_dist[2] ≈ blkof(g_ref[2]) rtol = 1e-10   # dALu block
+        @test g_dist[3] ≈ blkof(g_ref[3]) rtol = 1e-10   # dALd block
+        @test g_dist[4] ≈ g_ref[4] rtol = 1e-10          # dM1 (replicated)
+        @test g_dist[5] ≈ g_ref[5] rtol = 1e-10          # dM2
+    end
 end
 
 @testset "simple_eig kwargs (default-equivalent)" begin

@@ -331,20 +331,94 @@ function _cannon_row_reduce_scatter(contribs::Vector, grid::CannonGrid)
     return acc
 end
 
+# Assemble the local-a, full-d row slice of a block-distributed tensor:
+# gather the N2 row peers' blocks and concatenate along the LAST leg.
+# Mirror of _cannon_col_allgather; same buffer/sync discipline. Tag 750.
+function _cannon_row_allgather(blk, grid::CannonGrid, l_rs)
+    N2, r2 = grid.N2, grid.r2
+    nfront = ndims(blk) - 1
+    χ2 = sum(length, l_rs)
+    front = size(blk)[1:nfront]
+    full = similar(blk, front..., χ2)
+    view(full, ntuple(_ -> Colon(), nfront)..., l_rs[r2 + 1]) .= blk
+    N2 == 1 && return full
+    recvbufs = Vector{typeof(full)}(undef, N2)
+    for j in 0:N2-1
+        j == r2 && continue
+        recvbufs[j + 1] = similar(blk, front..., length(l_rs[j + 1]))
+    end
+    synchronize(blk)
+    reqs = MPI.Request[]
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.row_comm; source = j, tag = _TAG_BASE + 750))
+    end
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Isend(blk, grid.row_comm; dest = j, tag = _TAG_BASE + 750))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N2-1
+        j == r2 && continue
+        view(full, ntuple(_ -> Colon(), nfront)..., l_rs[j + 1]) .= recvbufs[j + 1]
+    end
+    return full
+end
+
+# Sum the row peers' full-d slice gradients and keep the local d block:
+# adjoint of _cannon_row_allgather. Direct pairwise on row_comm, tag 760.
+# Recv sizing: every row peer's slice has MY l-block columns at MY range, so
+# `similar(acc)` is right even for uneven χ (same reasoning as the sendbuf /
+# recvbuf split in _cannon_col_reduce_scatter).
+function _cannon_row_reduce_scatter_last(dslice, grid::CannonGrid, l_rs)
+    N2, r2 = grid.N2, grid.r2
+    nfront = ndims(dslice) - 1
+    cols = ntuple(_ -> Colon(), nfront)
+    acc = dslice[cols..., l_rs[r2 + 1]]
+    N2 == 1 && return acc
+    recvbufs = Vector{typeof(acc)}(undef, N2)
+    sendbufs = Vector{typeof(acc)}(undef, N2)
+    for j in 0:N2-1
+        j == r2 && continue
+        recvbufs[j + 1] = similar(acc)
+        sendbufs[j + 1] = dslice[cols..., l_rs[j + 1]]
+    end
+    synchronize(dslice)
+    reqs = MPI.Request[]
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.row_comm; source = j, tag = _TAG_BASE + 760))
+    end
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Isend(sendbufs[j + 1], grid.row_comm; dest = j, tag = _TAG_BASE + 760))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N2-1
+        j == r2 && continue
+        acc .+= recvbufs[j + 1]
+    end
+    return acc
+end
+
 # ─── Forward ──────────────────────────────────────────────────────────────
 
-# Shared by FLmap_cannon and its rrule. Returns (result_blk, blocks): the ring
-# rotates ONCE caching the N2 visiting FL blocks (χ²D²/N1 per rank — the AD
-# capture, far smaller than H); the local l range is then processed in
-# `forloop_iter` chunks, each running stage1 → fold → stage2 fully locally
-# with transients bounded by (2+d)·|H|/forloop_iter.
-function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_iter = 1)
+# Core shared by the replicated (FLmap_cannon) and distributed
+# (FLmap_cannon_dist) paths and their rrules. Takes the ALREADY-SLICED per-rank
+# AL working set:
+#   ALu_row = ALu[a_r1, :, :, :]   (local a block, FULL d leg)
+#   ALd_col = ALd[:, :, :, l_r2]   (FULL i leg, local l block)
+# Returns (result_blk, blocks): the ring rotates ONCE caching the N2 visiting
+# FL blocks (χ²D²/N1 per rank — the AD capture, far smaller than H); the local
+# l range is then processed in `forloop_iter` chunks, each running stage1 →
+# fold → stage2 fully locally with transients bounded by (2+d)·|H|/forloop_iter.
+function _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::CannonGrid; forloop_iter = 1)
     N1, N2, r1, r2 = grid.N1, grid.N2, grid.r1, grid.r2
-    χ = size(ALu, 1)
+    χ = size(ALu_row, 4)              # full d leg of the row slice
     a_rs = split_ranges(χ, N1)
     i_rs = split_ranges(χ, N2)
-    l_rng = i_rs[r2 + 1]
-    @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == length(l_rng) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
+    nl = size(ALd_col, 4)             # local l extent
+    @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == nl == length(i_rs[r2 + 1]) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
     @assert forloop_iter ≥ 1 "FLmap_cannon: forloop_iter must be ≥ 1"
 
     # Ring: rotate once, cache the visiting FL blocks by their i-block index.
@@ -361,15 +435,15 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_ite
     end
 
     # Local pipeline per l-chunk: stage 1 accumulate → fold once → stage 2.
+    # Chunk ranges are LOCAL (within the l block): ALd_col's last leg is the
+    # local block, so chunks index it directly.
     Dg, Dh = size(M1, 3), size(M2, 3)
-    partial = similar(FL_blk, χ, Dg, Dh, length(l_rng))
-    ALu_slice = view(ALu, a_rs[r1 + 1], :, :, :)
-    l_chunks = split_ranges(length(l_rng), min(forloop_iter, length(l_rng)))
+    partial = similar(FL_blk, χ, Dg, Dh, nl)
+    l_chunks = split_ranges(nl, min(forloop_iter, nl))
     for ch in l_chunks
-        l_glob = l_rng[ch]
         local Hc
         for t in 0:N2-1
-            ALd_slice = view(ALd, i_rs[t + 1], :, :, l_glob)
+            ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
             if t == 0
                 Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
             else
@@ -378,13 +452,24 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_ite
         end
         Gc = _cannon_fold(Hc, M1, M2)
         _free!(Hc)
-        Pc = _cannon_stage2(Gc, ALu_slice)
+        Pc = _cannon_stage2(Gc, ALu_row)
         _free!(Gc)
         view(partial, :, :, :, ch) .= Pc
         _free!(Pc)
     end
     result = _cannon_col_reduce_scatter(partial, grid, a_rs)
     return result, blocks
+end
+
+# Replicated-AL path: build the per-rank slices as views (no copies) and run
+# the shared core. Signature/behavior identical to the pre-refactor version.
+function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_iter = 1)
+    χ = size(ALu, 1)
+    a_rs = split_ranges(χ, grid.N1)
+    i_rs = split_ranges(χ, grid.N2)
+    ALu_row = view(ALu, a_rs[grid.r1 + 1], :, :, :)
+    ALd_col = view(ALd, :, :, :, i_rs[grid.r2 + 1])
+    return _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
 end
 
 """
@@ -412,5 +497,37 @@ function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; forloop_iter = 1, i
         M2 = _downcast_eltype(inner_etype, M2)
     end
     result, _ = _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid; forloop_iter)
+    return do_cast ? T_orig.(result) : result
+end
+
+"""
+    FLmap_cannon_dist(FL_blk, ALu_blk, ALd_blk, M, grid; forloop_iter=1, inner_etype=nothing)
+
+Fully distributed FLmap: FL, ALu, ALd all block-stored (first χ leg by r1,
+last by r2; `cannon_scatter` convention), M replicated. Internally assembles
+the row slice ALu[a_r1, :, :, :] and column slice ALd[:, :, :, l_r2] (the
+irreducible per-rank working set) and runs the same ring/chunk pipeline as
+`FLmap_cannon`. Collective over `grid.comm`. In an iteration with fixed
+ALu/ALd, hoisting the two gathers out of the loop is the natural
+optimization (leftenv round).
+"""
+function FLmap_cannon_dist(FL_blk, ALu_blk, ALd_blk, M, grid::CannonGrid;
+                           forloop_iter = 1, inner_etype = nothing)
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    T_orig = eltype(FL_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        FL_blk = _downcast_eltype(inner_etype, FL_blk)
+        ALu_blk = _downcast_eltype(inner_etype, ALu_blk)
+        ALd_blk = _downcast_eltype(inner_etype, ALd_blk)
+        M1 = _downcast_eltype(inner_etype, M1)
+        M2 = _downcast_eltype(inner_etype, M2)
+    end
+    χ = MPI.Allreduce(size(ALu_blk, 1), +, grid.col_comm)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    ALu_row = _cannon_row_allgather(ALu_blk, grid, l_rs)
+    ALd_col = _cannon_col_allgather(ALd_blk, grid, a_rs)
+    result, _ = _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end
