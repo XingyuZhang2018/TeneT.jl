@@ -294,8 +294,14 @@ local H/T/G recompute, `unsafe_free!` after each array's last use — no
 Zygote inside the map's rrule). All 20 cells ran (no OOM skips); parity vs
 the slice path ≤1e-10 fwd / ≤1e-8 bwd on every cell (`F✓ B✓`).
 
-| D  | χ    | n  | sl fwd ring | sl fwd nccl | ca fwd ring | ca fwd nccl | sl bwd ring | sl bwd nccl | ca bwd ring | ca bwd nccl | parity |
-|----|------|----|-------------|-------------|-------------|-------------|-------------|-------------|-------------|-------------|--------|
+Column legend — all times in ms: **slice** = the existing replicated-input
+path (`FLmap_parallel`, Part 2's subject); **cannon** = the distributed
+`FLmap_cannon`; **fwd** = one forward map call; **bwd** = one
+`Zygote.pullback` construction + backward; **ring** / **nccl** =
+`TENET_USE_NCCL` off / on; **n** = Cannon's `forloop_iter` for that cell.
+
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | cannon fwd ring | cannon fwd nccl | slice bwd ring | slice bwd nccl | cannon bwd ring | cannon bwd nccl | parity |
+|----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
 | 8  | 256  | 1  |     32.2 |     28.7 |      9.7 |      9.3 |    112.1 |    110.9 |     38.7 |     36.7 | F✓ B✓ |
 | 8  | 512  | 1  |     71.9 |     73.8 |     38.9 |     38.6 |    254.9 |    260.7 |    138.4 |    131.7 | F✓ B✓ |
 | 8  | 768  | 1  |    148.3 |    142.4 |    107.2 |     97.8 |    533.0 |    518.5 |    373.1 |    349.8 | F✓ B✓ |
