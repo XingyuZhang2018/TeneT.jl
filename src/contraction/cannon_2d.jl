@@ -200,6 +200,21 @@ function cannon_gather(blk::AbstractArray, grid::CannonGrid)
     return full
 end
 
+# ─── Distributed inner product / norm over block tiles ────────────────────
+#
+# Blocks tile the full tensor disjointly (first χ leg by r1, last by r2), so
+# the global inner product is the sum of local ones — a single scalar
+# allreduce. Collective over `grid.comm`. These are the `inner_product` /
+# `norm_fn` hooks for running simple_eig fully distributed on Cannon blocks.
+
+function cannon_dot(x_blk, y_blk, grid::CannonGrid)
+    return MPI.Allreduce(dot(x_blk, y_blk), +, grid.comm)
+end
+
+function cannon_norm(x_blk, grid::CannonGrid)
+    return sqrt(MPI.Allreduce(sum(abs2, x_blk), +, grid.comm))
+end
+
 # ─── Ring / column communication ──────────────────────────────────────────
 
 # Send `cur` to the left row neighbor (r2-1) and receive the next block from

@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_fold1, _cannon_fold2, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd, _cannon_fold1_dH, _cannon_fold1_dM1, _cannon_fold2_dT, _cannon_fold2_dM2, _cannon_stage2_dG, _cannon_stage2_dALu
+using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, cannon_dot, cannon_norm, simple_eig, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_fold1, _cannon_fold2, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd, _cannon_fold1_dH, _cannon_fold1_dM1, _cannon_fold2_dT, _cannon_fold2_dM2, _cannon_stage2_dG, _cannon_stage2_dALu
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -231,6 +231,58 @@ end
         out_cl = cannon_gather(FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = 99), g)
         @test out_cl ≈ ref rtol = 1e-12
     end
+end
+
+@testset "cannon_dot / cannon_norm" begin
+    for (N1, N2) in ((2, 2), (1, 4), (4, 1)), χ in (16, 18)   # 18: uneven blocks
+        Random.seed!(1100 + χ + 10N1)
+        g = cannon_grid(N1, N2)
+        x = rand(ComplexF64, χ, 3, 3, χ)
+        y = rand(ComplexF64, χ, 3, 3, χ)
+        xb = cannon_scatter(x, g); yb = cannon_scatter(y, g)
+        @test cannon_dot(xb, yb, g) ≈ dot(x, y) rtol = 1e-12
+        @test cannon_norm(xb, g) ≈ norm(x) rtol = 1e-12
+    end
+end
+
+@testset "distributed power iteration == simple_eig" begin
+    χ, D = 16, 3
+    FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=1200)
+    g = cannon_grid(2, 2)
+    # serial reference: simple_eig on the full map (returns ([λ], [v]))
+    λ_refs, FL_refs = simple_eig(x -> FLmap(x, ALu, ALd, M1, M2), FL; power_iter = 200)
+    λ_ref, FL_ref = λ_refs[1], FL_refs[1]
+    # distributed: same algorithm on blocks with cannon dot/norm.
+    # simple_eig does (power_iter-1) normalizing iters, then v1 = f(v),
+    # λ = dot(v, v1) — i.e. λ = dot(v_199, f(v_199)). The loop below computes
+    # the identical quantities on blocks (f is linear, so the initial
+    # normalization doesn't change the iterate direction).
+    blk = cannon_scatter(FL, g)
+    v = blk ./ cannon_norm(blk, g)
+    local λ, w
+    for _ in 1:200
+        w = FLmap_cannon(v, ALu, ALd, (M1, M2), g)
+        λ = cannon_dot(v, w, g)
+        v = w ./ cannon_norm(w, g)
+    end
+    @test λ ≈ λ_ref rtol = 1e-8
+    # eigenvector parity up to global phase: fix phase via the largest |entry|
+    v_full = cannon_gather(v, g)
+    FL_ref_n = FL_ref ./ norm(FL_ref)   # simple_eig already normalizes; harmless
+    imax = argmax(abs.(FL_ref_n))
+    phase = v_full[imax] / FL_ref_n[imax]
+    @test abs(phase) ≈ 1 rtol = 1e-6
+    @test v_full ≈ FL_ref_n .* phase rtol = 1e-6
+end
+
+@testset "simple_eig kwargs (default-equivalent)" begin
+    χ, D = 12, 3
+    FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=1300)
+    f = x -> FLmap(x, ALu, ALd, M1, M2)
+    λ1, v1 = simple_eig(f, FL; power_iter = 100)
+    λ2, v2 = simple_eig(f, FL; power_iter = 100, inner_product = dot, norm_fn = norm)
+    @test λ1[1] ≈ λ2[1] rtol = 1e-12
+    @test v1[1] ≈ v2[1] rtol = 1e-12
 end
 
 println("rank $rank: test_cannon.jl done")
