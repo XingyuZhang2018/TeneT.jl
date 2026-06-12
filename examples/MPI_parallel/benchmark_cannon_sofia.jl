@@ -49,13 +49,20 @@ fits_bwd(D, χ) = (4 + d_phys) * H_bytes(D, χ) + 10 * tensor_bytes(D, χ) < MEM
 
 function timeit(f)
     f(); CUDA.synchronize(); MPI.Barrier(comm)   # warm (also builds NCCL comms on first use)
-    t = MPI.Wtime()
+    GC.gc(); CUDA.reclaim()
+    tot = 0.0
     for _ in 1:nrep
+        MPI.Barrier(comm)
+        t = MPI.Wtime()
         f(); CUDA.synchronize()
+        tot += MPI.Wtime() - t
+        # Per-rep cleanup OUTSIDE the timed window: dead pullback tapes
+        # otherwise accumulate as live pool bytes across reps and OOM the
+        # big-H cells (job 1265371 died at D=10 χ=768 with the pool at
+        # 99.98% despite a fitting single-call peak).
+        GC.gc(); CUDA.reclaim()
     end
-    MPI.Barrier(comm)
-    dt = (MPI.Wtime() - t) / nrep
-    return MPI.Allreduce(dt, MPI.MAX, comm) * 1000   # ms, max over ranks
+    return MPI.Allreduce(tot / nrep, MPI.MAX, comm) * 1000   # ms, max over ranks
 end
 
 fmt(x) = isnan(x) ? @sprintf("%8s", "skip") : @sprintf("%8.1f", x)
