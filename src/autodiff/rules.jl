@@ -443,6 +443,8 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
             _, bp2 = pullback((h, alu, m1, m2) -> _cannon_stage2(_cannon_fold(h, m1, m2), alu),
                               Hc, ALu_slice, M1_c, M2_c)
             dHc, dALu_s, dM1_k, dM2_k = bp2(dpartial[:, :, :, ch])
+            # release the (2+d)|H|/n pullback tape before the adjoint contractions
+            bp2 = nothing
             view(dALu, a_rs[r1 + 1], :, :, :) .+= dALu_s
             dM1 .+= dM1_k
             dM2 .+= dM2_k
@@ -451,7 +453,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
                 dFL_contribs[t + 1] .+= _cannon_stage1_dFL(dHc, ALd_slice)
                 view(dALd, i_rs[t + 1], :, :, l_glob) .+= _cannon_stage1_dALd(dHc, blocks[t + 1])
             end
-            Hc = dHc = nothing
+            _free!(Hc); _free!(dHc)
         end
 
         # 4. Row reduce-scatter delivers summed dFL block t to rank (r1, t);

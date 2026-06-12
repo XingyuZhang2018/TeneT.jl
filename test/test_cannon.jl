@@ -187,21 +187,28 @@ end
 end
 
 @testset "forloop_iter chunking parity" begin
-    for (N1, N2) in ((2, 2), (1, 4)), n in (2, 3)
+    for (N1, N2) in ((2, 2), (1, 4), (4, 1))
         χ, D = 18, 3   # uneven blocks AND uneven chunks
-        FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=1000 + 10N1 + n)
-        g = cannon_grid(N1, N2)
-        ref = FLmap(FL, ALu, ALd, M1, M2)
-        out = cannon_gather(FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = n), g)
-        @test out ≈ ref rtol = 1e-12
-        loss_ref(FL, ALu, ALd, M1, M2) = real(sum(W .* FLmap(FL, ALu, ALd, M1, M2)))
-        loss_can(FL, ALu, ALd, M1, M2) = real(sum(W .* cannon_gather(
-            FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = n), g)))
-        g_ref = Zygote.pullback(loss_ref, FL, ALu, ALd, M1, M2)[2](1.0)
-        g_can = Zygote.pullback(loss_can, FL, ALu, ALd, M1, M2)[2](1.0)
-        for i in 1:5
-            @test isapprox(g_can[i], g_ref[i]; rtol = 1e-10)
+        local FL, ALu, ALd, M1, M2, ref
+        for n in (2, 3)
+            FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=1000 + 10N1 + n)
+            g = cannon_grid(N1, N2)
+            ref = FLmap(FL, ALu, ALd, M1, M2)
+            out = cannon_gather(FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = n), g)
+            @test out ≈ ref rtol = 1e-12
+            loss_ref(FL, ALu, ALd, M1, M2) = real(sum(W .* FLmap(FL, ALu, ALd, M1, M2)))
+            loss_can(FL, ALu, ALd, M1, M2) = real(sum(W .* cannon_gather(
+                FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = n), g)))
+            g_ref = Zygote.pullback(loss_ref, FL, ALu, ALd, M1, M2)[2](1.0)
+            g_can = Zygote.pullback(loss_can, FL, ALu, ALd, M1, M2)[2](1.0)
+            for i in 1:5
+                @test isapprox(g_can[i], g_ref[i]; rtol = 1e-10)
+            end
         end
+        # clamp path: forloop_iter beyond the local l extent
+        g = cannon_grid(N1, N2)
+        out_cl = cannon_gather(FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = 99), g)
+        @test out_cl ≈ ref rtol = 1e-12
     end
 end
 

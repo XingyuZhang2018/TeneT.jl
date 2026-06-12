@@ -9,9 +9,10 @@
 # take the NCCL fast path; the Cannon ring shifts and column reduce-scatter/
 # allgather are MPI point-to-point (no NCCL path yet).
 #
-# The Cannon path has no l-range sub-slicing yet, so its pre-fold block
-# H = χ²D⁴/(N1·N2) bounds the reachable sizes; configs whose predicted peak
-# exceeds the budget are skipped and printed as `skip`.
+# The Cannon path sub-slices its local l range via `forloop_iter`: per cell
+# the driver picks the smallest n whose BACKWARD per-chunk peak
+# (4+2d)·|H|/n (pullback tape + adjoint chain) plus residents fits the
+# budget, so every cell of the matrix runs — no skips.
 #
 # Output-placement asymmetry (deliberate, the honest map-level comparison):
 # slice fwd INCLUDES the allgatherv that replicates the full result on every
@@ -37,15 +38,21 @@ const total_splits = 128
 const forloop_iter = total_splits ÷ nprocs
 const nrep = 3
 const d_phys = 2
-const MEM_BUDGET = 110e9   # bytes; predictive OOM guard for the un-sub-sliced Cannon path
+const MEM_BUDGET = 110e9   # bytes; per-cell forloop_iter sizing budget
 
 report(s...) = rank == 0 && println(s...)
 
 H_bytes(D, χ) = χ^2 * D^4 / (N1 * N2) * 8
 tensor_bytes(D, χ) = χ^2 * D^2 * 8
-# forward peak ≈ (2+d)·|H| (fold pairwise temporaries); backward ≈ (4+d)·|H|
-fits_fwd(D, χ) = (2 + d_phys) * H_bytes(D, χ) + 6 * tensor_bytes(D, χ) < MEM_BUDGET
-fits_bwd(D, χ) = (4 + d_phys) * H_bytes(D, χ) + 10 * tensor_bytes(D, χ) < MEM_BUDGET
+# backward per-chunk peak dominates: (4+2d)·|H|/n (bp2 tape + adjoint chain);
+# residents ≈ input tensors + blocks row + partial/dpartial + full dALu/dALd.
+const BWD_COEFF = 4 + 2 * d_phys
+resident_bytes(D, χ) = 12 * tensor_bytes(D, χ)
+function pick_n(D, χ)
+    avail = MEM_BUDGET - resident_bytes(D, χ)
+    @assert avail > 0
+    return max(1, ceil(Int, BWD_COEFF * H_bytes(D, χ) / avail))
+end
 
 function timeit(f)
     f(); CUDA.synchronize(); MPI.Barrier(comm)   # warm (also builds NCCL comms on first use)
@@ -68,9 +75,9 @@ end
 fmt(x) = isnan(x) ? @sprintf("%8s", "skip") : @sprintf("%8.1f", x)
 
 report("=== Cannon $(N1)x$(N2) vs slice FLmap benchmark (4 GPU, ", CUDA.name(CUDA.device()), ") ===")
-report("methodology: test_MPI_config.jl Part 2 (Float64 leg5, single M, total_splits=$total_splits, nrep=$nrep)")
-report("| D  | χ    | sl fwd ring | sl fwd nccl | ca fwd ring | ca fwd nccl | sl bwd ring | sl bwd nccl | ca bwd ring | ca bwd nccl | parity |")
-report("|----|------|-------------|-------------|-------------|-------------|-------------|-------------|-------------|-------------|--------|")
+report("methodology: test_MPI_config.jl Part 2 (Float64 leg5, single M, total_splits=$total_splits, nrep=$nrep), cannon forloop_iter=n per cell (backward-peak formula)")
+report("| D  | χ    | n  | sl fwd ring | sl fwd nccl | ca fwd ring | ca fwd nccl | sl bwd ring | sl bwd nccl | ca bwd ring | ca bwd nccl | parity |")
+report("|----|------|----|-------------|-------------|-------------|-------------|-------------|-------------|-------------|-------------|--------|")
 
 for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     CUDA.seed!(42)   # deterministic per-process stream
@@ -85,23 +92,22 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     end
     blk = cannon_scatter(FL, g)
 
-    can_fwd = fits_fwd(D, χ)
-    can_bwd = can_fwd && fits_bwd(D, χ)
+    n = pick_n(D, χ)
 
     slice_fwd_f  = () -> TeneT.FLmap_parallel(FL, ALu, ALd, M; ifparallel = true, forloop_iter)
-    cannon_fwd_f = () -> FLmap_cannon(blk, ALu, ALd, M, g)
+    cannon_fwd_f = () -> FLmap_cannon(blk, ALu, ALd, M, g; forloop_iter = n)
     slice_bwd_f  = () -> Zygote.pullback(
         x -> sum(TeneT.FLmap_parallel(x, ALu, ALd, M; ifparallel = true, forloop_iter)), FL)[2](1.0)
     cannon_bwd_f = () -> Zygote.pullback(
-        x -> sum(FLmap_cannon(x, ALu, ALd, M, g)), blk)[2](1.0)
+        x -> sum(FLmap_cannon(x, ALu, ALd, M, g; forloop_iter = n)), blk)[2](1.0)
 
     t = Dict{String, Float64}()
     for (tag, on) in (("ring", "0"), ("nccl", "1"))
         ENV["TENET_USE_NCCL"] = on
         t["sf_$tag"] = timeit(slice_fwd_f)
-        t["cf_$tag"] = can_fwd ? timeit(cannon_fwd_f) : NaN
+        t["cf_$tag"] = timeit(cannon_fwd_f)
         t["sb_$tag"] = timeit(slice_bwd_f)
-        t["cb_$tag"] = can_bwd ? timeit(cannon_bwd_f) : NaN
+        t["cb_$tag"] = timeit(cannon_bwd_f)
         GC.gc(); CUDA.reclaim()
     end
     ENV["TENET_USE_NCCL"] = "0"
@@ -109,23 +115,17 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     # block-level parity (no gather needed): cannon block vs the matching
     # slice of the full slice-path result / dFL
     a_rs = split_ranges(χ, N1); i_rs = split_ranges(χ, N2)
-    p_fwd = "F–"
-    if can_fwd
-        ref_blk = slice_fwd_f()[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
-        err = norm(cannon_fwd_f() - ref_blk) / norm(ref_blk)
-        p_fwd = MPI.Allreduce(err, MPI.MAX, comm) < 1e-10 ? "F✓" : "F✗"
-        ref_blk = nothing
-    end
-    p_bwd = "B–"
-    if can_bwd
-        g_sl = slice_bwd_f()[1][a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
-        err = norm(cannon_bwd_f()[1] - g_sl) / norm(g_sl)
-        p_bwd = MPI.Allreduce(err, MPI.MAX, comm) < 1e-8 ? "B✓" : "B✗"
-        g_sl = nothing
-    end
+    ref_blk = slice_fwd_f()[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
+    err = norm(cannon_fwd_f() - ref_blk) / norm(ref_blk)
+    p_fwd = MPI.Allreduce(err, MPI.MAX, comm) < 1e-10 ? "F✓" : "F✗"
+    ref_blk = nothing
+    g_sl = slice_bwd_f()[1][a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
+    err = norm(cannon_bwd_f()[1] - g_sl) / norm(g_sl)
+    p_bwd = MPI.Allreduce(err, MPI.MAX, comm) < 1e-8 ? "B✓" : "B✗"
+    g_sl = nothing
 
-    rank == 0 && @printf("| %-2d | %-4d | %s | %s | %s | %s | %s | %s | %s | %s | %s %s |\n",
-        D, χ,
+    rank == 0 && @printf("| %-2d | %-4d | %-2d | %s | %s | %s | %s | %s | %s | %s | %s | %s %s |\n",
+        D, χ, n,
         fmt(t["sf_ring"]), fmt(t["sf_nccl"]), fmt(t["cf_ring"]), fmt(t["cf_nccl"]),
         fmt(t["sb_ring"]), fmt(t["sb_nccl"]), fmt(t["cb_ring"]), fmt(t["cb_nccl"]),
         p_fwd, p_bwd)

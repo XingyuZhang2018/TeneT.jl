@@ -61,6 +61,14 @@ end
 # Transient accounting: peak is ≈ (2+d)·|H| during the fold (@tensor pairwise
 # temporaries) — the serial transient peak / P.
 
+# Deterministic device-memory release for chunk transients. Plain @tensor
+# never eagerly frees on CuArray (DefaultAllocator's tensorfree! is a no-op),
+# so without explicit frees the pool rides at high-water across chunks and
+# reactive GC pollutes timings. unsafe_free! is stream-ordered and the
+# finalizer skips already-freed arrays.
+_free!(x::CuArray) = CUDA.unsafe_free!(x)
+_free!(x) = nothing
+
 function _cannon_stage1(FL, ALd)
     @tensor H[a, e, f, j, k, l] := FL[a, e, f, i] * ALd[i, j, k, l]
     return H
@@ -276,6 +284,7 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_ite
     i_rs = split_ranges(χ, N2)
     l_rng = i_rs[r2 + 1]
     @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == length(l_rng) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
+    @assert forloop_iter ≥ 1 "FLmap_cannon: forloop_iter must be ≥ 1"
 
     # Ring: rotate once, cache the visiting FL blocks by their i-block index.
     blocks = Vector{typeof(FL_blk)}(undef, N2)
@@ -307,8 +316,11 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_ite
             end
         end
         Gc = _cannon_fold(Hc, M1, M2)
-        view(partial, :, :, :, ch) .= _cannon_stage2(Gc, ALu_slice)
-        Hc = Gc = nothing
+        _free!(Hc)
+        Pc = _cannon_stage2(Gc, ALu_slice)
+        _free!(Gc)
+        view(partial, :, :, :, ch) .= Pc
+        _free!(Pc)
     end
     result = _cannon_col_reduce_scatter(partial, grid, a_rs)
     return result, blocks
@@ -321,8 +333,10 @@ Distributed FLmap on an N1×N2 Cannon grid. `FL_blk` and the returned block
 follow the convention: first χ leg split N1-ways by r1, last χ leg split
 N2-ways by r2. `M` is a leg5 tensor or an `(M1, M2)` tuple; ALu/ALd/M are
 replicated on every rank. Collective over `grid.comm`.
-`forloop_iter` sub-slices the local l range so per-chunk transients are
-≈(2+d)·χ²D⁴/(P·forloop_iter).
+`forloop_iter` sub-slices the local l range: forward per-chunk transients are
+≈(2+d)·χ²D⁴/(P·forloop_iter); backward ≈(4+2d)·χ²D⁴/(P·forloop_iter)
+(pullback tape + adjoint chain coexist) — size `forloop_iter` by the backward
+bound when gradients are needed.
 See docs/2026-06-10-cannon-flmap-design.md.
 """
 function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; forloop_iter = 1, inner_etype = nothing)
