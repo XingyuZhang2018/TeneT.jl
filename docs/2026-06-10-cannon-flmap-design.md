@@ -70,8 +70,32 @@ last χ leg split N2-ways.** Rank (r1, r2) holds:
 
 **Output distribution = input distribution** (d sits on a's axis, l on i's axis),
 so power iteration feeds the output straight back in; the environment never
-materializes in full. ALu, ALd, M stay fully replicated this round (AL
-distribution belongs to the leftenv integration round).
+materializes in full. ALu, ALd, M stayed fully replicated in v1/v2.
+
+### v3 (2026-06-12): ALu/ALd block-distributed too (`FLmap_cannon_dist`)
+
+M1/M2 stay replicated (tiny). ALu/ALd are stored in the same block convention
+as FL (first χ leg by r1, last by r2) — persistent per-rank storage drops to
+**3 tensors × χ²D²/P**. Rank (r1, r2) provably needs only two slices:
+
+- `ALd[:, :, :, l_r2]` (full i, local l) = 1/N2 of ALd — assembled by a
+  **column allgather along the first leg** (the existing `_cannon_col_allgather`
+  pattern);
+- `ALu[a_r1, :, :, :]` (local a, full d) = 1/N1 of ALu — assembled by the
+  mirror **row allgather along the last leg**.
+
+These slices are the irreducible working set (every output block depends on
+that much AL data); distribution removes the *persistent* replication. In a
+leftenv power iteration ALu/ALd are fixed, so the two gathers can be hoisted
+out of the iteration loop and amortized (integration-round optimization).
+
+Backward bonus: the v2 backward's largest messages — full-tensor
+`allreduce_p2p!` on dALu and dALd (2×χ²D² each) — become slice-level
+reduce-scatters: dALu accumulates on the row slice and **row reduce-scatters
+along the last leg** back to blocks; dALd accumulates on the column slice and
+**column reduce-scatters along the first leg** (the existing
+`_cannon_col_reduce_scatter` semantics). Backward communication drops
+accordingly; dM1/dM2 keep the small allreduce.
 
 ### Forward — stage 1 (contract i; FL blocks rotate along the row; M folded ONCE after the ring)
 
