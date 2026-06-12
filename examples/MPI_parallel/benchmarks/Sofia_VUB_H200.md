@@ -353,6 +353,45 @@ Footnotes:
    revisions (Zygote-taped backward / reclaim-cold timing) and OOMed at
    D≥10 large-χ cells; their numbers are superseded by this table.
 
+## Part 6: Kernel organization A/B — staged + eager-free vs monolithic @tensor + Zygote (1 GPU)
+
+Job `1275909` (2026-06-12, `submit_bench_kernel_ab.sh` → `bench_kernel_ab_sofia.jl`,
+commit `984ac88`), single H200, no MPI — isolates kernel organization from
+communication on the identical local workload of one 2×2-grid rank
+(`FL_row[χ/2,D,D,χ]·ALd_col[χ,D,D,χ/2]`, Float64 leg5 single-M).
+
+- **A (staged)**: pairwise stage kernels with owned intermediates +
+  `unsafe_free!` after last use; backward = hand-written single-contraction
+  adjoints (the `FLmap_cannon` organization).
+- **B (monolithic)**: original 5-tensor `@tensor` FLmap via `forloop`;
+  backward = the `forloop` rrule (per-slice Zygote pullback).
+- Both lower to the SAME cuTENSOR pairwise contractions; only the sum
+  placement and intermediate ownership differ. Each path runs at its own
+  memory-feasible chunk count (nA: coeff 8; nB: coeff 14 — Zygote tape +
+  cotangent chain measured ≈10-11 |H| units vs the ordered hand chain's 6;
+  at shared n, B OOMs cells A completes — jobs 1275621/1275726).
+- mem columns = device used (GiB) after one un-GC'd call: pool pressure
+  including dead-until-GC temporaries.
+
+| D  | χ    | nA | nB | A fwd ms | B fwd ms | A bwd ms | B bwd ms | A fwd mem | B fwd mem | A bwd mem | B bwd mem | parity |
+|----|------|----|----|----------|----------|----------|----------|-----------|-----------|-----------|-----------|--------|
+| 8  | 256  | 1  | 1  |      3.3 |      4.4 |     13.9 |     12.1 |      3.0 |      3.6 |      4.1 |      7.6 | F✓ B✓ |
+| 8  | 512  | 1  | 1  |     15.4 |     19.6 |     53.4 |     59.4 |      9.7 |     11.7 |     13.9 |     28.1 | F✓ B✓ |
+| 10 | 512  | 1  | 1  |     45.5 |     69.1 |    155.6 |    271.2 |     21.8 |     26.6 |     31.7 |     66.3 | F✓ B✓ |
+| 10 | 768  | 1  | 2  |    126.7 |    159.3 |    419.2 |    759.9 |     48.0 |     58.7 |     70.4 |    110.0 | F✓ B✓ |
+| 12 | 768  | 2  | 4  |    277.7 |    358.4 |    925.9 |   1668.8 |     51.2 |    108.0 |     74.3 |    110.9 | F✓ B✓ |
+| 12 | 1024 | 4  | 7  |    598.4 |    802.1 |   2119.3 |   3231.8 |     49.7 |    120.5 |     70.7 |    116.3 | F✓ B✓ |
+| 14 | 1024 | 8  | 13 |   1305.6 |   1790.4 |   4244.2 |   7017.6 |     50.2 |    115.1 |     69.5 |    112.8 | F✓ B✓ |
+| 16 | 1024 | 14 | 23 |   2280.5 |   2787.0 |   7171.5 |  11713.6 |     53.3 |    116.8 |     72.4 |    116.3 | F✓ B✓ |
+
+**Reading**: A wins every cell, growing with size — forward 1.2-1.5×,
+backward 1.5-1.8×, pool pressure ~40-55% lower (B's dead-until-GC
+temporaries block pool reuse → continuous fresh `cudaMalloc` inside the
+timed window and reactive-GC dependence). This motivates extending the
+staged + eager-free + hand-adjoint organization to ALL maps (single-GPU
+production paths included), which the full-VUMPS Cannon integration needs
+anyway.
+
 ## Sofia-specific Environment
 
 ```bash
