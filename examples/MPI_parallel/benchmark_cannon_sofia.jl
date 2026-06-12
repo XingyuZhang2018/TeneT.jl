@@ -9,10 +9,13 @@
 # take the NCCL fast path; the Cannon ring shifts and column reduce-scatter/
 # allgather are MPI point-to-point (no NCCL path yet).
 #
-# The Cannon path sub-slices its local l range via `forloop_iter`: per cell
-# the driver picks the smallest n whose BACKWARD per-chunk peak
-# (4+2d)·|H|/n (pullback tape + adjoint chain) plus residents fits the
-# budget, so every cell of the matrix runs — no skips.
+# The cannon path is the PRODUCTION form `FLmap_cannon_dist`: FL, ALu, ALd
+# all block-stored (persistent 3×χ²D²/P per rank); the per-call row/col AL
+# slice gathers (tags 750/730) are INCLUDED in the timings — in a leftenv
+# power iteration ALu/ALd are fixed so these gathers amortize away.
+# It sub-slices the local l range via `forloop_iter`: per cell the driver
+# picks the smallest n whose backward per-chunk peak (4+2d)·|H|/n plus
+# residents fits the budget, so every cell of the matrix runs — no skips.
 #
 # Output-placement asymmetry (deliberate, the honest map-level comparison):
 # slice fwd INCLUDES the allgatherv that replicates the full result on every
@@ -22,7 +25,7 @@
 #
 # Launched by Sofia/submit_benchmark_cannon.sh (mpirun -np 4).
 using CUDA, MPI, LinearAlgebra, Zygote, Printf, TeneT
-using TeneT: cannon_grid, cannon_scatter, FLmap_cannon, split_ranges
+using TeneT: cannon_grid, cannon_scatter, FLmap_cannon_dist, split_ranges
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -92,16 +95,18 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     for t in (FL, ALu, ALd, M)
         MPI.Bcast!(t, 0, comm)
     end
-    blk = cannon_scatter(FL, g)
+    blk  = cannon_scatter(FL, g)
+    ALub = cannon_scatter(ALu, g)
+    ALdb = cannon_scatter(ALd, g)
 
     n = pick_n(D, χ)
 
     slice_fwd_f  = () -> TeneT.FLmap_parallel(FL, ALu, ALd, M; ifparallel = true, forloop_iter)
-    cannon_fwd_f = () -> FLmap_cannon(blk, ALu, ALd, M, g; forloop_iter = n)
+    cannon_fwd_f = () -> FLmap_cannon_dist(blk, ALub, ALdb, M, g; forloop_iter = n)
     slice_bwd_f  = () -> Zygote.pullback(
         x -> sum(TeneT.FLmap_parallel(x, ALu, ALd, M; ifparallel = true, forloop_iter)), FL)[2](1.0)
     cannon_bwd_f = () -> Zygote.pullback(
-        x -> sum(FLmap_cannon(x, ALu, ALd, M, g; forloop_iter = n)), blk)[2](1.0)
+        x -> sum(FLmap_cannon_dist(x, ALub, ALdb, M, g; forloop_iter = n)), blk)[2](1.0)
 
     t = Dict{String, Float64}()
     for (tag, on) in (("ring", "0"), ("nccl", "1"))
