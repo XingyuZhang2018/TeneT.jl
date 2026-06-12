@@ -86,9 +86,8 @@ _inner(x, dx1, dx2) = real(dot(dx1, dx2))
 """
     _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
 
-LBFGS iteration callback.  Updates the boundary environment cache, saves
-checkpoints and log files, and zeros the gradient when convergence stalls
-or imaginary energy exceeds tolerance.
+LBFGS iteration callback. Updates the boundary environment cache, saves
+checkpoints and log files, and zeros the gradient only when energy stalls.
 """
 function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
     @unpack folder = params
@@ -128,7 +127,7 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x); iotype=IOStream)
     end
 
-    if abs(fδEierr[2]) < 1e-12 || abs(fδEierr[4]) > 1e-8
+    if abs(fδEierr[2]) < 1e-12
         g .= 0
     end
 
