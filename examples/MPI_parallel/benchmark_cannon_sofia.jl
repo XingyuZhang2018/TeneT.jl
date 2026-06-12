@@ -28,14 +28,15 @@ MPI.Init()
 const comm = MPI.COMM_WORLD
 const rank = MPI.Comm_rank(comm)
 const nprocs = MPI.Comm_size(comm)
-@assert nprocs == 4
 CUDA.device!(0)
 
 const N1 = parse(Int, get(ENV, "TENET_CANNON_N1", "2"))
 const N2 = parse(Int, get(ENV, "TENET_CANNON_N2", "2"))
+@assert nprocs == N1 * N2 "benchmark: nprocs=$nprocs ≠ N1×N2=$(N1 * N2)"
 const g = cannon_grid(N1, N2)
 const total_splits = 128
 const forloop_iter = total_splits ÷ nprocs
+@assert total_splits % nprocs == 0 "slice path needs total_splits divisible by nprocs"
 const nrep = 3
 const d_phys = 2
 const MEM_BUDGET = 110e9   # bytes; per-cell forloop_iter sizing budget
@@ -75,7 +76,7 @@ end
 
 fmt(x) = isnan(x) ? @sprintf("%8s", "skip") : @sprintf("%8.1f", x)
 
-report("=== Cannon $(N1)x$(N2) vs slice FLmap benchmark (4 GPU, ", CUDA.name(CUDA.device()), ") ===")
+report("=== Cannon $(N1)x$(N2) vs slice FLmap benchmark ($(nprocs) GPU, ", CUDA.name(CUDA.device()), ") ===")
 report("methodology: test_MPI_config.jl Part 2 (Float64 leg5, single M, total_splits=$total_splits, nrep=$nrep), cannon forloop_iter=n per cell (backward-peak formula)")
 report("| D  | χ    | n  | sl fwd ring | sl fwd nccl | ca fwd ring | ca fwd nccl | sl bwd ring | sl bwd nccl | ca bwd ring | ca bwd nccl | parity |")
 report("|----|------|----|-------------|-------------|-------------|-------------|-------------|-------------|-------------|-------------|--------|")
