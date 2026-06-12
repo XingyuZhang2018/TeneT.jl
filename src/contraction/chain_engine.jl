@@ -1,10 +1,13 @@
-# Deterministic-memory contraction-chain engine (M1).
+# Deterministic-memory contraction-chain engine (M1 core + M2 conj flags).
 # Design: docs/2026-06-12-deterministic-contraction-engine-design.md
 #
 # A Chain declares a left-assoc pairwise sequence as index-label tuples; the
 # executor runs TensorOperations' runtime tensorcontract (same cuTENSOR calls
 # as @tensor) with every intermediate owned and _free!'d after its last use.
-# M1 scope: no per-op conj flags (tuple-M maps only).
+# Per-op conj flags (M2): conjs[k] marks operand k as entering conjugated, so
+# single-M maps (e.g. FLmap(FL,ALu,ALd,M::leg5) = FLmap(...,M,conj(M))) run
+# without materializing conj(M). Intermediates are never conj-flagged: link k
+# contracts with conjA = (k == 2 ? conjs[1] : false), conjB = conjs[k].
 
 # Labels of intermediate I_k = I_{k-1} ⋆ ops[k+1]: open labels of I_{k-1}
 # (not shared with the op) followed by open labels of the op.
@@ -16,7 +19,7 @@ end
 
 struct Chain{N, O}
     ops::NTuple{N, Tuple}    # index labels per operand; ops[1] is the carried tensor
-    out::NTuple{O, Symbol}   # output labels of the final intermediate
+    out::NTuple{O, Any}      # output labels of the final intermediate (Symbol or Int)
     # Explicit labels for I₁..I_{N-2} (I_{N-1} ≡ out); nothing → derived
     # left-assoc concat via _link_labels. Pinning lets a chain reproduce the
     # exact intermediate layouts of a proven hand kernel (cuTENSOR's
@@ -24,9 +27,11 @@ struct Chain{N, O}
     # NB: NTuple{M, Tuple}, not NTuple — the label tuples have mixed arities,
     # so the diagonal rule rejects them as a plain NTuple.
     inters::Union{Nothing, NTuple{M, Tuple} where M}
+    conjs::NTuple{N, Bool}   # per-operand conj flags; intermediates never flagged
 
-    function Chain(ops::NTuple{N, Tuple}, out::NTuple{O, Symbol},
-                   inters::Union{Nothing, NTuple{M, Tuple} where M}) where {N, O}
+    function Chain(ops::NTuple{N, Tuple}, out::NTuple{O, Any},
+                   inters::Union{Nothing, NTuple{M, Tuple} where M},
+                   conjs::NTuple{N, Bool}) where {N, O}
         if inters !== nothing
             @assert length(inters) == N - 2 "Chain: inters pins I₁..I_{N-2}, expected $(N - 2) tuples, got $(length(inters))"
             labs = ops[1]
@@ -36,11 +41,22 @@ struct Chain{N, O}
                 labs = inters[k - 1]
             end
         end
-        return new{N, O}(ops, out, inters)
+        return new{N, O}(ops, out, inters, conjs)
     end
 end
 
 Chain(ops, out) = Chain(ops, out, nothing)
+Chain(ops, out, inters) = Chain(ops, out, inters, ntuple(_ -> false, length(ops)))
+
+"""
+    conj_variant(ch, slots...) -> Chain
+
+Same ops/out/inters as `ch`, with the given operand slots conj-flagged (on
+top of `ch.conjs`). E.g. `conj_variant(FLMAP_LEG5_CHAIN, 4)` runs the leg5
+chain with operand 4 (M2) read as `conj(M2)` — no materialized conjugate.
+"""
+conj_variant(ch::Chain{N}, slots::Int...) where {N} =
+    Chain(ch.ops, ch.out, ch.inters, ntuple(i -> ch.conjs[i] || i in slots, N))
 
 # Labels of intermediate I_{k-1} produced by link k (k in 2:N): the final
 # link yields `out`; inner links yield the pinned layout when `inters` is set,
@@ -81,7 +97,8 @@ function chain_apply(ch::Chain{N}, tensors::NTuple{N, Any}) where {N}
     labs = ch.ops[1]
     for k in 2:N
         IC  = _inter_labels(ch, labs, k)
-        nxt = tensorcontract(IC, acc, labs, false, tensors[k], ch.ops[k], false)
+        cA  = k == 2 ? ch.conjs[1] : false   # intermediates never conj-flagged
+        nxt = tensorcontract(IC, acc, labs, cA, tensors[k], ch.ops[k], ch.conjs[k])
         k > 2 && _free!(acc)     # acc owned from link k-1; inputs never freed
         acc, labs = nxt, IC
     end
@@ -102,7 +119,8 @@ function chain_apply_from1(ch::Chain{N}, H, tensors_tail::Tuple) where {N}
     labs = _inter_labels(ch, ch.ops[1], 2)
     for k in 3:N
         IC  = _inter_labels(ch, labs, k)
-        nxt = tensorcontract(IC, acc, labs, false, tensors_tail[k - 2], ch.ops[k], false)
+        # k ≥ 3: acc is an intermediate (or H), never conj-flagged — conjB only.
+        nxt = tensorcontract(IC, acc, labs, false, tensors_tail[k - 2], ch.ops[k], ch.conjs[k])
         k > 3 && _free!(acc)     # acc owned from link k-1; at k == 3 acc === H (caller's)
         acc, labs = nxt, IC
     end
@@ -139,23 +157,30 @@ Building block for the cannon ring, mirroring `_cannon_stage1_add!`.
 function chain_link1_add!(H, ch::Chain, A, B)
     IH = _inter_labels(ch, ch.ops[1], 2)
     pA, pB, pAB = _index2tuples(ch.ops[1], ch.ops[2], IH)
-    tensorcontract!(H, A, pA, false, B, pB, false, pAB, 1, 1)
+    tensorcontract!(H, A, pA, ch.conjs[1], B, pB, ch.conjs[2], pAB, 1, 1)
     return H
 end
 
 """
     chain_link1_back(ch, dH, A, B) -> (dA, dB)
 
-Adjoint of the chain's first link (I₁ = A ⋆ B): the generic pairwise adjoints
-`dA = dH ⋆ conj(B)`, `dB = conj(A) ⋆ dH` with the labels of
-`ch.ops[1]`/`ch.ops[2]`. Allocates both gradients; never frees its inputs.
-Counterpart of `chain_link1_add!` for the cannon ring's per-(chunk, block)
-dFL/dALd contributions.
+Adjoint of the chain's first link (I₁ = A° ⋆ B°, X° = conj-flagged X): the
+generic pairwise adjoints in tensorcontract flag form with cA = conjs[1],
+cB = conjs[2]
+
+    dA = tensorcontract(ops[1], dH, IH, cA, B, ops[2], !(cA ⊻ cB))
+    dB = tensorcontract(ops[2], A, ops[1], !(cA ⊻ cB), dH, IH, cB)
+
+(for cA = cB = false: `dA = dH ⋆ conj(B)`, `dB = conj(A) ⋆ dH`, matching the
+hand kernels). Allocates both gradients; never frees its inputs. Counterpart
+of `chain_link1_add!` for the cannon ring's per-(chunk, block) dFL/dALd
+contributions.
 """
 function chain_link1_back(ch::Chain, dH, A, B)
     IH = _inter_labels(ch, ch.ops[1], 2)
-    dA = tensorcontract(ch.ops[1], dH, IH, false, B, ch.ops[2], true)
-    dB = tensorcontract(ch.ops[2], A, ch.ops[1], true, dH, IH, false)
+    cA, cB = ch.conjs[1], ch.conjs[2]
+    dA = tensorcontract(ch.ops[1], dH, IH, cA, B, ch.ops[2], !(cA ⊻ cB))
+    dB = tensorcontract(ch.ops[2], A, ch.ops[1], !(cA ⊻ cB), dH, IH, cB)
     return dA, dB
 end
 
@@ -165,11 +190,15 @@ end
 Recompute-style backward: rebuilds the intermediates I_1..I_{N-2} (the final
 output I_{N-1} is NOT an adjoint operand and is not recomputed at all — same
 as the cannon rrule, which recomputes H/T/G but never P), then walks the
-reversed chain with the generic pairwise adjoints
+reversed chain with the generic pairwise adjoints of C = A° ⋆ B° (X° =
+conj-flagged X), in tensorcontract flag form with cA = (k == 2 ? conjs[1] :
+false), cB = conjs[k]:
 
-    dB = conj(A) ⋆ dC,    dA = dC ⋆ conj(B)
+    d(op_k) = tensorcontract(ops[k], I_{k-1}, lI, !(cA ⊻ cB), dC, lC, cB)
+    dI_{k-1} = tensorcontract(lI, dC, lC, cA, op_k, ops[k], !(cA ⊻ cB))
 
-(conj on the non-cotangent operand, matching the hand kernels). Every owned
+(for cA = cB = false: `dB = conj(A) ⋆ dC`, `dA = dC ⋆ conj(B)` — conj on the
+non-cotangent operand, matching the hand kernels). Every owned
 array is freed right after its last consumer; caller-owned arrays (`tensors`,
 `dOut`) are never freed. Gradients are returned in `ch.ops` order.
 """
@@ -179,8 +208,9 @@ function chain_backward(ch::Chain{N}, tensors::NTuple{N, Any}, dOut) where {N}
     labs   = Vector{Tuple}(undef, N - 2)
     acc, l = tensors[1], ch.ops[1]
     for k in 2:(N - 1)
-        IC  = _inter_labels(ch, l, k)
-        acc = tensorcontract(IC, acc, l, false, tensors[k], ch.ops[k], false)
+        IC = _inter_labels(ch, l, k)
+        cA = k == 2 ? ch.conjs[1] : false   # same flag rule as chain_apply
+        acc = tensorcontract(IC, acc, l, cA, tensors[k], ch.ops[k], ch.conjs[k])
         inters[k - 1], labs[k - 1] = acc, IC
         l = IC
     end
@@ -188,12 +218,14 @@ function chain_backward(ch::Chain{N}, tensors::NTuple{N, Any}, dOut) where {N}
     grads = Vector{Any}(undef, N)
     dC, lC = dOut, ch.out
     for k in N:-1:2
-        Iprev  = k == 2 ? tensors[1] : inters[k - 2]
-        lIprev = k == 2 ? ch.ops[1]  : labs[k - 2]
-        # d(op_k) = conj(I_{k-1}) ⋆ dC
-        grads[k] = tensorcontract(ch.ops[k], Iprev, lIprev, true, dC, lC, false)
-        # dI_{k-1} = dC ⋆ conj(op_k)
-        dprev = tensorcontract(lIprev, dC, lC, false, tensors[k], ch.ops[k], true)
+        Iprev  = k == 2 ? tensors[1]  : inters[k - 2]
+        lIprev = k == 2 ? ch.ops[1]   : labs[k - 2]
+        cA     = k == 2 ? ch.conjs[1] : false
+        cB     = ch.conjs[k]
+        # d(op_k) = flag-form conj(I_{k-1}°) ⋆ dC°
+        grads[k] = tensorcontract(ch.ops[k], Iprev, lIprev, !(cA ⊻ cB), dC, lC, cB)
+        # dI_{k-1} = flag-form dC° ⋆ conj(op_k°)
+        dprev = tensorcontract(lIprev, dC, lC, cA, tensors[k], ch.ops[k], !(cA ⊻ cB))
         # Frees AFTER both contractions of this step (last consumers):
         k < N && _free!(dC)      # owned cotangent from step k+1; at k == N dC === dOut (caller's)
         k > 2 && _free!(Iprev)   # owned inters[k-2]; at k == 2 Iprev === tensors[1] (caller's)
@@ -224,19 +256,22 @@ function chain_backward_from1(ch::Chain{N}, H, tensors_tail::Tuple, dOut) where 
     inters[1], labs[1] = H, _inter_labels(ch, ch.ops[1], 2)
     for k in 3:(N - 1)
         IC = _inter_labels(ch, labs[k - 2], k)
+        # k ≥ 3: the carried operand is an intermediate (or H) — conjB only.
         inters[k - 1] = tensorcontract(IC, inters[k - 2], labs[k - 2], false,
-                                       tensors_tail[k - 2], ch.ops[k], false)
+                                       tensors_tail[k - 2], ch.ops[k], ch.conjs[k])
         labs[k - 1] = IC
     end
     # 2. reversed walk k = N..3; dC is the cotangent of I_{k-1} entering step k.
+    # k ≥ 3 means cA = false always; with cB = conjs[k], !(cA ⊻ cB) = !cB.
     grads = Vector{Any}(undef, N - 2)    # grads[k-2] = d(op_k), tail order
     dC, lC = dOut, ch.out
     for k in N:-1:3
         Iprev, lIprev = inters[k - 2], labs[k - 2]
-        # d(op_k) = conj(I_{k-1}) ⋆ dC
-        grads[k - 2] = tensorcontract(ch.ops[k], Iprev, lIprev, true, dC, lC, false)
-        # dI_{k-1} = dC ⋆ conj(op_k)
-        dprev = tensorcontract(lIprev, dC, lC, false, tensors_tail[k - 2], ch.ops[k], true)
+        cB = ch.conjs[k]
+        # d(op_k) = flag-form conj(I_{k-1}) ⋆ dC°
+        grads[k - 2] = tensorcontract(ch.ops[k], Iprev, lIprev, !cB, dC, lC, cB)
+        # dI_{k-1} = flag-form dC ⋆ conj(op_k°)
+        dprev = tensorcontract(lIprev, dC, lC, false, tensors_tail[k - 2], ch.ops[k], !cB)
         # Frees AFTER both contractions of this step (last consumers):
         k < N && _free!(dC)      # owned cotangent from step k+1; at k == N dC === dOut (caller's)
         k > 3 && _free!(Iprev)   # owned inters[k-2]; at k == 3 Iprev === H (caller's)

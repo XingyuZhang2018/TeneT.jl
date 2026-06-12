@@ -261,4 +261,90 @@ end
     end
 end
 
+@testset "per-op conj flags vs Zygote (8 combos, 3-op chain)" begin
+    Random.seed!(21)
+    A = rand(ComplexF64, 4, 5, 3)        # (:x,:y,:s)
+    B = rand(ComplexF64, 3, 6, 2)        # (:s,:t,:u)
+    C = rand(ComplexF64, 2, 4, 7)        # (:u,:x,:v)
+    ops, out = ((:x,:y,:s), (:s,:t,:u), (:u,:x,:v)), (:y,:t,:v)
+    mc(x, c) = c ? conj(x) : x
+    function ref(a, b, c, cA, cB, cC)
+        I1 = tensorcontract((:x,:y,:t,:u), mc(a,cA), ops[1], false, mc(b,cB), ops[2], false)
+        return tensorcontract(out, I1, (:x,:y,:t,:u), false, mc(c,cC), ops[3], false)
+    end
+    for cA in (false,true), cB in (false,true), cC in (false,true)
+        ch = Chain(ops, out, nothing, (cA,cB,cC))
+        r  = ref(A, B, C, cA, cB, cC)
+        @test TeneT.chain_apply(ch, (A,B,C)) ≈ r rtol = 1e-12
+        dOut = rand(ComplexF64, size(r))
+        _, back = Zygote.pullback((a,b,c) -> ref(a,b,c,cA,cB,cC), A, B, C)
+        dz = back(dOut)
+        ge = TeneT.chain_backward(ch, (A,B,C), dOut)
+        for i in 1:3
+            @test ge[i] ≈ dz[i] rtol = 1e-10
+        end
+        # link1 helpers with flags — value-level vs the materialized reference
+        I1ref = tensorcontract((:x,:y,:t,:u), mc(A,cA), ops[1], false, mc(B,cB), ops[2], false)
+        Hacc = zero(I1ref)
+        TeneT.chain_link1_add!(Hacc, ch, A, B)
+        @test Hacc ≈ I1ref rtol = 1e-12
+        dH = rand(ComplexF64, size(I1ref))
+        _, lb = Zygote.pullback((a, b) -> tensorcontract((:x,:y,:t,:u),
+                    mc(a,cA), ops[1], false, mc(b,cB), ops[2], false), A, B)
+        dA_z, dB_z = lb(dH)
+        dA1, dB1 = TeneT.chain_link1_back(ch, dH, A, B)
+        @test dA1 ≈ dA_z rtol = 1e-10
+        @test dB1 ≈ dB_z rtol = 1e-10
+    end
+end
+
+@testset "integer-label chains construct and run" begin
+    Random.seed!(24)
+    A = rand(ComplexF64, 3, 4); B = rand(ComplexF64, 4, 5); C = rand(ComplexF64, 5, 2)
+    ch = Chain(((1,2), (2,3), (3,4)), (1,4))      # Int labels end-to-end
+    @test TeneT.chain_apply(ch, (A,B,C)) ≈ A*B*C rtol = 1e-12
+end
+
+@testset "conj_variant + from1 variants with flags (4-op chain)" begin
+    Random.seed!(22)
+    A = rand(ComplexF64, 4, 3); B = rand(ComplexF64, 3, 5)
+    M = rand(ComplexF64, 5, 6); D = rand(ComplexF64, 6, 2)
+    ops, out = ((:a,:b), (:b,:c), (:c,:d), (:d,:e)), (:a,:e)
+    base = Chain(ops, out)
+    ch = TeneT.conj_variant(base, 3)
+    @test ch.conjs == (false, false, true, false)
+    ref = A * B * conj(M) * D
+    @test TeneT.chain_apply(ch, (A,B,M,D)) ≈ ref rtol = 1e-12
+    dOut = rand(ComplexF64, size(ref))
+    _, back = Zygote.pullback((a,b,m,d) -> a*b*conj(m)*d, A, B, M, D)
+    dz = back(dOut)
+    ge = TeneT.chain_backward(ch, (A,B,M,D), dOut)
+    for i in 1:4; @test ge[i] ≈ dz[i] rtol = 1e-10; end
+    # from1: start from H = A*B (links 3..4 carry the conj flag on op 3)
+    H = A * B
+    @test TeneT.chain_apply_from1(ch, H, (M, D)) ≈ ref rtol = 1e-12
+    dH, dM, dD = TeneT.chain_backward_from1(ch, H, (M, D), dOut)
+    @test dM ≈ dz[3] rtol = 1e-10
+    @test dD ≈ dz[4] rtol = 1e-10
+    @test dH ≈ dOut * (conj(M) * D)' rtol = 1e-10  # dH = dOut ⋆ conj(conj(M)*D)
+end
+
+@testset "single-M FLmap leg5 via conj_variant (engine-level)" begin
+    Random.seed!(23)
+    χ, D, d = 12, 3, 2
+    FL  = rand(ComplexF64, χ, D, D, χ); ALu = rand(ComplexF64, χ, D, D, χ)
+    ALd = rand(ComplexF64, χ, D, D, χ); M   = rand(ComplexF64, D, D, D, D, d)
+    ch1m = TeneT.conj_variant(FLMAP_LEG5_CHAIN, 4)
+    ref  = TeneT.FLmap(FL, ALu, ALd, M)          # dispatches to (M, conj(M))
+    @test TeneT.chain_apply(ch1m, (FL, ALd, M, M, ALu)) ≈ ref rtol = 1e-12
+    dOut = rand(ComplexF64, size(ref))
+    _, back = Zygote.pullback((fl,alu,ald,m) -> TeneT.FLmap(fl,alu,ald,m), FL, ALu, ALd, M)
+    dFL_z, dALu_z, dALd_z, dM_z = back(dOut)
+    g = TeneT.chain_backward(ch1m, (FL, ALd, M, M, ALu), dOut)
+    @test g[1] ≈ dFL_z rtol = 1e-10
+    @test g[2] ≈ dALd_z rtol = 1e-10
+    @test g[3] .+ g[4] ≈ dM_z rtol = 1e-10       # slot-sum convention
+    @test g[5] ≈ dALu_z rtol = 1e-10
+end
+
 println("test_chain_engine done")
