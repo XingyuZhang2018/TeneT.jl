@@ -259,4 +259,57 @@ end
     end
 end
 
+@testset "forloop rrule reroute: engine == Zygote path" begin
+    Random.seed!(51)
+    χ, D, d = 8, 3, 2
+    FL  = rand(ComplexF64, χ, D, D, χ); ALu = rand(ComplexF64, χ, D, D, χ)
+    ALd = rand(ComplexF64, χ, D, D, χ); M5  = rand(ComplexF64, D, D, D, D, d)
+    # All four wrappers share the (χ,D,D,χ)³ + M5 geometry, so the same three
+    # boundary tensors serve every map; only the wrapper arg ORDER differs:
+    #   FLmap_parallel(FL, ALu, ALd, M)   — splits arg 3 (ALd) on its LAST dim
+    #   FRmap_parallel(FR, ARu, ARd, M)   — splits arg 3 (ARd) on dim 1
+    #   ACmap_parallel(AC, FL, FR, M)     — splits arg 3 (FR)  on its LAST dim
+    #   ACdmap_parallel(ACd, FL, FR, M)   — splits arg 3 (FR)  on dim 1
+    # χ = 8 is uneven under forloop_iter = 3 (split_ranges → 3,3,2 chunks).
+    wrappers = (TeneT.FLmap_parallel, TeneT.FRmap_parallel,
+                TeneT.ACmap_parallel, TeneT.ACdmap_parallel)
+    for fmap in wrappers, Mform in (M5, (M5, conj(M5))), n in (1, 3)
+        loss(a, b, c, m) = sum(abs2, fmap(a, b, c, m; ifparallel=false, forloop_iter=n))
+        old = TeneT.CHAIN_ENGINE[]
+        gref = try
+            TeneT.set_chain_engine!(false)
+            Zygote.gradient(loss, FL, ALu, ALd, Mform)
+        finally
+            TeneT.set_chain_engine!(old)
+        end
+        geng = try
+            TeneT.set_chain_engine!(true)
+            Zygote.gradient(loss, FL, ALu, ALd, Mform)
+        finally
+            TeneT.set_chain_engine!(old)
+        end
+        mname = Mform isa Tuple ? "tuple" : "single-M"
+        grads_match(geng, gref; label="$(nameof(fmap)) $mname n=$n")
+    end
+
+    # inner_etype (do_cast) branch — real production traffic (leftenv/rightenv/
+    # ACenv thread it under Zygote); cast tolerance is F32-level:
+    loss32(fl, alu, ald, m) = sum(abs2, TeneT.FLmap_parallel(fl, alu, ald, m;
+        ifparallel=false, forloop_iter=3, inner_etype=Float32))
+    old = TeneT.CHAIN_ENGINE[]
+    g32ref = try
+        TeneT.set_chain_engine!(false)
+        Zygote.gradient(loss32, FL, ALu, ALd, M5)
+    finally
+        TeneT.set_chain_engine!(old)
+    end
+    g32eng = try
+        TeneT.set_chain_engine!(true)
+        Zygote.gradient(loss32, FL, ALu, ALd, M5)
+    finally
+        TeneT.set_chain_engine!(old)
+    end
+    grads_match(g32eng, g32ref; rtol=1e-5, label="inner_etype Float32 forloop_iter=3")
+end
+
 println("test_chain_maps done")

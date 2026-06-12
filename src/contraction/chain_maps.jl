@@ -163,6 +163,7 @@ end
 # arg order is (C, FL, FR). Cmap gets NO engine_backward entry: the plan's map
 # census shows Cmap never goes through forloop/parallel — it is differentiated
 # directly in the Cenv loops, where the chain_apply rrule covers the
-# engine-ON path.
+# engine-ON path. Cmap has no inner_etype kwarg ⇒ its guards call chain_apply
+# directly (_chain_map is the inner_etype wrapper).
 const CMAP_LEG3_CHAIN = tensor_chain(((:a,:c,:d), (:a,:b), (:b,:c,:e)), (:d,:e))
 const CMAP_LEG4_CHAIN = tensor_chain(((:a,:c,:d,:e), (:a,:b), (:b,:c,:d,:f)), (:e,:f))

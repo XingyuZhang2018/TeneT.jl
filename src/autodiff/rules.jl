@@ -173,6 +173,32 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     args_c = do_cast ? map(a -> _boundary_cast(inner_etype, a), args) : args
 
     if forloop_iter == 1
+        # Engine routing is decided AT FORWARD TIME: when the toggle+guard pass,
+        # the forward is tape-free (f itself routes through the chain via the
+        # basic.jl guards) and the backward goes through the engine_backward
+        # registry, with a pullback recompute as the residual inner fallback
+        # (reached only if the registry rejects the concrete arg form). When
+        # the toggle is off, the eager-pullback path below runs unchanged.
+        if use_chain_engine(args_c...)
+            result_c = f(args_c...)
+            result = do_cast ? T_orig.(result_c) : result_c
+            function engineback(dresult)
+                _dresult = unthunk(dresult)
+                _dresult_c = do_cast ? _boundary_cast(inner_etype, _dresult) : _dresult
+                dargs_c = engine_backward(f, args_c, _dresult_c)
+                if dargs_c === nothing
+                    _, bp = pullback(f, args_c...)   # fallback: unregistered f / form
+                    dargs_c = bp(_dresult_c)
+                end
+                # engine_backward returns map-arg-order gradients (tuple-M arg ⇒
+                # tuple grad slot) — same shape as Zygote's pullback tuple.
+                # Upcast to original precision at boundary exit.
+                dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+                                  dargs_c
+                return NoTangent(), NoTangent(), dargs...
+            end
+            return result, engineback
+        end
         result_c, back = pullback(f, args_c...)
         result = do_cast ? T_orig.(result_c) : result_c
         function realback(dresult)
@@ -222,8 +248,12 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
                     j == N_in[1] ? view(args_c[j], in_idx_r...) : args_c[j]
                 end
                 t1 = time()
-                _, bp = pullback(f, split_args...)
-                dargs_range = bp(view(_dresult_c, out_idx_r...))
+                dargs_range = use_chain_engine(split_args...) ?
+                              engine_backward(f, split_args, view(_dresult_c, out_idx_r...)) : nothing
+                if dargs_range === nothing
+                    _, bp = pullback(f, split_args...)       # fallback: unregistered f / form
+                    dargs_range = bp(view(_dresult_c, out_idx_r...))
+                end
                 t_bp += time() - t1
                 for i in 1:length(args_c)
                     if i == N_in[1]
@@ -300,8 +330,12 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             split_args = ntuple(length(args_c)) do j
                 j == N_in[1] ? view(args_c[j], in_idx_r...) : args_c[j]
             end
-            _, bp = pullback(f, split_args...)
-            split_dargs = bp(_dresult_c[out_idx_r...])
+            split_dargs = use_chain_engine(split_args...) ?
+                          engine_backward(f, split_args, _dresult_c[out_idx_r...]) : nothing
+            if split_dargs === nothing
+                _, bp = pullback(f, split_args...)       # fallback: unregistered f / form
+                split_dargs = bp(_dresult_c[out_idx_r...])
+            end
             for j in 1:length(args_c)
                 if j == N_in[1]
                     dargs_c[j][in_idx_r...] .= split_dargs[j]
