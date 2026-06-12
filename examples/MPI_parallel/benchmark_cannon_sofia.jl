@@ -63,11 +63,12 @@ function timeit(f)
         t = MPI.Wtime()
         f(); CUDA.synchronize()
         tot += MPI.Wtime() - t
-        # Per-rep cleanup OUTSIDE the timed window: dead pullback tapes
-        # otherwise accumulate as live pool bytes across reps and OOM the
-        # big-H cells (job 1265371 died at D=10 χ=768 with the pool at
-        # 99.98% despite a fitting single-call peak).
-        GC.gc(); CUDA.reclaim()
+        # Per-rep GC OUTSIDE the timed window: finalizes dead pullback tapes
+        # so their pool blocks are reusable (job 1265371 OOMed without this).
+        # Deliberately NO CUDA.reclaim() here — returning pool memory to the
+        # driver makes the next rep re-allocate via slow cudaMalloc, which
+        # inflated every column ~2-4x in job 1273538.
+        GC.gc()
     end
     return MPI.Allreduce(tot / nrep, MPI.MAX, comm) * 1000   # ms, max over ranks
 end
