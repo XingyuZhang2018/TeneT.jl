@@ -6,17 +6,57 @@ using TeneT: Chain, chain_interlabels, tensor_chain, tensor_pinned_inters,
 using TensorOperations: tensorcontract
 
 # Compare two gradient collections in map-arg order; tuple-M slots compare
-# elementwise. Used by every per-map parity testset.
-function grads_match(ga, gb; rtol=1e-10)
-    @test length(ga) == length(gb)
-    for (a, b) in zip(ga, gb)
-        if b isa Tuple
-            @test a isa Tuple && length(a) == length(b)
-            for (ai, bi) in zip(a, b); @test ai ≈ bi rtol = rtol; end
-        else
-            @test a ≈ b rtol = rtol
+# elementwise (a tuple/non-tuple slot mismatch fails the isa test and skips
+# the elementwise loop instead of double-reporting as a MethodError). A
+# nonempty `label` wraps the comparisons in their own @testset.
+function grads_match(ga, gb; rtol=1e-10, label::String="")
+    body = () -> begin
+        @test length(ga) == length(gb)
+        for (a, b) in zip(ga, gb)
+            if b isa Tuple
+                if a isa Tuple
+                    @test length(a) == length(b)
+                    for (ai, bi) in zip(a, b); @test ai ≈ bi rtol = rtol; end
+                else
+                    @test a isa Tuple              # slot mismatch: bail early
+                end
+            else
+                @test a ≈ b rtol = rtol
+            end
         end
     end
+    if isempty(label)
+        body()
+    else
+        @testset "$label" begin body() end
+    end
+    return nothing
+end
+
+# One parity case: engine-OFF reference (fwd + Zygote grads) vs engine-ON
+# (fwd 1e-12, Zygote grads 1e-10) plus the engine_backward registry entry vs
+# a toggle-OFF Zygote pullback (1e-10). Toggle always restored.
+function chain_parity_case(f, args; check_engine_backward=true)
+    TeneT.set_chain_engine!(false)
+    ref  = f(args...)
+    gref = Zygote.gradient((a...) -> sum(abs2, f(a...)), args...)
+    geng = try
+        TeneT.set_chain_engine!(true)
+        @test f(args...) ≈ ref rtol = 1e-12
+        Zygote.gradient((a...) -> sum(abs2, f(a...)), args...)
+    finally
+        TeneT.set_chain_engine!(false)
+    end
+    grads_match(geng, gref; label="zygote on/off")
+    if check_engine_backward
+        dOut = rand(ComplexF64, size(ref))
+        _, bk = Zygote.pullback((a...) -> f(a...), args...)
+        gz = bk(dOut)
+        ge = TeneT.engine_backward(f, args, dOut)
+        @test ge !== nothing
+        grads_match(ge, gz; label="engine_backward")
+    end
+    return nothing
 end
 
 @testset "tensor_pinned_inters matches @tensor temp layouts" begin
@@ -30,6 +70,10 @@ end
     # N=3 edge case (one intermediate), N=2 → nothing
     @test tensor_pinned_inters(((:a,:b), (:b,:c), (:c,:d)), (:a,:d)) isa NTuple{1,Tuple}
     @test tensor_pinned_inters(((:a,:b), (:b,:c)), (:a,:c)) === nothing
+    # FRmap leg5 — helper output consistent with the constructed chain's first
+    # three inter layouts (chain_interlabels = (I₁, I₂, I₃, out) for N=5):
+    @test tensor_pinned_inters(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)), (:a,:e,:f,:i)) ==
+          chain_interlabels(TeneT.FRMAP_LEG5_CHAIN)[1:3]
 end
 
 @testset "toggle + chainability guard" begin
@@ -91,26 +135,7 @@ end
         ((FL5, ALu5, ALd5, M8),        "leg8"),
     ]
     for (args, name) in cases
-        @testset "$name" begin
-            TeneT.set_chain_engine!(false)
-            ref = TeneT.FLmap(args...)
-            gref = Zygote.gradient((a...) -> sum(abs2, TeneT.FLmap(a...)), args...)
-            geng = try                       # toggle hygiene: never leak ON state
-                TeneT.set_chain_engine!(true)
-                @test TeneT.FLmap(args...) ≈ ref rtol = 1e-12
-                Zygote.gradient((a...) -> sum(abs2, TeneT.FLmap(a...)), args...)
-            finally
-                TeneT.set_chain_engine!(false)
-            end
-            grads_match(geng, gref)
-            # engine_backward registry (the forloop-reroute entry point):
-            dOut = rand(ComplexF64, size(ref))
-            _, bk = Zygote.pullback((a...) -> TeneT.FLmap(a...), args...)
-            gz = bk(dOut)
-            ge = TeneT.engine_backward(TeneT.FLmap, args, dOut)
-            @test ge !== nothing
-            grads_match(ge, gz)
-        end
+        @testset "$name" begin chain_parity_case(TeneT.FLmap, args) end
     end
     # inner_etype path survives the reroute (mirrors test_contraction.jl):
     r32 = try
@@ -138,26 +163,7 @@ end
         ((FR5, ARu5, ARd5, M8),        "leg8"),
     ]
     for (args, name) in cases
-        @testset "$name" begin
-            TeneT.set_chain_engine!(false)
-            ref = TeneT.FRmap(args...)
-            gref = Zygote.gradient((a...) -> sum(abs2, TeneT.FRmap(a...)), args...)
-            geng = try                       # toggle hygiene: never leak ON state
-                TeneT.set_chain_engine!(true)
-                @test TeneT.FRmap(args...) ≈ ref rtol = 1e-12
-                Zygote.gradient((a...) -> sum(abs2, TeneT.FRmap(a...)), args...)
-            finally
-                TeneT.set_chain_engine!(false)
-            end
-            grads_match(geng, gref)
-            # engine_backward registry (the forloop-reroute entry point):
-            dOut = rand(ComplexF64, size(ref))
-            _, bk = Zygote.pullback((a...) -> TeneT.FRmap(a...), args...)
-            gz = bk(dOut)
-            ge = TeneT.engine_backward(TeneT.FRmap, args, dOut)
-            @test ge !== nothing
-            grads_match(ge, gz)
-        end
+        @testset "$name" begin chain_parity_case(TeneT.FRmap, args) end
     end
     # inner_etype path survives the reroute (mirrors test_contraction.jl):
     r32 = try
@@ -167,6 +173,34 @@ end
         TeneT.set_chain_engine!(false)
     end
     @test r32 ≈ TeneT.FRmap(FR5, ARu5, ARd5, M5; inner_etype=Float32) rtol = 1e-5
+end
+
+@testset "ACmap chains: parity over all variants" begin
+    Random.seed!(43)
+    χ, D, d = 8, 3, 2
+    # Geometry mirrors test_contraction.jl's ACmap testsets (physical leg d=2):
+    AC4 = rand(ComplexF64, χ, D, χ);    FL4 = rand(ComplexF64, χ, D, χ)
+    FR4 = rand(ComplexF64, χ, D, χ);    M4  = rand(ComplexF64, D, D, D, D)
+    AC5 = rand(ComplexF64, χ, D, D, χ); FL5 = rand(ComplexF64, χ, D, D, χ)
+    FR5 = rand(ComplexF64, χ, D, D, χ); M5  = rand(ComplexF64, D, D, D, D, d)
+    M8  = rand(ComplexF64, D, D, D, D, D, D, D, D)
+    cases = [
+        ((AC4, FL4, FR4, M4),        "leg4"),
+        ((AC5, FL5, FR5, M5),        "leg5 single-M"),
+        ((AC5, FL5, FR5, (M5, conj(M5))), "leg5 tuple"),
+        ((AC5, FL5, FR5, M8),        "leg8"),
+    ]
+    for (args, name) in cases
+        @testset "$name" begin chain_parity_case(TeneT.ACmap, args) end
+    end
+    # inner_etype path survives the reroute (mirrors test_contraction.jl):
+    r32 = try
+        TeneT.set_chain_engine!(true)
+        TeneT.ACmap(AC5, FL5, FR5, M5; inner_etype=Float32)
+    finally
+        TeneT.set_chain_engine!(false)
+    end
+    @test r32 ≈ TeneT.ACmap(AC5, FL5, FR5, M5; inner_etype=Float32) rtol = 1e-5
 end
 
 println("test_chain_maps done")

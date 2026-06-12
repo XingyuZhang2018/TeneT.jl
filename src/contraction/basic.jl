@@ -255,6 +255,8 @@ end
 ```
 """
 function ACmap(AC, FL, FR, M::leg4; inner_etype=nothing)
+    use_chain_engine(AC, FL, FR, M) &&
+        return _chain_map(ACMAP_LEG4_CHAIN, (AC, FR, M, FL), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(AC))
         @tensor result[f,g,h] := AC[a,b,c] * FR[c,e,h] * M[d,g,e,b] * FL[a,d,f]
         return result
@@ -269,6 +271,8 @@ function ACmap(AC, FL, FR, M::leg4; inner_etype=nothing)
     end
 end
 function ACmap(AC, FL, FR, M1::leg5, M2::leg5; inner_etype=nothing)
+    use_chain_engine(AC, FL, FR, M1, M2) &&
+        return _chain_map(ACMAP_LEG5_CHAIN, (AC, FR, M1, M2, FL), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(AC))
         @tensor result[i,j,k,l] := AC[a,b,c,d] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * FL[a,e,f,i]
         return result
@@ -284,6 +288,8 @@ function ACmap(AC, FL, FR, M1::leg5, M2::leg5; inner_etype=nothing)
     end
 end
 function ACmap(AC, FL, FR, M::leg8; inner_etype=nothing)
+    use_chain_engine(AC, FL, FR, M) &&
+        return _chain_map(ACMAP_LEG8_CHAIN, (AC, FR, M, FL), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(AC))
         @tensor result[i,j,k,l] := AC[a,b,c,d] * FR[d,g,h,l] * M[e,f,j,k,g,h,b,c] * FL[a,e,f,i]
         return result
@@ -298,8 +304,11 @@ function ACmap(AC, FL, FR, M::leg8; inner_etype=nothing)
     end
 end
 
-ACmap(AC, FL, FR, M::leg5; inner_etype=nothing) =
-    ACmap(AC, FL, FR, M, conj(M); inner_etype)
+function ACmap(AC, FL, FR, M::leg5; inner_etype=nothing)
+    use_chain_engine(AC, FL, FR, M) &&
+        return _chain_map(ACMAP_LEG5_CHAIN_1M, (AC, FR, M, M, FL), inner_etype)
+    return ACmap(AC, FL, FR, M, conj(M); inner_etype)
+end
 ACmap(AC, FL, FR, M::Tuple{leg5,leg5}; inner_etype=nothing) =
     ACmap(AC, FL, FR, M[1], M[2]; inner_etype)
 

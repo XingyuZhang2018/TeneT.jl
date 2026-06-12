@@ -94,3 +94,38 @@ function engine_backward(::typeof(FRmap), args::NTuple{4, Any}, dOut)
     end
     return nothing
 end
+
+# ─── ACmap family (leg4, leg8, leg5 pair, leg5 single-M) ────────────────────
+# Chain tensor order is (AC, FR, M..., FL) — the kernels' @tensor written
+# order; map arg order is (AC, FL, FR, M). NB: the carried operand (AC) IS the
+# map's first arg, but FL/FR are swapped relative to the chain order, so the
+# gradient permutations differ from both FLmap's and FRmap's — see the
+# per-return comments.
+const ACMAP_LEG4_CHAIN = tensor_chain(((:a,:b,:c), (:c,:e,:h), (:d,:g,:e,:b), (:a,:d,:f)), (:f,:g,:h))
+const ACMAP_LEG5_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:e,:f,:i)), (:i,:j,:k,:l))
+const ACMAP_LEG8_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:e,:f,:j,:k,:g,:h,:b,:c), (:a,:e,:f,:i)), (:i,:j,:k,:l))
+const ACMAP_LEG5_CHAIN_1M = conj_variant(ACMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
+
+function engine_backward(::typeof(ACmap), args::NTuple{4, Any}, dOut)
+    _chainable(args...) || return nothing
+    AC, FL, FR, M = args
+    if M isa Tuple && length(M) == 2
+        g = chain_backward(ACMAP_LEG5_CHAIN, (AC, FR, M[1], M[2], FL), dOut)
+        # g = (dAC, dFR, dM1, dM2, dFL) → map order (dAC, dFL, dFR, dM-tuple)
+        return (g[1], g[5], g[2], (g[3], g[4]))
+    elseif M isa AbstractArray && ndims(M) == 5
+        g = chain_backward(ACMAP_LEG5_CHAIN_1M, (AC, FR, M, M, FL), dOut)
+        dM = g[3]; dM .+= g[4]; _free!(g[4])           # slot-sum, in place
+        # g = (dAC, dFR, dM₁, dM₂, dFL) → map order (dAC, dFL, dFR, dM₁+dM₂)
+        return (g[1], g[5], g[2], dM)
+    elseif M isa AbstractArray && ndims(M) == 4
+        g = chain_backward(ACMAP_LEG4_CHAIN, (AC, FR, M, FL), dOut)
+        # g = (dAC, dFR, dM, dFL) → map order (dAC, dFL, dFR, dM)
+        return (g[1], g[4], g[2], g[3])
+    elseif M isa AbstractArray && ndims(M) == 8
+        g = chain_backward(ACMAP_LEG8_CHAIN, (AC, FR, M, FL), dOut)
+        # g = (dAC, dFR, dM, dFL) → map order (dAC, dFL, dFR, dM)
+        return (g[1], g[4], g[2], g[3])
+    end
+    return nothing
+end
