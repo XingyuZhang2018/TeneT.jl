@@ -155,6 +155,7 @@ function ChainRulesCore.rrule(::typeof(chain_apply), ch::Chain{N}, tensors::NTup
     # Recompute-style: the closure captures only caller-owned inputs; no
     # intermediate ever outlives the call (the cannon/Part-6 OOM lesson).
     function chain_apply_pullback(dOut)
+        dOut isa AbstractZero && return (NoTangent(), NoTangent(), NoTangent())
         return NoTangent(), NoTangent(), chain_backward(ch, tensors, unthunk(dOut))
     end
     return out, chain_apply_pullback
