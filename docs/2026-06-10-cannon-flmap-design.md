@@ -94,6 +94,28 @@ growing with grid size: ~1.33× total FLOPs at 2×2, ~3.3× at 8×8 — the same
 disease that disqualified the one-shot approach C). Fold-after-ring keeps total
 FLOPs exactly serial/P.
 
+### Stage 1b — l-chunk sub-slicing (`forloop_iter`, added 2026-06-12)
+
+Without sub-slicing, H = χ²D⁴/P bounds reachable sizes (benchmark job 1265371
+OOMed at D=10 χ=768 on 141 GB H200s; D≥12 large-χ cells unreachable). The l
+leg is free through stage 1 / fold / stage 2, so the local l range sub-slices
+the whole local pipeline — the `total_splits` idea of the slice path, composed
+correctly with the ring:
+
+- **Naive compositions fail**: chunk-outer × ring-inner multiplies ring
+  communication by the chunk count; ring-outer × chunk-inner keeps every
+  chunk's H alive simultaneously (= full H, no saving).
+- **Adopted: row-block cache + local chunk loop.** The ring rotates ONCE,
+  caching the N2 visiting FL blocks (`blocks`, total χ²D²/N1 per rank —
+  smaller than H by D⁴/(D²·…) ≈ 50–100× at production sizes). Then for each
+  of `forloop_iter` chunks of the local l range (via `split_ranges`):
+  H_chunk = Σ_t blocks[t]·ALd_slice → fold → stage 2 → write the chunk's
+  columns of the full-d partial. Entirely local; forward communication is
+  unchanged (one rotation + column reduce-scatter).
+
+Peak transient becomes ≈ (2+d)·|H|/forloop_iter + N2·|FL_blk| + |partial| —
+every Part-2 benchmark cell fits at 2×2 with forloop_iter ≤ 16.
+
 ### Forward — stage 2 (contract a; column reduce-scatter)
 
 ```
@@ -137,27 +159,32 @@ hard-coded. Zygote never sees MPI or in-place mutation.
 | Forward | Backward |
 |---------|----------|
 | column reduce-scatter | column allgather |
-| row ring shift (FL block rotation) | replay rotation; dFL accumulator block travels paired with its FL block |
+| row ring rotation (blocks cached) | **no replay** — blocks are local; dFL contributions summed by one row reduce-scatter |
 | replicated inputs (ALu/ALd/M) | gradient allreduce(+) over COMM_WORLD |
 
 ### Backward flow (rank (r1,r2) receives `dresult[d_range(r1), :, :, l_range(r2)]`)
 
+(Restructured 2026-06-12 together with `forloop_iter` chunking; the original
+travelling-accumulator reverse ring is superseded — the cached `blocks` make
+all per-step inputs local, so the backward needs no ring communication.)
+
 1. **Column allgather**: `dpartial[d full, g, h, l∈r2] = allgather(dresult, col_comm)`
    — adjoint of reduce-scatter.
-2. **Post-ring pullback** (local, once): one composite
-   `pullback((H, ALu_s, M1, M2) -> stage2(fold(H, M1, M2), ALu_s))` applied to
-   `dpartial` yields `dH`, the a_r1 slice contribution to `dALu`, and **dM1/dM2
-   in one shot** (fold-after-ring means the M gradients are not per-step sums).
-   The H block is captured in the rrule closure (χ²D⁴/P; a recompute option can
-   trade memory for compute later — design hook only).
-3. **Stage-1 reverse ring**: replay the FL rotation with each FL block's **dFL
-   accumulator travelling alongside it**. Each step: the cheap two-tensor
-   `pullback(stage1_kernel)(dH)` adds the dFL contribution into the paired
-   accumulator and accumulates the local `dALd[i∈t_k, :, :, l∈r2]` contribution;
-   then (FL block, dFL block) shift together. After a full cycle every dFL block
-   lands on its home rank — **dFL stays distributed**, matching "distributed
-   input → distributed gradient". Backward message volume ≈ 2× forward.
-4. **Replicated-arg gradient reduction**: dALu (only the a_r1 slice nonzero per
+2. **Per l-chunk, fully local**: recompute `H_chunk = Σ_t blocks[t]·ALd_slice`
+   (the rrule captures the small `blocks` row, NOT H — χ²D²/N1 vs χ²D⁴/P);
+   one composite `pullback((H, ALu_s, M1, M2) -> stage2(fold(H, M1, M2), ALu_s))`
+   applied to the chunk's columns of `dpartial` yields `dH_chunk`, the chunk's
+   dALu-slice contribution, and dM1/dM2 contributions (accumulated over chunks).
+3. **Hand-written stage-1 adjoints** (replace per-step Zygote pullbacks —
+   removes the redundant stage-1 forward recompute that made backward
+   ~1.6× slower than slice at large χ in job 1265371):
+   `dFL_contrib[t] += dH_chunk[a,e,f,j,k,l]·conj(ALd[i_t,j,k,l])` and
+   `dALd[i_t, :, :, l_chunk] += conj(blocks[t])·dH_chunk`, for every t and chunk.
+4. **Row reduce-scatter** of the N2 `dFL_contrib` blocks over `row_comm`
+   (direct pairwise, tag `_TAG_BASE+740`): block t's contributions from all
+   row ranks sum and land on rank (r1, t) — **dFL stays distributed**.
+   Backward comm volume ≈ half of the old reverse-ring scheme.
+5. **Replicated-arg gradient reduction**: dALu (only the a_r1 slice nonzero per
    rank), dALd (only the l_r2 slice nonzero), dM1/dM2 — all via
    `allreduce_p2p!(+, COMM_WORLD)`, which sums overlapping slices and stitches
    disjoint ones in one call, and picks up the existing NCCL fast path for free.
