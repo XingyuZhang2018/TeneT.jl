@@ -170,14 +170,19 @@ all per-step inputs local, so the backward needs no ring communication.)
 
 1. **Column allgather**: `dpartial[d full, g, h, l∈r2] = allgather(dresult, col_comm)`
    — adjoint of reduce-scatter.
-2. **Per l-chunk, fully local**: recompute `H_chunk = Σ_t blocks[t]·ALd_slice`
-   (the rrule captures the small `blocks` row, NOT H — χ²D²/N1 vs χ²D⁴/P);
-   one composite `pullback((H, ALu_s, M1, M2) -> stage2(fold(H, M1, M2), ALu_s))`
-   applied to the chunk's columns of `dpartial` yields `dH_chunk`, the chunk's
-   dALu-slice contribution, and dM1/dM2 contributions (accumulated over chunks).
-3. **Hand-written stage-1 adjoints** (replace per-step Zygote pullbacks —
-   removes the redundant stage-1 forward recompute that made backward
-   ~1.6× slower than slice at large χ in job 1265371):
+2. **Per l-chunk, fully local and Zygote-free** (2026-06-12: Zygote removed
+   entirely from `cannon_back` — its tapes and `@tensor`-internal temporaries
+   cannot be freed eagerly and accumulated ~60+ GiB of dead pool bytes per
+   call across chunks, OOMing job 1274256): recompute the owned chain
+   `H_chunk → T_chunk = fold1(H,M1) → G_chunk = fold2(T,M2)` from the cached
+   `blocks` (the rrule captures `blocks`, NOT H — χ²D²/N1 vs χ²D⁴/P), then
+   walk six hand-written single-contraction adjoints (stage2 → fold2 → fold1)
+   in the live-set-minimizing order, `unsafe_free!`-ing every intermediate
+   right after its last consumer. Per-chunk peak ≈ (2+2d)·|H|/forloop_iter
+   with zero cross-chunk garbage.
+3. **Hand-written stage-1 adjoints** (no per-step Zygote — removes the
+   redundant stage-1 forward recompute that made backward ~1.6× slower than
+   slice at large χ in job 1265371):
    `dFL_contrib[t] += dH_chunk[a,e,f,j,k,l]·conj(ALd[i_t,j,k,l])` and
    `dALd[i_t, :, :, l_chunk] += conj(blocks[t])·dH_chunk`, for every t and chunk.
 4. **Row reduce-scatter** of the N2 `dFL_contrib` blocks over `row_comm`
