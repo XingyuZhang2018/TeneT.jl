@@ -58,8 +58,8 @@ end
 #   fold contracts M1/M2 into H once per map call;
 #   stage 2 contracts a/b/c with ALu, leaving a full-length d leg for the
 #     column reduce-scatter.
-# Transient accounting: peak is ≈ (2+d)·|H| during the fold (@tensor pairwise
-# temporaries) — the serial transient peak / P.
+# Transient accounting: peak is ≈ (1+d)·|H| during the fold (H and the owned
+# pairwise intermediate T coexist) — the serial transient peak / P.
 
 # Deterministic device-memory release for chunk transients. Plain @tensor
 # never eagerly frees on CuArray (DefaultAllocator's tensorfree! is a no-op),
@@ -74,16 +74,32 @@ function _cannon_stage1(FL, ALd)
     return H
 end
 
-# In-place accumulating variant for the forward ring (avoids a second H-sized
-# temporary). Backward uses the non-mutating version through Zygote.pullback.
+# In-place accumulating variant for the ring (avoids a second H-sized
+# temporary). The rrule backward recomputes H with the same kernels and then
+# walks the hand adjoints below — no Zygote anywhere in the chunk body.
 function _cannon_stage1_add!(H, FL, ALd)
     @tensor H[a, e, f, j, k, l] += FL[a, e, f, i] * ALd[i, j, k, l]
     return H
 end
 
+# Fold split into its two pairwise steps so the d·|H| intermediate T is an
+# owned array (freeable eagerly) instead of a dead @tensor-internal temporary
+# — TensorOperations' DefaultAllocator never frees on CuArray, and these
+# temporaries are the largest single transient (job 1274256 OOM).
+function _cannon_fold1(H, M1)
+    @tensor T[a, f, k, g, b, p, l] := H[a, e, f, j, k, l] * M1[e, j, g, b, p]
+    return T
+end
+
+function _cannon_fold2(T, M2)
+    @tensor G[a, b, c, g, h, l] := T[a, f, k, g, b, p, l] * M2[f, k, h, c, p]
+    return G
+end
+
 function _cannon_fold(H, M1, M2)
-    @tensor G[a, b, c, g, h, l] := H[a, e, f, j, k, l] *
-                                   M1[e, j, g, b, p] * M2[f, k, h, c, p]
+    T = _cannon_fold1(H, M1)
+    G = _cannon_fold2(T, M2)
+    _free!(T)
     return G
 end
 
@@ -103,6 +119,36 @@ end
 function _cannon_stage1_dALd(dH, FL)
     @tensor dALd[i, j, k, l] := conj(FL[a, e, f, i]) * dH[a, e, f, j, k, l]
     return dALd
+end
+
+# Hand adjoints of stage 2 (P = G·ALu, contracting a,b,c):
+function _cannon_stage2_dG(dP, ALu)
+    @tensor dG[a, b, c, g, h, l] := dP[d, g, h, l] * conj(ALu[a, b, c, d])
+    return dG
+end
+function _cannon_stage2_dALu(dP, G)
+    @tensor dALu[a, b, c, d] := conj(G[a, b, c, g, h, l]) * dP[d, g, h, l]
+    return dALu
+end
+
+# Hand adjoints of fold step 2 (G = T·M2, contracting f,k,p):
+function _cannon_fold2_dT(dG, M2)
+    @tensor dT[a, f, k, g, b, p, l] := dG[a, b, c, g, h, l] * conj(M2[f, k, h, c, p])
+    return dT
+end
+function _cannon_fold2_dM2(dG, T)
+    @tensor dM2[f, k, h, c, p] := conj(T[a, f, k, g, b, p, l]) * dG[a, b, c, g, h, l]
+    return dM2
+end
+
+# Hand adjoints of fold step 1 (T = H·M1, contracting e,j):
+function _cannon_fold1_dH(dT, M1)
+    @tensor dH[a, e, f, j, k, l] := dT[a, f, k, g, b, p, l] * conj(M1[e, j, g, b, p])
+    return dH
+end
+function _cannon_fold1_dM1(dT, H)
+    @tensor dM1[e, j, g, b, p] := conj(H[a, e, f, j, k, l]) * dT[a, f, k, g, b, p, l]
+    return dM1
 end
 
 # ─── Boundary shims: full ↔ distributed blocks ────────────────────────────
@@ -334,9 +380,9 @@ follow the convention: first χ leg split N1-ways by r1, last χ leg split
 N2-ways by r2. `M` is a leg5 tensor or an `(M1, M2)` tuple; ALu/ALd/M are
 replicated on every rank. Collective over `grid.comm`.
 `forloop_iter` sub-slices the local l range: forward per-chunk transients are
-≈(2+d)·χ²D⁴/(P·forloop_iter); backward ≈(4+2d)·χ²D⁴/(P·forloop_iter)
-(pullback tape + adjoint chain coexist) — size `forloop_iter` by the backward
-bound when gradients are needed.
+≈(1+d)·χ²D⁴/(P·forloop_iter); backward ≈(2+2d)·χ²D⁴/(P·forloop_iter) (fully
+hand-written adjoint chain, every intermediate freed after its last use) —
+size `forloop_iter` by the backward bound when gradients are needed.
 See docs/2026-06-10-cannon-flmap-design.md.
 """
 function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; forloop_iter = 1, inner_etype = nothing)

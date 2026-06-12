@@ -416,9 +416,10 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         dpartial = _cannon_col_allgather(d_c, grid, a_rs)
 
         # 2-3. Per l-chunk, fully local: recompute H_chunk from the cached
-        #      blocks, composite fold∘stage2 pullback, then hand-written
-        #      stage-1 adjoints accumulate per-destination dFL contributions
-        #      and the dALd slice.
+        #      blocks, recompute the fold chain with owned intermediates, then
+        #      walk the fully hand-written adjoint chain (stage2 → fold2 →
+        #      fold1 → stage1) accumulating per-destination dFL contributions
+        #      and the dALu/dALd/dM slices.
         ALu_slice = view(ALu_c, a_rs[r1 + 1], :, :, :)
         dALu = zero(ALu_c)
         dALd = zero(ALd_c)
@@ -440,20 +441,38 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
                     _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
                 end
             end
-            _, bp2 = pullback((h, alu, m1, m2) -> _cannon_stage2(_cannon_fold(h, m1, m2), alu),
-                              Hc, ALu_slice, M1_c, M2_c)
-            dHc, dALu_s, dM1_k, dM2_k = bp2(dpartial[:, :, :, ch])
-            # release the (2+d)|H|/n pullback tape before the adjoint contractions
-            bp2 = nothing
-            view(dALu, a_rs[r1 + 1], :, :, :) .+= dALu_s
-            dM1 .+= dM1_k
-            dM2 .+= dM2_k
+            # Recompute the fold chain with owned intermediates, then walk the
+            # hand adjoints in the order that minimizes the live set; every
+            # array is freed right after its last use (Zygote-free: tapes and
+            # @tensor-internal temporaries cannot be freed eagerly and OOMed
+            # job 1274256 by accumulating across chunks).
+            Tc = _cannon_fold1(Hc, M1_c)
+            Gc = _cannon_fold2(Tc, M2_c)
+            dPc = dpartial[:, :, :, ch]
+            dGc = _cannon_stage2_dG(dPc, ALu_slice)
+            tmp = _cannon_stage2_dALu(dPc, Gc)
+            view(dALu, a_rs[r1 + 1], :, :, :) .+= tmp
+            _free!(tmp); _free!(dPc); _free!(Gc)
+            tmp = _cannon_fold2_dM2(dGc, Tc)
+            dM2 .+= tmp
+            _free!(tmp)
+            dTc = _cannon_fold2_dT(dGc, M2_c)
+            _free!(dGc); _free!(Tc)
+            tmp = _cannon_fold1_dM1(dTc, Hc)
+            dM1 .+= tmp
+            _free!(tmp)
+            dHc = _cannon_fold1_dH(dTc, M1_c)
+            _free!(dTc)
             for t in 0:N2-1
                 ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_glob)
-                dFL_contribs[t + 1] .+= _cannon_stage1_dFL(dHc, ALd_slice)
-                view(dALd, i_rs[t + 1], :, :, l_glob) .+= _cannon_stage1_dALd(dHc, blocks[t + 1])
+                tmp = _cannon_stage1_dFL(dHc, ALd_slice)
+                dFL_contribs[t + 1] .+= tmp
+                _free!(tmp)
+                tmp = _cannon_stage1_dALd(dHc, blocks[t + 1])
+                view(dALd, i_rs[t + 1], :, :, l_glob) .+= tmp
+                _free!(tmp)
             end
-            _free!(Hc); _free!(dHc)
+            _free!(dHc); _free!(Hc)
         end
 
         # 4. Row reduce-scatter delivers summed dFL block t to rank (r1, t);

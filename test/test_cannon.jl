@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd
+using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_fold1, _cannon_fold2, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd, _cannon_fold1_dH, _cannon_fold1_dM1, _cannon_fold2_dT, _cannon_fold2_dM2, _cannon_stage2_dG, _cannon_stage2_dALu
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -174,16 +174,37 @@ end
     @test dFL ≈ dFL_ref rtol = 1e-3
 end
 
-@testset "stage1 hand adjoints == Zygote (local, no MPI)" begin
+@testset "hand adjoints == Zygote (local, no MPI)" begin
     χ, D = 8, 3
     FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=102)
     H = _cannon_stage1(FL, ALd)
+    T = _cannon_fold1(H, M1)
+    G = _cannon_fold2(T, M2)
     Random.seed!(103)
     dH = rand(ComplexF64, size(H)...)
-    _, bp = Zygote.pullback(_cannon_stage1, FL, ALd)
-    dFL_z, dALd_z = bp(dH)
+    dT = rand(ComplexF64, size(T)...)
+    dG = rand(ComplexF64, size(G)...)
+    dP = rand(ComplexF64, size(_cannon_stage2(G, ALu))...)
+
+    _, bp1 = Zygote.pullback(_cannon_stage1, FL, ALd)
+    dFL_z, dALd_z = bp1(dH)
     @test _cannon_stage1_dFL(dH, ALd) ≈ dFL_z rtol = 1e-12
     @test _cannon_stage1_dALd(dH, FL) ≈ dALd_z rtol = 1e-12
+
+    _, bpf1 = Zygote.pullback(_cannon_fold1, H, M1)
+    dH_z, dM1_z = bpf1(dT)
+    @test _cannon_fold1_dH(dT, M1) ≈ dH_z rtol = 1e-12
+    @test _cannon_fold1_dM1(dT, H) ≈ dM1_z rtol = 1e-12
+
+    _, bpf2 = Zygote.pullback(_cannon_fold2, T, M2)
+    dT_z, dM2_z = bpf2(dG)
+    @test _cannon_fold2_dT(dG, M2) ≈ dT_z rtol = 1e-12
+    @test _cannon_fold2_dM2(dG, T) ≈ dM2_z rtol = 1e-12
+
+    _, bps2 = Zygote.pullback(_cannon_stage2, G, ALu)
+    dG_z, dALu_z = bps2(dP)
+    @test _cannon_stage2_dG(dP, ALu) ≈ dG_z rtol = 1e-12
+    @test _cannon_stage2_dALu(dP, G) ≈ dALu_z rtol = 1e-12
 end
 
 @testset "forloop_iter chunking parity" begin
