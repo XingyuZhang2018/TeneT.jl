@@ -392,6 +392,29 @@ staged + eager-free + hand-adjoint organization to ALL maps (single-GPU
 production paths included), which the full-VUMPS Cannon integration needs
 anyway.
 
+## Part 7: Chain-engine perf gate (1 GPU)
+
+Job `1276469` (2026-06-12, `submit_bench_chain_gate.sh` →
+`bench_chain_gate_sofia.jl`, commit `0a58586`). Paths on the Part-6 local
+workload: **H** = hand staged kernels (Part 6's A), **C** = chain engine
+(`chain_apply`/`chain_backward` per chunk, same n as H), **T** = monolithic
+`@tensor` + forloop + Zygote (Part 6's B, own nB).
+
+| D  | χ    | n  | nB | H fwd ms | C fwd ms | T fwd ms | H bwd ms | C bwd ms | T bwd ms | Hf mem | Cf mem | Tf mem | Hb mem | Cb mem | Tb mem | parity |
+|----|------|----|----|----------|----------|----------|----------|----------|----------|--------|--------|--------|--------|--------|--------|--------|
+| 10 | 512  | 1  | 1  |     45.5 |     48.7 |     59.3 |    160.7 |    222.6 |    172.0 |     22.0 |     17.2 |     26.9 |     32.1 |     32.4 |     66.6 | F✓ B✓ Tf✓ Tb✓ |
+| 12 | 1024 | 4  | 7  |    598.1 |    632.2 |    778.3 |   2147.1 |   2347.2 |   3423.5 |     51.3 |     41.4 |    122.7 |     73.0 |     74.7 |    111.0 | F✓ B✓ Tf✓ Tb✓ |
+| 16 | 1024 | 14 | 23 |   2283.2 |   2401.0 |   2914.1 |   7476.5 |   8103.6 |  11572.3 |     56.7 |     46.8 |    120.9 |     76.5 |     79.5 |    116.3 | F✓ B✓ Tf✓ Tb✓ |
+
+Gate (≤1.05 time, ≤1.10 mem): **FAIL** — CHAIN/HAND fwd 1.052–1.070, bwd
+1.084–1.385 (small cell dominated by fixed overheads; production cells
+5–9%, converging down with size). CHAIN fwd memory is 18–22% BETTER than
+hand; CHAIN beats TENSOR everywhere. Diagnosis: the engine's derived
+left-assoc intermediate layouts differ from the hand kernels' (different
+cuTENSOR permutation problems); per-call label processing measured ~10 µs/
+link (<0.1%, not the gap). Remediation: explicit per-chain intermediate
+layout pinning, then re-gate.
+
 ## Sofia-specific Environment
 
 ```bash
