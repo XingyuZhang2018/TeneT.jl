@@ -129,3 +129,40 @@ function engine_backward(::typeof(ACmap), args::NTuple{4, Any}, dOut)
     end
     return nothing
 end
+
+# ─── ACdmap family (leg4, leg5 pair, leg5 single-M — NO leg8 method) ────────
+# Chain tensor order is (ACd, FR, M..., FL) — the kernels' @tensor written
+# order; map arg order is (ACd, FL, FR, M). Same arg layout as ACmap, so the
+# gradient permutations below match ACmap's — see the per-return comments.
+const ACDMAP_LEG4_CHAIN = tensor_chain(((:f,:g,:h), (:c,:e,:h), (:d,:g,:e,:b), (:a,:d,:f)), (:a,:b,:c))
+const ACDMAP_LEG5_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:e,:f,:i)), (:a,:b,:c,:d))
+const ACDMAP_LEG5_CHAIN_1M = conj_variant(ACDMAP_LEG5_CHAIN, 4)  # M2 = conj(M1), no materialization
+
+function engine_backward(::typeof(ACdmap), args::NTuple{4, Any}, dOut)
+    _chainable(args...) || return nothing
+    ACd, FL, FR, M = args
+    if M isa Tuple && length(M) == 2
+        g = chain_backward(ACDMAP_LEG5_CHAIN, (ACd, FR, M[1], M[2], FL), dOut)
+        # g = (dACd, dFR, dM1, dM2, dFL) → map order (dACd, dFL, dFR, dM-tuple)
+        return (g[1], g[5], g[2], (g[3], g[4]))
+    elseif M isa AbstractArray && ndims(M) == 5
+        g = chain_backward(ACDMAP_LEG5_CHAIN_1M, (ACd, FR, M, M, FL), dOut)
+        dM = g[3]; dM .+= g[4]; _free!(g[4])           # slot-sum, in place
+        # g = (dACd, dFR, dM₁, dM₂, dFL) → map order (dACd, dFL, dFR, dM₁+dM₂)
+        return (g[1], g[5], g[2], dM)
+    elseif M isa AbstractArray && ndims(M) == 4
+        g = chain_backward(ACDMAP_LEG4_CHAIN, (ACd, FR, M, FL), dOut)
+        # g = (dACd, dFR, dM, dFL) → map order (dACd, dFL, dFR, dM)
+        return (g[1], g[4], g[2], g[3])
+    end
+    return nothing
+end
+
+# ─── Cmap (leg3-FL, leg4-FL) ─────────────────────────────────────────────────
+# Chain tensor order is (FL, C, FR) — the kernels' @tensor written order; map
+# arg order is (C, FL, FR). Cmap gets NO engine_backward entry: the plan's map
+# census shows Cmap never goes through forloop/parallel — it is differentiated
+# directly in the Cenv loops, where the chain_apply rrule covers the
+# engine-ON path.
+const CMAP_LEG3_CHAIN = tensor_chain(((:a,:c,:d), (:a,:b), (:b,:c,:e)), (:d,:e))
+const CMAP_LEG4_CHAIN = tensor_chain(((:a,:c,:d,:e), (:a,:b), (:b,:c,:d,:f)), (:e,:f))

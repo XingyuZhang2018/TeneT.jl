@@ -35,28 +35,61 @@ end
 
 # One parity case: engine-OFF reference (fwd + Zygote grads) vs engine-ON
 # (fwd 1e-12, Zygote grads 1e-10) plus the engine_backward registry entry vs
-# a toggle-OFF Zygote pullback (1e-10). Toggle always restored.
+# a toggle-OFF Zygote pullback (1e-10). Both regions set the toggle
+# EXPLICITLY (OFF for references, ON for engine paths) and restore the
+# ambient value — so the references remain @tensor-path results even after
+# Task 11 flips the global default ON. Toggle always restored.
 function chain_parity_case(f, args; check_engine_backward=true)
-    TeneT.set_chain_engine!(false)
-    ref  = f(args...)
-    gref = Zygote.gradient((a...) -> sum(abs2, f(a...)), args...)
+    old = TeneT.CHAIN_ENGINE[]
+    ref, gref = try
+        TeneT.set_chain_engine!(false)
+        r = f(args...)
+        (r, Zygote.gradient((a...) -> sum(abs2, f(a...)), args...))
+    finally
+        TeneT.set_chain_engine!(old)
+    end
     geng = try
         TeneT.set_chain_engine!(true)
         @test f(args...) ≈ ref rtol = 1e-12
         Zygote.gradient((a...) -> sum(abs2, f(a...)), args...)
     finally
-        TeneT.set_chain_engine!(false)
+        TeneT.set_chain_engine!(old)
     end
     grads_match(geng, gref; label="zygote on/off")
     if check_engine_backward
         dOut = rand(ComplexF64, size(ref))
-        _, bk = Zygote.pullback((a...) -> f(a...), args...)
-        gz = bk(dOut)
+        # gz must REMAIN a toggle-OFF @tensor-path pullback regardless of the
+        # ambient default: engine_backward is validated against pure Zygote.
+        gz = try
+            TeneT.set_chain_engine!(false)
+            _, bk = Zygote.pullback((a...) -> f(a...), args...)
+            bk(dOut)
+        finally
+            TeneT.set_chain_engine!(old)
+        end
         ge = TeneT.engine_backward(f, args, dOut)
         @test ge !== nothing
         grads_match(ge, gz; label="engine_backward")
     end
     return nothing
+end
+
+# Engine-ON inner_etype result must match the toggle-OFF kernel's cast path.
+function inner_etype_survives(f, args; rtol=1e-5)
+    old = TeneT.CHAIN_ENGINE[]
+    r32 = try
+        TeneT.set_chain_engine!(true)
+        f(args...; inner_etype=Float32)
+    finally
+        TeneT.set_chain_engine!(old)
+    end
+    ref = try
+        TeneT.set_chain_engine!(false)
+        f(args...; inner_etype=Float32)
+    finally
+        TeneT.set_chain_engine!(old)
+    end
+    @test r32 ≈ ref rtol = rtol
 end
 
 @testset "tensor_pinned_inters matches @tensor temp layouts" begin
@@ -138,13 +171,7 @@ end
         @testset "$name" begin chain_parity_case(TeneT.FLmap, args) end
     end
     # inner_etype path survives the reroute (mirrors test_contraction.jl):
-    r32 = try
-        TeneT.set_chain_engine!(true)
-        TeneT.FLmap(FL5, ALu5, ALd5, M5; inner_etype=Float32)
-    finally
-        TeneT.set_chain_engine!(false)
-    end
-    @test r32 ≈ TeneT.FLmap(FL5, ALu5, ALd5, M5; inner_etype=Float32) rtol = 1e-5
+    inner_etype_survives(TeneT.FLmap, (FL5, ALu5, ALd5, M5))
 end
 
 @testset "FRmap chains: parity over all variants" begin
@@ -166,13 +193,7 @@ end
         @testset "$name" begin chain_parity_case(TeneT.FRmap, args) end
     end
     # inner_etype path survives the reroute (mirrors test_contraction.jl):
-    r32 = try
-        TeneT.set_chain_engine!(true)
-        TeneT.FRmap(FR5, ARu5, ARd5, M5; inner_etype=Float32)
-    finally
-        TeneT.set_chain_engine!(false)
-    end
-    @test r32 ≈ TeneT.FRmap(FR5, ARu5, ARd5, M5; inner_etype=Float32) rtol = 1e-5
+    inner_etype_survives(TeneT.FRmap, (FR5, ARu5, ARd5, M5))
 end
 
 @testset "ACmap chains: parity over all variants" begin
@@ -194,13 +215,48 @@ end
         @testset "$name" begin chain_parity_case(TeneT.ACmap, args) end
     end
     # inner_etype path survives the reroute (mirrors test_contraction.jl):
-    r32 = try
-        TeneT.set_chain_engine!(true)
-        TeneT.ACmap(AC5, FL5, FR5, M5; inner_etype=Float32)
-    finally
-        TeneT.set_chain_engine!(false)
+    inner_etype_survives(TeneT.ACmap, (AC5, FL5, FR5, M5))
+end
+
+@testset "ACdmap chains: parity over all variants" begin
+    Random.seed!(44)
+    χ, D, d = 8, 3, 2
+    # Geometry mirrors test_contraction.jl's ACdmap leg4/leg5 testsets
+    # (physical leg d=2; no leg8 — ACdmap has no leg8 method):
+    ACd4 = rand(ComplexF64, χ, D, χ);    FL4 = rand(ComplexF64, χ, D, χ)
+    FR4  = rand(ComplexF64, χ, D, χ);    M4  = rand(ComplexF64, D, D, D, D)
+    ACd5 = rand(ComplexF64, χ, D, D, χ); FL5 = rand(ComplexF64, χ, D, D, χ)
+    FR5  = rand(ComplexF64, χ, D, D, χ); M5  = rand(ComplexF64, D, D, D, D, d)
+    cases = [
+        ((ACd4, FL4, FR4, M4),        "leg4"),
+        ((ACd5, FL5, FR5, M5),        "leg5 single-M"),
+        ((ACd5, FL5, FR5, (M5, conj(M5))), "leg5 tuple"),
+    ]
+    for (args, name) in cases
+        @testset "$name" begin chain_parity_case(TeneT.ACdmap, args) end
     end
-    @test r32 ≈ TeneT.ACmap(AC5, FL5, FR5, M5; inner_etype=Float32) rtol = 1e-5
+    # inner_etype path survives the reroute (mirrors test_contraction.jl):
+    inner_etype_survives(TeneT.ACdmap, (ACd5, FL5, FR5, M5))
+end
+
+@testset "Cmap chains: parity (leg3/leg4 FL)" begin
+    Random.seed!(45)
+    χ, D = 8, 3
+    # Geometry mirrors test_contraction.jl's "ACmap and Cmap" testset. Cmap
+    # has no engine_backward entry (never goes through forloop/parallel) and
+    # no inner_etype kwarg, so no inner_etype_survives call either.
+    Cm  = rand(ComplexF64, χ, χ)
+    FL3 = rand(ComplexF64, χ, D, χ);    FR3 = rand(ComplexF64, χ, D, χ)
+    FL4 = rand(ComplexF64, χ, D, D, χ); FR4 = rand(ComplexF64, χ, D, D, χ)
+    cases = [
+        ((Cm, FL3, FR3), "leg3 FL"),
+        ((Cm, FL4, FR4), "leg4 FL"),
+    ]
+    for (args, name) in cases
+        @testset "$name" begin
+            chain_parity_case(TeneT.Cmap, args; check_engine_backward=false)
+        end
+    end
 end
 
 println("test_chain_maps done")
