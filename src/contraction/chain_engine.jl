@@ -61,6 +61,7 @@ Run links 2..N of the chain starting from a provided first intermediate
 Frees the internally created intermediates, never H or the inputs.
 """
 function chain_apply_from1(ch::Chain{N}, H, tensors_tail::Tuple) where {N}
+    @assert N ≥ 3 "chain_apply_from1 needs links beyond I₁ (N ≥ 3); use chain_apply for 2-operand chains"
     @assert length(tensors_tail) == N - 2
     acc  = H
     labs = _link_labels(ch.ops[1], ch.ops[2])
@@ -180,6 +181,7 @@ freed after their last consumer; H, `tensors_tail`, `dOut` are caller-owned
 and never freed.
 """
 function chain_backward_from1(ch::Chain{N}, H, tensors_tail::Tuple, dOut) where {N}
+    @assert N ≥ 3 "chain_backward_from1 needs links beyond I₁ (N ≥ 3); use chain_backward for 2-operand chains"
     @assert length(tensors_tail) == N - 2
     # 1. forward recompute of I_2..I_{N-2}, starting from I_1 = H (provided).
     inters = Vector{Any}(undef, N - 2)
