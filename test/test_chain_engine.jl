@@ -6,13 +6,30 @@ using TeneT: Chain, chain_interlabels, FLMAP_LEG5_CHAIN
 using TensorOperations: tensorcontract, tensorcontract!
 
 @testset "chain label analysis" begin
-    ch = Chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)),
-               (:d,:g,:h,:l))
+    ops = ((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d))
+    out = (:d,:g,:h,:l)
+
+    # un-pinned chain: derived left-assoc concat layouts
+    ch = Chain(ops, out)
     ils = chain_interlabels(ch)
     @test ils[1] == (:a,:e,:f,:j,:k,:l)        # H
     @test ils[2] == (:a,:f,:k,:l,:g,:b,:p)     # T  (I_{k-1}-minus-shared, then op-minus-shared)
     @test ils[3] == (:a,:l,:g,:b,:h,:c)        # G
-    @test FLMAP_LEG5_CHAIN.out == (:d,:g,:h,:l)
+    @test ils[4] == out
+
+    # FLMAP_LEG5_CHAIN pins the hand-kernel layouts (_cannon_stage1/_fold1/_fold2)
+    pls = chain_interlabels(FLMAP_LEG5_CHAIN)
+    @test pls[1] == (:a,:e,:f,:j,:k,:l)        # H (hand == derived)
+    @test pls[2] == (:a,:f,:k,:g,:b,:p,:l)     # T (hand layout, ≠ derived)
+    @test pls[3] == (:a,:b,:c,:g,:h,:l)        # G (hand layout, ≠ derived)
+    @test pls[4] == out
+    @test FLMAP_LEG5_CHAIN.out == out
+
+    # constructor validation: each pinned tuple must be a set-permutation of
+    # the derived label set at its position.
+    bad_inters = ((:a,:e,:f,:j,:k,:l), (:a,:f,:k,:g,:b,:p,:q), (:a,:b,:c,:g,:h,:l))
+    @test_throws AssertionError Chain(ops, out, bad_inters)
+    @test_throws AssertionError Chain(ops, out, ((:a,:e,:f,:j,:k,:l),))  # wrong count
 end
 
 @testset "chain_apply == FLmap == hand pipeline" begin

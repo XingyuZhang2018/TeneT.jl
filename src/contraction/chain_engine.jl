@@ -6,11 +6,6 @@
 # as @tensor) with every intermediate owned and _free!'d after its last use.
 # M1 scope: no per-op conj flags (tuple-M maps only).
 
-struct Chain{N, O}
-    ops::NTuple{N, Tuple}    # index labels per operand; ops[1] is the carried tensor
-    out::NTuple{O, Symbol}   # output labels of the final intermediate
-end
-
 # Labels of intermediate I_k = I_{k-1} ⋆ ops[k+1]: open labels of I_{k-1}
 # (not shared with the op) followed by open labels of the op.
 function _link_labels(labs::Tuple, op::Tuple)
@@ -19,11 +14,47 @@ function _link_labels(labs::Tuple, op::Tuple)
     return (keep..., new...)
 end
 
+struct Chain{N, O}
+    ops::NTuple{N, Tuple}    # index labels per operand; ops[1] is the carried tensor
+    out::NTuple{O, Symbol}   # output labels of the final intermediate
+    # Explicit labels for I₁..I_{N-2} (I_{N-1} ≡ out); nothing → derived
+    # left-assoc concat via _link_labels. Pinning lets a chain reproduce the
+    # exact intermediate layouts of a proven hand kernel (cuTENSOR's
+    # permutation problem depends on the layout, not just the label set).
+    # NB: NTuple{M, Tuple}, not NTuple — the label tuples have mixed arities,
+    # so the diagonal rule rejects them as a plain NTuple.
+    inters::Union{Nothing, NTuple{M, Tuple} where M}
+
+    function Chain(ops::NTuple{N, Tuple}, out::NTuple{O, Symbol},
+                   inters::Union{Nothing, NTuple{M, Tuple} where M}) where {N, O}
+        if inters !== nothing
+            @assert length(inters) == N - 2 "Chain: inters pins I₁..I_{N-2}, expected $(N - 2) tuples, got $(length(inters))"
+            labs = ops[1]
+            for k in 2:(N - 1)
+                derived = _link_labels(labs, ops[k])
+                @assert Set(inters[k - 1]) == Set(derived) "Chain: inters[$(k - 1)] = $(inters[k - 1]) must be a permutation of the link-$k label set $(derived)"
+                labs = inters[k - 1]
+            end
+        end
+        return new{N, O}(ops, out, inters)
+    end
+end
+
+Chain(ops, out) = Chain(ops, out, nothing)
+
+# Labels of intermediate I_{k-1} produced by link k (k in 2:N): the final
+# link yields `out`; inner links yield the pinned layout when `inters` is set,
+# else the derived left-assoc concat. Single source of truth for every
+# executor/backward below.
+_inter_labels(ch::Chain{N}, labs, k) where {N} =
+    k == N ? ch.out :
+    ch.inters === nothing ? _link_labels(labs, ch.ops[k]) : ch.inters[k - 1]
+
 function chain_interlabels(ch::Chain{N}) where {N}
     ils = Vector{Tuple}(undef, N - 1)
     labs = ch.ops[1]
     for k in 2:N
-        labs = k == N ? ch.out : _link_labels(labs, ch.ops[k])
+        labs = _inter_labels(ch, labs, k)
         ils[k - 1] = labs
     end
     return Tuple(ils)
@@ -31,9 +62,13 @@ end
 
 # FLmap leg5 (tuple-M), operand order (FL, ALd, M1, M2, ALu) — the current
 # left-assoc order of the serial kernel and the cannon stage pipeline.
+# Intermediates pinned to the proven hand-kernel layouts (_cannon_stage1 H,
+# _cannon_fold1 T, _cannon_fold2 G): the derived left-assoc layouts give
+# cuTENSOR different permutation problems, costing 5-9% at production cells.
 const FLMAP_LEG5_CHAIN = Chain(
     ((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)),
-    (:d,:g,:h,:l))
+    (:d,:g,:h,:l),
+    ((:a,:e,:f,:j,:k,:l), (:a,:f,:k,:g,:b,:p,:l), (:a,:b,:c,:g,:h,:l)))
 
 """
     chain_apply(ch, tensors) -> result
@@ -45,7 +80,7 @@ function chain_apply(ch::Chain{N}, tensors::NTuple{N, Any}) where {N}
     acc  = tensors[1]
     labs = ch.ops[1]
     for k in 2:N
-        IC  = k == N ? ch.out : _link_labels(labs, ch.ops[k])
+        IC  = _inter_labels(ch, labs, k)
         nxt = tensorcontract(IC, acc, labs, false, tensors[k], ch.ops[k], false)
         k > 2 && _free!(acc)     # acc owned from link k-1; inputs never freed
         acc, labs = nxt, IC
@@ -64,9 +99,9 @@ function chain_apply_from1(ch::Chain{N}, H, tensors_tail::Tuple) where {N}
     @assert N ≥ 3 "chain_apply_from1 needs links beyond I₁ (N ≥ 3); use chain_apply for 2-operand chains"
     @assert length(tensors_tail) == N - 2
     acc  = H
-    labs = _link_labels(ch.ops[1], ch.ops[2])
+    labs = _inter_labels(ch, ch.ops[1], 2)
     for k in 3:N
-        IC  = k == N ? ch.out : _link_labels(labs, ch.ops[k])
+        IC  = _inter_labels(ch, labs, k)
         nxt = tensorcontract(IC, acc, labs, false, tensors_tail[k - 2], ch.ops[k], false)
         k > 3 && _free!(acc)     # acc owned from link k-1; at k == 3 acc === H (caller's)
         acc, labs = nxt, IC
@@ -102,7 +137,7 @@ labels of `ch.ops[1]`/`ch.ops[2]` (α=1, β=1 in the mutating `tensorcontract!`)
 Building block for the cannon ring, mirroring `_cannon_stage1_add!`.
 """
 function chain_link1_add!(H, ch::Chain, A, B)
-    IH = _link_labels(ch.ops[1], ch.ops[2])
+    IH = _inter_labels(ch, ch.ops[1], 2)
     pA, pB, pAB = _index2tuples(ch.ops[1], ch.ops[2], IH)
     tensorcontract!(H, A, pA, false, B, pB, false, pAB, 1, 1)
     return H
@@ -118,7 +153,7 @@ Counterpart of `chain_link1_add!` for the cannon ring's per-(chunk, block)
 dFL/dALd contributions.
 """
 function chain_link1_back(ch::Chain, dH, A, B)
-    IH = _link_labels(ch.ops[1], ch.ops[2])
+    IH = _inter_labels(ch, ch.ops[1], 2)
     dA = tensorcontract(ch.ops[1], dH, IH, false, B, ch.ops[2], true)
     dB = tensorcontract(ch.ops[2], A, ch.ops[1], true, dH, IH, false)
     return dA, dB
@@ -144,7 +179,7 @@ function chain_backward(ch::Chain{N}, tensors::NTuple{N, Any}, dOut) where {N}
     labs   = Vector{Tuple}(undef, N - 2)
     acc, l = tensors[1], ch.ops[1]
     for k in 2:(N - 1)
-        IC  = _link_labels(l, ch.ops[k])
+        IC  = _inter_labels(ch, l, k)
         acc = tensorcontract(IC, acc, l, false, tensors[k], ch.ops[k], false)
         inters[k - 1], labs[k - 1] = acc, IC
         l = IC
@@ -186,9 +221,9 @@ function chain_backward_from1(ch::Chain{N}, H, tensors_tail::Tuple, dOut) where 
     # 1. forward recompute of I_2..I_{N-2}, starting from I_1 = H (provided).
     inters = Vector{Any}(undef, N - 2)
     labs   = Vector{Tuple}(undef, N - 2)
-    inters[1], labs[1] = H, _link_labels(ch.ops[1], ch.ops[2])
+    inters[1], labs[1] = H, _inter_labels(ch, ch.ops[1], 2)
     for k in 3:(N - 1)
-        IC = _link_labels(labs[k - 2], ch.ops[k])
+        IC = _inter_labels(ch, labs[k - 2], k)
         inters[k - 1] = tensorcontract(IC, inters[k - 2], labs[k - 2], false,
                                        tensors_tail[k - 2], ch.ops[k], false)
         labs[k - 1] = IC
