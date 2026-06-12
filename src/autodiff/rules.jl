@@ -380,7 +380,7 @@ end
 # The whole differentiated region is collective: every rank must execute the
 # same pullback sequence (rank-uniform control flow), or the grid deadlocks.
 function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid::CannonGrid;
-                              inner_etype = nothing)
+                              forloop_iter = 1, inner_etype = nothing)
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
     T_orig = eltype(FL_blk)
@@ -391,7 +391,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
     M1_c  = do_cast ? _downcast_eltype(inner_etype, M1) : M1
     M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
 
-    result_c, H = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid)
+    result_c, blocks = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function cannon_back(dresult)
@@ -415,43 +415,50 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         # 1. Adjoint of the column reduce-scatter: allgather dresult blocks.
         dpartial = _cannon_col_allgather(d_c, grid, a_rs)
 
-        # 2. Post-ring pullback (local, once; H captured from forward): the
-        #    composite fold∘stage2 yields dH, the dALu slice, and dM1/dM2 in
-        #    one shot — fold-after-ring means M gradients are not per-step sums.
+        # 2-3. Per l-chunk, fully local: recompute H_chunk from the cached
+        #      blocks, composite fold∘stage2 pullback, then hand-written
+        #      stage-1 adjoints accumulate per-destination dFL contributions
+        #      and the dALd slice.
         ALu_slice = view(ALu_c, a_rs[r1 + 1], :, :, :)
-        _, bp2 = pullback((h, alu, m1, m2) -> _cannon_stage2(_cannon_fold(h, m1, m2), alu),
-                          H, ALu_slice, M1_c, M2_c)
-        dH, dALu_slice, dM1, dM2 = bp2(dpartial)
         dALu = zero(ALu_c)
-        view(dALu, a_rs[r1 + 1], :, :, :) .= dALu_slice
-
-        # 3. Stage-1 reverse: replay the FL rotation with each block's dFL
-        #    accumulator travelling alongside it. The accumulator for block t
-        #    starts (zeros) at its home rank, collects one contribution per
-        #    rank in the row, and the final shift lands it home — so dFL
-        #    stays distributed, matching the input convention.
         dALd = zero(ALd_c)
-        cur = FL_c
-        dacc = zero(FL_c)
-        for k in 0:N2-1
-            t = mod(r2 + k, N2)
-            ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_rng)
-            _, bp1 = pullback(_cannon_stage1, cur, ALd_slice)
-            dcur_k, dALd_k = bp1(dH)
-            dacc .+= dcur_k
-            view(dALd, i_rs[t + 1], :, :, l_rng) .+= dALd_k
-            if N2 > 1
-                t_next = mod(r2 + k + 1, N2)
-                sz = (length(a_rs[r1 + 1]), size(FL_c, 2), size(FL_c, 3),
-                      length(i_rs[t_next + 1]))
-                if k < N2 - 1   # last replay shift of cur is unnecessary
-                    cur = _cannon_row_shift(cur, grid, sz; tag = _TAG_BASE + 700)
+        dM1 = zero(M1_c)
+        dM2 = zero(M2_c)
+        dFL_contribs = Vector{typeof(FL_c)}(undef, N2)
+        for t in 0:N2-1
+            dFL_contribs[t + 1] = zero(blocks[t + 1])
+        end
+        l_chunks = split_ranges(length(l_rng), min(forloop_iter, length(l_rng)))
+        for ch in l_chunks
+            l_glob = l_rng[ch]
+            local Hc
+            for t in 0:N2-1
+                ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_glob)
+                if t == 0
+                    Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
+                else
+                    _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
                 end
-                dacc = _cannon_row_shift(dacc, grid, sz; tag = _TAG_BASE + 720)
             end
+            _, bp2 = pullback((h, alu, m1, m2) -> _cannon_stage2(_cannon_fold(h, m1, m2), alu),
+                              Hc, ALu_slice, M1_c, M2_c)
+            dHc, dALu_s, dM1_k, dM2_k = bp2(dpartial[:, :, :, ch])
+            view(dALu, a_rs[r1 + 1], :, :, :) .+= dALu_s
+            dM1 .+= dM1_k
+            dM2 .+= dM2_k
+            for t in 0:N2-1
+                ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_glob)
+                dFL_contribs[t + 1] .+= _cannon_stage1_dFL(dHc, ALd_slice)
+                view(dALd, i_rs[t + 1], :, :, l_glob) .+= _cannon_stage1_dALd(dHc, blocks[t + 1])
+            end
+            Hc = dHc = nothing
         end
 
-        # 4. Replicated-input gradients: per-rank slices summed/stitched by a
+        # 4. Row reduce-scatter delivers summed dFL block t to rank (r1, t);
+        #    dFL stays distributed, matching the input convention.
+        dFL = _cannon_row_reduce_scatter(dFL_contribs, grid)
+
+        # 5. Replicated-input gradients: per-rank slices summed/stitched by a
         #    single allreduce each (picks up the NCCL fast path when enabled).
         allreduce_p2p!(dALu, +, grid.comm)
         allreduce_p2p!(dALd, +, grid.comm)
@@ -459,7 +466,6 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         allreduce_p2p!(dM2, +, grid.comm)
 
         dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
-        dFL = dacc
         if do_cast
             dFL = T_orig.(dFL); dALu = T_orig.(dALu); dALd = T_orig.(dALd)
             dM = is_tuple ? (T_orig.(dM[1]), T_orig.(dM[2])) : T_orig.(dM)

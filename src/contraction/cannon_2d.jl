@@ -84,6 +84,19 @@ function _cannon_stage2(G, ALu)
     return P
 end
 
+# Hand-written adjoints of _cannon_stage1 (H = FL·ALd): two contractions
+# instead of Zygote's three (whose pullback re-runs the stage-1 forward only
+# to discard it — the cause of the large-χ backward slowdown in job 1265371).
+function _cannon_stage1_dFL(dH, ALd)
+    @tensor dFL[a, e, f, i] := dH[a, e, f, j, k, l] * conj(ALd[i, j, k, l])
+    return dFL
+end
+
+function _cannon_stage1_dALd(dH, FL)
+    @tensor dALd[i, j, k, l] := conj(FL[a, e, f, i]) * dH[a, e, f, j, k, l]
+    return dALd
+end
+
 # ─── Boundary shims: full ↔ distributed blocks ────────────────────────────
 
 """
@@ -218,11 +231,45 @@ function _cannon_col_allgather(dblk, grid::CannonGrid, d_rs)
     return full
 end
 
+# Sum per-destination dFL contribution blocks over the row and deliver block
+# t to rank (r1, t). Direct pairwise on row_comm, same buffer/sync discipline
+# as the column reduce-scatter: allocate everything, one synchronize, post
+# all Irecv! before all Isend.
+function _cannon_row_reduce_scatter(contribs::Vector, grid::CannonGrid)
+    N2, r2 = grid.N2, grid.r2
+    acc = contribs[r2 + 1]
+    N2 == 1 && return acc
+    recvbufs = Vector{typeof(acc)}(undef, N2)
+    for j in 0:N2-1
+        j == r2 && continue
+        recvbufs[j + 1] = similar(acc)
+    end
+    synchronize(acc)
+    reqs = MPI.Request[]
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.row_comm; source = j, tag = _TAG_BASE + 740))
+    end
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Isend(contribs[j + 1], grid.row_comm; dest = j, tag = _TAG_BASE + 740))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N2-1
+        j == r2 && continue
+        acc .+= recvbufs[j + 1]
+    end
+    return acc
+end
+
 # ─── Forward ──────────────────────────────────────────────────────────────
 
-# Shared by FLmap_cannon and its rrule. Returns (result_blk, H); the rrule
-# captures the pre-fold H for the composite fold∘stage2 pullback.
-function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
+# Shared by FLmap_cannon and its rrule. Returns (result_blk, blocks): the ring
+# rotates ONCE caching the N2 visiting FL blocks (χ²D²/N1 per rank — the AD
+# capture, far smaller than H); the local l range is then processed in
+# `forloop_iter` chunks, each running stage1 → fold → stage2 fully locally
+# with transients bounded by (2+d)·|H|/forloop_iter.
+function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid; forloop_iter = 1)
     N1, N2, r1, r2 = grid.N1, grid.N2, grid.r1, grid.r2
     χ = size(ALu, 1)
     a_rs = split_ranges(χ, N1)
@@ -230,19 +277,12 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
     l_rng = i_rs[r2 + 1]
     @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == length(l_rng) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
 
-    # Stage 1: rotate FL blocks along the row ring, accumulate the stationary
-    # pre-fold intermediate H (M is folded once after the ring). First step
-    # writes H directly (:=); later steps accumulate (+=).
-    local H
+    # Ring: rotate once, cache the visiting FL blocks by their i-block index.
+    blocks = Vector{typeof(FL_blk)}(undef, N2)
     cur = FL_blk
     for k in 0:N2-1
         t = mod(r2 + k, N2)
-        ALd_slice = view(ALd, i_rs[t + 1], :, :, l_rng)
-        if k == 0
-            H = _cannon_stage1(cur, ALd_slice)
-        else
-            _cannon_stage1_add!(H, cur, ALd_slice)
-        end
+        blocks[t + 1] = cur
         if k < N2 - 1
             t_next = mod(r2 + k + 1, N2)
             cur = _cannon_row_shift(cur, grid,
@@ -250,25 +290,42 @@ function _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid::CannonGrid)
         end
     end
 
-    # Fold M once, contract a/b/c with the local row slice of replicated ALu,
-    # then reduce-scatter the full-d partial along the column.
-    G = _cannon_fold(H, M1, M2)
+    # Local pipeline per l-chunk: stage 1 accumulate → fold once → stage 2.
+    Dg, Dh = size(M1, 3), size(M2, 3)
+    partial = similar(FL_blk, χ, Dg, Dh, length(l_rng))
     ALu_slice = view(ALu, a_rs[r1 + 1], :, :, :)
-    partial = _cannon_stage2(G, ALu_slice)
+    l_chunks = split_ranges(length(l_rng), min(forloop_iter, length(l_rng)))
+    for ch in l_chunks
+        l_glob = l_rng[ch]
+        local Hc
+        for t in 0:N2-1
+            ALd_slice = view(ALd, i_rs[t + 1], :, :, l_glob)
+            if t == 0
+                Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
+            else
+                _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
+            end
+        end
+        Gc = _cannon_fold(Hc, M1, M2)
+        view(partial, :, :, :, ch) .= _cannon_stage2(Gc, ALu_slice)
+        Hc = Gc = nothing
+    end
     result = _cannon_col_reduce_scatter(partial, grid, a_rs)
-    return result, H
+    return result, blocks
 end
 
 """
-    FLmap_cannon(FL_blk, ALu, ALd, M, grid; inner_etype=nothing) -> result_blk
+    FLmap_cannon(FL_blk, ALu, ALd, M, grid; forloop_iter=1, inner_etype=nothing) -> result_blk
 
 Distributed FLmap on an N1×N2 Cannon grid. `FL_blk` and the returned block
 follow the convention: first χ leg split N1-ways by r1, last χ leg split
 N2-ways by r2. `M` is a leg5 tensor or an `(M1, M2)` tuple; ALu/ALd/M are
 replicated on every rank. Collective over `grid.comm`.
+`forloop_iter` sub-slices the local l range so per-chunk transients are
+≈(2+d)·χ²D⁴/(P·forloop_iter).
 See docs/2026-06-10-cannon-flmap-design.md.
 """
-function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; inner_etype = nothing)
+function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; forloop_iter = 1, inner_etype = nothing)
     M1, M2 = M isa Tuple ? M : (M, conj(M))
     T_orig = eltype(FL_blk)
     do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -279,6 +336,6 @@ function FLmap_cannon(FL_blk, ALu, ALd, M, grid::CannonGrid; inner_etype = nothi
         M1 = _downcast_eltype(inner_etype, M1)
         M2 = _downcast_eltype(inner_etype, M2)
     end
-    result, _ = _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid)
+    result, _ = _cannon_forward(FL_blk, ALu, ALd, M1, M2, grid; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end

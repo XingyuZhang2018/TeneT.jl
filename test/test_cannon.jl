@@ -7,7 +7,7 @@ using LinearAlgebra
 using Random
 using Zygote
 using TeneT
-using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2
+using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, FLmap, FLmap_cannon, split_ranges, _cannon_stage1, _cannon_stage1_add!, _cannon_fold, _cannon_stage2, _cannon_stage1_dFL, _cannon_stage1_dALd
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -172,6 +172,37 @@ end
     dFL_ref = Zygote.pullback(loss_ref, FL)[2](1.0)[1]
     @test eltype(dFL) == ComplexF64
     @test dFL ≈ dFL_ref rtol = 1e-3
+end
+
+@testset "stage1 hand adjoints == Zygote (local, no MPI)" begin
+    χ, D = 8, 3
+    FL, ALu, ALd, M1, M2, _ = make_leg5(χ, D; seed=102)
+    H = _cannon_stage1(FL, ALd)
+    Random.seed!(103)
+    dH = rand(ComplexF64, size(H)...)
+    _, bp = Zygote.pullback(_cannon_stage1, FL, ALd)
+    dFL_z, dALd_z = bp(dH)
+    @test _cannon_stage1_dFL(dH, ALd) ≈ dFL_z rtol = 1e-12
+    @test _cannon_stage1_dALd(dH, FL) ≈ dALd_z rtol = 1e-12
+end
+
+@testset "forloop_iter chunking parity" begin
+    for (N1, N2) in ((2, 2), (1, 4)), n in (2, 3)
+        χ, D = 18, 3   # uneven blocks AND uneven chunks
+        FL, ALu, ALd, M1, M2, W = make_leg5(χ, D; seed=1000 + 10N1 + n)
+        g = cannon_grid(N1, N2)
+        ref = FLmap(FL, ALu, ALd, M1, M2)
+        out = cannon_gather(FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = n), g)
+        @test out ≈ ref rtol = 1e-12
+        loss_ref(FL, ALu, ALd, M1, M2) = real(sum(W .* FLmap(FL, ALu, ALd, M1, M2)))
+        loss_can(FL, ALu, ALd, M1, M2) = real(sum(W .* cannon_gather(
+            FLmap_cannon(cannon_scatter(FL, g), ALu, ALd, (M1, M2), g; forloop_iter = n), g)))
+        g_ref = Zygote.pullback(loss_ref, FL, ALu, ALd, M1, M2)[2](1.0)
+        g_can = Zygote.pullback(loss_can, FL, ALu, ALd, M1, M2)[2](1.0)
+        for i in 1:5
+            @test isapprox(g_can[i], g_ref[i]; rtol = 1e-10)
+        end
+    end
 end
 
 println("rank $rank: test_cannon.jl done")
