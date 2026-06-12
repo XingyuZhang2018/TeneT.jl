@@ -149,6 +149,17 @@ function ChainRulesCore.rrule(::typeof(norm), S::StructArray)
     return y, back
 end
 
+# ─── AD rule for the contraction-chain engine (M2) ───────────────────────────
+function ChainRulesCore.rrule(::typeof(chain_apply), ch::Chain{N}, tensors::NTuple{N, Any}) where {N}
+    out = chain_apply(ch, tensors)
+    # Recompute-style: the closure captures only caller-owned inputs; no
+    # intermediate ever outlives the call (the cannon/Part-6 OOM lesson).
+    function chain_apply_pullback(dOut)
+        return NoTangent(), NoTangent(), chain_backward(ch, tensors, unthunk(dOut))
+    end
+    return out, chain_apply_pullback
+end
+
 # ─── AD rules for forloop / parallel (from ADC4PEPS) ─────────────────────────
 # These provide chunked backprop through loop iterations and MPI-aware gradient
 # accumulation, rather than hand-written per-map adjoints.

@@ -17,6 +17,30 @@ function _link_labels(labs::Tuple, op::Tuple)
     return (keep..., new...)
 end
 
+# @tensor's temp-layout rule (probe-verified three times, see plan): each
+# intermediate is a STABLE PARTITION of its natural (openA..., openB...)
+# order — labels not contracted by the NEXT operand first, labels contracted
+# by the next operand last, both blocks in natural relative order. Pinning
+# new chains to these layouts gives cuTENSOR the identical permutation
+# problems as the original @tensor kernels (M1 Part-7 lesson).
+function tensor_pinned_inters(ops::NTuple{N, Tuple}, out::Tuple) where {N}
+    N < 3 && return nothing
+    inters = Vector{Tuple}(undef, N - 2)
+    layout = ops[1]
+    for j in 1:(N - 2)
+        natural = _link_labels(layout, ops[j + 1])
+        nextop  = ops[j + 2]
+        keep = filter(l -> !(l in nextop), natural)
+        cont = filter(l -> l in nextop, natural)   # temp-natural order, NOT nextop order
+        inters[j] = (keep..., cont...)
+        layout = inters[j]
+    end
+    @assert Set(out) == Set(_link_labels(layout, ops[N])) "tensor_pinned_inters: out must be a permutation of the final link's labels"
+    return Tuple(inters)
+end
+
+tensor_chain(ops, out) = Chain(ops, out, tensor_pinned_inters(ops, out))
+
 struct Chain{N, O}
     ops::NTuple{N, Tuple}    # index labels per operand; ops[1] is the carried tensor
     out::NTuple{O, Any}      # output labels of the final intermediate (Symbol or Int)
@@ -55,8 +79,10 @@ Same ops/out/inters as `ch`, with the given operand slots conj-flagged (on
 top of `ch.conjs`). E.g. `conj_variant(FLMAP_LEG5_CHAIN, 4)` runs the leg5
 chain with operand 4 (M2) read as `conj(M2)` — no materialized conjugate.
 """
-conj_variant(ch::Chain{N}, slots::Int...) where {N} =
-    Chain(ch.ops, ch.out, ch.inters, ntuple(i -> ch.conjs[i] || i in slots, N))
+function conj_variant(ch::Chain{N}, slots::Int...) where {N}
+    @assert all(s -> 1 ≤ s ≤ N, slots) "conj_variant: slot out of range"
+    return Chain(ch.ops, ch.out, ch.inters, ntuple(i -> ch.conjs[i] || i in slots, N))
+end
 
 # Labels of intermediate I_{k-1} produced by link k (k in 2:N): the final
 # link yields `out`; inner links yield the pinned layout when `inters` is set,
@@ -194,8 +220,8 @@ reversed chain with the generic pairwise adjoints of C = A° ⋆ B° (X° =
 conj-flagged X), in tensorcontract flag form with cA = (k == 2 ? conjs[1] :
 false), cB = conjs[k]:
 
-    d(op_k) = tensorcontract(ops[k], I_{k-1}, lI, !(cA ⊻ cB), dC, lC, cB)
-    dI_{k-1} = tensorcontract(lI, dC, lC, cA, op_k, ops[k], !(cA ⊻ cB))
+    d(op_k) = tensorcontract(ops[k], Iprev, lIprev, !(cA ⊻ cB), dC, lC, cB)
+    dIprev  = tensorcontract(lIprev, dC, lC, cA, op_k, ops[k], !(cA ⊻ cB))
 
 (for cA = cB = false: `dB = conj(A) ⋆ dC`, `dA = dC ⋆ conj(B)` — conj on the
 non-cotangent operand, matching the hand kernels). Every owned
@@ -222,9 +248,9 @@ function chain_backward(ch::Chain{N}, tensors::NTuple{N, Any}, dOut) where {N}
         lIprev = k == 2 ? ch.ops[1]   : labs[k - 2]
         cA     = k == 2 ? ch.conjs[1] : false
         cB     = ch.conjs[k]
-        # d(op_k) = flag-form conj(I_{k-1}°) ⋆ dC°
+        # d(op_k) = flag-form conj(Iprev°) ⋆ dC°
         grads[k] = tensorcontract(ch.ops[k], Iprev, lIprev, !(cA ⊻ cB), dC, lC, cB)
-        # dI_{k-1} = flag-form dC° ⋆ conj(op_k°)
+        # dIprev = flag-form dC° ⋆ conj(op_k°)
         dprev = tensorcontract(lIprev, dC, lC, cA, tensors[k], ch.ops[k], !(cA ⊻ cB))
         # Frees AFTER both contractions of this step (last consumers):
         k < N && _free!(dC)      # owned cotangent from step k+1; at k == N dC === dOut (caller's)
@@ -268,9 +294,9 @@ function chain_backward_from1(ch::Chain{N}, H, tensors_tail::Tuple, dOut) where 
     for k in N:-1:3
         Iprev, lIprev = inters[k - 2], labs[k - 2]
         cB = ch.conjs[k]
-        # d(op_k) = flag-form conj(I_{k-1}) ⋆ dC°
+        # d(op_k) = flag-form conj(Iprev) ⋆ dC°
         grads[k - 2] = tensorcontract(ch.ops[k], Iprev, lIprev, !cB, dC, lC, cB)
-        # dI_{k-1} = flag-form dC ⋆ conj(op_k°)
+        # dIprev = flag-form dC ⋆ conj(op_k°)
         dprev = tensorcontract(lIprev, dC, lC, false, tensors_tail[k - 2], ch.ops[k], !cB)
         # Frees AFTER both contractions of this step (last consumers):
         k < N && _free!(dC)      # owned cotangent from step k+1; at k == N dC === dOut (caller's)

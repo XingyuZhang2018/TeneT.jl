@@ -62,6 +62,7 @@ include("contraction/basic.jl")
 include("contraction/forloop_parallel_MPI.jl")
 include("contraction/cannon_2d.jl")
 include("contraction/chain_engine.jl")
+include("contraction/chain_maps.jl")
 include("contraction/observable.jl")
 
 # ============================================================================
