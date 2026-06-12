@@ -26,9 +26,26 @@ const BWD_COEFF = 4 + 2 * d_phys
 
 H_bytes(D, χ) = χ^2 * D^4 / 4 * 8
 tensor_bytes(D, χ) = χ^2 * D^2 * 8
-pick_n(D, χ) = max(1, ceil(Int, BWD_COEFF * H_bytes(D, χ) / (MEM_BUDGET - 12 * tensor_bytes(D, χ))))
+# Per-path chunk counts: A's ordered hand adjoints peak at ≈(2+2d)|H|/n (use
+# 8 with margin); B's Zygote backward holds tape + cotangent chain ≈10-11
+# units (job 1275726 OOMed at (10,768) n=1 with 130 GiB live) — use 14.
+# Each path runs at its own memory-feasible n, both reported.
+pick_n(coeff, D, χ) = max(1, ceil(Int, coeff * H_bytes(D, χ) / (MEM_BUDGET - 12 * tensor_bytes(D, χ))))
+
+# Single-process OOM guard (no MPI → catching is deadlock-free): report the
+# cell as NaN and clean up instead of killing the sweep.
+function try_or_nan(f)
+    try
+        return f()
+    catch e
+        e isa CUDA.OutOfGPUMemoryError || rethrow()
+        GC.gc(); CUDA.reclaim()
+        return NaN
+    end
+end
 
 mem_gb() = (CUDA.total_memory() - CUDA.available_memory()) / 2^30
+fmt(x) = isnan(x) ? @sprintf("%8s", "oom") : @sprintf("%8.1f", x)
 
 function timeit(f)
     f(); CUDA.synchronize()
@@ -87,11 +104,12 @@ function staged_bwd(FLr, ALur, ALdc, M1, M2, dout, n)
 end
 
 println("=== Kernel A/B: staged cannon kernels vs FLmap+forloop (1 GPU, ", CUDA.name(CUDA.device()), ", CLB=", get(ENV, "CUDA_LAUNCH_BLOCKING", "0"), ") ===")
-println("| D  | χ    | n  | A fwd ms | B fwd ms | A bwd ms | B bwd ms | A fwd mem | B fwd mem | A bwd mem | B bwd mem | parity |")
-println("|----|------|----|----------|----------|----------|----------|-----------|-----------|-----------|-----------|--------|")
+println("| D  | χ    | nA | nB | A fwd ms | B fwd ms | A bwd ms | B bwd ms | A fwd mem | B fwd mem | A bwd mem | B bwd mem | parity |")
+println("|----|------|----|----|----------|----------|----------|----------|-----------|-----------|-----------|-----------|--------|")
 
 for (D, χ) in [(8, 256), (8, 512), (10, 512), (10, 768), (12, 768), (12, 1024), (14, 1024), (16, 1024)]
-    n = pick_n(D, χ)
+    nA = pick_n(8, D, χ)
+    nB = pick_n(14, D, χ)
     χa = χ ÷ 2; χl = χ ÷ 2
     CUDA.seed!(42)
     FLr  = CUDA.rand(Float64, χa, D, D, χ)
@@ -100,47 +118,56 @@ for (D, χ) in [(8, 256), (8, 512), (10, 512), (10, 768), (12, 768), (12, 1024),
     M1   = CUDA.rand(Float64, D, D, D, D, d_phys)
     M2   = CUDA.rand(Float64, D, D, D, D, d_phys)
     dout = CUDA.rand(Float64, χ, D, D, χl)
-    fl_kw = (forloop_iter = n, N_in = (3, 4), N_out = 4, size_out = (χ, D, D, χl))
+    fl_kwA = (forloop_iter = nA, N_in = (3, 4), N_out = 4, size_out = (χ, D, D, χl))
+    fl_kwB = (forloop_iter = nB, N_in = (3, 4), N_out = 4, size_out = (χ, D, D, χl))
 
-    # parity first (also warms both paths); GC between steps — dead results
-    # from one path otherwise stack under the next path's working set and
-    # OOM'd job 1275621 at (8, 768)
-    rA = staged_fwd(FLr, ALur, ALdc, M1, M2, n)
-    rB = TeneT.forloop(TeneT.FLmap, FLr, ALur, ALdc, (M1, M2); fl_kw...)
+    # parity first (also warms both paths); GC between steps so one path's
+    # dead results never stack under the other's working set
+    rA = staged_fwd(FLr, ALur, ALdc, M1, M2, nA)
+    rB = TeneT.forloop(TeneT.FLmap, FLr, ALur, ALdc, (M1, M2); fl_kwA...)
     pf = isapprox(rA, rB; rtol = 1e-11) ? "F✓" : "F✗"
     rA = rB = nothing
     GC.gc(); CUDA.reclaim()
-    gA = staged_bwd(FLr, ALur, ALdc, M1, M2, dout, n)
+    gA = staged_bwd(FLr, ALur, ALdc, M1, M2, dout, nA)
     GC.gc(); CUDA.reclaim()
-    _, bpB = Zygote.pullback((a, b, c, m) -> TeneT.forloop(TeneT.FLmap, a, b, c, m; fl_kw...),
-                             FLr, ALur, ALdc, (M1, M2))
-    gB = bpB(dout)
-    pb = (isapprox(gA[1], gB[1]; rtol = 1e-10) && isapprox(gA[2], gB[2]; rtol = 1e-10) &&
-          isapprox(gA[3], gB[3]; rtol = 1e-10) && isapprox(gA[4], gB[4][1]; rtol = 1e-10) &&
-          isapprox(gA[5], gB[4][2]; rtol = 1e-10)) ? "B✓" : "B✗"
-    rA = rB = gA = gB = bpB = nothing
+    gB = try_or_nan() do
+        _, bpB = Zygote.pullback((a, b, c, m) -> TeneT.forloop(TeneT.FLmap, a, b, c, m; fl_kwB...),
+                                 FLr, ALur, ALdc, (M1, M2))
+        bpB(dout)
+    end
+    pb = gB isa Tuple ?
+         ((isapprox(gA[1], gB[1]; rtol = 1e-10) && isapprox(gA[2], gB[2]; rtol = 1e-10) &&
+           isapprox(gA[3], gB[3]; rtol = 1e-10) && isapprox(gA[4], gB[4][1]; rtol = 1e-10) &&
+           isapprox(gA[5], gB[4][2]; rtol = 1e-10)) ? "B✓" : "B✗") : "B–oom"
+    rA = rB = gA = gB = nothing
     GC.gc(); CUDA.reclaim()
 
     # timing + memory per section: GC+reclaim → timed (per-rep GC, no reclaim)
     # → record used (live+garbage high-water proxy) → reclaim
     t = Dict{String, Float64}(); m = Dict{String, Float64}()
     for (key, f) in (
-        ("Af", () -> staged_fwd(FLr, ALur, ALdc, M1, M2, n)),
-        ("Bf", () -> TeneT.forloop(TeneT.FLmap, FLr, ALur, ALdc, (M1, M2); fl_kw...)),
-        ("Ab", () -> staged_bwd(FLr, ALur, ALdc, M1, M2, dout, n)),
-        ("Bb", () -> Zygote.pullback((a, b, c, mm) -> TeneT.forloop(TeneT.FLmap, a, b, c, mm; fl_kw...),
+        ("Af", () -> staged_fwd(FLr, ALur, ALdc, M1, M2, nA)),
+        ("Bf", () -> TeneT.forloop(TeneT.FLmap, FLr, ALur, ALdc, (M1, M2); fl_kwA...)),
+        ("Ab", () -> staged_bwd(FLr, ALur, ALdc, M1, M2, dout, nA)),
+        ("Bb", () -> Zygote.pullback((a, b, c, mm) -> TeneT.forloop(TeneT.FLmap, a, b, c, mm; fl_kwB...),
                                      FLr, ALur, ALdc, (M1, M2))[2](dout)),
     )
         GC.gc(); CUDA.reclaim()
-        t[key] = timeit(f)
-        f(); CUDA.synchronize()          # one un-GC'd call for the memory probe
-        m[key] = mem_gb()
+        t[key] = try_or_nan() do
+            timeit(f)
+        end
+        if !isnan(t[key])
+            f(); CUDA.synchronize()      # one un-GC'd call for the memory probe
+            m[key] = mem_gb()
+        else
+            m[key] = NaN
+        end
         GC.gc(); CUDA.reclaim()
     end
 
-    @printf("| %-2d | %-4d | %-2d | %8.1f | %8.1f | %8.1f | %8.1f | %8.2f | %8.2f | %8.2f | %8.2f | %s %s |\n",
-            D, χ, n, t["Af"], t["Bf"], t["Ab"], t["Bb"],
-            m["Af"], m["Bf"], m["Ab"], m["Bb"], pf, pb)
+    @printf("| %-2d | %-4d | %-2d | %-2d | %s | %s | %s | %s | %s | %s | %s | %s | %s %s |\n",
+            D, χ, nA, nB, fmt(t["Af"]), fmt(t["Bf"]), fmt(t["Ab"]), fmt(t["Bb"]),
+            fmt(m["Af"]), fmt(m["Bf"]), fmt(m["Ab"]), fmt(m["Bb"]), pf, pb)
     flush(stdout)
 
     FLr = ALur = ALdc = M1 = M2 = dout = nothing
