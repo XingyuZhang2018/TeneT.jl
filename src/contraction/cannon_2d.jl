@@ -4,12 +4,14 @@
 # Rank (r1, r2) on an N1×N2 grid holds
 #   FL block:      FL[a_range(r1), :, :, i_range(r2)]
 #   result block:  result[d_range(r1), :, :, l_range(r2)]
-# ALu / ALd / M are fully replicated (AL distribution comes with the later
-# leftenv integration round). Stage 1 rotates FL blocks along the row ring
-# while accumulating the pre-fold intermediate H; M is folded once after the
-# ring, then stage 2 contracts with ALu and reduce-scatters along the column.
-# Output distribution = input distribution, so the map iterates without
-# redistribution.
+# M is replicated (tiny). ALu/ALd: `FLmap_cannon` takes them replicated;
+# `FLmap_cannon_dist` takes them block-stored in the same convention and
+# assembles the irreducible per-rank slices ALu[a_r1, :, :, :] (row
+# allgather) and ALd[:, :, :, l_r2] (column allgather). Stage 1 rotates FL
+# blocks along the row ring while accumulating the pre-fold intermediate H;
+# M is folded once after the ring, then stage 2 contracts with ALu and
+# reduce-scatters along the column. Output distribution = input
+# distribution, so the map iterates without redistribution.
 
 struct CannonGrid
     N1::Int
@@ -418,7 +420,7 @@ function _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::CannonGr
     a_rs = split_ranges(χ, N1)
     i_rs = split_ranges(χ, N2)
     nl = size(ALd_col, 4)             # local l extent
-    @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == nl == length(i_rs[r2 + 1]) "FLmap_cannon: block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
+    @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == nl == length(i_rs[r2 + 1]) "cannon forward: FL block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
     @assert forloop_iter ≥ 1 "FLmap_cannon: forloop_iter must be ≥ 1"
 
     # Ring: rotate once, cache the visiting FL blocks by their i-block index.
