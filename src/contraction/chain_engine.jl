@@ -53,6 +53,26 @@ function chain_apply(ch::Chain{N}, tensors::NTuple{N, Any}) where {N}
     return acc
 end
 
+"""
+    chain_apply_from1(ch, H, tensors_tail) -> result
+
+Run links 2..N of the chain starting from a provided first intermediate
+(H = I₁, e.g. ring-accumulated). `tensors_tail` are ops 3..N's tensors.
+Frees the internally created intermediates, never H or the inputs.
+"""
+function chain_apply_from1(ch::Chain{N}, H, tensors_tail::Tuple) where {N}
+    @assert length(tensors_tail) == N - 2
+    acc  = H
+    labs = _link_labels(ch.ops[1], ch.ops[2])
+    for k in 3:N
+        IC  = k == N ? ch.out : _link_labels(labs, ch.ops[k])
+        nxt = tensorcontract(IC, acc, labs, false, tensors_tail[k - 2], ch.ops[k], false)
+        k > 3 && _free!(acc)     # acc owned from link k-1; at k == 3 acc === H (caller's)
+        acc, labs = nxt, IC
+    end
+    return acc
+end
+
 # Index2Tuple bookkeeping for the mutating tensorcontract! API (verified in
 # TensorOperations 5.5.1, interface.jl:148):
 #   tensorcontract!(C, A, pA, conjA, B, pB, conjB, pAB, α, β)
@@ -85,6 +105,22 @@ function chain_link1_add!(H, ch::Chain, A, B)
     pA, pB, pAB = _index2tuples(ch.ops[1], ch.ops[2], IH)
     tensorcontract!(H, A, pA, false, B, pB, false, pAB, 1, 1)
     return H
+end
+
+"""
+    chain_link1_back(ch, dH, A, B) -> (dA, dB)
+
+Adjoint of the chain's first link (I₁ = A ⋆ B): the generic pairwise adjoints
+`dA = dH ⋆ conj(B)`, `dB = conj(A) ⋆ dH` with the labels of
+`ch.ops[1]`/`ch.ops[2]`. Allocates both gradients; never frees its inputs.
+Counterpart of `chain_link1_add!` for the cannon ring's per-(chunk, block)
+dFL/dALd contributions.
+"""
+function chain_link1_back(ch::Chain, dH, A, B)
+    IH = _link_labels(ch.ops[1], ch.ops[2])
+    dA = tensorcontract(ch.ops[1], dH, IH, false, B, ch.ops[2], true)
+    dB = tensorcontract(ch.ops[2], A, ch.ops[1], true, dH, IH, false)
+    return dA, dB
 end
 
 """
@@ -129,4 +165,45 @@ function chain_backward(ch::Chain{N}, tensors::NTuple{N, Any}, dOut) where {N}
     end
     grads[1] = dC                # dI_1-walked-to-d(op_1); owned, returned to caller
     return Tuple(grads)
+end
+
+"""
+    chain_backward_from1(ch, H, tensors_tail, dOut) -> (dH, dtail...)
+
+Backward of links 2..N only: cotangents for H (= I₁, e.g. ring-accumulated)
+and the tail operands (ops 3..N, `tensors_tail` order). Recompute-style for
+the internal intermediates: I₂..I_{N-2} are rebuilt from H (the final output
+is never an adjoint operand), then the reversed walk runs the same generic
+pairwise adjoints as `chain_backward` but stops at k = 3, returning the
+carried cotangent dI₁ = dH first. Owned intermediates and cotangents are
+freed after their last consumer; H, `tensors_tail`, `dOut` are caller-owned
+and never freed.
+"""
+function chain_backward_from1(ch::Chain{N}, H, tensors_tail::Tuple, dOut) where {N}
+    @assert length(tensors_tail) == N - 2
+    # 1. forward recompute of I_2..I_{N-2}, starting from I_1 = H (provided).
+    inters = Vector{Any}(undef, N - 2)
+    labs   = Vector{Tuple}(undef, N - 2)
+    inters[1], labs[1] = H, _link_labels(ch.ops[1], ch.ops[2])
+    for k in 3:(N - 1)
+        IC = _link_labels(labs[k - 2], ch.ops[k])
+        inters[k - 1] = tensorcontract(IC, inters[k - 2], labs[k - 2], false,
+                                       tensors_tail[k - 2], ch.ops[k], false)
+        labs[k - 1] = IC
+    end
+    # 2. reversed walk k = N..3; dC is the cotangent of I_{k-1} entering step k.
+    grads = Vector{Any}(undef, N - 2)    # grads[k-2] = d(op_k), tail order
+    dC, lC = dOut, ch.out
+    for k in N:-1:3
+        Iprev, lIprev = inters[k - 2], labs[k - 2]
+        # d(op_k) = conj(I_{k-1}) ⋆ dC
+        grads[k - 2] = tensorcontract(ch.ops[k], Iprev, lIprev, true, dC, lC, false)
+        # dI_{k-1} = dC ⋆ conj(op_k)
+        dprev = tensorcontract(lIprev, dC, lC, false, tensors_tail[k - 2], ch.ops[k], true)
+        # Frees AFTER both contractions of this step (last consumers):
+        k < N && _free!(dC)      # owned cotangent from step k+1; at k == N dC === dOut (caller's)
+        k > 3 && _free!(Iprev)   # owned inters[k-2]; at k == 3 Iprev === H (caller's)
+        dC, lC = dprev, lIprev
+    end
+    return (dC, grads...)        # dC == dH after the k == 3 step; owned
 end
