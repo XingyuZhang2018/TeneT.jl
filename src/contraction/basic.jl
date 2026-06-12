@@ -142,6 +142,8 @@ FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4; inner_etype=nothing) =
 ```
 """
 function FRmap(FR, ARu, ARd, M::leg4; inner_etype=nothing)
+    use_chain_engine(FR, ARu, ARd, M) &&
+        return _chain_map(FRMAP_LEG4_CHAIN, (ARd, FR, M, ARu), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(FR))
         @tensor result[a,d,f] := ARd[f,g,h] * FR[c,e,h] * M[d,g,e,b] * ARu[a,b,c]
         return result
@@ -156,6 +158,8 @@ function FRmap(FR, ARu, ARd, M::leg4; inner_etype=nothing)
     end
 end
 function FRmap(FR, ARu, ARd, M1::leg5, M2::leg5; inner_etype=nothing)
+    use_chain_engine(FR, ARu, ARd, M1, M2) &&
+        return _chain_map(FRMAP_LEG5_CHAIN, (ARd, FR, M1, M2, ARu), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(FR))
         @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M1[e,j,g,b,p] * M2[f,k,h,c,p] * ARu[a,b,c,d]
         return result
@@ -171,6 +175,8 @@ function FRmap(FR, ARu, ARd, M1::leg5, M2::leg5; inner_etype=nothing)
     end
 end
 function FRmap(FR, ARu, ARd, M::leg8; inner_etype=nothing)
+    use_chain_engine(FR, ARu, ARd, M) &&
+        return _chain_map(FRMAP_LEG8_CHAIN, (ARd, FR, M, ARu), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(FR))
         @tensor result[a,e,f,i] := ARd[i,j,k,l] * FR[d,g,h,l] * M[e,f,j,k,g,h,b,c] * ARu[a,b,c,d]
         return result
@@ -185,8 +191,11 @@ function FRmap(FR, ARu, ARd, M::leg8; inner_etype=nothing)
     end
 end
 
-FRmap(FR, ARu, ARd, M::leg5; inner_etype=nothing) =
-    FRmap(FR, ARu, ARd, M, conj(M); inner_etype)
+function FRmap(FR, ARu, ARd, M::leg5; inner_etype=nothing)
+    use_chain_engine(FR, ARu, ARd, M) &&
+        return _chain_map(FRMAP_LEG5_CHAIN_1M, (ARd, FR, M, M, ARu), inner_etype)
+    return FRmap(FR, ARu, ARd, M, conj(M); inner_etype)
+end
 FRmap(FR, ARu, ARd, M::Tuple{leg5,leg5}; inner_etype=nothing) =
     FRmap(FR, ARu, ARd, M[1], M[2]; inner_etype)
 

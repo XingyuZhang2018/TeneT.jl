@@ -5,6 +5,20 @@ using TeneT: Chain, chain_interlabels, tensor_chain, tensor_pinned_inters,
              conj_variant, chain_apply, use_chain_engine, CHAIN_ENGINE
 using TensorOperations: tensorcontract
 
+# Compare two gradient collections in map-arg order; tuple-M slots compare
+# elementwise. Used by every per-map parity testset.
+function grads_match(ga, gb; rtol=1e-10)
+    @test length(ga) == length(gb)
+    for (a, b) in zip(ga, gb)
+        if b isa Tuple
+            @test a isa Tuple && length(a) == length(b)
+            for (ai, bi) in zip(a, b); @test ai ≈ bi rtol = rtol; end
+        else
+            @test a ≈ b rtol = rtol
+        end
+    end
+end
+
 @testset "tensor_pinned_inters matches @tensor temp layouts" begin
     # FLmap leg4 — probe-verified:
     ops = ((:a,:d,:f), (:f,:g,:h), (:d,:g,:e,:b), (:a,:b,:c))
@@ -77,35 +91,25 @@ end
         ((FL5, ALu5, ALd5, M8),        "leg8"),
     ]
     for (args, name) in cases
-        TeneT.set_chain_engine!(false)
-        ref = TeneT.FLmap(args...)
-        gref = Zygote.gradient((a...) -> sum(abs2, TeneT.FLmap(a...)), args...)
-        geng = try                       # toggle hygiene: never leak ON state
-            TeneT.set_chain_engine!(true)
-            @test TeneT.FLmap(args...) ≈ ref rtol = 1e-12
-            Zygote.gradient((a...) -> sum(abs2, TeneT.FLmap(a...)), args...)
-        finally
+        @testset "$name" begin
             TeneT.set_chain_engine!(false)
-        end
-        for i in 1:4
-            if gref[i] isa Tuple
-                for j in 1:2; @test geng[i][j] ≈ gref[i][j] rtol = 1e-10; end
-            else
-                @test geng[i] ≈ gref[i] rtol = 1e-10
+            ref = TeneT.FLmap(args...)
+            gref = Zygote.gradient((a...) -> sum(abs2, TeneT.FLmap(a...)), args...)
+            geng = try                       # toggle hygiene: never leak ON state
+                TeneT.set_chain_engine!(true)
+                @test TeneT.FLmap(args...) ≈ ref rtol = 1e-12
+                Zygote.gradient((a...) -> sum(abs2, TeneT.FLmap(a...)), args...)
+            finally
+                TeneT.set_chain_engine!(false)
             end
-        end
-        # engine_backward registry (the forloop-reroute entry point):
-        dOut = rand(ComplexF64, size(ref))
-        _, bk = Zygote.pullback((a...) -> TeneT.FLmap(a...), args...)
-        gz = bk(dOut)
-        ge = TeneT.engine_backward(TeneT.FLmap, args, dOut)
-        @test ge !== nothing
-        for i in 1:4
-            if gz[i] isa Tuple
-                for j in 1:2; @test ge[i][j] ≈ gz[i][j] rtol = 1e-10; end
-            else
-                @test ge[i] ≈ gz[i] rtol = 1e-10
-            end
+            grads_match(geng, gref)
+            # engine_backward registry (the forloop-reroute entry point):
+            dOut = rand(ComplexF64, size(ref))
+            _, bk = Zygote.pullback((a...) -> TeneT.FLmap(a...), args...)
+            gz = bk(dOut)
+            ge = TeneT.engine_backward(TeneT.FLmap, args, dOut)
+            @test ge !== nothing
+            grads_match(ge, gz)
         end
     end
     # inner_etype path survives the reroute (mirrors test_contraction.jl):
@@ -116,6 +120,53 @@ end
         TeneT.set_chain_engine!(false)
     end
     @test r32 ≈ TeneT.FLmap(FL5, ALu5, ALd5, M5; inner_etype=Float32) rtol = 1e-5
+end
+
+@testset "FRmap chains: parity over all variants" begin
+    Random.seed!(42)
+    χ, D, d = 8, 3, 2
+    # Geometry mirrors test_contraction.jl:275-292:
+    FR4  = rand(ComplexF64, χ, D, χ);    ARu4 = rand(ComplexF64, χ, D, χ)
+    ARd4 = rand(ComplexF64, χ, D, χ);    M4   = rand(ComplexF64, D, D, D, D)
+    FR5  = rand(ComplexF64, χ, D, D, χ); ARu5 = rand(ComplexF64, χ, D, D, χ)
+    ARd5 = rand(ComplexF64, χ, D, D, χ); M5   = rand(ComplexF64, D, D, D, D, d)
+    M8   = rand(ComplexF64, D, D, D, D, D, D, D, D)
+    cases = [
+        ((FR4, ARu4, ARd4, M4),        "leg4"),
+        ((FR5, ARu5, ARd5, M5),        "leg5 single-M"),
+        ((FR5, ARu5, ARd5, (M5, conj(M5))), "leg5 tuple"),
+        ((FR5, ARu5, ARd5, M8),        "leg8"),
+    ]
+    for (args, name) in cases
+        @testset "$name" begin
+            TeneT.set_chain_engine!(false)
+            ref = TeneT.FRmap(args...)
+            gref = Zygote.gradient((a...) -> sum(abs2, TeneT.FRmap(a...)), args...)
+            geng = try                       # toggle hygiene: never leak ON state
+                TeneT.set_chain_engine!(true)
+                @test TeneT.FRmap(args...) ≈ ref rtol = 1e-12
+                Zygote.gradient((a...) -> sum(abs2, TeneT.FRmap(a...)), args...)
+            finally
+                TeneT.set_chain_engine!(false)
+            end
+            grads_match(geng, gref)
+            # engine_backward registry (the forloop-reroute entry point):
+            dOut = rand(ComplexF64, size(ref))
+            _, bk = Zygote.pullback((a...) -> TeneT.FRmap(a...), args...)
+            gz = bk(dOut)
+            ge = TeneT.engine_backward(TeneT.FRmap, args, dOut)
+            @test ge !== nothing
+            grads_match(ge, gz)
+        end
+    end
+    # inner_etype path survives the reroute (mirrors test_contraction.jl):
+    r32 = try
+        TeneT.set_chain_engine!(true)
+        TeneT.FRmap(FR5, ARu5, ARd5, M5; inner_etype=Float32)
+    finally
+        TeneT.set_chain_engine!(false)
+    end
+    @test r32 ≈ TeneT.FRmap(FR5, ARu5, ARd5, M5; inner_etype=Float32) rtol = 1e-5
 end
 
 println("test_chain_maps done")

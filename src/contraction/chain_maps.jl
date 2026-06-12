@@ -38,20 +38,59 @@ const FLMAP_LEG8_CHAIN = tensor_chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:f,:j,:
 const FLMAP_LEG5_CHAIN_1M = conj_variant(FLMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
 
 function engine_backward(::typeof(FLmap), args::NTuple{4, Any}, dOut)
+    _chainable(args...) || return nothing
     FL, ALu, ALd, M = args
-    if M isa Tuple && length(M) == 2 && _chainable(M)
+    if M isa Tuple && length(M) == 2
         g = chain_backward(FLMAP_LEG5_CHAIN, (FL, ALd, M[1], M[2], ALu), dOut)
+        # g = (dFL, dALd, dM1, dM2, dALu) → map order (dFL, dALu, dALd, dM-tuple)
         return (g[1], g[5], g[2], (g[3], g[4]))
     elseif M isa AbstractArray && ndims(M) == 5
         g = chain_backward(FLMAP_LEG5_CHAIN_1M, (FL, ALd, M, M, ALu), dOut)
         dM = g[3]; dM .+= g[4]; _free!(g[4])           # slot-sum, in place
+        # g = (dFL, dALd, dM₁, dM₂, dALu) → map order (dFL, dALu, dALd, dM₁+dM₂)
         return (g[1], g[5], g[2], dM)
     elseif M isa AbstractArray && ndims(M) == 4
         g = chain_backward(FLMAP_LEG4_CHAIN, (FL, ALd, M, ALu), dOut)
+        # g = (dFL, dALd, dM, dALu) → map order (dFL, dALu, dALd, dM)
         return (g[1], g[4], g[2], g[3])
     elseif M isa AbstractArray && ndims(M) == 8
         g = chain_backward(FLMAP_LEG8_CHAIN, (FL, ALd, M, ALu), dOut)
+        # g = (dFL, dALd, dM, dALu) → map order (dFL, dALu, dALd, dM)
         return (g[1], g[4], g[2], g[3])
+    end
+    return nothing
+end
+
+# ─── FRmap family (leg4, leg8, leg5 pair, leg5 single-M) ────────────────────
+# Chain tensor order is (ARd, FR, M..., ARu) — the kernels' @tensor written
+# order; map arg order is (FR, ARu, ARd, M). NB: unlike FLmap the carried
+# operand (ARd) is NOT the map's first arg, so the gradient permutations
+# below differ from FLmap's — see the per-return comments.
+const FRMAP_LEG4_CHAIN = tensor_chain(((:f,:g,:h), (:c,:e,:h), (:d,:g,:e,:b), (:a,:b,:c)), (:a,:d,:f))
+const FRMAP_LEG5_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)), (:a,:e,:f,:i))
+const FRMAP_LEG8_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:f,:j,:k,:g,:h,:b,:c), (:a,:b,:c,:d)), (:a,:e,:f,:i))
+const FRMAP_LEG5_CHAIN_1M = conj_variant(FRMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
+
+function engine_backward(::typeof(FRmap), args::NTuple{4, Any}, dOut)
+    _chainable(args...) || return nothing
+    FR, ARu, ARd, M = args
+    if M isa Tuple && length(M) == 2
+        g = chain_backward(FRMAP_LEG5_CHAIN, (ARd, FR, M[1], M[2], ARu), dOut)
+        # g = (dARd, dFR, dM1, dM2, dARu) → map order (dFR, dARu, dARd, dM-tuple)
+        return (g[2], g[5], g[1], (g[3], g[4]))
+    elseif M isa AbstractArray && ndims(M) == 5
+        g = chain_backward(FRMAP_LEG5_CHAIN_1M, (ARd, FR, M, M, ARu), dOut)
+        dM = g[3]; dM .+= g[4]; _free!(g[4])           # slot-sum, in place
+        # g = (dARd, dFR, dM₁, dM₂, dARu) → map order (dFR, dARu, dARd, dM₁+dM₂)
+        return (g[2], g[5], g[1], dM)
+    elseif M isa AbstractArray && ndims(M) == 4
+        g = chain_backward(FRMAP_LEG4_CHAIN, (ARd, FR, M, ARu), dOut)
+        # g = (dARd, dFR, dM, dARu) → map order (dFR, dARu, dARd, dM)
+        return (g[2], g[4], g[1], g[3])
+    elseif M isa AbstractArray && ndims(M) == 8
+        g = chain_backward(FRMAP_LEG8_CHAIN, (ARd, FR, M, ARu), dOut)
+        # g = (dARd, dFR, dM, dARu) → map order (dFR, dARu, dARd, dM)
+        return (g[2], g[4], g[1], g[3])
     end
     return nothing
 end
