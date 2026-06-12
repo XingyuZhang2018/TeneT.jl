@@ -102,18 +102,23 @@ for (D, χ) in [(8, 256), (8, 512), (10, 512), (10, 768), (12, 768), (12, 1024),
     dout = CUDA.rand(Float64, χ, D, D, χl)
     fl_kw = (forloop_iter = n, N_in = (3, 4), N_out = 4, size_out = (χ, D, D, χl))
 
-    # parity first (also warms both paths)
+    # parity first (also warms both paths); GC between steps — dead results
+    # from one path otherwise stack under the next path's working set and
+    # OOM'd job 1275621 at (8, 768)
     rA = staged_fwd(FLr, ALur, ALdc, M1, M2, n)
     rB = TeneT.forloop(TeneT.FLmap, FLr, ALur, ALdc, (M1, M2); fl_kw...)
     pf = isapprox(rA, rB; rtol = 1e-11) ? "F✓" : "F✗"
+    rA = rB = nothing
+    GC.gc(); CUDA.reclaim()
     gA = staged_bwd(FLr, ALur, ALdc, M1, M2, dout, n)
+    GC.gc(); CUDA.reclaim()
     _, bpB = Zygote.pullback((a, b, c, m) -> TeneT.forloop(TeneT.FLmap, a, b, c, m; fl_kw...),
                              FLr, ALur, ALdc, (M1, M2))
     gB = bpB(dout)
     pb = (isapprox(gA[1], gB[1]; rtol = 1e-10) && isapprox(gA[2], gB[2]; rtol = 1e-10) &&
           isapprox(gA[3], gB[3]; rtol = 1e-10) && isapprox(gA[4], gB[4][1]; rtol = 1e-10) &&
           isapprox(gA[5], gB[4][2]; rtol = 1e-10)) ? "B✓" : "B✗"
-    rA = rB = gA = gB = nothing
+    rA = rB = gA = gB = bpB = nothing
     GC.gc(); CUDA.reclaim()
 
     # timing + memory per section: GC+reclaim → timed (per-rep GC, no reclaim)
