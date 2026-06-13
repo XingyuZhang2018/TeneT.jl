@@ -355,6 +355,38 @@ end
     end
 end
 
+@testset "FLmap_C3v inner_etype cast branch is self-consistent" begin
+    Random.seed!(49)
+    χ, D = 6, 3
+    # qrctmrg geometry: boundary tensors (χ,D,D,χ), M's leg4 (D,D,D,D);
+    # complex inputs through the 2M dispatch (the core then sees
+    # M1, conj(M1), M2, conj(M2) — all four M slots populated). Kernel path
+    # pinned (engine OFF): this is a cast-branch test, not a chain test.
+    FL  = rand(ComplexF64, χ, D, D, χ); ALu = rand(ComplexF64, χ, D, D, χ)
+    ALd = rand(ComplexF64, χ, D, D, χ)
+    M1  = rand(ComplexF64, D, D, D, D); M2 = rand(ComplexF64, D, D, D, D)
+    old = TeneT.CHAIN_ENGINE[]
+    try
+        TeneT.set_chain_engine!(false)
+        r64 = TeneT.FLmap_C3v(FL, ALu, ALd, M1, M2)
+        r32 = TeneT.FLmap_C3v(FL, ALu, ALd, M1, M2; inner_etype=Float32)
+        @test eltype(r32) == ComplexF64                 # upcast at exit
+        @test r32 ≈ r64 rtol = 1e-5                     # F32 accuracy
+        # Self-consistency: the cast branch must equal the plain kernel run on
+        # pre-downcast inputs, i.e. ALL seven operands contract in ComplexF32
+        # (downcast commutes with conj, so the dispatch's conj(M) is exact).
+        # Before the M3/M4 downcast fix this FAILED: raw ComplexF64 M3/M4
+        # leaked into the F32 contraction and shifted the result at
+        # F32-epsilon level (observed 1.5e-7 relative; the r64 accuracy check
+        # alone passed at 1.4e-8 — raw M3/M4 made the result MORE precise).
+        c32(A) = TeneT._downcast_eltype(Float32, A)
+        ref32 = ComplexF64.(TeneT.FLmap_C3v(c32(FL), c32(ALu), c32(ALd), c32(M1), c32(M2)))
+        @test r32 ≈ ref32 rtol = 1e-12
+    finally
+        TeneT.set_chain_engine!(old)
+    end
+end
+
 @testset "reroute stays live on views (forloop/parallel slice forms)" begin
     Random.seed!(47)
     χ, D, d = 8, 3, 2

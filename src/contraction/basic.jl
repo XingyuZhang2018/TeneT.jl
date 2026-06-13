@@ -120,7 +120,9 @@ function FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4, M3::leg4, M4::leg4; inner_e
         ALd_t = _downcast_eltype(inner_etype, ALd)
         M1_t  = _downcast_eltype(inner_etype, M1)
         M2_t  = _downcast_eltype(inner_etype, M2)
-        @tensor result_t[3,8,88,9] := FL_t[1,4,44,5] * ALu_t[1,2,22,3] * M1_t[4,7,2,10] * M2_t[44,77,22,10] * M3[6,8,7,11] * M4[66,88,77,11] * ALd_t[5,6,66,9]
+        M3_t  = _downcast_eltype(inner_etype, M3)
+        M4_t  = _downcast_eltype(inner_etype, M4)
+        @tensor result_t[3,8,88,9] := FL_t[1,4,44,5] * ALu_t[1,2,22,3] * M1_t[4,7,2,10] * M2_t[44,77,22,10] * M3_t[6,8,7,11] * M4_t[66,88,77,11] * ALd_t[5,6,66,9]
         return T_out.(result_t)
     end
 end
