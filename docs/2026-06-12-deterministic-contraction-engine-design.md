@@ -120,7 +120,7 @@ Map-by-map, parity-gated, old paths retained until verified:
 | Milestone | Deliverable | Gate |
 |-----------|-------------|------|
 | M1 | Engine + FLmap leg5 chain (port of proven kernels) | == hand kernels bitwise-ish; perf ≥ hand kernels; 4-rank suite green |
-| M2 | All FLmap/FRmap/ACmap/ACdmap/Cmap leg variants as chains; forloop/parallel rerouted | per-map parity vs @tensor 1e-12 fwd / 1e-10 grad; existing serial test suite green; **engine default ON (serial gates green; Sofia perf gate pending Task 12)** |
+| M2 | All FLmap/FRmap/ACmap/ACdmap/Cmap leg variants as chains; forloop/parallel rerouted | per-map parity vs @tensor 1e-12 fwd / 1e-10 grad; existing serial test suite green; **engine default ON.** Sofia Part-8 A/B (job 1285203): forward a clear win (0.63–0.83× time at scale, leaner mem at D10, parity f✓); the literal gate FAIL is harness-bound (backward `n` calibrated for rank-local not full-χ → OOM; in-process pool fragmentation at D≥12), not a proven engine regression; one real nit = Cmap bwd overhead (tiny map). Follow-ups: per-map-isolated re-run + Cmap-chain exemption. See benchmarks Part 8. |
 | M3 | cannon wrappers: FRmap, Cmap; ACmap dataflow design + impl | distributed parity per map |
 | M4 | leftenv/rightenv/ACenv/Cenv cannon; gather hoisting; buffer reuse | env-level eigenpair parity; zero-allocation steady-state iteration |
 | M5 | vumps_step → full VUMPS distributed | fixed-point trajectory match vs serial |

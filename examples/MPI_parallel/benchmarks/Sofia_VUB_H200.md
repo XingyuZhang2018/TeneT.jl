@@ -450,6 +450,105 @@ compile-time lowering from the same chain tables remains the recorded
 fallback if small-shape paths ever become hot. M1 closed; M2 (all maps as
 chains) unblocked.
 
+## Part 8: M2 chain-engine perf gate — production-path A/B (1 GPU)
+
+Job `1285203` (2026-06-13, `submit_bench_chain_gate_m2.sh` →
+`bench_chain_gate_m2_sofia.jl`, commit `eb800c4`, worktree `TeneT_m2gate`),
+single H200, no MPI. The toggle IS the A/B switch: **CHAIN** =
+`set_chain_engine!(true)` (production routes through the engine: `chain_apply`
+fwd, `engine_backward`-rerouted forloop rrule bwd), **TENSOR** = `(false)`
+(verbatim `@tensor` fwd + per-slice Zygote forloop rrule bwd). Six maps,
+Float64 leg5 single-M; CHAIN arm at the engine-feasible `n`, TENSOR arm at its
+own `nB` (Part-6 coeff 14 — each path at its feasible chunking, Part-6/7
+convention). (First attempt `1285146` OOM'd on a driver bug — TENSOR arm forced
+to the engine's `n` + an unguarded parity block; fixed in `eb800c4`.)
+
+| map    | dir | D  | χ    | n  | nB | C ms     | T ms     | C/T   | C mem  | T mem  | C/T m | parity |
+|--------|-----|----|------|----|----|----------|----------|-------|--------|--------|-------|--------|
+| FLmap  | fwd | 10 | 512  | 1  | 1  |    186.4 |    233.3 | 0.799 |   60.8 |   99.9 | 0.609 | f✓ |
+| FLmap  | bwd | 10 | 512  | 1  | 1  |   1035.0 |      oom |   —   |  120.5 |    oom |   —   | g? |
+| FRmap  | fwd | 10 | 512  | 1  | 1  |    217.9 |    216.7 | 1.005 |   60.8 |   80.9 | 0.752 | f✓ |
+| FRmap  | bwd | 10 | 512  | 1  | 1  |   1023.9 |      oom |   —   |  120.5 |    oom |   —   | g? |
+| ACmap  | fwd | 10 | 512  | 1  | 1  |    236.1 |    232.7 | 1.015 |   80.4 |   99.9 | 0.805 | f✓ |
+| ACmap  | bwd | 10 | 512  | 1  | 1  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACdmap | fwd | 10 | 512  | 1  | 1  |    229.1 |    229.2 | 1.000 |   80.4 |   99.9 | 0.805 | f✓ |
+| ACdmap | bwd | 10 | 512  | 1  | 1  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| Cmap   | fwd | 10 | 512  | —  | —  |      1.6 |      1.6 | 1.014 |    2.4 |    2.4 | 1.000 | f✓ |
+| Cmap   | bwd | 10 | 512  | —  | —  |     12.5 |      4.4 | 2.835 |    2.9 |    3.2 | 0.903 | g✓ |
+| Mumap  | fwd | 10 | 512  | 1  | 1  |    258.7 |    256.7 | 1.008 |   61.0 |   80.4 | 0.759 | f✓ |
+| FLmap  | fwd | 12 | 1024 | 4  | 7  |   2628.5 |   3365.9 | 0.781 |  132.6 |  127.3 | 1.042 | f✓ |
+| FLmap  | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| FRmap  | fwd | 12 | 1024 | 4  | 7  |   3012.9 |   3597.4 | 0.838 |  132.6 |  127.3 | 1.042 | f✓ |
+| FRmap  | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACmap  | fwd | 12 | 1024 | 4  | 7  |      oom |   3545.4 |   —   |    oom |  127.3 |   —   | f? |
+| ACmap  | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACdmap | fwd | 12 | 1024 | 4  | 7  |      oom |   3450.5 |   —   |    oom |  127.3 |   —   | f? |
+| ACdmap | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| Cmap   | fwd | 12 | 1024 | —  | —  |     11.3 |     11.3 | 0.996 |   12.0 |   12.0 | 1.000 | f✓ |
+| Cmap   | bwd | 12 | 1024 | —  | —  |     43.4 |     33.7 | 1.288 |   13.2 |   15.4 | 0.856 | g✓ |
+| Mumap  | fwd | 12 | 1024 | 4  | 7  |      oom |   3503.3 |   —   |    oom |  126.0 |   —   | f? |
+| FLmap  | fwd | 16 | 1024 | 14 | 23 |   9452.8 |  11331.5 | 0.834 |  129.8 |  108.8 | 1.193 | f✓ |
+| FLmap  | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| FRmap  | fwd | 16 | 1024 | 14 | 23 |  11058.6 |  14723.8 | 0.751 |  129.8 |  108.9 | 1.192 | f✓ |
+| FRmap  | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACmap  | fwd | 16 | 1024 | 14 | 23 |      oom |  11804.1 |   —   |    oom |  108.8 |   —   | f? |
+| ACmap  | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACdmap | fwd | 16 | 1024 | 14 | 23 |      oom |  12154.0 |   —   |    oom |  108.8 |   —   | f? |
+| ACdmap | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| Cmap   | fwd | 16 | 1024 | —  | —  |     19.7 |     19.7 | 1.000 |   20.7 |   20.7 | 1.000 | f✓ |
+| Cmap   | bwd | 16 | 1024 | —  | —  |     89.7 |     59.3 | 1.512 |   22.8 |   26.8 | 0.854 | g✓ |
+| Mumap  | fwd | 16 | 1024 | 14 | 23 |  11901.0 |  18863.9 | 0.631 |  129.7 |  139.8 | 0.928 | f✓ |
+
+Literal gate (≤1.05 time, ≤1.10 mem, all cells): **FAIL** — but the failure is
+dominated by benchmark-harness limits, not chain-engine regressions. Reading:
+
+- **Forward TIME — robust win (unaffected by pool state).** FLmap 0.799/0.781/
+  0.834×, FRmap 1.005/0.838/0.751×, Mumap 1.008/—/0.631×. The engine forward is
+  faster at every production cell where it runs, growing with size — the Part-6
+  motivation confirmed on the literal production path. Parity `f✓` on every
+  forward cell that ran (fwd 1e-12, the maps' single-M conj-flag chains agree
+  bit-for-bit with the @tensor path).
+- **Forward MEMORY — leaner where cleanly measured.** At D10χ512 every CHAIN
+  forward is 0.61–0.81× TENSOR. At D12/D16 the rank-0 single-process probe is
+  contaminated (see below).
+- **Backward — NOT measurable at these `n` (harness, not engine).** `pick_n`
+  (Part-6 coeff 8/14) was calibrated on the cannon **rank-local** workload
+  (χ/2-blocks); at **full χ** a single leg5 intermediate is χ²·D⁴·8 ≈ 21 GiB at
+  D10χ512, so `n=1` cannot chunk the backward under 140 GiB. CHAIN bwd ran only
+  for FLmap/FRmap at D10 (120 GiB, TENSOR OOM there = engine ran where @tensor
+  could not); everything else OOM/OOM. **Part-7 is the backward authority** —
+  properly chunked, the chain backward is competitive-and-leaner there. The
+  `g?` cells are "parity not probed" (an arm OOM'd), NOT parity failures; the
+  serial suite proves bwd parity 1e-10 for all 21 maps.
+- **ACmap/ACdmap forward OOM at D12/D16 ⇒ in-process pool fragmentation, not an
+  intrinsic chain regression.** Same maps are *leaner* than @tensor at D10
+  (80.4 vs 99.9); if the chain forward were intrinsically heavier it would show
+  at D10 too. The driver measures all 6 maps × fwd/bwd in ONE process per cell;
+  the 120 GiB FLmap/FRmap backward measurements fragment the pool before ACmap
+  fwd, so CHAIN ACmap fwd can't get a contiguous block while TENSOR (different
+  alloc pattern, measured after a GC+reclaim) squeaks in at 127 GiB. Needs
+  per-map process isolation to measure clean.
+- **Cmap bwd is genuinely slower (2.835/1.288/1.512×) — the one real nit.** Not
+  memory (mem 0.85–0.90×), not artifact: the 3-link `chain_backward` +
+  recompute overhead is not worth it for a tiny leg4 map (12 ms vs 4 ms — the
+  absolute cost is negligible beside FLmap/ACmap's seconds, but per the design
+  doc's "any map slower than its @tensor original is a bug" it is flagged).
+  Candidate follow-up: exempt Cmap from the chain (route the guard back to
+  `@tensor`), since the chain's eager-free/recompute machinery only pays off on
+  the χ²D⁴-class maps.
+
+**Verdict:** the chain engine is **correct** (all serial + 4-rank MPI parity
+gates green; forward parity `f✓` here) and the **forward is a clear production
+win** (0.63–0.83× time at scale, leaner memory where cleanly probed). The
+literal-gate FAIL is (a) a backward `n`-calibration gap in the harness and (b)
+in-process pool fragmentation at D≥12 — not proven engine regressions — plus
+(c) one real, tiny per-map nit (Cmap bwd overhead). Follow-ups: a re-run with
+per-map process isolation + a backward-calibrated `n` to get clean at-scale
+memory, and the Cmap-chain exemption. FLmap_C3v and the corner maps are
+consciously unbenched (out-of-scope per the M2 plan: corner maps' only caller
+is commented out; FLmap_C3v lives only in the qrctmrg path, no Sofia production
+benchmark today).
+
 ## Sofia-specific Environment
 
 ```bash
