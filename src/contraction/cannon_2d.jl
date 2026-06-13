@@ -542,7 +542,13 @@ end
 # SAME full chain → identical replicated output, NO allreduce). No ring, no
 # output scatter, no square-grid assertion. Local einsum is CMAP_LEG*_CHAIN via
 # chain_apply (whole-chain engine API), NOT a hand kernel.
-function Cmap_cannon(C, FL_blk, FR_blk, grid::CannonGrid; inner_etype = nothing)
+# NO inner_etype kwarg: Cmap deliberately has no precondition/boundary downcast
+# path (C is tiny χ×χ, no production inner_etype caller — cf. chain_maps.jl:167).
+# The gather-class maps (FRmap/ACmap/ACdmap) DO take inner_etype and implement
+# the FLmap-style do_cast — do NOT copy this no-cast signature to them.
+# (CMAP_LEG*_CHAIN are defined in chain_maps.jl, included after this file, and
+# resolve at call time via Julia's global late-binding.)
+function Cmap_cannon(C, FL_blk, FR_blk, grid::CannonGrid)
     χ = MPI.Allreduce(size(FL_blk, 1), +, grid.col_comm)   # full a/b extent (r1)
     a_rs = split_ranges(χ, grid.N1)
     e_rs = split_ranges(χ, grid.N2)

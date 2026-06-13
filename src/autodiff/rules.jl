@@ -702,14 +702,14 @@ end
 # every rank computes the IDENTICAL replicated `out` from IDENTICAL full inputs.
 # The forward gather of each block into the full tensor is therefore an
 # allgather of a replicated-into-blocks tensor, whose adjoint is TAKE-MY-BLOCK
-# (a getindex slice of the identical full cotangent), exactly the cannon_gather
-# rrule (rules.jl:459) — NOT reduce-scatter, which would SUM the identical peer
+# (a getindex slice of the identical full cotangent), exactly the `cannon_gather`
+# rrule's `gather_back` — NOT reduce-scatter, which would SUM the identical peer
 # cotangents and over-count by P (FLmap_cannon_dist uses reduce-scatter only
 # because its output is DISTRIBUTED; Cmap's output is replicated). dC comes
 # from chain_backward already replicated (identical chain on identical inputs
 # and identical dOut on every rank) — returned as-is, no allreduce, no slice.
-function ChainRulesCore.rrule(::typeof(Cmap_cannon), C, FL_blk, FR_blk, grid::CannonGrid;
-                              inner_etype = nothing)
+# No inner_etype: Cmap has no downcast path (cf. the forward in cannon_2d.jl).
+function ChainRulesCore.rrule(::typeof(Cmap_cannon), C, FL_blk, FR_blk, grid::CannonGrid)
     χ = MPI.Allreduce(size(FL_blk, 1), +, grid.col_comm)
     a_rs = split_ranges(χ, grid.N1)
     e_rs = split_ranges(χ, grid.N2)
