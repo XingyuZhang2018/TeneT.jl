@@ -177,6 +177,12 @@ end
     include("test_tm_spectrum.jl")
     include("test_tm_spectrum_plot.jl")
     include("test_patch.jl")
+    # M2 chain-engine parity suite + the CHAIN_ENGINE[]==true flip assertion
+    # (Task 11). Verified to include cleanly under this preamble — its
+    # `using TeneT: ...` internals and Zygote do not clash with the imports
+    # above. CI-gating the flip here is the point; it is no longer a
+    # manual-only suite.
+    include("test_chain_maps.jl")
 
     if get(ENV, "TENET_TEST_MPI", "false") == "true"
         include("test_mpi.jl")

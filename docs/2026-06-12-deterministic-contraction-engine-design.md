@@ -120,7 +120,7 @@ Map-by-map, parity-gated, old paths retained until verified:
 | Milestone | Deliverable | Gate |
 |-----------|-------------|------|
 | M1 | Engine + FLmap leg5 chain (port of proven kernels) | == hand kernels bitwise-ish; perf ≥ hand kernels; 4-rank suite green |
-| M2 | All FLmap/FRmap/ACmap/ACdmap/Cmap leg variants as chains; forloop/parallel rerouted | per-map parity vs @tensor 1e-12 fwd / 1e-10 grad; existing serial test suite green |
+| M2 | All FLmap/FRmap/ACmap/ACdmap/Cmap leg variants as chains; forloop/parallel rerouted | per-map parity vs @tensor 1e-12 fwd / 1e-10 grad; existing serial test suite green; **engine default ON (serial gates green; Sofia perf gate pending Task 12)** |
 | M3 | cannon wrappers: FRmap, Cmap; ACmap dataflow design + impl | distributed parity per map |
 | M4 | leftenv/rightenv/ACenv/Cenv cannon; gather hoisting; buffer reuse | env-level eigenpair parity; zero-allocation steady-state iteration |
 | M5 | vumps_step → full VUMPS distributed | fixed-point trajectory match vs serial |

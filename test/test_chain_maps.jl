@@ -37,8 +37,8 @@ end
 # (fwd 1e-12, Zygote grads 1e-10) plus the engine_backward registry entry vs
 # a toggle-OFF Zygote pullback (1e-10). Both regions set the toggle
 # EXPLICITLY (OFF for references, ON for engine paths) and restore the
-# ambient value — so the references remain @tensor-path results even after
-# Task 11 flips the global default ON. Toggle always restored.
+# ambient value — so the references remain @tensor-path results now that the
+# global default is ON (Task 11 flipped it). Toggle always restored.
 function chain_parity_case(f, args; check_engine_backward=true)
     old = TeneT.CHAIN_ENGINE[]
     ref, gref = try
@@ -110,20 +110,24 @@ end
 end
 
 @testset "toggle + chainability guard" begin
-    @test CHAIN_ENGINE[] == false                       # M2 default until Task 11
+    @test CHAIN_ENGINE[] == true                        # default ON since Task 11
     A = rand(ComplexF64, 2, 2); V = [A, A]
     @test TeneT._chainable(A)
     @test TeneT._chainable(view(A, :, 1:1))
     @test !TeneT._chainable(V)                          # Vector-of-arrays excluded
     @test TeneT._chainable((A, A)) && !TeneT._chainable((A, V))
+    old = TeneT.CHAIN_ENGINE[]
     try
         TeneT.set_chain_engine!(true)
         @test use_chain_engine(A, (A, A))
         @test !use_chain_engine(A, V)
-    finally
+        # OFF-path guard: explicitly OFF here, then restore the ambient default
+        # so this testset never leaks toggle state into later testsets.
         TeneT.set_chain_engine!(false)
+        @test !use_chain_engine(A)
+    finally
+        TeneT.set_chain_engine!(old)
     end
-    @test !use_chain_engine(A)
 end
 
 @testset "rrule(chain_apply) under Zygote == Zygote over @tensor" begin
@@ -134,8 +138,17 @@ end
     M1  = rand(ComplexF64, D, D, D, D, d); M2 = rand(ComplexF64, D, D, D, D, d)
     loss_chain(t...) = sum(abs2, chain_apply(TeneT.FLMAP_LEG5_CHAIN, t))
     loss_tensor(fl, ald, m1, m2, alu) = sum(abs2, TeneT.FLmap(fl, alu, ald, m1, m2))
+    # loss_chain always hits the engine (direct chain_apply). loss_tensor is the
+    # @tensor reference: pin the toggle OFF (now that the default is ON) so this
+    # stays "chain vs @tensor", not "chain vs chain". Restore the ambient value.
     gc = Zygote.gradient(loss_chain, FL, ALd, M1, M2, ALu)
-    gt = Zygote.gradient(loss_tensor, FL, ALd, M1, M2, ALu)
+    old = TeneT.CHAIN_ENGINE[]
+    gt = try
+        TeneT.set_chain_engine!(false)
+        Zygote.gradient(loss_tensor, FL, ALd, M1, M2, ALu)
+    finally
+        TeneT.set_chain_engine!(old)
+    end
     for i in 1:5; @test gc[i] ≈ gt[i] rtol = 1e-10; end
 end
 
@@ -337,7 +350,8 @@ end
         @test ch1m.conjs == (false, false, false, true)
     end
 
-    # Kernel-first geometry sanity (engine OFF — the @tensor originals);
+    # Geometry sanity — pure shape probes (no numerical @tensor reference is
+    # being established, so they run on the engine now that the default is ON);
     # output χ-legs from the integer labels: LD out (1,...,12), DR out
     # (9,...,4), RU out (12,...,1), LU out (9,...,4):
     @test size(TeneT.LDmap(Lc, Dc, M1, M2)) == (χL, D, D, D, D, χR)
@@ -396,7 +410,8 @@ end
     @test TeneT.FLMAP_C3V_CHAIN_CONJ46.conjs ==
           (false, false, false, true, false, true, false)
 
-    # Kernel-first geometry sanity (engine OFF — the @tensor original):
+    # Geometry sanity — pure shape probe (no numerical @tensor reference, so it
+    # runs on the engine now that the default is ON):
     @test size(TeneT.FLmap_C3v(FL, ALu, ALd, M1, M2, M3, M4)) == (χ, D, D, χ)
 
     cases = [

@@ -2,8 +2,9 @@
 # the engine toggle, and the engine_backward registry used by the
 # forloop/parallel rrule reroute. Plan: docs/2026-06-12-chain-engine-m2-plan.md
 
-# Global switch. Default false until M2 parity + the Sofia gate pass (Task 11).
-const CHAIN_ENGINE = Ref(false)
+# Global switch. Default ON since M2 serial gates passed (Task 11); the Sofia
+# perf gate is Task 12.
+const CHAIN_ENGINE = Ref(true)
 set_chain_engine!(b::Bool) = (CHAIN_ENGINE[] = b; b)
 
 # Numeric AbstractArrays (incl. SubArray views): leg aliases also admit
