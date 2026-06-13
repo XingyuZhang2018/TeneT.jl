@@ -533,3 +533,26 @@ function FLmap_cannon_dist(FL_blk, ALu_blk, ALd_blk, M, grid::CannonGrid;
     result, _ = _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end
+
+# ─── Cmap (replicated class — C replicated, FL/FR distributed) ───────────────
+# Cmap leg4 result[e,f] := FL[a,c,d,e] C[a,b] FR[b,c,d,f]; leg3 result[d,e] :=
+# FL[a,c,d] C[a,b] FR[b,c,e]. C stays REPLICATED (per the M3 design — C is
+# tiny χ×χ); only FL/FR are block-stored. Output is the FULL χ×χ tensor,
+# identical on every rank (every rank gathers the SAME full FL/FR and runs the
+# SAME full chain → identical replicated output, NO allreduce). No ring, no
+# output scatter, no square-grid assertion. Local einsum is CMAP_LEG*_CHAIN via
+# chain_apply (whole-chain engine API), NOT a hand kernel.
+function Cmap_cannon(C, FL_blk, FR_blk, grid::CannonGrid; inner_etype = nothing)
+    χ = MPI.Allreduce(size(FL_blk, 1), +, grid.col_comm)   # full a/b extent (r1)
+    a_rs = split_ranges(χ, grid.N1)
+    e_rs = split_ranges(χ, grid.N2)
+    # Make FL/FR fully local: gather the r1 (a/b) leg over col, the r2 (e/f)
+    # leg over row. After both gathers each rank holds the IDENTICAL FULL FL and
+    # FR, so the local chain produces the complete replicated χ×χ output — NO
+    # allreduce needed (design (a) below).
+    FL_full = _cannon_col_allgather(_cannon_row_allgather(FL_blk, grid, e_rs), grid, a_rs)
+    FR_full = _cannon_col_allgather(_cannon_row_allgather(FR_blk, grid, e_rs), grid, a_rs)
+    chain = ndims(FL_blk) == 3 ? CMAP_LEG3_CHAIN : CMAP_LEG4_CHAIN
+    out = chain_apply(chain, (FL_full, C, FR_full))
+    return out   # full χ×χ, replicated
+end
