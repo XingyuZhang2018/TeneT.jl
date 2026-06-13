@@ -697,6 +697,57 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_dist), FL_blk, ALu_blk, ALd_
     return result, cannon_dist_back
 end
 
+# Cmap (replicated class): C replicated, FL/FR block-stored, output FULL χ×χ
+# replicated. Forward design (a): allgather FL/FR to full and run the chain, so
+# every rank computes the IDENTICAL replicated `out` from IDENTICAL full inputs.
+# The forward gather of each block into the full tensor is therefore an
+# allgather of a replicated-into-blocks tensor, whose adjoint is TAKE-MY-BLOCK
+# (a getindex slice of the identical full cotangent), exactly the cannon_gather
+# rrule (rules.jl:459) — NOT reduce-scatter, which would SUM the identical peer
+# cotangents and over-count by P (FLmap_cannon_dist uses reduce-scatter only
+# because its output is DISTRIBUTED; Cmap's output is replicated). dC comes
+# from chain_backward already replicated (identical chain on identical inputs
+# and identical dOut on every rank) — returned as-is, no allreduce, no slice.
+function ChainRulesCore.rrule(::typeof(Cmap_cannon), C, FL_blk, FR_blk, grid::CannonGrid;
+                              inner_etype = nothing)
+    χ = MPI.Allreduce(size(FL_blk, 1), +, grid.col_comm)
+    a_rs = split_ranges(χ, grid.N1)
+    e_rs = split_ranges(χ, grid.N2)
+    FL_full = _cannon_col_allgather(_cannon_row_allgather(FL_blk, grid, e_rs), grid, a_rs)
+    FR_full = _cannon_col_allgather(_cannon_row_allgather(FR_blk, grid, e_rs), grid, a_rs)
+    chain = ndims(FL_blk) == 3 ? CMAP_LEG3_CHAIN : CMAP_LEG4_CHAIN
+    result = chain_apply(chain, (FL_full, C, FR_full))
+
+    function cmap_cannon_back(dresult)
+        r1, r2 = grid.r1, grid.r2
+        # B0: full χ×χ cotangent, identical on every rank (replicated output) —
+        # NO allgather. Densify structured cotangents (FillArrays.Fill from a
+        # bare `sum` loss) so chain_backward gets a real device buffer.
+        d_c = unthunk(dresult)
+        if !(d_c isa DenseArray)
+            buf = similar(FL_full, eltype(d_c), size(d_c))
+            buf .= d_c
+            d_c = buf
+        end
+        # B1: chain grads in ops order (FL, C, FR).
+        dFL_full, dC, dFR_full = chain_backward(chain, (FL_full, C, FR_full), d_c)
+        # B3: take-my-block — dFL_full/dFR_full are identical on every rank; slice
+        # the block this rank owns (leg4: [a, :, :, e]; leg3: [a, :, e]).
+        if ndims(FL_blk) == 3
+            dFL_blk = dFL_full[a_rs[r1 + 1], :, e_rs[r2 + 1]]
+            dFR_blk = dFR_full[a_rs[r1 + 1], :, e_rs[r2 + 1]]
+        else
+            dFL_blk = dFL_full[a_rs[r1 + 1], :, :, e_rs[r2 + 1]]
+            dFR_blk = dFR_full[a_rs[r1 + 1], :, :, e_rs[r2 + 1]]
+        end
+        _free!(dFL_full); _free!(dFR_full)
+        # B2: dC replicated, returned as-is (no allreduce — would over-count by P).
+        # map order Cmap_cannon(C, FL_blk, FR_blk, grid).
+        return NoTangent(), dC, dFL_blk, dFR_blk, NoTangent()
+    end
+    return result, cmap_cannon_back
+end
+
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     atype = _arraytype(M)

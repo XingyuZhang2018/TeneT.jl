@@ -40,4 +40,24 @@ end
     end
 end
 
+@testset "Cmap_cannon gradient parity" begin
+    for (N1, N2) in ((2, 2), (1, 4))
+        χ, D = 16, 3
+        Random.seed!(2500 + 10N1)
+        FL = rand(ComplexF64, χ, D, D, χ); FR = rand(ComplexF64, χ, D, D, χ); C = rand(ComplexF64, χ, χ)
+        W  = rand(ComplexF64, χ, χ)
+        g = cannon_grid(N1, N2)
+        FLb = cannon_scatter(FL, g); FRb = cannon_scatter(FR, g)
+        loss_ref(C,FL,FR)   = real(sum(W .* Cmap(C, FL, FR)))
+        loss_dist(C,FLb,FRb) = real(sum(W .* Cmap_cannon(C, FLb, FRb, g)))
+        g_ref  = Zygote.pullback(loss_ref,  C, FL, FR)[2](1.0)
+        g_dist = Zygote.pullback(loss_dist, C, FLb, FRb)[2](1.0)
+        a_rs = split_ranges(χ, N1); e_rs = split_ranges(χ, N2)
+        blkof(x) = x[a_rs[g.r1+1], :, :, e_rs[g.r2+1]]
+        @test g_dist[1] ≈ g_ref[1] rtol = 1e-10              # dC full (replicated)
+        @test g_dist[2] ≈ blkof(g_ref[2]) rtol = 1e-10       # dFL block (take-my-block)
+        @test g_dist[3] ≈ blkof(g_ref[3]) rtol = 1e-10       # dFR block (take-my-block)
+    end
+end
+
 println("rank $rank: test_cannon_m3.jl batch A done")
