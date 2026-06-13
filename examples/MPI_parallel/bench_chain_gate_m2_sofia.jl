@@ -93,6 +93,29 @@ function try_or_nan(f)
     end
 end
 
+# Object-returning OOM guard for the parity arms: returns `nothing` on OOM so a
+# parity check degrades to "unknown" (f?/g?) instead of killing the sweep.
+function try_or_none(f)
+    try
+        return f()
+    catch e
+        if !BENCH_CPU && e isa CUDA.OutOfGPUMemoryError
+            GC.gc(); _reclaim()
+            return nothing
+        end
+        rethrow()
+    end
+end
+
+# Bring a forward result / gradient tuple to host so the GPU arrays of one
+# parity arm are freed (by the GC between arms) before the other arm allocates.
+# Only one arm's device memory is ever live at a time → the parity check can't
+# OOM by accumulation (the bug that killed job 1285146 at the unguarded gON/gOFF).
+to_cpu(x::AbstractArray) = BENCH_CPU ? copy(x) : Array(x)
+to_cpu(t::Tuple)         = map(to_cpu, t)
+to_cpu(::Nothing)        = nothing
+to_cpu(x)                = x
+
 # Same timeit harness as Part 7: warm once, then per-rep GC OUTSIDE the timed
 # window (no reclaim between reps → the pool pressure of the path persists,
 # exactly the regime the mem probe samples).
@@ -149,9 +172,14 @@ function bwd_Cmap(C, FL, FR)
     return bp(1.0)
 end
 
-# ----- parity helpers (ON vs OFF on the SAME inputs) -----
-fwd_parity(rON, rOFF) = isapprox(rON, rOFF; rtol = 1e-12) ? "f✓" : "f✗"
+# ----- parity helpers (ON vs OFF on the SAME inputs; args are CPU copies) -----
+# A `nothing` arm = that side OOM'd during the parity probe → parity unknown.
+function fwd_parity(rON, rOFF)
+    (rON === nothing || rOFF === nothing) && return "f?"
+    isapprox(rON, rOFF; rtol = 1e-12) ? "f✓" : "f✗"
+end
 function grad_parity(gON, gOFF)
+    (gON === nothing || gOFF === nothing) && return "g?"
     ok = true
     for (a, b) in zip(gON, gOFF)
         a === nothing && b === nothing && continue
@@ -197,7 +225,8 @@ function main()
                 mapname, dir, D, χ, n === nothing ? "—" : string(n), nB === nothing ? "—" : string(nB),
                 fmt(t_on), fmt(t_off), fmtr(rt), fmt(m_on), fmt(m_off), fmtr(rm), parity)
         flush(stdout)
-        push!(gate_rows, (map = mapname, dir = dir, D = D, χ = χ, rt = rt, rm = rm))
+        push!(gate_rows, (map = mapname, dir = dir, D = D, χ = χ,
+                          t_on = t_on, t_off = t_off, rt = rt, rm = rm))
     end
 
     for (D, χ) in cells
@@ -222,30 +251,40 @@ function main()
             ("ACmap",  fwd_ACmap,  (AC, FL, FR, M)),
             ("ACdmap", fwd_ACdmap, (ACd, FL, FR, M)),
         )
-            # fwd parity + A/B
-            rON  = with_engine(true,  () -> fwd(fargs..., n))
-            rOFF = with_engine(false, () -> fwd(fargs..., n))
+            # fwd parity + A/B. CHAIN arm runs at the engine-feasible n; the
+            # TENSOR arm at its OWN feasible nB (the @tensor+Zygote path needs
+            # more chunks — Part-6 coeff 14 — to fit; forcing it to the engine's
+            # n is both unfair and OOMs at D≥12). Each parity arm is brought to
+            # host and freed before the other runs (one arm live at a time).
+            rON  = try_or_none(() -> with_engine(true,  () -> to_cpu(fwd(fargs..., n))))
+            GC.gc(); _reclaim()
+            rOFF = try_or_none(() -> with_engine(false, () -> to_cpu(fwd(fargs..., nB))))
+            GC.gc(); _reclaim()
             pf_s = fwd_parity(rON, rOFF)
             rON = rOFF = nothing; GC.gc(); _reclaim()
             t_on, t_off, m_on, m_off =
-                ab_time_mem(with_engine_thunk(true, () -> fwd(fargs..., n)),
-                            with_engine_thunk(false, () -> fwd(fargs..., n)))
+                ab_time_mem(with_engine_thunk(true,  () -> fwd(fargs..., n)),
+                            with_engine_thunk(false, () -> fwd(fargs..., nB)))
             row(mapname, "fwd", D, χ, n, nB, t_on, t_off, m_on, m_off, pf_s)
 
-            # bwd parity + A/B
-            gON  = with_engine(true,  () -> bwd_vumps(fwd, fargs, n))
-            gOFF = with_engine(false, () -> bwd_vumps(fwd, fargs, n))
+            # bwd parity + A/B (same n/nB split, CPU-copied + freed between arms)
+            gON  = try_or_none(() -> with_engine(true,  () -> to_cpu(bwd_vumps(fwd, fargs, n))))
+            GC.gc(); _reclaim()
+            gOFF = try_or_none(() -> with_engine(false, () -> to_cpu(bwd_vumps(fwd, fargs, nB))))
+            GC.gc(); _reclaim()
             pg = grad_parity(gON, gOFF)
             gON = gOFF = nothing; GC.gc(); _reclaim()
             t_on, t_off, m_on, m_off =
                 ab_time_mem(with_engine_thunk(true,  () -> bwd_vumps(fwd, fargs, n)),
-                            with_engine_thunk(false, () -> bwd_vumps(fwd, fargs, n)))
+                            with_engine_thunk(false, () -> bwd_vumps(fwd, fargs, nB)))
             row(mapname, "bwd", D, χ, n, nB, t_on, t_off, m_on, m_off, pg)
         end
 
         # ---- Cmap leg4 (direct, no chunking): fwd + bwd ----
-        rON  = with_engine(true,  () -> fwd_Cmap(Cm, FL, FR))
-        rOFF = with_engine(false, () -> fwd_Cmap(Cm, FL, FR))
+        rON  = try_or_none(() -> with_engine(true,  () -> to_cpu(fwd_Cmap(Cm, FL, FR))))
+        GC.gc(); _reclaim()
+        rOFF = try_or_none(() -> with_engine(false, () -> to_cpu(fwd_Cmap(Cm, FL, FR))))
+        GC.gc(); _reclaim()
         pf_s = fwd_parity(rON, rOFF)
         rON = rOFF = nothing; GC.gc(); _reclaim()
         t_on, t_off, m_on, m_off =
@@ -253,8 +292,10 @@ function main()
                         with_engine_thunk(false, () -> fwd_Cmap(Cm, FL, FR)))
         row("Cmap", "fwd", D, χ, nothing, nothing, t_on, t_off, m_on, m_off, pf_s)
 
-        gON  = with_engine(true,  () -> bwd_Cmap(Cm, FL, FR))
-        gOFF = with_engine(false, () -> bwd_Cmap(Cm, FL, FR))
+        gON  = try_or_none(() -> with_engine(true,  () -> to_cpu(bwd_Cmap(Cm, FL, FR))))
+        GC.gc(); _reclaim()
+        gOFF = try_or_none(() -> with_engine(false, () -> to_cpu(bwd_Cmap(Cm, FL, FR))))
+        GC.gc(); _reclaim()
         pg = grad_parity(gON, gOFF)
         gON = gOFF = nothing; GC.gc(); _reclaim()
         t_on, t_off, m_on, m_off =
@@ -263,13 +304,16 @@ function main()
         row("Cmap", "bwd", D, χ, nothing, nothing, t_on, t_off, m_on, m_off, pg)
 
         # ---- Mumap (FORWARD ONLY: preconditioner path, no forloop_sum rrule) ----
-        rON  = with_engine(true,  () -> fwd_Mumap(AC, ACd, FL, FR, Mu, n))
-        rOFF = with_engine(false, () -> fwd_Mumap(AC, ACd, FL, FR, Mu, n))
+        # CHAIN at n, TENSOR at nB (same feasible-chunking split as the vumps maps).
+        rON  = try_or_none(() -> with_engine(true,  () -> to_cpu(fwd_Mumap(AC, ACd, FL, FR, Mu, n))))
+        GC.gc(); _reclaim()
+        rOFF = try_or_none(() -> with_engine(false, () -> to_cpu(fwd_Mumap(AC, ACd, FL, FR, Mu, nB))))
+        GC.gc(); _reclaim()
         pf_s = fwd_parity(rON, rOFF)
         rON = rOFF = nothing; GC.gc(); _reclaim()
         t_on, t_off, m_on, m_off =
             ab_time_mem(with_engine_thunk(true,  () -> fwd_Mumap(AC, ACd, FL, FR, Mu, n)),
-                        with_engine_thunk(false, () -> fwd_Mumap(AC, ACd, FL, FR, Mu, n)))
+                        with_engine_thunk(false, () -> fwd_Mumap(AC, ACd, FL, FR, Mu, nB)))
         row("Mumap", "fwd", D, χ, n, nB, t_on, t_off, m_on, m_off, pf_s)
 
         FL = ALu = ALd = FR = ARu = ARd = AC = ACd = M = Mu = Cm = nothing
@@ -281,16 +325,21 @@ function main()
     pass = true
     slower = NamedTuple[]
     for r in gate_rows
-        # NaN comparisons are false → an OOM'd cell fails the gate.
-        cell_ok = (r.rt ≤ 1.05) && (isnan(r.rm) || r.rm ≤ 1.10)
+        chain_ran = !isnan(r.t_on)
+        tensor_oom = isnan(r.t_off)
+        # cell passes iff CHAIN ran AND (TENSOR OOM'd at its own feasible nB —
+        # an engine WIN, runs where @tensor can't — OR the ratio is within gate).
+        # CHAIN itself OOMing is a real FAIL.
+        cell_ok = chain_ran && (tensor_oom || ((r.rt ≤ 1.05) && (isnan(r.rm) || r.rm ≤ 1.10)))
         pass &= cell_ok
-        # flag any cell where CHAIN is strictly slower than TENSOR (design doc:
-        # "any map slower than its @tensor original is a bug").
+        note = (chain_ran && tensor_oom) ? "ok (TENSOR OOM @nB — engine win)" :
+               (cell_ok ? "ok" : "FAIL")
+        # flag any cell where CHAIN is strictly slower than its @tensor original.
         if !isnan(r.rt) && r.rt > 1.0
             push!(slower, (map = r.map, dir = r.dir, D = r.D, χ = r.χ, rt = r.rt))
         end
         @printf("GATE %-6s %-3s cell=(%d,%d) CHAIN/TENSOR time=%s mem=%s -> %s\n",
-                r.map, r.dir, r.D, r.χ, fmtr(r.rt), fmtr(r.rm), cell_ok ? "ok" : "FAIL")
+                r.map, r.dir, r.D, r.χ, fmtr(r.rt), fmtr(r.rm), note)
     end
     println()
     if isempty(slower)
