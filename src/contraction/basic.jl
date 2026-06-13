@@ -110,6 +110,8 @@ FLmap(FL, ALu, ALd, M::Tuple{leg5,leg5}; inner_etype=nothing) =
     FLmap(FL, ALu, ALd, M[1], M[2]; inner_etype)
 
 function FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4, M3::leg4, M4::leg4; inner_etype=nothing)
+    use_chain_engine(FL, ALu, ALd, M1, M2, M3, M4) &&
+        return _chain_map(FLMAP_C3V_CHAIN, (FL, ALu, M1, M2, M3, M4, ALd), inner_etype)
     if inner_etype === nothing || inner_etype == real(eltype(FL))
         @tensor result[3,8,88,9] := FL[1,4,44,5] * ALu[1,2,22,3] * M1[4,7,2,10] * M2[44,77,22,10] * M3[6,8,7,11] * M4[66,88,77,11] * ALd[5,6,66,9]
         return result
@@ -127,10 +129,16 @@ function FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4, M3::leg4, M4::leg4; inner_e
     end
 end
 
-FLmap_C3v(FL, ALu, ALd, M::leg4; inner_etype=nothing) =
-    FLmap_C3v(FL, ALu, ALd, M, conj(M), M, conj(M); inner_etype)
-FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4; inner_etype=nothing) =
-    FLmap_C3v(FL, ALu, ALd, M1, conj(M1), M2, conj(M2); inner_etype)
+function FLmap_C3v(FL, ALu, ALd, M::leg4; inner_etype=nothing)
+    use_chain_engine(FL, ALu, ALd, M) &&
+        return _chain_map(FLMAP_C3V_CHAIN_CONJ46, (FL, ALu, M, M, M, M, ALd), inner_etype)
+    return FLmap_C3v(FL, ALu, ALd, M, conj(M), M, conj(M); inner_etype)
+end
+function FLmap_C3v(FL, ALu, ALd, M1::leg4, M2::leg4; inner_etype=nothing)
+    use_chain_engine(FL, ALu, ALd, M1, M2) &&
+        return _chain_map(FLMAP_C3V_CHAIN_CONJ46, (FL, ALu, M1, M1, M2, M2, ALd), inner_etype)
+    return FLmap_C3v(FL, ALu, ALd, M1, conj(M1), M2, conj(M2); inner_etype)
+end
 
 """
     FRm = FRmap(ARu, ARd, M, FR, i)

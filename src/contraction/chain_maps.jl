@@ -227,3 +227,15 @@ const LDMAP_CHAIN_1M = conj_variant(LDMAP_CHAIN, 4)   # M2 = conj(M1), no materi
 const DRMAP_CHAIN_1M = conj_variant(DRMAP_CHAIN, 4)
 const RUMAP_CHAIN_1M = conj_variant(RUMAP_CHAIN, 4)
 const LUMAP_CHAIN_1M = conj_variant(LUMAP_CHAIN, 4)
+
+# ─── FLmap_C3v (7-operand chain, #4 — the last of the 21 maps) ──────────────
+# INTEGER labels transcribed verbatim from the basic.jl kernel (NB 44/22/77/
+# 66/88 are distinct labels, not repeats). Chain tensor order is the @tensor
+# written order (FL, ALu, M1, M2, M3, M4, ALd); map arg order is
+# (FL, ALu, ALd, M1, M2, M3, M4). qrctmrg-only map: it never goes through
+# forloop/parallel (not forloop traffic), so NO engine_backward entry —
+# Zygote-gradability comes from the chain_apply rrule. Conj slots 4 and 6 are
+# the conj(M1)/conj(M2) positions shared by BOTH the single-M dispatch
+# (M, conj(M), M, conj(M)) and the 2M dispatch (M1, conj(M1), M2, conj(M2)).
+const FLMAP_C3V_CHAIN = tensor_chain(((1,4,44,5), (1,2,22,3), (4,7,2,10), (44,77,22,10), (6,8,7,11), (66,88,77,11), (5,6,66,9)), (3,8,88,9))
+const FLMAP_C3V_CHAIN_CONJ46 = conj_variant(FLMAP_C3V_CHAIN, 4, 6)

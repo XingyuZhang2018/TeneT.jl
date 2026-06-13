@@ -301,19 +301,25 @@ end
 
 @testset "corner maps LD/DR/RU/LU chains: parity" begin
     Random.seed!(47)
-    χ, D, d = 6, 3, 2
+    χL, χR, D, d = 6, 5, 3, 2
     # Geometry from oc_Q_22_getQ_CBE (observable.jl:108-136): the corner
     # inputs L/D/R/U are all 4-leg (χ,D,D,χ) boundary tensors, M1/M2 are
     # leg5 (D,D,D,D,d), and only the OUTPUTS are 6-leg (χ,D,D,D,D,χ).
     # Label-derived sizes (basic.jl integer labels), e.g. LDmap: label 9
     # joins L leg 4 with D leg 1 (χ); labels 5,6 join L legs 2,3 with
     # M1/M2 legs 1 (D); labels 10,11 join D legs 2,3 with M1/M2 legs 2 (D);
-    # label 13 joins M1/M2 legs 5 (d). These maps are dead in src (their
-    # only caller is commented out) and never go through forloop/parallel —
+    # label 13 joins M1/M2 legs 5 (d). The two open χ-legs of each map are
+    # DISTINCT sizes so a transposed transcription cannot hide behind equal
+    # dimensions: the joined χ labels are 1 (L–U), 9 (L–D), 4 (U–R),
+    # 12 (D–R); labels 1,9 = χL and labels 4,12 = χR gives every map open
+    # legs (χL,χR) or (χR,χL). These maps are dead in src (their only
+    # caller is commented out) and never go through forloop/parallel —
     # NO engine_backward entries, gradability via the chain_apply rrule, so
     # check_engine_backward=false throughout. The tests ARE the spec.
-    Lc = rand(ComplexF64, χ, D, D, χ); Dc = rand(ComplexF64, χ, D, D, χ)
-    Rc = rand(ComplexF64, χ, D, D, χ); Uc = rand(ComplexF64, χ, D, D, χ)
+    Lc = rand(ComplexF64, χL, D, D, χL)   # legs (1,5,6,9)
+    Dc = rand(ComplexF64, χL, D, D, χR)   # legs (9,10,11,12)
+    Rc = rand(ComplexF64, χR, D, D, χR)   # legs (4,7,8,12)
+    Uc = rand(ComplexF64, χL, D, D, χR)   # legs (1,2,3,4)
     M1 = rand(ComplexF64, D, D, D, D, d)        # pair case: two INDEPENDENT M's
     M2 = rand(ComplexF64, D, D, D, D, d)
 
@@ -331,11 +337,13 @@ end
         @test ch1m.conjs == (false, false, false, true)
     end
 
-    # Kernel-first geometry sanity (engine OFF — the @tensor originals):
-    @test size(TeneT.LDmap(Lc, Dc, M1, M2)) == (χ, D, D, D, D, χ)
-    @test size(TeneT.DRmap(Dc, Rc, M1, M2)) == (χ, D, D, D, D, χ)
-    @test size(TeneT.RUmap(Rc, Uc, M1, M2)) == (χ, D, D, D, D, χ)
-    @test size(TeneT.LUmap(Lc, Uc, M1, M2)) == (χ, D, D, D, D, χ)
+    # Kernel-first geometry sanity (engine OFF — the @tensor originals);
+    # output χ-legs from the integer labels: LD out (1,...,12), DR out
+    # (9,...,4), RU out (12,...,1), LU out (9,...,4):
+    @test size(TeneT.LDmap(Lc, Dc, M1, M2)) == (χL, D, D, D, D, χR)
+    @test size(TeneT.DRmap(Dc, Rc, M1, M2)) == (χL, D, D, D, D, χR)
+    @test size(TeneT.RUmap(Rc, Uc, M1, M2)) == (χR, D, D, D, D, χL)
+    @test size(TeneT.LUmap(Lc, Uc, M1, M2)) == (χL, D, D, D, D, χR)
 
     # RUmap's case args are (R, U, M1, M2) — the MAP signature; its chain
     # tensors are (U, R, M1, M2), the @tensor written order.
@@ -353,6 +361,56 @@ end
             chain_parity_case(f, (A, B, (M1, conj(M1))); check_engine_backward=false)
         end
     end
+end
+
+@testset "FLmap_C3v chain: parity" begin
+    Random.seed!(48)
+    χ, D = 6, 3
+    # Geometry from qrctmrg.jl: T/U boundary tensors are 4-leg (χ,D,D,χ)
+    # (init_env: `T = rand!(similar(M,χ,D,D,χ))`); M's are leg4 (D,D,D,D).
+    # Label-derived sizes (basic.jl integer labels — 44/22/77/66/88 are
+    # distinct labels, not repeats): label 1 joins FL leg 1 with ALu leg 1
+    # (χ); label 5 joins FL leg 4 with ALd leg 1 (χ); labels 4,44 join FL
+    # legs 2,3 with M1/M2 legs 1 (D); labels 2,22 join ALu legs 2,3 with
+    # M1/M2 legs 3 (D); label 10 joins M1 leg 4 with M2 leg 4 (D); labels
+    # 7,77 join M1/M2 legs 2 with M3/M4 legs 3 (D); label 11 joins M3 leg 4
+    # with M4 leg 4 (D); labels 6,66 join M3/M4 legs 1 with ALd legs 2,3
+    # (D); the output (3,8,88,9) = (χ,D,D,χ). qrctmrg-only map — never goes
+    # through forloop/parallel — so NO engine_backward entry, gradability
+    # via the chain_apply rrule: check_engine_backward=false throughout.
+    # The single-M grad parity also exercises 4-fold slot accumulation
+    # through the chain_apply rrule (Zygote sums the four dM slots; the
+    # engine-OFF reference does the same via conj materialization).
+    FL  = rand(ComplexF64, χ, D, D, χ); ALu = rand(ComplexF64, χ, D, D, χ)
+    ALd = rand(ComplexF64, χ, D, D, χ)
+    M1 = rand(ComplexF64, D, D, D, D); M2 = rand(ComplexF64, D, D, D, D)
+    M3 = rand(ComplexF64, D, D, D, D); M4 = rand(ComplexF64, D, D, D, D)
+
+    # Chain declaration transcribed verbatim from the kernel's integer labels;
+    # conj slots 4 and 6 = the conj(M1)/conj(M2) positions shared by BOTH the
+    # single-M dispatch (M,conj(M),M,conj(M)) and the 2M dispatch
+    # (M1,conj(M1),M2,conj(M2)):
+    @test TeneT.FLMAP_C3V_CHAIN.ops ==
+          ((1,4,44,5), (1,2,22,3), (4,7,2,10), (44,77,22,10), (6,8,7,11), (66,88,77,11), (5,6,66,9))
+    @test TeneT.FLMAP_C3V_CHAIN.out == (3,8,88,9)
+    @test TeneT.FLMAP_C3V_CHAIN_CONJ46.conjs ==
+          (false, false, false, true, false, true, false)
+
+    # Kernel-first geometry sanity (engine OFF — the @tensor original):
+    @test size(TeneT.FLmap_C3v(FL, ALu, ALd, M1, M2, M3, M4)) == (χ, D, D, χ)
+
+    cases = [
+        ((FL, ALu, ALd, M1, M2, M3, M4), "7-arg core (4 independent M's)"),
+        ((FL, ALu, ALd, M1),             "single-M"),
+        ((FL, ALu, ALd, M1, M2),         "2M (independent M1, M2)"),
+    ]
+    for (args, name) in cases
+        @testset "$name" begin
+            chain_parity_case(TeneT.FLmap_C3v, args; check_engine_backward=false)
+        end
+    end
+    # inner_etype path survives the reroute (2M form):
+    inner_etype_survives(TeneT.FLmap_C3v, (FL, ALu, ALd, M1, M2))
 end
 
 @testset "FLmap_C3v inner_etype cast branch is self-consistent" begin
@@ -388,7 +446,7 @@ end
 end
 
 @testset "reroute stays live on views (forloop/parallel slice forms)" begin
-    Random.seed!(47)
+    Random.seed!(52)
     χ, D, d = 8, 3, 2
     # The forloop/parallel rrules hand engine_backward SubArray slices of
     # arg 3 (FLmap/ACmap: last dim; FRmap/ACdmap: dim 1 — the N_in
