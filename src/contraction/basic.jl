@@ -384,14 +384,17 @@ ACdmap(ACd, FL, FR, M::Tuple{leg5,leg5}; inner_etype=nothing) =
     ACdmap(ACd, FL, FR, M[1], M[2]; inner_etype)
 
 function Mmap(AC, ACd, FL, FR)
+    use_chain_engine(AC, ACd, FL, FR) && return chain_apply(MMAP_CHAIN, (AC, FR, FL, ACd))
     @tensor result[d,g,e,b] := AC[a,b,c] * FR[c,e,h] * FL[a,d,f] * ACd[f,g,h]
     return result
 end
 function Mumap(AC, ACd, FL, FR, Mu)
+    use_chain_engine(AC, ACd, FL, FR, Mu) && return _chain_Mumap(AC, ACd, FL, FR, Mu)
     @tensor result[f,k,h,c,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Mu[e,j,g,b,p])
     return result
 end
 function Mdmap(AC, ACd, FL, FR, Md)
+    use_chain_engine(AC, ACd, FL, FR, Md) && return _chain_Mdmap(AC, ACd, FL, FR, Md)
     @tensor result[e,j,g,b,p] := (AC[a,b,c,d] * FR[d,g,h,l]) * ((FL[a,e,f,i] * ACd[i,j,k,l]) * Md[f,k,h,c,p])
     return result
 end

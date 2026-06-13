@@ -259,6 +259,69 @@ end
     end
 end
 
+@testset "Mmap/Mumap/Mdmap chains: parity" begin
+    Random.seed!(46)
+    χ, D, d = 8, 3, 2
+    # Probe-pinned tree layouts (Task 8 Step 1 @macroexpand probe). Y (the
+    # inner chains' out) is a B-side temp — its layout CANNOT be derived by
+    # tensor_pinned_inters and is pinned to the probe values; the outer
+    # chains' single inter must be the probe's X = AC*FR temp, and their
+    # ops[3] must equal the inner chains' out (the composed-glue contract).
+    @test TeneT.MUMAP_INNER_CHAIN.out == (:a,:b,:g,:l,:f,:k,:p)
+    @test TeneT.MDMAP_INNER_CHAIN.out == (:a,:c,:h,:l,:e,:j,:p)
+    @test chain_interlabels(TeneT.MUMAP_INNER_CHAIN)[1] == (:a,:f,:k,:l,:e,:j)
+    @test chain_interlabels(TeneT.MDMAP_INNER_CHAIN)[1] == (:a,:e,:j,:l,:f,:k)
+    @test chain_interlabels(TeneT.MUMAP_OUTER_CHAIN)[1] == (:c,:h,:a,:b,:g,:l)
+    @test chain_interlabels(TeneT.MDMAP_OUTER_CHAIN)[1] == (:b,:g,:a,:c,:h,:l)
+    @test TeneT.MUMAP_OUTER_CHAIN.ops[3] == TeneT.MUMAP_INNER_CHAIN.out
+    @test TeneT.MDMAP_OUTER_CHAIN.ops[3] == TeneT.MDMAP_INNER_CHAIN.out
+
+    # Mmap geometry mirrors test_contraction.jl's "Mmap" testset (all four
+    # boundary tensors (χ,D,χ), output (D,D,D,D)); Mumap/Mdmap geometry from
+    # the production call sites (precondition.jl): AC/ACd/FL/FR (χ,D,D,χ),
+    # Mu/Md (D,D,D,D,d). None of the three has an engine_backward entry —
+    # they reach production only through forloop_sum/parallel_sum, which
+    # have NO rrule (forward-only); Zygote-gradability here comes from the
+    # chain_apply rrule (Mmap) and the composed-glue rrules (Mumap/Mdmap).
+    AC3 = rand(ComplexF64, χ, D, χ);    ACd3 = rand(ComplexF64, χ, D, χ)
+    FL3 = rand(ComplexF64, χ, D, χ);    FR3  = rand(ComplexF64, χ, D, χ)
+    AC5 = rand(ComplexF64, χ, D, D, χ); ACd5 = rand(ComplexF64, χ, D, D, χ)
+    FL5 = rand(ComplexF64, χ, D, D, χ); FR5  = rand(ComplexF64, χ, D, D, χ)
+    M5  = rand(ComplexF64, D, D, D, D, d)
+    @testset "Mmap" begin
+        chain_parity_case(TeneT.Mmap, (AC3, ACd3, FL3, FR3); check_engine_backward=false)
+    end
+    @testset "Mumap" begin
+        chain_parity_case(TeneT.Mumap, (AC5, ACd5, FL5, FR5, M5); check_engine_backward=false)
+    end
+    @testset "Mdmap" begin
+        chain_parity_case(TeneT.Mdmap, (AC5, ACd5, FL5, FR5, M5); check_engine_backward=false)
+    end
+end
+
+@testset "reroute stays live on views (forloop/parallel slice forms)" begin
+    Random.seed!(47)
+    χ, D, d = 8, 3, 2
+    # The forloop/parallel rrules hand engine_backward SubArray slices of
+    # arg 3 (FLmap/ACmap: last dim; FRmap/ACdmap: dim 1 — the N_in
+    # conventions of forloop_parallel_MPI.jl:543-632) plus a view of dOut
+    # (out dim 4 tracks the split in all four leg5 cases). `nothing` here
+    # would silently send production back to per-slice Zygote tapes.
+    A  = rand(ComplexF64, χ, D, D, χ); B  = rand(ComplexF64, χ, D, D, χ)
+    S  = rand(ComplexF64, χ, D, D, χ); M5 = rand(ComplexF64, D, D, D, D, d)
+    dO = rand(ComplexF64, χ, D, D, χ)
+    dOv = @view dO[:, :, :, 1:3]                 # sliced output cotangent
+    cases = (
+        (TeneT.FLmap,  (A, B, (@view S[:, :, :, 1:3]), M5)),  # ALd last-dim slice
+        (TeneT.FRmap,  (A, B, (@view S[1:3, :, :, :]), M5)),  # ARd dim-1 slice
+        (TeneT.ACmap,  (A, B, (@view S[:, :, :, 1:3]), M5)),  # FR last-dim slice
+        (TeneT.ACdmap, (A, B, (@view S[1:3, :, :, :]), M5)),  # FR dim-1 slice
+    )
+    for (f, va) in cases
+        @test TeneT.engine_backward(f, va, dOv) !== nothing
+    end
+end
+
 @testset "forloop rrule reroute: engine == Zygote path" begin
     Random.seed!(51)
     χ, D, d = 8, 3, 2
@@ -293,23 +356,26 @@ end
     end
 
     # inner_etype (do_cast) branch — real production traffic (leftenv/rightenv/
-    # ACenv thread it under Zygote); cast tolerance is F32-level:
-    loss32(fl, alu, ald, m) = sum(abs2, TeneT.FLmap_parallel(fl, alu, ald, m;
-        ifparallel=false, forloop_iter=3, inner_etype=Float32))
-    old = TeneT.CHAIN_ENGINE[]
-    g32ref = try
-        TeneT.set_chain_engine!(false)
-        Zygote.gradient(loss32, FL, ALu, ALd, M5)
-    finally
-        TeneT.set_chain_engine!(old)
+    # ACenv thread it under Zygote); cast tolerance is F32-level. n=1 covers
+    # the iter==1 engineback upcast path, n=3 the chunked-back upcast path:
+    for n in (1, 3)
+        loss32 = (fl, alu, ald, m) -> sum(abs2, TeneT.FLmap_parallel(fl, alu, ald, m;
+            ifparallel=false, forloop_iter=n, inner_etype=Float32))
+        old = TeneT.CHAIN_ENGINE[]
+        g32ref = try
+            TeneT.set_chain_engine!(false)
+            Zygote.gradient(loss32, FL, ALu, ALd, M5)
+        finally
+            TeneT.set_chain_engine!(old)
+        end
+        g32eng = try
+            TeneT.set_chain_engine!(true)
+            Zygote.gradient(loss32, FL, ALu, ALd, M5)
+        finally
+            TeneT.set_chain_engine!(old)
+        end
+        grads_match(g32eng, g32ref; rtol=1e-5, label="inner_etype Float32 forloop_iter=$n")
     end
-    g32eng = try
-        TeneT.set_chain_engine!(true)
-        Zygote.gradient(loss32, FL, ALu, ALd, M5)
-    finally
-        TeneT.set_chain_engine!(old)
-    end
-    grads_match(g32eng, g32ref; rtol=1e-5, label="inner_etype Float32 forloop_iter=3")
 end
 
 println("test_chain_maps done")

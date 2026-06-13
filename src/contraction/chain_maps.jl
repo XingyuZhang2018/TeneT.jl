@@ -167,3 +167,40 @@ end
 # directly (_chain_map is the inner_etype wrapper).
 const CMAP_LEG3_CHAIN = tensor_chain(((:a,:c,:d), (:a,:b), (:b,:c,:e)), (:d,:e))
 const CMAP_LEG4_CHAIN = tensor_chain(((:a,:c,:d,:e), (:a,:b), (:b,:c,:d,:f)), (:e,:f))
+
+# ─── Mmap / Mumap / Mdmap (precondition transfer maps) ──────────────────────
+# Chain tensor order for Mmap is (AC, FR, FL, ACd) — the kernel's left-assoc
+# @tensor order; map arg order is (AC, ACd, FL, FR). NONE of the three M-maps
+# gets an engine_backward entry: their only production consumers are
+# forloop_sum/parallel_sum (precondition.jl), which have NO rrule — they are
+# forward-only in production (census-verified). Zygote-gradability comes from
+# the chain_apply rrule (Mmap) and the composed-glue rrules below + in
+# autodiff/rules.jl (Mumap/Mdmap). No inner_etype kwarg ⇒ the basic.jl guards
+# call chain_apply/_chain_Mumap/_chain_Mdmap directly (Cmap-style).
+const MMAP_CHAIN = tensor_chain(((:a,:b,:c), (:c,:e,:h), (:a,:d,:f), (:f,:g,:h)), (:d,:g,:e,:b))
+
+# Mumap/Mdmap are parenthesized TREES (X = AC*FR; Y = (FL*ACd)*Mu|Md;
+# out = X*Y), expressed as two composed chains glued by _chain_Mumap /
+# _chain_Mdmap. Y is a B-side temp: its layout is pinned from the Task 8
+# @macroexpand probe and CANNOT be derived by tensor_pinned_inters (that rule
+# covers carried-side temps only) — the inner chains' `out` is DECLARED as
+# the probe value. The outer chains' ops[3] equals the inner chains' out and
+# their derived single inter is the probe's X temp (asserted in
+# test_chain_maps.jl).
+const MUMAP_INNER_CHAIN = Chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p)), (:a,:b,:g,:l,:f,:k,:p), ((:a,:f,:k,:l,:e,:j),))
+const MUMAP_OUTER_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:a,:b,:g,:l,:f,:k,:p)), (:f,:k,:h,:c,:p))
+const MDMAP_INNER_CHAIN = Chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:f,:k,:h,:c,:p)), (:a,:c,:h,:l,:e,:j,:p), ((:a,:e,:j,:l,:f,:k),))
+const MDMAP_OUTER_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:a,:c,:h,:l,:e,:j,:p)), (:e,:j,:g,:b,:p))
+
+function _chain_Mumap(AC, ACd, FL, FR, Mu)
+    Y = chain_apply(MUMAP_INNER_CHAIN, (FL, ACd, Mu))
+    out = chain_apply(MUMAP_OUTER_CHAIN, (AC, FR, Y))
+    _free!(Y)
+    return out
+end
+function _chain_Mdmap(AC, ACd, FL, FR, Md)
+    Y = chain_apply(MDMAP_INNER_CHAIN, (FL, ACd, Md))
+    out = chain_apply(MDMAP_OUTER_CHAIN, (AC, FR, Y))
+    _free!(Y)
+    return out
+end
