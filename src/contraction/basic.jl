@@ -399,15 +399,46 @@ function Mdmap(AC, ACd, FL, FR, Md)
     return result
 end
 
-LDmap(L, D, M1::leg5, M2::leg5) = @tensor result[1,2,3,7,8,12] := L[1,5,6,9] * D[9,10,11,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
-DRmap(D, R, M1::leg5, M2::leg5) = @tensor result[9,5,6,2,3,4] := D[9,10,11,12] * R[4,7,8,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
-RUmap(R, U, M1::leg5, M2::leg5) = @tensor result[12,10,11,5,6,1] := U[1,2,3,4] * R[4,7,8,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
-LUmap(L, U, M1::leg5, M2::leg5) = @tensor result[9,10,11,7,8,4] := L[1,5,6,9] * U[1,2,3,4] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+# Corner maps: no inner_etype kwarg ⇒ guards call chain_apply directly
+# (Cmap-style). NB RUmap: chain tensor order is (U, R, M1, M2) — the @tensor
+# written order — while the map args are (R, U, M1, M2).
+function LDmap(L, D, M1::leg5, M2::leg5)
+    use_chain_engine(L, D, M1, M2) && return chain_apply(LDMAP_CHAIN, (L, D, M1, M2))
+    @tensor result[1,2,3,7,8,12] := L[1,5,6,9] * D[9,10,11,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+    return result
+end
+function DRmap(D, R, M1::leg5, M2::leg5)
+    use_chain_engine(D, R, M1, M2) && return chain_apply(DRMAP_CHAIN, (D, R, M1, M2))
+    @tensor result[9,5,6,2,3,4] := D[9,10,11,12] * R[4,7,8,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+    return result
+end
+function RUmap(R, U, M1::leg5, M2::leg5)
+    use_chain_engine(R, U, M1, M2) && return chain_apply(RUMAP_CHAIN, (U, R, M1, M2))
+    @tensor result[12,10,11,5,6,1] := U[1,2,3,4] * R[4,7,8,12] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+    return result
+end
+function LUmap(L, U, M1::leg5, M2::leg5)
+    use_chain_engine(L, U, M1, M2) && return chain_apply(LUMAP_CHAIN, (L, U, M1, M2))
+    @tensor result[9,10,11,7,8,4] := L[1,5,6,9] * U[1,2,3,4] * M1[5,10,7,2,13] * M2[6,11,8,3,13]
+    return result
+end
 
-LDmap(L, D, M::leg5) = LDmap(L, D, M, conj(M))
-DRmap(D, R, M::leg5) = DRmap(D, R, M, conj(M))
-RUmap(R, U, M::leg5) = RUmap(R, U, M, conj(M))
-LUmap(L, U, M::leg5) = LUmap(L, U, M, conj(M))
+function LDmap(L, D, M::leg5)
+    use_chain_engine(L, D, M) && return chain_apply(LDMAP_CHAIN_1M, (L, D, M, M))
+    return LDmap(L, D, M, conj(M))
+end
+function DRmap(D, R, M::leg5)
+    use_chain_engine(D, R, M) && return chain_apply(DRMAP_CHAIN_1M, (D, R, M, M))
+    return DRmap(D, R, M, conj(M))
+end
+function RUmap(R, U, M::leg5)
+    use_chain_engine(R, U, M) && return chain_apply(RUMAP_CHAIN_1M, (U, R, M, M))
+    return RUmap(R, U, M, conj(M))
+end
+function LUmap(L, U, M::leg5)
+    use_chain_engine(L, U, M) && return chain_apply(LUMAP_CHAIN_1M, (L, U, M, M))
+    return LUmap(L, U, M, conj(M))
+end
 
 LDmap(L, D, M::Tuple{leg5,leg5}) = LDmap(L, D, M[1], M[2])
 DRmap(D, R, M::Tuple{leg5,leg5}) = DRmap(D, R, M[1], M[2])

@@ -181,12 +181,15 @@ const MMAP_CHAIN = tensor_chain(((:a,:b,:c), (:c,:e,:h), (:a,:d,:f), (:f,:g,:h))
 
 # Mumap/Mdmap are parenthesized TREES (X = AC*FR; Y = (FL*ACd)*Mu|Md;
 # out = X*Y), expressed as two composed chains glued by _chain_Mumap /
-# _chain_Mdmap. Y is a B-side temp: its layout is pinned from the Task 8
-# @macroexpand probe and CANNOT be derived by tensor_pinned_inters (that rule
-# covers carried-side temps only) — the inner chains' `out` is DECLARED as
-# the probe value. The outer chains' ops[3] equals the inner chains' out and
-# their derived single inter is the probe's X temp (asserted in
-# test_chain_maps.jl).
+# _chain_Mdmap. "B-side" = the right operand of the root contraction X*Y;
+# @tensor lays those temps out by a different rule than the left-assoc
+# carried temps tensor_pinned_inters models. Two kinds of pinned labels are
+# at play: an "inner inter" is helper-derivable and frozen by choice (the
+# pin just locks in what tensor_pinned_inters would derive), whereas the
+# inner chains' `out` (Y) is NOT derivable and must be DECLARED from the
+# Task 8 @macroexpand probe. The outer chains' ops[3] equals the inner
+# chains' out and their derived single inter is the probe's X temp
+# (asserted in test_chain_maps.jl).
 const MUMAP_INNER_CHAIN = Chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p)), (:a,:b,:g,:l,:f,:k,:p), ((:a,:f,:k,:l,:e,:j),))
 const MUMAP_OUTER_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:a,:b,:g,:l,:f,:k,:p)), (:f,:k,:h,:c,:p))
 const MDMAP_INNER_CHAIN = Chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:f,:k,:h,:c,:p)), (:a,:c,:h,:l,:e,:j,:p), ((:a,:e,:j,:l,:f,:k),))
@@ -204,3 +207,23 @@ function _chain_Mdmap(AC, ACd, FL, FR, Md)
     _free!(Y)
     return out
 end
+
+# ─── Corner maps LDmap/DRmap/RUmap/LUmap (chains #18-21) ────────────────────
+# INTEGER labels, transcribed verbatim from the basic.jl kernels (the engine
+# is label-type-agnostic; keeping the kernels' integers makes the transcription
+# diffable against the @tensor bodies). Chain tensor order is the @tensor
+# written order — for RUmap that is (U, R, M1, M2) while the map args are
+# (R, U, M1, M2); the other three match their arg order. These maps are DEAD
+# in src per the plan census (their only caller, oc_Q_22_getQ_CBE, is
+# commented out) and never go through forloop/parallel — NO engine_backward
+# entries; Zygote-gradability comes from the chain_apply rrule. No
+# inner_etype kwarg ⇒ the basic.jl guards call chain_apply directly
+# (Cmap-style). The parity tests ARE the spec (test_chain_maps.jl).
+const LDMAP_CHAIN = tensor_chain(((1,5,6,9), (9,10,11,12), (5,10,7,2,13), (6,11,8,3,13)), (1,2,3,7,8,12))
+const DRMAP_CHAIN = tensor_chain(((9,10,11,12), (4,7,8,12), (5,10,7,2,13), (6,11,8,3,13)), (9,5,6,2,3,4))
+const RUMAP_CHAIN = tensor_chain(((1,2,3,4), (4,7,8,12), (5,10,7,2,13), (6,11,8,3,13)), (12,10,11,5,6,1))
+const LUMAP_CHAIN = tensor_chain(((1,5,6,9), (1,2,3,4), (5,10,7,2,13), (6,11,8,3,13)), (9,10,11,7,8,4))
+const LDMAP_CHAIN_1M = conj_variant(LDMAP_CHAIN, 4)   # M2 = conj(M1), no materialization
+const DRMAP_CHAIN_1M = conj_variant(DRMAP_CHAIN, 4)
+const RUMAP_CHAIN_1M = conj_variant(RUMAP_CHAIN, 4)
+const LUMAP_CHAIN_1M = conj_variant(LUMAP_CHAIN, 4)

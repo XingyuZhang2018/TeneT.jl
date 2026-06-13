@@ -155,26 +155,27 @@ function ChainRulesCore.rrule(::typeof(chain_apply), ch::Chain{N}, tensors::NTup
     # Recompute-style: the closure captures only caller-owned inputs; no
     # intermediate ever outlives the call (the cannon/Part-6 OOM lesson).
     function chain_apply_pullback(dOut)
+        dOut = unthunk(dOut)             # FIRST: a Thunk wrapping a zero must not slip past the guard
         dOut isa AbstractZero && return (NoTangent(), NoTangent(), NoTangent())
-        return NoTangent(), NoTangent(), chain_backward(ch, tensors, unthunk(dOut))
+        return NoTangent(), NoTangent(), chain_backward(ch, tensors, dOut)
     end
     return out, chain_apply_pullback
 end
 
-# Composed tree maps Mumap/Mdmap (M2 Task 8): forward = inner chain (Y = the
-# probe-pinned B-side temp) then outer chain, with Y freed and recomputed in
-# the backward (recompute-style, like the cannon rrule). chain_backward only —
+# Composed tree maps Mumap/Mdmap (M2 Task 8): forward = the primal glue
+# (single source of truth — inner chain builds Y, the probe-pinned B-side
+# temp, the outer chain consumes it, Y freed); the backward recomputes Y
+# (recompute-style, like the cannon rrule). chain_backward only —
 # NEVER Zygote inside. Gradients return in the maps' (AC, ACd, FL, FR, M)
 # arg order; the chains consume (FL, ACd, M) / (AC, FR, Y).
 function ChainRulesCore.rrule(::typeof(_chain_Mumap), AC, ACd, FL, FR, Mu)
-    Y = chain_apply(MUMAP_INNER_CHAIN, (FL, ACd, Mu))
-    out = chain_apply(MUMAP_OUTER_CHAIN, (AC, FR, Y))
-    _free!(Y)                                  # recomputed in the backward
+    out = _chain_Mumap(AC, ACd, FL, FR, Mu)    # primal glue (frees Y; recomputed in the backward)
     function _chain_Mumap_pullback(dOut)
+        dOut = unthunk(dOut)             # FIRST: a Thunk wrapping a zero must not slip past the guard
         dOut isa AbstractZero &&
             return (NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent())
         Y2 = chain_apply(MUMAP_INNER_CHAIN, (FL, ACd, Mu))
-        dAC, dFR, dY = chain_backward(MUMAP_OUTER_CHAIN, (AC, FR, Y2), unthunk(dOut))
+        dAC, dFR, dY = chain_backward(MUMAP_OUTER_CHAIN, (AC, FR, Y2), dOut)
         dFL, dACd, dMu = chain_backward(MUMAP_INNER_CHAIN, (FL, ACd, Mu), dY)
         _free!(Y2); _free!(dY)
         return NoTangent(), dAC, dACd, dFL, dFR, dMu
@@ -183,14 +184,13 @@ function ChainRulesCore.rrule(::typeof(_chain_Mumap), AC, ACd, FL, FR, Mu)
 end
 
 function ChainRulesCore.rrule(::typeof(_chain_Mdmap), AC, ACd, FL, FR, Md)
-    Y = chain_apply(MDMAP_INNER_CHAIN, (FL, ACd, Md))
-    out = chain_apply(MDMAP_OUTER_CHAIN, (AC, FR, Y))
-    _free!(Y)                                  # recomputed in the backward
+    out = _chain_Mdmap(AC, ACd, FL, FR, Md)    # primal glue (frees Y; recomputed in the backward)
     function _chain_Mdmap_pullback(dOut)
+        dOut = unthunk(dOut)             # FIRST: a Thunk wrapping a zero must not slip past the guard
         dOut isa AbstractZero &&
             return (NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent())
         Y2 = chain_apply(MDMAP_INNER_CHAIN, (FL, ACd, Md))
-        dAC, dFR, dY = chain_backward(MDMAP_OUTER_CHAIN, (AC, FR, Y2), unthunk(dOut))
+        dAC, dFR, dY = chain_backward(MDMAP_OUTER_CHAIN, (AC, FR, Y2), dOut)
         dFL, dACd, dMd = chain_backward(MDMAP_INNER_CHAIN, (FL, ACd, Md), dY)
         _free!(Y2); _free!(dY)
         return NoTangent(), dAC, dACd, dFL, dFR, dMd

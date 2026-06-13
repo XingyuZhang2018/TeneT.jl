@@ -299,6 +299,62 @@ end
     end
 end
 
+@testset "corner maps LD/DR/RU/LU chains: parity" begin
+    Random.seed!(47)
+    χ, D, d = 6, 3, 2
+    # Geometry from oc_Q_22_getQ_CBE (observable.jl:108-136): the corner
+    # inputs L/D/R/U are all 4-leg (χ,D,D,χ) boundary tensors, M1/M2 are
+    # leg5 (D,D,D,D,d), and only the OUTPUTS are 6-leg (χ,D,D,D,D,χ).
+    # Label-derived sizes (basic.jl integer labels), e.g. LDmap: label 9
+    # joins L leg 4 with D leg 1 (χ); labels 5,6 join L legs 2,3 with
+    # M1/M2 legs 1 (D); labels 10,11 join D legs 2,3 with M1/M2 legs 2 (D);
+    # label 13 joins M1/M2 legs 5 (d). These maps are dead in src (their
+    # only caller is commented out) and never go through forloop/parallel —
+    # NO engine_backward entries, gradability via the chain_apply rrule, so
+    # check_engine_backward=false throughout. The tests ARE the spec.
+    Lc = rand(ComplexF64, χ, D, D, χ); Dc = rand(ComplexF64, χ, D, D, χ)
+    Rc = rand(ComplexF64, χ, D, D, χ); Uc = rand(ComplexF64, χ, D, D, χ)
+    M1 = rand(ComplexF64, D, D, D, D, d)        # pair case: two INDEPENDENT M's
+    M2 = rand(ComplexF64, D, D, D, D, d)
+
+    # Chain declarations transcribed verbatim from the kernels' integer labels:
+    @test TeneT.LDMAP_CHAIN.ops == ((1,5,6,9), (9,10,11,12), (5,10,7,2,13), (6,11,8,3,13))
+    @test TeneT.LDMAP_CHAIN.out == (1,2,3,7,8,12)
+    @test TeneT.DRMAP_CHAIN.ops == ((9,10,11,12), (4,7,8,12), (5,10,7,2,13), (6,11,8,3,13))
+    @test TeneT.DRMAP_CHAIN.out == (9,5,6,2,3,4)
+    @test TeneT.RUMAP_CHAIN.ops == ((1,2,3,4), (4,7,8,12), (5,10,7,2,13), (6,11,8,3,13))
+    @test TeneT.RUMAP_CHAIN.out == (12,10,11,5,6,1)
+    @test TeneT.LUMAP_CHAIN.ops == ((1,5,6,9), (1,2,3,4), (5,10,7,2,13), (6,11,8,3,13))
+    @test TeneT.LUMAP_CHAIN.out == (9,10,11,7,8,4)
+    for ch1m in (TeneT.LDMAP_CHAIN_1M, TeneT.DRMAP_CHAIN_1M,
+                 TeneT.RUMAP_CHAIN_1M, TeneT.LUMAP_CHAIN_1M)
+        @test ch1m.conjs == (false, false, false, true)
+    end
+
+    # Kernel-first geometry sanity (engine OFF — the @tensor originals):
+    @test size(TeneT.LDmap(Lc, Dc, M1, M2)) == (χ, D, D, D, D, χ)
+    @test size(TeneT.DRmap(Dc, Rc, M1, M2)) == (χ, D, D, D, D, χ)
+    @test size(TeneT.RUmap(Rc, Uc, M1, M2)) == (χ, D, D, D, D, χ)
+    @test size(TeneT.LUmap(Lc, Uc, M1, M2)) == (χ, D, D, D, D, χ)
+
+    # RUmap's case args are (R, U, M1, M2) — the MAP signature; its chain
+    # tensors are (U, R, M1, M2), the @tensor written order.
+    for (f, A, B, name) in ((TeneT.LDmap, Lc, Dc, "LDmap"),
+                            (TeneT.DRmap, Dc, Rc, "DRmap"),
+                            (TeneT.RUmap, Rc, Uc, "RUmap"),
+                            (TeneT.LUmap, Lc, Uc, "LUmap"))
+        @testset "$name pair" begin
+            chain_parity_case(f, (A, B, M1, M2); check_engine_backward=false)
+        end
+        @testset "$name single-M" begin
+            chain_parity_case(f, (A, B, M1); check_engine_backward=false)
+        end
+        @testset "$name tuple" begin
+            chain_parity_case(f, (A, B, (M1, conj(M1))); check_engine_backward=false)
+        end
+    end
+end
+
 @testset "reroute stays live on views (forloop/parallel slice forms)" begin
     Random.seed!(47)
     χ, D, d = 8, 3, 2
