@@ -159,10 +159,19 @@ end
     dblk = back(1.0)[1]
     dFR_ref = Zygote.pullback(x -> real(sum(FRmap(x, ARu, ARd, M1, M2))), FR)[2](1.0)[1]
     @test dblk ≈ dFR_ref[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-10
-    # inner_etype Float32 boundary cast (fwd 1e-4, grad 1e-3)
+    # inner_etype Float32 boundary cast — forward (1e-4) AND gradient (1e-3),
+    # both halves like the FLmap template (test_cannon.jl:158-175): the gradient
+    # half exercises the rrule do_cast branch (_boundary_cast on the cotangent +
+    # T_orig upcast of dFR/dARu/dARd/dM), else that path ships untested.
     out32 = cannon_gather(FRmap_cannon_dist(FRb, ARub, ARdb, (M1,M2), g; inner_etype=Float32), g)
     @test eltype(out32) == ComplexF64
     @test out32 ≈ FRmap(FR, ARu, ARd, (M1,M2)) rtol = 1e-4
+    loss32(FRb)  = real(sum(Wb .* FRmap_cannon_dist(FRb, ARub, ARdb, (M1,M2), g; inner_etype=Float32)))
+    lref(FR)     = real(sum(W  .* FRmap(FR, ARu, ARd, (M1,M2))))
+    dFR32 = Zygote.pullback(loss32, FRb)[2](1.0)[1]
+    dFRr  = Zygote.pullback(lref,  FR)[2](1.0)[1]
+    @test eltype(dFR32) == ComplexF64                                            # upcast at exit
+    @test dFR32 ≈ dFRr[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-3            # F32 grad accuracy
 end
 
 @testset "FRmap_cannon_dist forloop_iter clamp (square grid)" begin
