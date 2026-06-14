@@ -734,3 +734,102 @@ function ACmap_cannon_dist(AC_blk, FL_blk, FR_blk, M, grid::CannonGrid;
     result, _, _, _ = _acmap_cannon_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end
+
+# ─── ACdmap (cross-axis gather class — SQUARE grid, 2-LEVEL i/d chunk) ───────
+# Design: docs/2026-06-13-acmap-cannon-dataflow-design.md §5-§6.
+# result[a,b,c,d] := ACd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] FL[a,e,f,i]
+# Cross-axis the OTHER way vs ACmap: contracted i (ACd.1=r1, FL.4=r2) + output
+# d (FR.1=r1, result.4=r2); co-dist output a (FL.1=r1, result.1=r1, local r1);
+# aligned contracted l (ACd.4=r2, FR.4=r2, local r2). Internal chain
+# intermediates I1=(i,k,d,h,j,g), I2=(i,d,e,b,k,h,p), I3=(d,b,c,i,e,f) carry FULL
+# i × FULL d and are ABSENT l (l is contracted at link 2 (FR) and gone from I1
+# on) — so chunking l bounds NOTHING (THE BLOCKER §5.1). Fix: 2-level loop over i
+# (contracted → ACCUMULATE Σ_i) and d (output → ASSIGN disjoint d-slice). With
+# n_i·n_d = N²·forloop_iter the per-chain intermediate reaches the ACmap-class
+# bound χ²D⁴/(P·forloop_iter) (§6.2). The contracted local l-block is summed
+# WHOLE inside each chain_apply (it is not an intermediate leg, so keeping it
+# whole costs nothing). Square grid REQUIRED: p_rs = split_ranges(χ,N) is the
+# single partition for every leg (risk 2 — the r1- and r2-partitions coincide
+# only when N1==N2). Local einsum is ACDMAP_LEG5_CHAIN via chain_apply
+# (whole-chain API), NOT a ring, NOT a hand kernel. Leg placement (slice
+# accordingly — see loop): i is on ACd.1 (first leg) and FL.4 (last leg); d is on
+# FR.1 (first leg) and result.4 (last). So the i-chunk `ich` slices ACd_g's FIRST
+# leg AND FL_g's LAST leg; the d-chunk `dch` slices FR_g's FIRST leg.
+# (Kept EXPLICIT — NOT DRY-merged with FRmap: although FRmap is the structural
+# twin with i↔d swapped, the i↔d slicing is the highest cross-leak risk, so each
+# map is written out per the review decision.)
+# (ACDMAP_LEG5_CHAIN is defined in chain_maps.jl, included after this file, and
+# resolves at call time via Julia's global late-binding.)
+function _acdmap_cannon_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, p_rs, n_i, n_d; forloop_iter = 1)
+    # ACd_g = ACd[i∈1:χ, j, k, l∈p_rs[r2+1]]  (col_allgather, full i)
+    # FR_g  = FR[d∈1:χ, g, h, l∈p_rs[r2+1]]   (col_allgather, full d)
+    # FL_g  = FL[a∈p_rs[r1+1], e, f, i∈1:χ]   (row_allgather, full i)
+    χ = sum(length, p_rs)
+    na = length(p_rs[grid.r1 + 1])             # local a extent
+    # out (a,b,c,d): b = M1's leg :b in (:e,:j,:g,:b,:p) = size(M1,4);
+    # c = M2's leg :c in (:f,:k,:h,:c,:p) = size(M2,4). NOT size(M1,2)/size(M2,2)
+    # (those are :j/:k, the ACmap output legs). Verified with non-uniform bonds
+    # (Db≠Dc); a uniform-D=3 test masks the wrong index — the Db≠Dc testset guards
+    # this so it cannot hide.
+    partial = similar(FL_g, na, size(M1,4), size(M2,4), χ)   # [a-block, b, c, d∈1:χ]
+    i_chunks = split_ranges(χ, min(n_i, χ))    # contracted → ACCUMULATE Σ_i
+    d_chunks = split_ranges(χ, min(n_d, χ))    # output     → ASSIGN disjoint d-slice
+    for dch in d_chunks                          # disjoint output d-slices → ASSIGN
+        acc = nothing
+        for ich in i_chunks                      # summed contracted i-slices → ACCUMULATE Σ_i
+            piece = chain_apply(ACDMAP_LEG5_CHAIN,
+                (ACd_g[ich, :, :, :], FR_g[dch, :, :, :], M1, M2, FL_g[:, :, :, ich]))
+            if acc === nothing
+                acc = piece
+            else
+                acc .+= piece; _free!(piece)
+            end
+        end
+        view(partial, :, :, :, dch) .= acc; _free!(acc)   # disjoint d-slice assignment
+    end
+    # F5: sum l over row (full last leg d), keep d-block r2.
+    @assert size(partial, 4) == χ "ACdmap F5: partial last leg must be full d (mirror of ACmap risk-5)"
+    result = _cannon_row_reduce_scatter_last(partial, grid, p_rs)   # tag 760
+    return result, ACd_g, FR_g, FL_g
+end
+
+"""
+    ACdmap_cannon_dist(ACd_blk, FL_blk, FR_blk, M, grid; forloop_iter=1, inner_etype=nothing)
+
+Distributed ACdmap on a SQUARE N×N Cannon grid (gather class — `@assert
+N1==N2`). ACd/FL/FR are block-stored (first χ leg by r1, last χ leg by r2;
+`cannon_scatter` convention), M replicated. Two cross-axis legs (contracted `i`,
+output `d`) are gathered to full before the local chain so the off-diagonal
+`(a,d)` blocks are actually contracted (the diagonal trap, transposed vs ACmap).
+The single `p_rs = split_ranges(χ, N)` is licensed by the square assertion.
+`forloop_iter` sets the 2-level memory chunk: `n_i = n_d = N·⌈√forloop_iter⌉`
+chunks over the contracted `i` (accumulate `Σ_i`) and the output `d` (assign
+disjoint slices) — the legs that actually appear in the chain intermediates
+(full-i × full-d); the contracted local `l`-block is summed whole inside each
+`chain_apply` (chunking `l` would bound nothing — THE BLOCKER §5.1). Output
+`[a,b,c,d]` is block-distributed (a on r1, d on r2). Local einsum is
+`ACDMAP_LEG5_CHAIN` via `chain_apply` (whole-chain engine API), NOT a ring, NOT a
+hand kernel. Collective over `grid.comm`. Rectangular grids (N1≠N2) are M3 v2 (a
+real block transpose). See docs/2026-06-13-m3-cannon-wrappers-plan.md Batch D and
+docs/2026-06-13-acmap-cannon-dataflow-design.md §5-§6.
+"""
+function ACdmap_cannon_dist(ACd_blk, FL_blk, FR_blk, M, grid::CannonGrid;
+                            forloop_iter = 1, inner_etype = nothing)
+    @assert grid.N1 == grid.N2 "ACdmap_cannon_dist: M3 v1 requires a square grid (N1==N2)"
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    T_orig = eltype(ACd_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        ACd_blk = _downcast_eltype(inner_etype, ACd_blk); FL_blk = _downcast_eltype(inner_etype, FL_blk)
+        FR_blk = _downcast_eltype(inner_etype, FR_blk)
+        M1 = _downcast_eltype(inner_etype, M1); M2 = _downcast_eltype(inner_etype, M2)
+    end
+    χ = MPI.Allreduce(size(ACd_blk, 1), +, grid.col_comm)        # F0
+    p_rs = split_ranges(χ, grid.N1)
+    n_chunk = grid.N1 * ceil(Int, sqrt(forloop_iter))           # §6.2: n_i = n_d = N·⌈√forloop_iter⌉
+    ACd_g = _cannon_col_allgather(ACd_blk, grid, p_rs)          # F1: full i (tag 730)
+    FL_g  = _cannon_row_allgather(FL_blk, grid, p_rs)           # F2: full i (tag 750)
+    FR_g  = _cannon_col_allgather(FR_blk, grid, p_rs)           # F3: full d (tag 730)
+    result, _, _, _ = _acdmap_cannon_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, p_rs, n_chunk, n_chunk; forloop_iter)
+    return do_cast ? T_orig.(result) : result
+end

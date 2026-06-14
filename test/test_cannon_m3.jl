@@ -6,8 +6,8 @@ using TeneT
 using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather,
              split_ranges, Cmap, Cmap_cannon,
              FRmap, FRmap_cannon_dist,
-             ACmap, ACmap_cannon_dist
-# Batch D appends: ACdmap, ACdmap_cannon_dist
+             ACmap, ACmap_cannon_dist,
+             ACdmap, ACdmap_cannon_dist
 
 MPI.Init()
 const comm = MPI.COMM_WORLD
@@ -273,4 +273,46 @@ end
     @test out2 ≈ ACmap(ref, FL, FR, (M1,M2)) rtol = 1e-11
 end
 
-println("rank $rank: test_cannon_m3.jl batch C done")
+# ─────────────────────────────────────────────────────────────────────────────
+# Batch D — ACdmap_cannon_dist (cross-axis gather class, 2-level i/d chunk).
+# result[a,b,c,d] := ACd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] FL[a,e,f,i]
+# Cross-axis the OTHER way vs ACmap: contracted i (ACd.1=r1, FL.4=r2) + output d
+# (FR.1=r1, result.4=r2). Square grid only; off-diagonal (a,d) trap guard.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@testset "ACdmap_cannon_dist forward parity (square grid)" begin
+    N1 = N2 = 2
+    for χ in (16, 18), n in (1, 3)
+        D = 3
+        ACd, FL, FR, M1, M2, _ = make_leg5(χ, D; seed=2900 + χ + n)
+        g = cannon_grid(N1, N2)
+        ref = ACdmap(ACd, FL, FR, (M1, M2))   # result[a,b,c,d] := ACd[i,j,k,l] FR[d,g,h,l] M1 M2 FL[a,e,f,i]
+        ACdb = cannon_scatter(ACd, g); FLb = cannon_scatter(FL, g); FRb = cannon_scatter(FR, g)
+        out = cannon_gather(ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g; forloop_iter=n), g)
+        @test out ≈ ref rtol = 1e-12
+        if χ == 18   # off-diagonal (a,d) plane — the trap, transposed (§5.1)
+            @test out[1:9, :, :, 10:18] ≈ ref[1:9, :, :, 10:18] rtol = 1e-12
+            @test out[10:18, :, :, 1:9] ≈ ref[10:18, :, :, 1:9] rtol = 1e-12
+        end
+        out1 = cannon_gather(ACdmap_cannon_dist(ACdb, FLb, FRb, M1, g), g)
+        @test out1 ≈ ACdmap(ACd, FL, FR, M1) rtol = 1e-12
+    end
+    @test_skip "ACdmap_cannon_dist rectangular grid (N1≠N2) deferred to M3 v2"
+end
+
+# ACdmap is NOT self-iterating (output {a,d} top, input {i,l} bottom). Its iterate
+# test feeds its output block into a matching ACmap_cannon_dist (whose AC input is
+# {a,d}) and compares the composed serial maps.
+@testset "ACdmap_cannon_dist composes into ACmap" begin
+    N1 = N2 = 2; χ, D = 16, 3
+    ACd, FL, FR, M1, M2, _ = make_leg5(χ, D; seed=3100)
+    g = cannon_grid(N1, N2)
+    ACdb=cannon_scatter(ACd,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g)
+    mid_blk = ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g)   # [a,b,c,d] block
+    # the {a,d} output block convention matches ACmap's AC input {a,d} → feed in
+    out = cannon_gather(ACmap_cannon_dist(mid_blk, FLb, FRb, (M1,M2), g), g)
+    ref_mid = ACdmap(ACd, FL, FR, (M1,M2))
+    @test out ≈ ACmap(ref_mid, FL, FR, (M1,M2)) rtol = 1e-11
+end
+
+println("rank $rank: test_cannon_m3.jl batch D done")
