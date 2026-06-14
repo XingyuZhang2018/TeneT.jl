@@ -300,19 +300,25 @@ end
     @test_skip "ACdmap_cannon_dist rectangular grid (N1≠N2) deferred to M3 v2"
 end
 
-# ACdmap is NOT self-iterating (output {a,d} top, input {i,l} bottom). Its iterate
-# test feeds its output block into a matching ACmap_cannon_dist (whose AC input is
-# {a,d}) and compares the composed serial maps.
-@testset "ACdmap_cannon_dist composes into ACmap" begin
-    N1 = N2 = 2; χ, D = 16, 3
-    ACd, FL, FR, M1, M2, _ = make_leg5(χ, D; seed=3100)
-    g = cannon_grid(N1, N2)
-    ACdb=cannon_scatter(ACd,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g)
-    mid_blk = ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g)   # [a,b,c,d] block
-    # the {a,d} output block convention matches ACmap's AC input {a,d} → feed in
-    out = cannon_gather(ACmap_cannon_dist(mid_blk, FLb, FRb, (M1,M2), g), g)
-    ref_mid = ACdmap(ACd, FL, FR, (M1,M2))
-    @test out ≈ ACmap(ref_mid, FL, FR, (M1,M2)) rtol = 1e-11
+@testset "ACdmap_cannon_dist gradient parity (square grid)" begin
+    N1 = N2 = 2
+    for χ in (16, 18), n in (1, 3)
+        D = 3
+        ACd, FL, FR, M1, M2, W = make_leg5(χ, D; seed=3000 + χ + n)
+        g = cannon_grid(N1, N2)
+        ACdb=cannon_scatter(ACd,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g); Wb=cannon_scatter(W,g)
+        loss_ref(ACd,FL,FR,M1,M2)  = real(sum(W  .* ACdmap(ACd,FL,FR,(M1,M2))))
+        loss_dist(ACdb,FLb,FRb,M1,M2) = real(sum(Wb .* ACdmap_cannon_dist(ACdb,FLb,FRb,(M1,M2),g; forloop_iter=n)))
+        g_ref  = Zygote.pullback(loss_ref,  ACd,FL,FR,M1,M2)[2](1.0)
+        g_dist = Zygote.pullback(loss_dist, ACdb,FLb,FRb,M1,M2)[2](1.0)
+        p_rs = split_ranges(χ, N1)
+        blkof(x) = x[p_rs[g.r1+1], :, :, p_rs[g.r2+1]]
+        @test g_dist[1] ≈ blkof(g_ref[1]) rtol = 1e-10   # dACd block
+        @test g_dist[2] ≈ blkof(g_ref[2]) rtol = 1e-10   # dFL block
+        @test g_dist[3] ≈ blkof(g_ref[3]) rtol = 1e-10   # dFR block
+        @test g_dist[4] ≈ g_ref[4] rtol = 1e-10          # dM1 replicated
+        @test g_dist[5] ≈ g_ref[5] rtol = 1e-10          # dM2
+    end
 end
 
 println("rank $rank: test_cannon_m3.jl batch D done")
