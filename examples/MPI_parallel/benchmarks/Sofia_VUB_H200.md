@@ -551,16 +551,14 @@ benchmark today).
 
 ## Part 9: M3 Cannon-wrapper 4-GPU validation — `Cmap_cannon` / `FRmap_cannon_dist` / `ACmap_cannon_dist` / `ACdmap_cannon_dist`
 
-> **PLACEHOLDER — fill after the gated cluster run.** Built by Batch E of
-> [`docs/2026-06-13-m3-cannon-wrappers-plan.md`](../../../docs/2026-06-13-m3-cannon-wrappers-plan.md);
-> the 4-GPU run itself is gated separately (user / `/hpc` flow). Do NOT mark M3
-> done until this table records PASS + the FRmap/ACdmap bounded-memory
-> confirmation.
+Jobs `1285915` (`forloop_iter=4`) + `1285916` (`forloop_iter=16`, 2026-06-14,
+`submit_test_cannon_m3.sh` → `test_cannon_m3_sofia.jl`, branch
+`claude/ecstatic-golick-e3f6f0` @ `7e2372f`), 1 node × 4×H200, Cannon grid 2×2.
+Plan: [Batch E](../../../docs/2026-06-13-m3-cannon-wrappers-plan.md).
 
-Job `<JOBID>` (2026-06-__, `submit_test_cannon_m3.sh` → `test_cannon_m3_sofia.jl`,
-branch `claude/ecstatic-golick-e3f6f0` @ `<commit>`), 1 node × 4×H200, Cannon
-grid 2×2. Plan: [Batch E](../../../docs/2026-06-13-m3-cannon-wrappers-plan.md).
-Run via:
+**Result: GPU distributed parity PASSED for all four maps at χ=256 D=8 (rel
+3–5e-15, ≪ gate); the χ=400 D=10 cell OOMs on the SERIAL REFERENCE (not the
+distributed maps) — a validation-harness limit, diagnosed below.** Run via:
 
 ```bash
 cd examples/MPI_parallel/Sofia && sbatch submit_test_cannon_m3.sh
@@ -590,39 +588,59 @@ design's bounded-intermediate claim holds at production scale.
 
 Parity table (fill `✓`/`✗` + the allreduced max rel errors):
 
-| map      | χ   | D  | variant | fwd rel err | grad max rel err | fwd ✓/✗ | grad ✓/✗ | dev-mem fwd (GiB) | dev-mem fwd+bwd (GiB) |
-|----------|-----|----|---------|-------------|------------------|---------|----------|-------------------|-----------------------|
-| Cmap     | 256 | 8  | leg4    |             |                  |         |          | —                 | —                     |
-| FRmap    | 256 | 8  | tuple-M |             |                  |         |          |                   |                       |
-| FRmap    | 256 | 8  | 1M      |             |                  |         |          |                   |                       |
-| ACmap    | 256 | 8  | tuple-M |             |                  |         |          | (ref)             | (ref)                 |
-| ACmap    | 256 | 8  | 1M      |             |                  |         |          | (ref)             | (ref)                 |
-| ACdmap   | 256 | 8  | tuple-M |             |                  |         |          |                   |                       |
-| ACdmap   | 256 | 8  | 1M      |             |                  |         |          |                   |                       |
-| Cmap     | 400 | 10 | leg4    |             |                  |         |          | —                 | —                     |
-| FRmap    | 400 | 10 | tuple-M |             |                  |         |          |                   |                       |
-| FRmap    | 400 | 10 | 1M      |             |                  |         |          |                   |                       |
-| ACmap    | 400 | 10 | tuple-M |             |                  |         |          | (ref)             | (ref)                 |
-| ACmap    | 400 | 10 | 1M      |             |                  |         |          | (ref)             | (ref)                 |
-| ACdmap   | 400 | 10 | tuple-M |             |                  |         |          |                   |                       |
-| ACdmap   | 400 | 10 | 1M      |             |                  |         |          |                   |                       |
+Parity table (job 1285916; the χ=256 D8 dev-mem columns are the co-resident
+total = serial reference + distributed map, see diagnosis):
 
-Headline reading (fill after the run):
+| map      | χ   | D  | variant | fwd rel err | grad max rel err | fwd | grad | dev-mem fwd (GiB) | dev-mem fwd+bwd (GiB) |
+|----------|-----|----|---------|-------------|------------------|-----|------|-------------------|-----------------------|
+| Cmap     | 256 | 8  | leg4    | 0.0         | 0.0              | ✓   | ✓    | —                 | —                     |
+| FRmap    | 256 | 8  | tuple-M | 3.23e-15    | 4.49e-15         | ✓   | ✓    | 13.88             | 26.45                 |
+| FRmap    | 256 | 8  | 1M      | 5.50e-15    | 4.50e-15         | ✓   | ✓    | 14.35             | 27.88                 |
+| ACmap    | 256 | 8  | tuple-M | 3.26e-15    | 4.57e-15         | ✓   | ✓    | (ref)             | (ref)                 |
+| ACmap    | 256 | 8  | 1M      | 5.52e-15    | 4.58e-15         | ✓   | ✓    | (ref)             | (ref)                 |
+| ACdmap   | 256 | 8  | tuple-M | 3.23e-15    | 4.49e-15         | ✓   | ✓    | 18.20             | 31.88                 |
+| ACdmap   | 256 | 8  | 1M      | 5.45e-15    | 4.50e-15         | ✓   | ✓    | 18.26             | 31.95                 |
+| Cmap     | 400 | 10 | leg4    | 0.0         | 0.0              | ✓   | ✓    | —                 | —                     |
+| FRmap    | 400 | 10 | tuple-M | — (OOM)     | — (OOM)          | —   | —    | 74.13 → OOM       | OOM (serial ref)      |
+| ACmap/ACdmap | 400 | 10 | both | — (not reached) | — (not reached) | — | — | —             | —                     |
 
-- **Parity:** all four maps PASS the forward (≤1e-10) and gradient (≤1e-8) gate
-  on GPU at both cells, both M-variants → the M3 maps reproduce the serial
-  kernels on `CuArray` at production scale (the GPU half the CPU 4-rank gate
-  cannot reach).
-- **Bounded intermediates (the load-bearing check):** FRmap/ACdmap fwd+bwd peak
-  device mem stays within `<X>×` of ACmap's at the same cell — **no χ²-plane
-  spike** → the 2-level d/i (FRmap) and i/d (ACdmap) chunk holds the
-  full-`i`×full-`d` intermediates to ≈χ²D⁴/(P·forloop_iter) as designed.
-- **Cmap:** replicated output, tiny mem (full χ×χ only, no chunk); parity exact
-  to FP.
+**Headline reading:**
 
-`=== RESULT: PASS/FAIL ===` per map + a final aggregate line are printed by the
-driver. Footnote: if FRmap/ACdmap show a χ²-plane spike, raise `forloop_iter`
-and confirm the peak drops ∝ 1/forloop_iter (the bounded-intermediate signature).
+- **Parity — PASS (the primary goal).** All four maps reproduce the serial
+  kernels on `CuArray` at χ=256 D=8 to rel **3–5e-15** (≪ the 1e-10 fwd / 1e-8
+  grad gate), both tuple-M and single-M — the GPU half the CPU 4-rank gate
+  cannot reach. Cmap is exact to FP (replicated output). Independent of
+  `forloop_iter` (n=4 and n=16 both pass identically).
+- **χ=400 D=10 OOM is the SERIAL REFERENCE, NOT the distributed maps.** The
+  validator compares each dist map against `serial FRmap/ACmap/ACdmap` (the
+  chain engine, default ON, run un-distributed on ONE GPU, held on every rank).
+  At χ=400 D=10 that serial kernel builds the FULL `FRMAP_LEG5_CHAIN`
+  intermediate I2 = full-i × full-d × D⁴ × d_phys = χ²·D⁴·2·16 B = **47.684 GiB**
+  — its forward peaks at 74 GB, and its **gradient** (`chain_backward` recomputing
+  I2) requests another 47.684 GiB → OOM at 99.99% of the 140 GiB H200. The
+  failing allocation size is EXACTLY χ²D⁴·d_phys and is **identical at
+  forloop_iter=4 and 16** — because it is the *un-chunked serial reference*, not
+  the chunked distributed map. (The "FRmap forward peak 13.88 GB" at χ=256 is
+  likewise the serial ref's full I1+I2 = 4.3+8.6 GB — which is why that column is
+  `forloop_iter`-invariant.) **This is precisely WHY the distributed maps exist:
+  the full serial kernel does not fit at production χ on one GPU.** It is a
+  harness limit (the parity check needs the unfittable full reference), not a
+  distributed-map defect or a chunk-bound failure.
+- **At-scale distributed-map memory: design-proven, not yet GPU-probed in
+  isolation.** Because the driver co-locates the dist map with the full serial
+  ref, the dev-mem columns measure their SUM, dominated by the ref; the dist
+  map's own bounded peak (≈χ²D⁴/(P·forloop_iter)) was never measured alone. The
+  χ=256 cell shows the dist maps run correctly alongside the full ref; the
+  bounded-intermediate claim rests on the design proof + the 4-rank CPU parity.
+  **Follow-up to close it empirically:** a serial-ref-free probe at χ=400 D=10 —
+  run each dist map standalone (no serial comparison), assert it does NOT OOM,
+  measure its peak, and check chunk-count-invariance (gather(dist@floop=a) ≈
+  gather(dist@floop=b)) for at-scale correctness without the unfittable ref.
+
+`=== RESULT ===` lines per map are printed by the driver. **Verdict: M3
+distributed parity validated on GPU (χ=256 D=8, all 4 maps); the production-cell
+memory check is blocked by the serial reference's size, recorded as a follow-up
+(serial-ref-free dist-only probe).**
 
 ## Sofia-specific Environment
 
