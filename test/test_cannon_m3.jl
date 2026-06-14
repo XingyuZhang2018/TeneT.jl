@@ -232,6 +232,34 @@ end
         @test g_dist[4] ≈ g_ref[4] rtol = 1e-10          # dM1 replicated
         @test g_dist[5] ≈ g_ref[5] rtol = 1e-10          # dM2
     end
+    # single-M dM = dM1 + conj(dM2) composition
+    AC, FL, FR, M1, M2, W = make_leg5(16, 3; seed=2750)
+    g = cannon_grid(2, 2)
+    ACb=cannon_scatter(AC,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g); Wb=cannon_scatter(W,g)
+    lr(AC,M) = real(sum(W  .* ACmap(AC,FL,FR,M)))
+    ld(ACb,M)= real(sum(Wb .* ACmap_cannon_dist(ACb,FLb,FRb,M,g)))
+    gr = Zygote.pullback(lr, AC, M1)[2](1.0); gd = Zygote.pullback(ld, ACb, M1)[2](1.0)
+    p_rs = split_ranges(16, 2)
+    @test gd[1] ≈ gr[1][p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-10
+    @test gd[2] ≈ gr[2] rtol = 1e-10
+    # bare-sum loss (FillArrays densify guard)
+    back = Zygote.pullback(x -> real(sum(ACmap_cannon_dist(x, FLb, FRb, (M1,M2), g))), ACb)[2]
+    dblk = back(1.0)[1]
+    dAC_ref = Zygote.pullback(x -> real(sum(ACmap(x, FL, FR, M1, M2))), AC)[2](1.0)[1]
+    @test dblk ≈ dAC_ref[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-10
+    # inner_etype Float32 boundary cast — forward (1e-4) AND gradient (1e-3),
+    # both halves like the FLmap/FRmap template: the gradient half exercises the
+    # rrule do_cast branch (_boundary_cast on the cotangent + T_orig upcast of
+    # dAC/dFL/dFR/dM), else that path ships untested.
+    out32 = cannon_gather(ACmap_cannon_dist(ACb, FLb, FRb, (M1,M2), g; inner_etype=Float32), g)
+    @test eltype(out32) == ComplexF64
+    @test out32 ≈ ACmap(AC, FL, FR, (M1,M2)) rtol = 1e-4
+    loss32(ACb)  = real(sum(Wb .* ACmap_cannon_dist(ACb, FLb, FRb, (M1,M2), g; inner_etype=Float32)))
+    lref(AC)     = real(sum(W  .* ACmap(AC, FL, FR, (M1,M2))))
+    dAC32 = Zygote.pullback(loss32, ACb)[2](1.0)[1]
+    dACr  = Zygote.pullback(lref,  AC)[2](1.0)[1]
+    @test eltype(dAC32) == ComplexF64                                            # upcast at exit
+    @test dAC32 ≈ dACr[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-3            # F32 grad accuracy
 end
 
 println("rank $rank: test_cannon_m3.jl batch C done")
