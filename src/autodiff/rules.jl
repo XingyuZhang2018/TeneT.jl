@@ -851,6 +851,106 @@ function ChainRulesCore.rrule(::typeof(FRmap_cannon_dist), FR_blk, ARu_blk, ARd_
     return result, frmap_cannon_dist_back
 end
 
+# ACmap (cross-axis gather class): AC/FL/FR block-stored, output [i,j,k,l]
+# block-distributed (i on r1, l on r2 — same convention as input). The forward
+# gathers the two cross-axis legs (contracted d via AC/FR, output i via FL) to
+# full, runs the local ACMAP_LEG5_CHAIN per l-chunk (SINGLE l-loop — ACmap's
+# intermediates carry local-a + chunked-l, never a full-i×full-d plane), and
+# col_reduce_scatter's the output i (completing Σ_a). Backward is the design
+# doc §4.2 B0-B5: chain_backward (recompute-style, eager _free!, NO Zygote) over
+# the SAME single l-chunk, then the adjoint comm pairs (B5 col_allgather ↔ F5
+# col_reduce_scatter; B3 col_reduce_scatter ↔ F3 col_allgather; B2/B1
+# row_reduce_scatter_last ↔ F2/F1 row_allgather).
+# Captured footprint: 3·χ²D²/N gathered slices (AC_g a-block/full-d, FL_g
+# a-block/full-i, FR_g full-d/l-block) + M1/M2 + p_rs + forloop_iter — never a
+# χ²D⁴ array, never a χ×χ (i,l) plane (full i coexists only with the local
+# l-block). Same rank-uniform / densify / do_cast discipline as
+# FLmap_cannon_dist.
+function ChainRulesCore.rrule(::typeof(ACmap_cannon_dist), AC_blk, FL_blk, FR_blk, M, grid::CannonGrid;
+                              forloop_iter = 1, inner_etype = nothing)
+    @assert grid.N1 == grid.N2 "ACmap_cannon_dist: M3 v1 requires a square grid (N1==N2)"
+    is_tuple = M isa Tuple
+    M1, M2 = is_tuple ? M : (M, conj(M))
+    T_orig = eltype(AC_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    AC_c  = do_cast ? _downcast_eltype(inner_etype, AC_blk) : AC_blk
+    FL_c  = do_cast ? _downcast_eltype(inner_etype, FL_blk) : FL_blk
+    FR_c  = do_cast ? _downcast_eltype(inner_etype, FR_blk) : FR_blk
+    M1_c  = do_cast ? _downcast_eltype(inner_etype, M1) : M1
+    M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
+
+    χ = MPI.Allreduce(size(AC_c, 1), +, grid.col_comm)
+    p_rs = split_ranges(χ, grid.N1)
+    AC_g = _cannon_row_allgather(AC_c, grid, p_rs)      # F1: full d (tag 750)
+    FL_g = _cannon_row_allgather(FL_c, grid, p_rs)      # F2: full i (tag 750)
+    FR_g = _cannon_col_allgather(FR_c, grid, p_rs)      # F3: full d (tag 730)
+    result_c, _, _, _ = _acmap_cannon_forward_sliced(AC_g, FR_g, FL_g, M1_c, M2_c, grid, p_rs; forloop_iter)
+    result = do_cast ? T_orig.(result_c) : result_c
+
+    function acmap_cannon_dist_back(dresult)
+        nl = size(FR_g, 4)           # local l extent
+
+        d_c = unthunk(dresult)
+        # B0: densify structured cotangents (e.g. FillArrays.Fill from a bare
+        # `sum` loss): the column allgather hands d_c straight to MPI.Isend.
+        if !(d_c isa DenseArray)
+            buf = similar(AC_g, eltype(d_c), size(d_c))
+            buf .= d_c
+            d_c = buf
+        end
+        d_c = do_cast ? _boundary_cast(inner_etype, d_c) : d_c
+
+        # B5: adjoint of F5 col_reduce_scatter (710) → col_allgather (730); full
+        # i (first leg), local l-block.
+        dpartial = _cannon_col_allgather(d_c, grid, p_rs)
+
+        # B4: SAME single l-chunk as the forward (chain_backward recomputes
+        # I1/I2/I3 → same local-a + chunked-l intermediates). Zero-init the
+        # gathered-slice grad accumulators FIRST.
+        dAC_g = zero(AC_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
+        dM1 = zero(M1_c); dM2 = zero(M2_c)
+        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        for ch in l_chunks
+            dPc = dpartial[:, :, :, ch]
+            # Chain grads in ops order (dAC, dFR, dM1, dM2, dFL).
+            (dAC_c, dFR_c, dM1_c, dM2_c, dFL_c) =
+                chain_backward(ACMAP_LEG5_CHAIN,
+                    (AC_g, FR_g[:, :, :, ch], M1_c, M2_c, FL_g),
+                    dPc)
+            dAC_g .+= dAC_c                       # a-block/full-d (accumulate over chunks)
+            view(dFR_g, :, :, :, ch) .+= dFR_c    # l-sliced disjoint per ch
+            dFL_g .+= dFL_c                       # a-block/full-i (accumulate over chunks)
+            dM1 .+= dM1_c; dM2 .+= dM2_c
+            _free!(dAC_c); _free!(dFR_c); _free!(dFL_c); _free!(dM1_c); _free!(dM2_c)
+            _free!(dPc)
+        end
+
+        # B3: adjoint of F3 col_allgather on FR (730) → col_reduce_scatter (710);
+        #     dFR_g full d, local l-block → keep d-block r1.
+        dFR_blk = _cannon_col_reduce_scatter(dFR_g, grid, p_rs)
+        # B2: adjoint of F2 row_allgather on FL (750) → row_reduce_scatter_last
+        #     (760); dFL_g a-block, full i → keep i-block r2.
+        dFL_blk = _cannon_row_reduce_scatter_last(dFL_g, grid, p_rs)
+        # B1: adjoint of F1 row_allgather on AC (750) → row_reduce_scatter_last
+        #     (760); dAC_g a-block, full d → keep d-block r2.
+        dAC_blk = _cannon_row_reduce_scatter_last(dAC_g, grid, p_rs)
+
+        # BM: replicated-M gradients, single allreduce each (NCCL fast path).
+        allreduce_p2p!(dM1, +, grid.comm)
+        allreduce_p2p!(dM2, +, grid.comm)
+        dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
+        if do_cast
+            dAC_blk = T_orig.(dAC_blk); dFL_blk = T_orig.(dFL_blk); dFR_blk = T_orig.(dFR_blk)
+            dM = is_tuple ? (T_orig.(dM[1]), T_orig.(dM[2])) : T_orig.(dM)
+        end
+        # map arg order ACmap_cannon_dist(AC, FL, FR, M, grid). Chain returns
+        # (dAC, dFR, dM1, dM2, dFL); permute to map order (dAC, dFL, dFR, dM)
+        # exactly as engine_backward(::typeof(ACmap),…) does (chain_maps.jl:116).
+        return NoTangent(), dAC_blk, dFL_blk, dFR_blk, dM, NoTangent()
+    end
+    return result, acmap_cannon_dist_back
+end
+
 function ChainRulesCore.rrule(::typeof(leading_boundary), rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS)
     rtup, rtdown = rt
     atype = _arraytype(M)

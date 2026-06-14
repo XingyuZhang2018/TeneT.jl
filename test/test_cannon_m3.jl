@@ -213,4 +213,25 @@ println("rank $rank: test_cannon_m3.jl batch B done")
     @test_skip "ACmap_cannon_dist rectangular grid (N1≠N2) deferred to M3 v2"
 end
 
+@testset "ACmap_cannon_dist gradient parity (square grid)" begin
+    N1 = N2 = 2
+    for χ in (16, 18), n in (1, 3)
+        D = 3
+        AC, FL, FR, M1, M2, W = make_leg5(χ, D; seed=2700 + χ + n)
+        g = cannon_grid(N1, N2)
+        ACb=cannon_scatter(AC,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g); Wb=cannon_scatter(W,g)
+        loss_ref(AC,FL,FR,M1,M2)  = real(sum(W  .* ACmap(AC,FL,FR,(M1,M2))))
+        loss_dist(ACb,FLb,FRb,M1,M2) = real(sum(Wb .* ACmap_cannon_dist(ACb,FLb,FRb,(M1,M2),g; forloop_iter=n)))
+        g_ref  = Zygote.pullback(loss_ref,  AC,FL,FR,M1,M2)[2](1.0)
+        g_dist = Zygote.pullback(loss_dist, ACb,FLb,FRb,M1,M2)[2](1.0)
+        p_rs = split_ranges(χ, N1)
+        blkof(x) = x[p_rs[g.r1+1], :, :, p_rs[g.r2+1]]
+        @test g_dist[1] ≈ blkof(g_ref[1]) rtol = 1e-10   # dAC block
+        @test g_dist[2] ≈ blkof(g_ref[2]) rtol = 1e-10   # dFL block
+        @test g_dist[3] ≈ blkof(g_ref[3]) rtol = 1e-10   # dFR block
+        @test g_dist[4] ≈ g_ref[4] rtol = 1e-10          # dM1 replicated
+        @test g_dist[5] ≈ g_ref[5] rtol = 1e-10          # dM2
+    end
+end
+
 println("rank $rank: test_cannon_m3.jl batch C done")
