@@ -746,9 +746,14 @@ end
 # on) — so chunking l bounds NOTHING (THE BLOCKER §5.1). Fix: 2-level loop over i
 # (contracted → ACCUMULATE Σ_i) and d (output → ASSIGN disjoint d-slice). With
 # n_i·n_d = N²·forloop_iter the per-chain intermediate reaches the ACmap-class
-# bound χ²D⁴/(P·forloop_iter) (§6.2). The contracted local l-block is summed
-# WHOLE inside each chain_apply (it is not an intermediate leg, so keeping it
-# whole costs nothing). Square grid REQUIRED: p_rs = split_ranges(χ,N) is the
+# bound χ²D⁴/(P·forloop_iter), P = N1·N2 = N² (§6.2; risks 1,3). The contracted
+# local l-block is summed WHOLE inside each chain_apply (it is not an intermediate
+# leg, so keeping it whole costs nothing). The rrule's backward (rules.jl) reuses
+# the IDENTICAL n_i = n_d = N·⌈√forloop_iter⌉ 2-level chunk — chain_backward
+# recompute-style rebuilds the same full-i×full-d I1/I2/I3, so capturing only the
+# bounded gathered slices (3·χ²D²/N) is licensed: the recompute peak is bounded by
+# feeding the i/d-chunk slices, not by the captured slices alone (§6.3).
+# Square grid REQUIRED: p_rs = split_ranges(χ,N) is the
 # single partition for every leg (risk 2 — the r1- and r2-partitions coincide
 # only when N1==N2). Local einsum is ACDMAP_LEG5_CHAIN via chain_apply
 # (whole-chain API), NOT a ring, NOT a hand kernel. Leg placement (slice
