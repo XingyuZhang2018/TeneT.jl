@@ -30,12 +30,19 @@ export HOME=$WD
 JULIA=$WD/julia-1.11.3/bin/julia
 CLEAN_LD=$(echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -v 'CUDA/12.8.0' | tr '\n' ':')
 
+# forloop_iter for the 2-level chunk (n_i = n_d = N·ceil(sqrt(FLOOP))). The
+# χ=400 D=10 cell needs more chunks than the χ=256 D=8 default: at floop=4
+# (n=4) a single full-i×full-d chain intermediate is ~48 GiB and OOMs the
+# H200; floop=16 (n=8 → χ/8=50 per chunk) keeps each intermediate ~sub-GB,
+# confirming the design's χ²D⁴/(P·forloop_iter) bound at production scale.
+FLOOP=${TENET_CANNON_FLOOP:-16}
 BASE_ENVS="export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
 export UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc; \
 export UCX_MEMTYPE_CACHE=n; \
 export UCX_WARN_UNUSED_ENV_VARS=n; \
 export CUDA_LAUNCH_BLOCKING=1; \
 export LD_PRELOAD=/usr/lib64/libcuda.so.1; \
+export TENET_CANNON_FLOOP=$FLOOP; \
 export NCCL_DEBUG=WARN"
 
 echo "=== Sofia 4-GPU M3 Cannon-wrapper validation (C/FR/AC/ACd parity + mem) ==="
