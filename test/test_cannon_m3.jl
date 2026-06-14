@@ -321,4 +321,67 @@ end
     end
 end
 
+@testset "ACdmap_cannon_dist single-M / densify / inner_etype" begin
+    N1 = N2 = 2
+    ACd, FL, FR, M1, M2, W = make_leg5(16, 3; seed=3040)
+    g = cannon_grid(N1, N2)
+    ACdb=cannon_scatter(ACd,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g); Wb=cannon_scatter(W,g)
+    # single-M dM = dM1 + conj(dM2) composition
+    lr(ACd,M) = real(sum(W  .* ACdmap(ACd,FL,FR,M)))
+    ld(ACdb,M)= real(sum(Wb .* ACdmap_cannon_dist(ACdb,FLb,FRb,M,g)))
+    gr = Zygote.pullback(lr, ACd, M1)[2](1.0); gd = Zygote.pullback(ld, ACdb, M1)[2](1.0)
+    p_rs = split_ranges(16, 2)
+    @test gd[1] ≈ gr[1][p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-10
+    @test gd[2] ≈ gr[2] rtol = 1e-10
+    # bare-sum loss (FillArrays densify guard)
+    back = Zygote.pullback(x -> real(sum(ACdmap_cannon_dist(x, FLb, FRb, (M1,M2), g))), ACdb)[2]
+    dblk = back(1.0)[1]
+    dACd_ref = Zygote.pullback(x -> real(sum(ACdmap(x, FL, FR, M1, M2))), ACd)[2](1.0)[1]
+    @test dblk ≈ dACd_ref[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-10
+    # inner_etype Float32 boundary cast — forward (1e-4) AND gradient (1e-3), both
+    # halves: the gradient half exercises the rrule do_cast branch (_boundary_cast
+    # on the cotangent + T_orig upcast of dACd/dFL/dFR/dM).
+    out32 = cannon_gather(ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g; inner_etype=Float32), g)
+    @test eltype(out32) == ComplexF64
+    @test out32 ≈ ACdmap(ACd, FL, FR, (M1,M2)) rtol = 1e-4
+    loss32(ACdb) = real(sum(Wb .* ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g; inner_etype=Float32)))
+    lref(ACd)    = real(sum(W  .* ACdmap(ACd, FL, FR, (M1,M2))))
+    dACd32 = Zygote.pullback(loss32, ACdb)[2](1.0)[1]
+    dACdr  = Zygote.pullback(lref,  ACd)[2](1.0)[1]
+    @test eltype(dACd32) == ComplexF64                                           # upcast at exit
+    @test dACd32 ≈ dACdr[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-3          # F32 grad accuracy
+end
+
+# Non-uniform-bond test (the dim guard the plan review mandated): the output
+# middle legs b = size(M1,4), c = size(M2,4) are masked by a uniform D=3 test.
+# Build M1 with 4th-dim Db and M2 with 4th-dim Dc, Db≠Dc, so a wrong index
+# (size(M1,2)/size(M2,2) = j/k, the ACmap output legs) cannot hide. Forward AND
+# gradient parity.
+@testset "ACdmap_cannon_dist non-uniform bond (Db≠Dc) parity" begin
+    N1 = N2 = 2; χ = 16
+    # distinct M-slot bonds: M1=(e,j,g,b,p), M2=(f,k,h,c,p); b=5 (Db), c=7 (Dc), b≠c.
+    De, Df, Dj, Dk, Dg, Dh, Db, Dc, Dp = 2, 2, 3, 3, 4, 4, 5, 7, 6
+    Random.seed!(3050)
+    M1 = rand(ComplexF64, De, Dj, Dg, Db, Dp)
+    M2 = rand(ComplexF64, Df, Dk, Dh, Dc, Dp)
+    ACd = rand(ComplexF64, χ, Dj, Dk, χ)         # (i,j,k,l)
+    FL  = rand(ComplexF64, χ, De, Df, χ)         # (a,e,f,i)
+    FR  = rand(ComplexF64, χ, Dg, Dh, χ)         # (d,g,h,l)
+    W   = rand(ComplexF64, χ, Db, Dc, χ)         # out (a,b,c,d)
+    g = cannon_grid(N1, N2)
+    ACdb=cannon_scatter(ACd,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g); Wb=cannon_scatter(W,g)
+    ref = ACdmap(ACd, FL, FR, (M1, M2))
+    @test size(ref) == (χ, Db, Dc, χ)            # b=size(M1,4)=5, c=size(M2,4)=7 — the dim fix
+    out = cannon_gather(ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g), g)
+    @test out ≈ ref rtol = 1e-12
+    loss_ref(ACd,FL,FR,M1,M2)  = real(sum(W  .* ACdmap(ACd,FL,FR,(M1,M2))))
+    loss_dist(ACdb,FLb,FRb,M1,M2) = real(sum(Wb .* ACdmap_cannon_dist(ACdb,FLb,FRb,(M1,M2),g)))
+    g_ref  = Zygote.pullback(loss_ref,  ACd,FL,FR,M1,M2)[2](1.0)
+    g_dist = Zygote.pullback(loss_dist, ACdb,FLb,FRb,M1,M2)[2](1.0)
+    p_rs = split_ranges(χ, N1); blkof(x) = x[p_rs[g.r1+1], :, :, p_rs[g.r2+1]]
+    @test g_dist[1] ≈ blkof(g_ref[1]) rtol = 1e-10
+    @test g_dist[4] ≈ g_ref[4] rtol = 1e-10
+    @test g_dist[5] ≈ g_ref[5] rtol = 1e-10
+end
+
 println("rank $rank: test_cannon_m3.jl batch D done")
