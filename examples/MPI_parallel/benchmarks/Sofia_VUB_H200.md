@@ -549,6 +549,81 @@ consciously unbenched (out-of-scope per the M2 plan: corner maps' only caller
 is commented out; FLmap_C3v lives only in the qrctmrg path, no Sofia production
 benchmark today).
 
+## Part 9: M3 Cannon-wrapper 4-GPU validation — `Cmap_cannon` / `FRmap_cannon_dist` / `ACmap_cannon_dist` / `ACdmap_cannon_dist`
+
+> **PLACEHOLDER — fill after the gated cluster run.** Built by Batch E of
+> [`docs/2026-06-13-m3-cannon-wrappers-plan.md`](../../../docs/2026-06-13-m3-cannon-wrappers-plan.md);
+> the 4-GPU run itself is gated separately (user / `/hpc` flow). Do NOT mark M3
+> done until this table records PASS + the FRmap/ACdmap bounded-memory
+> confirmation.
+
+Job `<JOBID>` (2026-06-__, `submit_test_cannon_m3.sh` → `test_cannon_m3_sofia.jl`,
+branch `claude/ecstatic-golick-e3f6f0` @ `<commit>`), 1 node × 4×H200, Cannon
+grid 2×2. Plan: [Batch E](../../../docs/2026-06-13-m3-cannon-wrappers-plan.md).
+Run via:
+
+```bash
+cd examples/MPI_parallel/Sofia && sbatch submit_test_cannon_m3.sh
+```
+
+Methodology: each of the four M3 maps is run distributed on `CuArray`s and its
+forward + Zygote-sum-loss gradient compared (rel err, allreduced max over ranks)
+against the serial `Cmap`/`FRmap`/`ACmap`/`ACdmap` reference — the SAME
+`*_cannon_dist` code the 4-rank CPU parity gate (`test/test_cannon_m3.jl`)
+exercises; the GPU is the only new variable. Gate: **forward rel ≤ 1e-10,
+gradient max rel ≤ 1e-8** (the CPU test gate is tighter, 1e-12 / 1e-10 — the GPU
+thresholds absorb device-FP reduction order). Two cells: a validation cell
+(`χ=256 D=8`, env defaults `TENET_CANNON_CHI_VALID`/`TENET_CANNON_D_VALID`) and a
+production cell (`χ=400 D=10`, `TENET_CANNON_CHI`/`TENET_CANNON_D`), Float64 leg5,
+both single-M and tuple-M. Cmap any grid (replicated output); FR/AC/ACd require
+the square 2×2 grid. `forloop_iter=4` (`TENET_CANNON_FLOOP`) so `n_d=n_i ≥ 2N`,
+the regime that forces the 2-level accumulate/assign chunk for FRmap/ACdmap.
+
+**Device-memory column** = device used (`total − available`) GiB, max over ranks,
+sampled by `mem_line` immediately after each FRmap/ACdmap forward and fwd+bwd
+(the same probe as Part 5/7/8). **The load-bearing claim** (the FLmap-OOM
+lesson): FRmap and ACdmap carry full-`i`×full-`d` chain intermediates; the
+2-level chunk must keep the peak bounded at ≈χ²D⁴/(P·forloop_iter), **NOT** a
+χ×χ plane blow-up. Compare their peak to ACmap (single l-chunk) at the same cell
+— if FRmap/ACdmap stay within a small factor of ACmap (no χ²-plane spike), the
+design's bounded-intermediate claim holds at production scale.
+
+Parity table (fill `✓`/`✗` + the allreduced max rel errors):
+
+| map      | χ   | D  | variant | fwd rel err | grad max rel err | fwd ✓/✗ | grad ✓/✗ | dev-mem fwd (GiB) | dev-mem fwd+bwd (GiB) |
+|----------|-----|----|---------|-------------|------------------|---------|----------|-------------------|-----------------------|
+| Cmap     | 256 | 8  | leg4    |             |                  |         |          | —                 | —                     |
+| FRmap    | 256 | 8  | tuple-M |             |                  |         |          |                   |                       |
+| FRmap    | 256 | 8  | 1M      |             |                  |         |          |                   |                       |
+| ACmap    | 256 | 8  | tuple-M |             |                  |         |          | (ref)             | (ref)                 |
+| ACmap    | 256 | 8  | 1M      |             |                  |         |          | (ref)             | (ref)                 |
+| ACdmap   | 256 | 8  | tuple-M |             |                  |         |          |                   |                       |
+| ACdmap   | 256 | 8  | 1M      |             |                  |         |          |                   |                       |
+| Cmap     | 400 | 10 | leg4    |             |                  |         |          | —                 | —                     |
+| FRmap    | 400 | 10 | tuple-M |             |                  |         |          |                   |                       |
+| FRmap    | 400 | 10 | 1M      |             |                  |         |          |                   |                       |
+| ACmap    | 400 | 10 | tuple-M |             |                  |         |          | (ref)             | (ref)                 |
+| ACmap    | 400 | 10 | 1M      |             |                  |         |          | (ref)             | (ref)                 |
+| ACdmap   | 400 | 10 | tuple-M |             |                  |         |          |                   |                       |
+| ACdmap   | 400 | 10 | 1M      |             |                  |         |          |                   |                       |
+
+Headline reading (fill after the run):
+
+- **Parity:** all four maps PASS the forward (≤1e-10) and gradient (≤1e-8) gate
+  on GPU at both cells, both M-variants → the M3 maps reproduce the serial
+  kernels on `CuArray` at production scale (the GPU half the CPU 4-rank gate
+  cannot reach).
+- **Bounded intermediates (the load-bearing check):** FRmap/ACdmap fwd+bwd peak
+  device mem stays within `<X>×` of ACmap's at the same cell — **no χ²-plane
+  spike** → the 2-level d/i (FRmap) and i/d (ACdmap) chunk holds the
+  full-`i`×full-`d` intermediates to ≈χ²D⁴/(P·forloop_iter) as designed.
+- **Cmap:** replicated output, tiny mem (full χ×χ only, no chunk); parity exact
+  to FP.
+
+`=== RESULT: PASS/FAIL ===` per map + a final aggregate line are printed by the
+driver. Footnote: if FRmap/ACdmap show a χ²-plane spike, raise `forloop_iter`
+and confirm the peak drops ∝ 1/forloop_iter (the bounded-intermediate signature).
+
 ## Sofia-specific Environment
 
 ```bash
