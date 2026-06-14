@@ -262,4 +262,15 @@ end
     @test dAC32 ≈ dACr[p_rs[g.r1+1], :, :, p_rs[g.r2+1]] rtol = 1e-3            # F32 grad accuracy
 end
 
+@testset "ACmap_cannon_dist iterability" begin
+    N1 = N2 = 2; χ, D = 16, 3
+    AC, FL, FR, M1, M2, _ = make_leg5(χ, D; seed=2800)
+    g = cannon_grid(N1, N2)
+    ACb=cannon_scatter(AC,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g)
+    out_blk = ACmap_cannon_dist(ACb, FLb, FRb, (M1,M2), g)
+    out2 = cannon_gather(ACmap_cannon_dist(out_blk, FLb, FRb, (M1,M2), g), g)
+    ref = ACmap(AC, FL, FR, (M1,M2))
+    @test out2 ≈ ACmap(ref, FL, FR, (M1,M2)) rtol = 1e-11
+end
+
 println("rank $rank: test_cannon_m3.jl batch C done")
