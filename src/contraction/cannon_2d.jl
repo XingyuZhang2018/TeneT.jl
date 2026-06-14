@@ -562,3 +562,89 @@ function Cmap_cannon(C, FL_blk, FR_blk, grid::CannonGrid)
     out = chain_apply(chain, (FL_full, C, FR_full))
     return out   # full χ×χ, replicated
 end
+
+# ─── FRmap (cross-axis gather class — SQUARE grid, 2-LEVEL d/i chunk) ────────
+# result[a,e,f,i] := ARd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] ARu[a,b,c,d]
+# STRUCTURALLY ACdmap with i↔d swapped: cross-axis CONTRACTED d (FR.1=r1,
+# ARu.4=r2) + cross-axis OUTPUT i (ARd.1=r1, result.4=r2); co-dist output a
+# (local r1); aligned contracted l (local r2). Pinned chain intermediates
+# I1/I2/I3 carry FULL i × FULL d (verified ≡ ACDMAP label-sets) — chunking l
+# bounds NOTHING. Fix: 2-level loop over d (contracted → ACCUMULATE Σ_d) and i
+# (output → ASSIGN disjoint i-slice). Local l-block summed WHOLE inside each
+# chain_apply. Square grid REQUIRED (single p_rs). Local einsum is
+# FRMAP_LEG5_CHAIN via chain_apply (whole-chain API), NOT a ring, NOT a hand
+# kernel. Leg placement (slice accordingly — see loop): i is on ARd.1 (first leg)
+# and result.4; d is on FR.1 (first leg) and ARu.4 (LAST leg). So the i-chunk
+# `ich` slices ARd_g's FIRST leg; the d-chunk `dch` slices FR_g's FIRST leg AND
+# ARu_g's LAST leg.
+# (FRMAP_LEG5_CHAIN is defined in chain_maps.jl, included after this file, and
+# resolves at call time via Julia's global late-binding.)
+function _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs, n_d, n_i; forloop_iter = 1)
+    # ARd_g = ARd[i∈1:χ, j, k, l∈p_rs[r2+1]]   (col_allgather, full i)
+    # FR_g  = FR[d∈1:χ, g, h, l∈p_rs[r2+1]]    (col_allgather, full d)
+    # ARu_g = ARu[a∈p_rs[r1+1], b, c, d∈1:χ]   (row_allgather, full d)
+    χ = sum(length, p_rs)
+    na = length(p_rs[grid.r1 + 1])             # local a extent
+    # out (a,e,f,i): e = M1's FIRST leg (:e in (:e,:j,:g,:b,:p)) = size(M1,1);
+    # f = M2's FIRST leg (:f in (:f,:k,:h,:c,:p)) = size(M2,1). (Verified with
+    # non-uniform bonds; uniform-D test would mask a wrong index.)
+    partial = similar(ARu_g, na, size(M1,1), size(M2,1), χ)   # [a-block, e, f, i∈1:χ]
+    d_chunks = split_ranges(χ, min(n_d, χ))    # contracted → ACCUMULATE Σ_d
+    i_chunks = split_ranges(χ, min(n_i, χ))    # output     → ASSIGN disjoint i-slice
+    for ich in i_chunks                          # disjoint output i-slices → ASSIGN
+        acc = nothing
+        for dch in d_chunks                      # summed contracted d-slices → ACCUMULATE Σ_d
+            piece = chain_apply(FRMAP_LEG5_CHAIN,
+                (ARd_g[ich, :, :, :], FR_g[dch, :, :, :], M1, M2, ARu_g[:, :, :, dch]))
+            if acc === nothing
+                acc = piece
+            else
+                acc .+= piece; _free!(piece)
+            end
+        end
+        view(partial, :, :, :, ich) .= acc; _free!(acc)   # disjoint i-slice assignment
+    end
+    # F5: sum l over row (full last leg i), keep i-block r2.
+    @assert size(partial, 4) == χ "FRmap F5: partial last leg must be full i"
+    result = _cannon_row_reduce_scatter_last(partial, grid, p_rs)   # tag 760
+    return result, ARd_g, FR_g, ARu_g
+end
+
+"""
+    FRmap_cannon_dist(FR_blk, ARu_blk, ARd_blk, M, grid; forloop_iter=1, inner_etype=nothing)
+
+Distributed FRmap on a SQUARE N×N Cannon grid (gather class — `@assert
+N1==N2`). FR/ARu/ARd are block-stored (first χ leg by r1, last χ leg by r2;
+`cannon_scatter` convention), M replicated. Two cross-axis legs (contracted
+`d`, output `i`) are gathered to full before the local chain so the
+off-diagonal `(a,i)` blocks are actually contracted (the diagonal trap). The
+single `p_rs = split_ranges(χ, N)` is licensed by the square assertion.
+`forloop_iter` sets the 2-level memory chunk: `n_d = n_i = N·⌈√forloop_iter⌉`
+chunks over the contracted `d` (accumulate `Σ_d`) and the output `i` (assign
+disjoint slices); the contracted local `l`-block is summed whole inside each
+`chain_apply`. Local einsum is `FRMAP_LEG5_CHAIN` via `chain_apply` (whole-chain
+engine API), NOT a ring, NOT a hand kernel. Collective over `grid.comm`.
+Rectangular grids (N1≠N2) are M3 v2 (a real block transpose). See
+docs/2026-06-13-m3-cannon-wrappers-plan.md Batch B.
+"""
+function FRmap_cannon_dist(FR_blk, ARu_blk, ARd_blk, M, grid::CannonGrid;
+                           forloop_iter = 1, inner_etype = nothing)
+    @assert grid.N1 == grid.N2 "FRmap_cannon_dist: M3 v1 requires a square grid (N1==N2)"
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    T_orig = eltype(FR_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        FR_blk  = _downcast_eltype(inner_etype, FR_blk)
+        ARu_blk = _downcast_eltype(inner_etype, ARu_blk)
+        ARd_blk = _downcast_eltype(inner_etype, ARd_blk)
+        M1 = _downcast_eltype(inner_etype, M1); M2 = _downcast_eltype(inner_etype, M2)
+    end
+    χ = MPI.Allreduce(size(ARd_blk, 1), +, grid.col_comm)       # F0
+    p_rs = split_ranges(χ, grid.N1)
+    n_chunk = grid.N1 * ceil(Int, sqrt(forloop_iter))          # §6.2: n_d = n_i = N·⌈√forloop_iter⌉
+    ARd_g = _cannon_col_allgather(ARd_blk, grid, p_rs)         # F1: full i (tag 730)
+    ARu_g = _cannon_row_allgather(ARu_blk, grid, p_rs)         # F2: full d (tag 750)
+    FR_g  = _cannon_col_allgather(FR_blk,  grid, p_rs)         # F3: full d (tag 730)
+    result, _, _, _ = _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs, n_chunk, n_chunk; forloop_iter)
+    return do_cast ? T_orig.(result) : result
+end
