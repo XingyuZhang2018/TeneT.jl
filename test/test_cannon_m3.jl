@@ -384,4 +384,19 @@ end
     @test g_dist[5] ≈ g_ref[5] rtol = 1e-10
 end
 
+# ACdmap is NOT self-iterating (output {a,d} top, input {i,l} bottom). Its iterate
+# test feeds its output block into a matching ACmap_cannon_dist (whose AC input is
+# {a,d}) and compares the composed serial maps.
+@testset "ACdmap_cannon_dist composes into ACmap" begin
+    N1 = N2 = 2; χ, D = 16, 3
+    ACd, FL, FR, M1, M2, _ = make_leg5(χ, D; seed=3100)
+    g = cannon_grid(N1, N2)
+    ACdb=cannon_scatter(ACd,g); FLb=cannon_scatter(FL,g); FRb=cannon_scatter(FR,g)
+    mid_blk = ACdmap_cannon_dist(ACdb, FLb, FRb, (M1,M2), g)   # [a,b,c,d] block
+    # the {a,d} output block convention matches ACmap's AC input {a,d} → feed in
+    out = cannon_gather(ACmap_cannon_dist(mid_blk, FLb, FRb, (M1,M2), g), g)
+    ref_mid = ACdmap(ACd, FL, FR, (M1,M2))
+    @test out ≈ ACmap(ref_mid, FL, FR, (M1,M2)) rtol = 1e-11
+end
+
 println("rank $rank: test_cannon_m3.jl batch D done")
