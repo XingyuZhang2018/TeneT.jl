@@ -5,8 +5,8 @@ using Test, MPI, LinearAlgebra, Random, Zygote
 using TeneT
 using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather,
              split_ranges, Cmap, Cmap_cannon,
-             FRmap, FRmap_cannon_dist
-# Batch C appends: ACmap, ACmap_cannon_dist
+             FRmap, FRmap_cannon_dist,
+             ACmap, ACmap_cannon_dist
 # Batch D appends: ACdmap, ACdmap_cannon_dist
 
 MPI.Init()
@@ -186,3 +186,31 @@ end
 end
 
 println("rank $rank: test_cannon_m3.jl batch B done")
+
+# ─── Batch C: ACmap_cannon_dist (gather class, SINGLE l-chunk, square grid) ───
+
+@testset "ACmap_cannon_dist forward parity (square grid)" begin
+    N1 = N2 = 2
+    for χ in (16, 18), n in (1, 3)
+        D = 3
+        AC, FL, FR, M1, M2, _ = make_leg5(χ, D; seed=2600 + χ + n)
+        g = cannon_grid(N1, N2)
+        ref = ACmap(AC, FL, FR, (M1, M2))      # result[i,j,k,l] := AC[a,b,c,d] FR[d,g,h,l] M1 M2 FL[a,e,f,i]
+        ACb = cannon_scatter(AC, g); FLb = cannon_scatter(FL, g); FRb = cannon_scatter(FR, g)
+        out = cannon_gather(ACmap_cannon_dist(ACb, FLb, FRb, (M1,M2), g; forloop_iter=n), g)
+        @test out ≈ ref rtol = 1e-12
+        # CRITICAL off-diagonal (the diagonal trap): with χ=18, N=2 →
+        # p_rs = [1:9, 10:18]; check off-diagonal (i,l) blocks A≠B explicitly.
+        if χ == 18
+            @test out[1:9, :, :, 10:18] ≈ ref[1:9, :, :, 10:18] rtol = 1e-12   # i-blk 0, l-blk 1
+            @test out[10:18, :, :, 1:9] ≈ ref[10:18, :, :, 1:9] rtol = 1e-12   # i-blk 1, l-blk 0
+        end
+        # single-M entry
+        out1 = cannon_gather(ACmap_cannon_dist(ACb, FLb, FRb, M1, g), g)
+        @test out1 ≈ ACmap(AC, FL, FR, M1) rtol = 1e-12
+    end
+    # rectangular grids are M3 v2 — explicitly skipped:
+    @test_skip "ACmap_cannon_dist rectangular grid (N1≠N2) deferred to M3 v2"
+end
+
+println("rank $rank: test_cannon_m3.jl batch C done")
