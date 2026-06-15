@@ -748,22 +748,22 @@ function ChainRulesCore.rrule(::typeof(Cmap_cannon), C, FL_blk, FR_blk, grid::Ca
     return result, cmap_cannon_back
 end
 
-# FRmap (cross-axis gather class): FR/ARu/ARd block-stored, output [a,e,f,i]
-# block-distributed (a on r1, i on r2 — same convention as input). The forward
-# gathers the two cross-axis legs (contracted d, output i) to full, runs the
-# local FRMAP_LEG5_CHAIN per (d-chunk, i-chunk), and row_reduce_scatter_last's
-# the output i (completing Σ_l). Backward is the i↔d swap of the ACdmap rrule:
-# chain_backward (recompute-style, eager _free!, NO Zygote) over the SAME
-# 2-level d/i chunk, then the adjoint comm pairs (B5 row_allgather ↔ F5
-# row_reduce_scatter_last; B1/B3 col_reduce_scatter ↔ F1/F3 col_allgather; B2
-# row_reduce_scatter_last ↔ F2 row_allgather).
-# Captured footprint: 3·χ²D²/N gathered slices (ARd_g full-i/l-block, FR_g
-# full-d/l-block, ARu_g a-block/full-d) + M1/M2 + p_rs + chunk counts — never a
-# χ²D⁴ array, never a χ×χ (a,i) plane. The backward transient is bounded by the
-# 2-level d/i chunk: chain_backward recomputes the full-i×full-d I1/I2/I3, so
-# capturing bounded slices alone does NOT bound the recompute — the d/i chunk
-# does (mirrors the ACdmap bound). Same rank-uniform / densify / do_cast
-# discipline as FLmap_cannon_dist.
+# FRmap (cross-axis RING class via the M3.5 reorder, docs/2026-06-15-…): FR/ARu/ARd
+# block-stored, output [a,e,f,i] block-distributed (a on r1, i on r2). The forward
+# gathers the two cross-axis legs (contracted d, output i) to full, runs the local
+# FRMAP_LEG5_CANNON_CHAIN (ops (FR,ARu,M1,M2,ARd) — FR·ARu kills the cross-axis
+# contracted d at link 1 → a-block×l-block intermediates, NO full-i×full-d plane)
+# per SINGLE l-chunk (accumulate Σ_l), and row_reduce_scatter_last's the output i
+# (completing Σ_l). Backward (i↔d swap of the ACdmap rrule): chain_backward
+# (recompute-style, eager _free!, NO Zygote) over the SAME single l-chunk, grads in
+# the reordered ops order (dFR,dARu,dM1,dM2,dARd), then the adjoint comm pairs
+# (B5 row_allgather ↔ F5 row_reduce_scatter_last; B1/B3 col_reduce_scatter ↔ F1/F3
+# col_allgather; B2 row_reduce_scatter_last ↔ F2 row_allgather) — UNCHANGED from the
+# old gather-class version (only the local chain order/chunk changed). l is the
+# aligned CONTRACTED leg: dpartial (no l axis) is SHARED across chunks; the
+# l-carrying operands FR_g/ARd_g are sliced. Captured footprint: 3·χ²D²/N gathered
+# slices + M1/M2 + p_rs — never a χ²D⁴ array, never a χ×χ plane. Same rank-uniform /
+# densify / do_cast discipline as FLmap_cannon_dist.
 function ChainRulesCore.rrule(::typeof(FRmap_cannon_dist), FR_blk, ARu_blk, ARd_blk, M, grid::CannonGrid;
                               forloop_iter = 1, inner_etype = nothing)
     @assert grid.N1 == grid.N2 "FRmap_cannon_dist: M3 v1 requires a square grid (N1==N2)"
@@ -779,11 +779,10 @@ function ChainRulesCore.rrule(::typeof(FRmap_cannon_dist), FR_blk, ARu_blk, ARd_
 
     χ = MPI.Allreduce(size(ARd_c, 1), +, grid.col_comm)
     p_rs = split_ranges(χ, grid.N1)
-    n_chunk = grid.N1 * ceil(Int, sqrt(forloop_iter))   # n_d = n_i = N·⌈√forloop_iter⌉
     ARd_g = _cannon_col_allgather(ARd_c, grid, p_rs)    # F1: full i (tag 730)
     ARu_g = _cannon_row_allgather(ARu_c, grid, p_rs)    # F2: full d (tag 750)
     FR_g  = _cannon_col_allgather(FR_c,  grid, p_rs)    # F3: full d (tag 730)
-    result_c, _, _, _ = _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1_c, M2_c, grid, p_rs, n_chunk, n_chunk; forloop_iter)
+    result_c, _, _, _ = _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1_c, M2_c, grid, p_rs; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function frmap_cannon_dist_back(dresult)
@@ -798,32 +797,32 @@ function ChainRulesCore.rrule(::typeof(FRmap_cannon_dist), FR_blk, ARu_blk, ARd_
         d_c = do_cast ? _boundary_cast(inner_etype, d_c) : d_c
 
         # B5: adjoint of F5 row_reduce_scatter_last (760) → row_allgather (750);
-        # full i (last leg), local a.
+        # full i (last leg), local a. dpartial has NO l axis (l is contracted) →
+        # SHARED across every l-sub-chunk.
         dpartial = _cannon_row_allgather(d_c, grid, p_rs)
 
-        # B4: SAME 2-level d/i chunk as the forward (chain_backward recomputes
-        # I1/I2/I3 → same full-i×full-d intermediates). Zero-init the
-        # gathered-slice grad accumulators FIRST.
+        # B4: SINGLE-l accumulate (mirror of the M3.5 ring-reorder forward over
+        # FRMAP_LEG5_CANNON_CHAIN = ops (FR,ARu,M1,M2,ARd); chain_backward recomputes
+        # the a-block×l-block I1/I2/I3 — no full-i×full-d plane). l is the aligned
+        # CONTRACTED leg: feed the FULL dpartial to every chunk; slice the
+        # l-carrying operands FR_g/ARd_g on l. Grads return in the NEW ops order
+        # (dFR, dARu, dM1, dM2, dARd). Zero-init accumulators FIRST.
         dARd_g = zero(ARd_g); dFR_g = zero(FR_g); dARu_g = zero(ARu_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
-        d_chunks = split_ranges(χ, min(n_chunk, χ))   # contracted d
-        i_chunks = split_ranges(χ, min(n_chunk, χ))   # output i
-        for ich in i_chunks
-            dpi = dpartial[:, :, :, ich]              # cotangent for this i-chunk (shared over d)
-            for dch in d_chunks
-                # Chain grads in ops order (dARd, dFR, dM1, dM2, dARu).
-                (dARd_c, dFR_c, dM1_c, dM2_c, dARu_c) =
-                    chain_backward(FRMAP_LEG5_CHAIN,
-                        (ARd_g[ich,:,:,:], FR_g[dch,:,:,:], M1_c, M2_c, ARu_g[:,:,:,dch]),
-                        dpi)
-                view(dARd_g, ich,:,:,:) .+= dARd_c    # i-sliced disjoint per ich (accumulate over dch)
-                view(dFR_g, dch,:,:,:)  .+= dFR_c     # d-sliced (accumulate over both loops)
-                view(dARu_g,:,:,:,dch)  .+= dARu_c    # d-sliced (accumulate over both loops)
-                dM1 .+= dM1_c; dM2 .+= dM2_c
-                _free!(dARd_c); _free!(dFR_c); _free!(dARu_c); _free!(dM1_c); _free!(dM2_c)
-            end
-            _free!(dpi)
+        nl = size(FR_g, 4)
+        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        for ch in l_chunks
+            (dFR_c, dARu_c, dM1_c, dM2_c, dARd_c) =
+                chain_backward(FRMAP_LEG5_CANNON_CHAIN,
+                    (FR_g[:,:,:,ch], ARu_g, M1_c, M2_c, ARd_g[:,:,:,ch]),
+                    dpartial)
+            view(dFR_g,  :,:,:,ch) .+= dFR_c      # FR l-slice (disjoint per ch)
+            dARu_g .+= dARu_c                     # ARu has no l → accumulate over chunks
+            view(dARd_g, :,:,:,ch) .+= dARd_c     # ARd l-slice (disjoint per ch)
+            dM1 .+= dM1_c; dM2 .+= dM2_c
+            _free!(dFR_c); _free!(dARu_c); _free!(dARd_c); _free!(dM1_c); _free!(dM2_c)
         end
+        _free!(dpartial)
 
         # B3: adjoint of F3 col_allgather on FR (730) → col_reduce_scatter (710);
         #     dFR_g full d, local l-block → keep d-block r1.
@@ -951,26 +950,24 @@ function ChainRulesCore.rrule(::typeof(ACmap_cannon_dist), AC_blk, FL_blk, FR_bl
     return result, acmap_cannon_dist_back
 end
 
-# ACdmap (cross-axis gather class): ACd/FL/FR block-stored, output [a,b,c,d]
-# block-distributed (a on r1, d on r2). The forward gathers the two cross-axis
-# legs (contracted i via ACd/FL, output d via FR) to full, runs the local
-# ACDMAP_LEG5_CHAIN over the 2-LEVEL i/d chunk (inner i-loop accumulates Σ_i;
-# outer d-loop assigns disjoint d-slices — ACdmap's intermediates carry full-i ×
-# full-d and are bounded ONLY by this chunk, NOT by an l-chunk; that was THE
-# BLOCKER §5.1), and row_reduce_scatter_last's the output d (completing Σ_l).
-# Backward is the design doc §5.2 B0-B5: chain_backward (recompute-style, eager
-# _free!, NO Zygote) over the SAME 2-level i/d chunk, then the adjoint comm pairs
-# (B5 row_allgather ↔ F5 row_reduce_scatter_last; B3/B1 col_reduce_scatter ↔ F3/F1
-# col_allgather; B2 row_reduce_scatter_last ↔ F2 row_allgather).
-# Captured footprint: 3·χ²D²/N gathered slices (ACd_g full-i/l-block, FL_g
-# a-block/full-i, FR_g full-d/l-block) + M1/M2 + p_rs + n_chunk — never a χ²D⁴
-# array, never a χ×χ (a,d) plane (the full-i×full-d chain intermediates are
-# bounded by feeding chain_backward the i/d-chunk slices, exactly as the forward
-# feeds chain_apply; capturing bounded slices alone does NOT bound the recompute).
-# KEPT EXPLICIT — NOT DRY-merged with FRmap (the i↔d structural twin): the i↔d
-# slicing is the highest cross-leak risk, so each rrule is written out per the
-# review decision. Same rank-uniform / densify / do_cast discipline as
-# FLmap_cannon_dist.
+# ACdmap (cross-axis RING class via the M3.5 reorder, docs/2026-06-15-…): ACd/FL/FR
+# block-stored, output [a,b,c,d] block-distributed (a on r1, d on r2). The forward
+# gathers the two cross-axis legs (contracted i via ACd/FL, output d via FR) to
+# full, runs the local ACDMAP_LEG5_CANNON_CHAIN (ops (FL,ACd,M1,M2,FR) — FL·ACd
+# kills the cross-axis contracted i at link 1 → a-block×l-block intermediates, NO
+# full-i×full-d plane; the former §5.1 BLOCKER is gone) per SINGLE l-chunk
+# (accumulate Σ_l), and row_reduce_scatter_last's the output d (completing Σ_l).
+# Backward: chain_backward (recompute-style, eager _free!, NO Zygote) over the SAME
+# single l-chunk, grads in the reordered ops order (dFL,dACd,dM1,dM2,dFR), then the
+# adjoint comm pairs (B5 row_allgather ↔ F5 row_reduce_scatter_last; B3/B1
+# col_reduce_scatter ↔ F3/F1 col_allgather; B2 row_reduce_scatter_last ↔ F2
+# row_allgather) — UNCHANGED from the old gather-class version (only the local chain
+# order/chunk changed). l is the aligned CONTRACTED leg: dpartial (no l axis) is
+# SHARED across chunks; the l-carrying operands ACd_g/FR_g are sliced. Captured
+# footprint: 3·χ²D²/N gathered slices + M1/M2 + p_rs — never a χ²D⁴ array, never a
+# χ×χ (a,d) plane. KEPT EXPLICIT — NOT DRY-merged with FRmap (the i↔d structural
+# twin): the i↔d slicing is the highest cross-leak risk. Same rank-uniform /
+# densify / do_cast discipline as FLmap_cannon_dist.
 function ChainRulesCore.rrule(::typeof(ACdmap_cannon_dist), ACd_blk, FL_blk, FR_blk, M, grid::CannonGrid;
                               forloop_iter = 1, inner_etype = nothing)
     @assert grid.N1 == grid.N2 "ACdmap_cannon_dist: M3 v1 requires a square grid (N1==N2)"
@@ -986,11 +983,10 @@ function ChainRulesCore.rrule(::typeof(ACdmap_cannon_dist), ACd_blk, FL_blk, FR_
 
     χ = MPI.Allreduce(size(ACd_c, 1), +, grid.col_comm)
     p_rs = split_ranges(χ, grid.N1)
-    n_chunk = grid.N1 * ceil(Int, sqrt(forloop_iter))   # n_i = n_d = N·⌈√forloop_iter⌉
     ACd_g = _cannon_col_allgather(ACd_c, grid, p_rs)    # F1: full i (tag 730)
     FL_g  = _cannon_row_allgather(FL_c,  grid, p_rs)    # F2: full i (tag 750)
     FR_g  = _cannon_col_allgather(FR_c,  grid, p_rs)    # F3: full d (tag 730)
-    result_c, _, _, _ = _acdmap_cannon_forward_sliced(ACd_g, FR_g, FL_g, M1_c, M2_c, grid, p_rs, n_chunk, n_chunk; forloop_iter)
+    result_c, _, _, _ = _acdmap_cannon_forward_sliced(ACd_g, FR_g, FL_g, M1_c, M2_c, grid, p_rs; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function acdmap_cannon_dist_back(dresult)
@@ -1005,32 +1001,33 @@ function ChainRulesCore.rrule(::typeof(ACdmap_cannon_dist), ACd_blk, FL_blk, FR_
         d_c = do_cast ? _boundary_cast(inner_etype, d_c) : d_c
 
         # B5: adjoint of F5 row_reduce_scatter_last (760) → row_allgather (750);
-        # full d (last leg), local a.
+        # full d (last leg), local a. dpartial has NO l axis (l is contracted) →
+        # SHARED across every l-sub-chunk (NOT sliced — that would be ACmap's
+        # output-leg pattern, wrong here).
         dpartial = _cannon_row_allgather(d_c, grid, p_rs)
 
-        # B4: SAME 2-level i/d chunk as the forward (chain_backward recomputes
-        # I1/I2/I3 → same full-i×full-d intermediates). Zero-init the
-        # gathered-slice grad accumulators FIRST.
+        # B4: SINGLE-l accumulate (mirror of the M3.5 ring-reorder forward over
+        # ACDMAP_LEG5_CANNON_CHAIN = ops (FL,ACd,M1,M2,FR); chain_backward recomputes
+        # the a-block×l-block I1/I2/I3 — no full-i×full-d plane). l is the aligned
+        # CONTRACTED leg: feed the FULL dpartial to every chunk; slice the
+        # l-carrying operands ACd_g/FR_g on l. Grads return in the NEW ops order
+        # (dFL, dACd, dM1, dM2, dFR). Zero-init accumulators FIRST.
         dACd_g = zero(ACd_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
-        i_chunks = split_ranges(χ, min(n_chunk, χ))   # contracted i
-        d_chunks = split_ranges(χ, min(n_chunk, χ))   # output d
-        for dch in d_chunks
-            dpd = dpartial[:, :, :, dch]              # cotangent for this d-chunk (shared over i)
-            for ich in i_chunks
-                # Chain grads in ops order (dACd, dFR, dM1, dM2, dFL).
-                (dACd_c, dFR_c, dM1_c, dM2_c, dFL_c) =
-                    chain_backward(ACDMAP_LEG5_CHAIN,
-                        (ACd_g[ich,:,:,:], FR_g[dch,:,:,:], M1_c, M2_c, FL_g[:,:,:,ich]),
-                        dpd)
-                view(dACd_g, ich,:,:,:) .+= dACd_c    # i-sliced (accumulate over both loops)
-                view(dFR_g, dch,:,:,:)  .+= dFR_c     # d-sliced disjoint per dch (accumulate over ich)
-                view(dFL_g, :,:,:,ich)  .+= dFL_c     # i-sliced (accumulate over both loops)
-                dM1 .+= dM1_c; dM2 .+= dM2_c
-                _free!(dACd_c); _free!(dFR_c); _free!(dFL_c); _free!(dM1_c); _free!(dM2_c)
-            end
-            _free!(dpd)
+        nl = size(ACd_g, 4)
+        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        for ch in l_chunks
+            (dFL_c, dACd_c, dM1_c, dM2_c, dFR_c) =
+                chain_backward(ACDMAP_LEG5_CANNON_CHAIN,
+                    (FL_g, ACd_g[:,:,:,ch], M1_c, M2_c, FR_g[:,:,:,ch]),
+                    dpartial)
+            dFL_g .+= dFL_c                       # FL has no l → accumulate over chunks
+            view(dACd_g, :,:,:,ch) .+= dACd_c     # ACd l-slice (disjoint per ch)
+            view(dFR_g,  :,:,:,ch) .+= dFR_c      # FR l-slice (disjoint per ch)
+            dM1 .+= dM1_c; dM2 .+= dM2_c
+            _free!(dFL_c); _free!(dACd_c); _free!(dFR_c); _free!(dM1_c); _free!(dM2_c)
         end
+        _free!(dpartial)
 
         # B3: adjoint of F3 col_allgather on FR (730) → col_reduce_scatter (710);
         #     dFR_g full d, local l-block → keep d-block r1.

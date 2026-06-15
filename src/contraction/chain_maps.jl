@@ -71,6 +71,14 @@ const FRMAP_LEG4_CHAIN = tensor_chain(((:f,:g,:h), (:c,:e,:h), (:d,:g,:e,:b), (:
 const FRMAP_LEG5_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)), (:a,:e,:f,:i))
 const FRMAP_LEG8_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:f,:j,:k,:g,:h,:b,:c), (:a,:b,:c,:d)), (:a,:e,:f,:i))
 const FRMAP_LEG5_CHAIN_1M = conj_variant(FRMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
+# M3.5 distributed-only RING-class reorder (docs/2026-06-15-m35-cannon-ring-reorder-design.md):
+# operands permuted to (FR, ARu, M1, M2, ARd) so the cross-axis CONTRACTED leg d
+# dies at link 1 (FR·ARu) — no full-i×full-d plane → single-l-chunk ring class
+# (like FLmap/ACmap). Per-operand leg tuples are IDENTICAL to FRMAP_LEG5_CHAIN,
+# only the ORDER permuted (asserted). The cannon forward/rrule always run the 2M
+# chain, so NO _1M twin is needed.
+const FRMAP_LEG5_CANNON_CHAIN = tensor_chain(((:d,:g,:h,:l), (:a,:b,:c,:d), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:i,:j,:k,:l)), (:a,:e,:f,:i))
+@assert Set(FRMAP_LEG5_CANNON_CHAIN.ops) == Set(FRMAP_LEG5_CHAIN.ops) && FRMAP_LEG5_CANNON_CHAIN.out == FRMAP_LEG5_CHAIN.out "FRMAP_LEG5_CANNON_CHAIN must be an operand permutation of FRMAP_LEG5_CHAIN (identical legs/out, reordered only)"
 
 function engine_backward(::typeof(FRmap), args::NTuple{4, Any}, dOut)
     _chainable(args...) || return nothing
@@ -138,6 +146,14 @@ end
 const ACDMAP_LEG4_CHAIN = tensor_chain(((:f,:g,:h), (:c,:e,:h), (:d,:g,:e,:b), (:a,:d,:f)), (:a,:b,:c))
 const ACDMAP_LEG5_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:e,:f,:i)), (:a,:b,:c,:d))
 const ACDMAP_LEG5_CHAIN_1M = conj_variant(ACDMAP_LEG5_CHAIN, 4)  # M2 = conj(M1), no materialization
+# M3.5 distributed-only RING-class reorder (docs/2026-06-15-m35-cannon-ring-reorder-design.md):
+# operands permuted to (FL, ACd, M1, M2, FR) so the cross-axis CONTRACTED leg i
+# dies at link 1 (FL·ACd) — no full-i×full-d plane → single-l-chunk ring class
+# (like FLmap/ACmap). Per-operand leg tuples are IDENTICAL to ACDMAP_LEG5_CHAIN,
+# only the ORDER permuted (asserted). The cannon forward/rrule always run the 2M
+# chain, so NO _1M twin is needed.
+const ACDMAP_LEG5_CANNON_CHAIN = tensor_chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:d,:g,:h,:l)), (:a,:b,:c,:d))
+@assert Set(ACDMAP_LEG5_CANNON_CHAIN.ops) == Set(ACDMAP_LEG5_CHAIN.ops) && ACDMAP_LEG5_CANNON_CHAIN.out == ACDMAP_LEG5_CHAIN.out "ACDMAP_LEG5_CANNON_CHAIN must be an operand permutation of ACDMAP_LEG5_CHAIN (identical legs/out, reordered only)"
 
 function engine_backward(::typeof(ACdmap), args::NTuple{4, Any}, dOut)
     _chainable(args...) || return nothing
