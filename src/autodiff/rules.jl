@@ -810,7 +810,7 @@ function ChainRulesCore.rrule(::typeof(FRmap_cannon_dist), FR_blk, ARu_blk, ARd_
         dARd_g = zero(ARd_g); dFR_g = zero(FR_g); dARu_g = zero(ARu_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
         nl = size(FR_g, 4)
-        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        l_chunks = _ring_l_chunks(length(p_rs[grid.r1+1]), nl, M1_c, M2_c, forloop_iter)  # match forward's 2^31 floor
         for ch in l_chunks
             (dFR_c, dARu_c, dM1_c, dM2_c, dARd_c) =
                 chain_backward(FRMAP_LEG5_CANNON_CHAIN,
@@ -1015,7 +1015,7 @@ function ChainRulesCore.rrule(::typeof(ACdmap_cannon_dist), ACd_blk, FL_blk, FR_
         dACd_g = zero(ACd_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
         nl = size(ACd_g, 4)
-        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        l_chunks = _ring_l_chunks(length(p_rs[grid.r1+1]), nl, M1_c, M2_c, forloop_iter)  # match forward's 2^31 floor
         for ch in l_chunks
             (dFL_c, dACd_c, dM1_c, dM2_c, dFR_c) =
                 chain_backward(ACDMAP_LEG5_CANNON_CHAIN,

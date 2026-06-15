@@ -563,6 +563,24 @@ function Cmap_cannon(C, FL_blk, FR_blk, grid::CannonGrid)
     return out   # full χ×χ, replicated
 end
 
+# cuTENSOR contracts the M3.5 ring chain's 7-dim intermediate I2 (≈ na·local_l·
+# D⁴·d_phys) through 32-bit-indexed StridedViews; once it exceeds ~2^31 elements
+# cuTENSOR throws an illegal-address (code 700). Observed on a 2×2 grid at D=10
+# χ=768 (I2≈2.95e9 > 2^31) with a single l-chunk; a 4×4 grid never hit it (I2 is
+# χ²/P smaller). Floor the l-chunk COUNT so each chunk's I2 stays < 2e9, taking the
+# max with the caller's forloop_iter (never fewer chunks than asked). Uniform-D
+# production: Dmax⁴·d_phys is exact; non-uniform bonds: a safe over-estimate (a few
+# extra chunks). Used by both reorder forwards (cannon_2d.jl) and rrules (rules.jl).
+function _ring_l_chunks(na::Int, nl::Int, M1, M2, forloop_iter::Int)
+    Dmax = max(size(M1,1), size(M1,2), size(M1,3), size(M1,4),
+               size(M2,1), size(M2,2), size(M2,3), size(M2,4))
+    dphys = size(M1, 5)
+    inter_n1 = na * nl * Dmax^4 * dphys            # I2 element count at a single l-chunk
+    n_floor  = cld(inter_n1, 2_000_000_000)        # keep each chunk's I2 < 2e9 (< 2^31, margin)
+    n_eff    = clamp(max(forloop_iter, n_floor), 1, nl)
+    return split_ranges(nl, n_eff)
+end
+
 # ─── FRmap (cross-axis gather class — SQUARE grid, RING reorder, single l-chunk) ─
 # result[a,e,f,i] := ARd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] ARu[a,b,c,d]
 # M3.5 RING reorder (docs/2026-06-15-m35-cannon-ring-reorder-design.md): the local
@@ -590,7 +608,7 @@ function _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; fo
     # f = M2's FIRST leg (:f in (:f,:k,:h,:c,:p)) = size(M2,1); i is FULL.
     # (Verified with non-uniform bonds; uniform-D test would mask a wrong index.)
     partial = similar(ARu_g, na, size(M1,1), size(M2,1), χ)   # [a-block, e, f, i∈1:χ]
-    l_chunks = split_ranges(nl, min(forloop_iter, nl))
+    l_chunks = _ring_l_chunks(na, nl, M1, M2, forloop_iter)   # 2^31 cuTENSOR floor (see _ring_l_chunks)
     firstchunk = true
     for ch in l_chunks                           # ACCUMULATE Σ_l (l is the aligned contracted leg)
         Pc = chain_apply(FRMAP_LEG5_CANNON_CHAIN,
@@ -769,7 +787,7 @@ function _acdmap_cannon_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, p_rs; fo
     # (those are :j/:k, the ACmap output legs). Verified with non-uniform bonds
     # (Db≠Dc); a uniform-D=3 test masks the wrong index — the Db≠Dc testset guards it.
     partial = similar(FL_g, na, size(M1,4), size(M2,4), χ)   # [a-block, b, c, d∈1:χ]
-    l_chunks = split_ranges(nl, min(forloop_iter, nl))
+    l_chunks = _ring_l_chunks(na, nl, M1, M2, forloop_iter)  # 2^31 cuTENSOR floor (see _ring_l_chunks)
     firstchunk = true
     for ch in l_chunks                           # ACCUMULATE Σ_l (l is the aligned contracted leg)
         Pc = chain_apply(ACDMAP_LEG5_CANNON_CHAIN,
