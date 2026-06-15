@@ -425,3 +425,162 @@ function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg
     return VUMPSRuntime(scatter_struct(AL, grid), scatter_struct(AR, grid), C,
                         scatter_struct(FL, grid), scatter_struct(FR, grid))
 end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# M5-plaq: Plaquette-mode cannon (vumps_step_cannon for VUMPS{<:Plaquette}).
+# Plaquette VUMPS is a SIMPLER mirror of General: no AR / rightenv (left-canonical
+# only), and ACenv/Cenv use FL on BOTH transfer sides instead of FL+FR. The serial
+# Plaquette path (plaquette.jl) calls the SAME ACmap(AC,FL,FR,M) / Cmap(C,FL,FR)
+# kernels as General, just passing a second FL slice into the FR slot. So the cannon
+# versions REUSE the General cannon machinery wholesale (gather/scatter seam,
+# ACmap_cannon_sliced, _simple_eig_{AC,C}map_cannon, leftenv_cannon, ALCtoAC_cannon,
+# cannon_dot/norm rrules) — the only changes: FR-operand sourced from FL[:,jr], and the
+# AR/rightenv half dropped (ACCtoAL not ACCtoALAR). AD-correctness is identical to M5.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# jr column of the FR-slot FL slice (copied from serial ACenv_plaq/Cenv_plaq:58-64).
+function _plaq_jr(::Type{L}, j::Int, Nj::Int) where {L <: Plaquette}
+    if L <: Plaquette{Square}
+        return mod1(j + 1, Nj)
+    elseif L <: Plaquette{Honeycomb{:brickwall_h}}
+        return mod1(Nj - j, Nj)
+    else
+        error("Plaquette cannon: unsupported lattice $L (only Square / Honeycomb brickwall_h)")
+    end
+end
+
+"""
+    λAC, AC_blk = ACenv_plaq_cannon(AC_blk, FL_blk, M, grid; alg)
+
+Distributed plaquette `ACenv_plaq`. FL on BOTH sides: FL[:,j] (row-gather, "FL" slot)
+and FL[:,jr] (col-gather, "FR" slot). Reuses `_simple_eig_ACmap_cannon` /
+`ACmap_cannon_sliced` verbatim; mirrors ACenv_cannon (non-leading cells use GLOBAL cannon_norm).
+"""
+function ACenv_plaq_cannon(AC_blk, FL_blk, M, grid::CannonGrid; alg::VUMPS{L}) where {L <: Plaquette}
+    @assert grid.N1 == grid.N2 "ACenv_plaq_cannon: square grid (N1==N2)"
+    @assert alg.ifsimple_eig "ACenv_plaq_cannon: requires ifsimple_eig=true"
+    @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "ACenv_plaq_cannon: mixed precision is not supported on the cannon path"
+    @assert ndims(M.data[1]) == 5 "ACenv_plaq_cannon: leg5 single-layer-pair M only"
+    @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+
+    Ni, Nj = size(M)
+    χ, p_rs = ChainRulesCore.ignore_derivatives() do
+        c = MPI.Allreduce(size(AC_blk[1, 1], 1), +, grid.col_comm)
+        (c, split_ranges(c, grid.N1))
+    end
+    λAC = Zygote.Buffer(randSA(Array, M.pattern))
+    AC′ = Zygote.Buffer(AC_blk)
+    processed_indices = Set{Int}()
+    for j in 1:Nj
+        jr = _plaq_jr(L, j, Nj)
+        FLj_col  = ntuple(ip -> cannon_gather_row(FL_blk[ip, j],  grid, p_rs), Ni)   # FL slot (full i)
+        FLjr_col = ntuple(ip -> cannon_gather_col(FL_blk[ip, jr], grid, p_rs), Ni)   # FR slot (full d)
+        M_j      = ntuple(ip -> M[ip, j], Ni)
+        p = AC_blk.pattern[1, j]
+        if p ∉ processed_indices
+            λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_cannon,
+                                   AC_blk[1, j], FLj_col, FLjr_col, M_j, grid;
+                                   power_iter, forloop_iter, segment_checkpoint)
+            λAC[1, j], AC′[1, j] = selectpos(λACs, ACs, Ni)
+            push!(processed_indices, p)
+            length(processed_indices) == length(AC_blk.data) && break
+        end
+        for i in 2:Ni
+            p2 = AC_blk.pattern[i, j]
+            if p2 ∉ processed_indices
+                ACij = ACmap_cannon_sliced(AC′[i-1, j], FLj_col[i-1], FLjr_col[i-1], M_j[i-1], grid; forloop_iter)
+                AC′[i, j] = ACij / cannon_norm(ACij, grid)
+                λAC[i, j] = λAC[1, j]
+                push!(processed_indices, p2)
+                length(processed_indices) == length(AC_blk.data) && break
+            end
+        end
+    end
+    return copy(λAC), copy(AC′)
+end
+
+"""
+    λC, C = Cenv_plaq_cannon(C, FL_blk, grid; alg)
+
+Distributed plaquette `Cenv_plaq`: Cmap(C, FL[:,jl], FL[:,jr]). C REPLICATED (gather FL
+slices take-my-block, plain norm). Mirrors Cenv_cannon.
+"""
+function Cenv_plaq_cannon(C, FL_blk, grid::CannonGrid; alg::VUMPS{L}) where {L <: Plaquette}
+    @assert alg.ifsimple_eig "Cenv_plaq_cannon: requires ifsimple_eig=true"
+    @unpack power_iter, segment_checkpoint = alg
+    Ni, Nj = size(C)
+    λC = Zygote.Buffer(randSA(Array, C.pattern))
+    C′ = Zygote.Buffer(C)
+    processed_indices = Set{Int}()
+    for j in 1:Nj
+        jl = mod1(j + 1, Nj)          # FL slot column (serial Cenv_plaq:117, all lattices)
+        jr = _plaq_jr(L, j, Nj)       # FR slot column
+        FLjl_full = ntuple(ip -> cannon_gather(FL_blk[ip, jl], grid), Ni)
+        FLjr_full = ntuple(ip -> cannon_gather(FL_blk[ip, jr], grid), Ni)
+        p = C.pattern[1, j]
+        if p ∉ processed_indices
+            λCs, Cs = _simple_eig_Cmap_cannon(C[1, j], FLjl_full, FLjr_full; power_iter, segment_checkpoint)
+            λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
+            push!(processed_indices, p)
+            length(processed_indices) == length(C.data) && break
+        end
+        for i in 2:Ni
+            p2 = C.pattern[i, j]
+            if p2 ∉ processed_indices
+                Cij = Cmap(C′[i-1, j], FLjl_full[i-1], FLjr_full[i-1])
+                C′[i, j] = Cij / norm(Cij)    # local norm OK — C replicated
+                λC[i, j] = λC[1, j]
+                push!(processed_indices, p2)
+                length(processed_indices) == length(C.data) && break
+            end
+        end
+    end
+    return copy(λC), copy(C′)
+end
+
+"""
+    AL_blk, errL = ACCtoAL_cannon(AC_blk, C, grid)
+
+Left-only QR gather seam (plaquette has no AR): gather AC to full, run the verbatim
+serial `ACCtoAL`, scatter AL. C replicated. Same AD as M5 ACCtoALAR_cannon minus the AR half.
+"""
+function ACCtoAL_cannon(AC_blk, C, grid::CannonGrid)
+    AC_full = gather_struct(AC_blk, grid)
+    AL_full, errL = ACCtoAL(AC_full, C)           # VERBATIM serial kernel (general.jl:685)
+    return scatter_struct(AL_full, grid), errL
+end
+
+"""
+    rt′, err = vumps_step_cannon(rt::PlaquetteVUMPSRuntime, M, grid, alg)
+
+One distributed plaquette VUMPS step, mirroring serial vumps_step (plaquette.jl:162):
+ALCtoAC → leftenv → ACenv_plaq → Cenv_plaq → ACCtoAL (no rightenv/AR). AL/FL block, C replicated.
+"""
+function vumps_step_cannon(rt::PlaquetteVUMPSRuntime, M::StructArray, grid::CannonGrid, alg::VUMPS{L}) where {L <: Plaquette}
+    @assert alg.inner_checkpoint isa Plain "vumps_step_cannon(Plaquette): inner_checkpoint other than Plain() is not supported on the cannon path; got $(alg.inner_checkpoint)"
+    @unpack AL, C, FL = rt
+    sub = alg.subop_checkpoint
+    AC = ALCtoAC_cannon(AL, C, grid)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv_cannon(a, b, m, fl, grid; alg), AL, conj(AL), M, FL)
+    _, AC = checkpoint(sub, (a, fl, m) -> ACenv_plaq_cannon(a, fl, m, grid; alg), AC, FL, M)
+    _, C  = Cenv_plaq_cannon(C, FL, grid; alg)
+    AL, err = checkpoint(sub, (ac, c) -> ACCtoAL_cannon(ac, c, grid), AC, C)
+    C = for_gc(C)
+    return PlaquetteVUMPSRuntime(AL, C, FL), err
+end
+
+"""
+    rt = init_VUMPSRuntime_cannon(M, χ, grid, alg::VUMPS{<:Plaquette})
+
+Block-distributed plaquette init: serial canonicalization (C = LRtoC(L,L), no right),
+unconditional bcast over grid.comm, then scatter AL/FL (C replicated).
+"""
+function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg::VUMPS{L}) where {L <: Plaquette}
+    A = initial_A(M, χ)
+    AL, Lg, _ = left_canonical(A)
+    C = LRtoC(Lg, Lg)
+    AL = bcast_struct(AL, 0, grid.comm)
+    C  = bcast_struct(C,  0, grid.comm)
+    _, FL = leftenv(AL, conj(AL), M; alg)
+    return PlaquetteVUMPSRuntime(scatter_struct(AL, grid), C, scatter_struct(FL, grid))
+end

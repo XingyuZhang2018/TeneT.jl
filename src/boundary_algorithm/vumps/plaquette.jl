@@ -160,6 +160,9 @@ One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
 function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
+    # Cannon (2D block-distributed) path when a grid is set — routes both vumps_itr
+    # call sites. Serial body below runs whenever grid === nothing.
+    alg.grid === nothing || return vumps_step_cannon(rt, M, alg.grid, alg)
     @unpack AL, C, FL = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
@@ -175,6 +178,8 @@ end
 
 function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Plaquette})
     size(M.pattern) == (2,2) || size(M.pattern) == (2,6) || error("Plaquette VUMPS only supports 2×2 and 2×6 patterns. Got pattern of size $(size(M.pattern)).")
+    # Cannon path: build a BLOCK-distributed plaquette runtime when a grid is set.
+    alg.grid === nothing || return init_VUMPSRuntime_cannon(M, χ, alg.grid, alg)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     C = LRtoC(L, L)   # use L on both sides (no right canonical)
