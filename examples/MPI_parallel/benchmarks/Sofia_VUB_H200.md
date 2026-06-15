@@ -756,6 +756,90 @@ Headline reading (ring columns):
 `Sofia_cannon_bench16_1287187.out`. Footnotes 1–2 of Part 5 (output-placement
 asymmetry, NCCL coverage) apply unchanged.
 
+## Part 11: M3.5 ring-class reorder — FRmap/ACdmap gather-class → ring-class
+
+Branch `claude/ecstatic-golick-e3f6f0` @ `334575d`. Design:
+[`docs/2026-06-15-m35-cannon-ring-reorder-design.md`](../../../docs/2026-06-15-m35-cannon-ring-reorder-design.md).
+The M3 gather-class FRmap/ACdmap (2-level i/d chunk, a full-i×full-d intermediate
+plane) are reordered so the cross-axis **contracted** leg dies at link 1 (FL·ACd /
+FR·ARu) — exactly as ACmap already did — collapsing the plane to χ²D⁴/P. All four
+cannon maps become **single-l-chunk ring-class** with **identical communication**
+(no new primitive; only the local chain order + chunk loop change). Driver
+`benchmark_cannon_maps_sofia.jl` (Float64 leg5 single-M, nrep=3, cannon
+`forloop_iter=pick_n`; parity vs the chunked `*_parallel` slice ref — no
+serial-ref OOM). Validated: 4-rank CPU parity (incl. multi-chunk accumulate,
+off-diagonal trap blocks, single-M, Db≠Dc) + opus review CLEAN + GPU parity
+`F✓ B✓` every cell. A 2³¹ cuTENSOR floor (`_ring_l_chunks`) was added after a
+2×2 D=10 χ=768 illegal-address (the 7-dim I2 = na·local_l·D⁴·d_phys overflows
+32-bit StridedView indexing > 2³¹; the floor caps each chunk's I2 < 2e9).
+
+Gather-class baseline = job `1287203` (16 GPU 4×4); ring-class = the **ring**
+columns of job `1287248` (16 GPU 4×4, same matrix). 16-GPU headline (ms):
+
+| cell | FLmap | ACmap | FRmap gather→ring | ACdmap gather→ring |
+|------|-------|-------|-------------------|---------------------|
+| D16 χ1024 fwd | 2169 | 2139 | 8245 → **2345** (3.5×) | 8329 → **2248** (3.7×) |
+| D16 χ1024 bwd | 5968 | 5960 | 38583 → **7247** (5.3×) | 28977 → **6133** (4.7×) |
+| D14 χ1024 fwd | 1495 | 1524 | 4844 → **1675** (2.9×) | 4974 → **1642** (3.0×) |
+| D14 χ1024 bwd | 3948 | 3725 | 22144 → **5048** (4.4×) | 16339 → **4044** (4.0×) |
+
+**Reading.** The gather-class FRmap/ACdmap ran **3–6× FLmap** (the full-i×full-d
+plane = N× redundant FLOPs/rank + ≈P·n small GEMMs); the reorder drops them to
+**≈ FLmap / ACmap (1.0–1.1×)** — all four maps now one architecture. The penalty
+grew with grid size in the gather-class (N× factor: 16-GPU FRmap bwd was 6.4×
+FLmap vs 3.1× at 4 GPU), so the reorder matters more at scale. The 4-GPU
+gather-class baseline (`1287202`) showed the same 2.4–3.8× that the reorder
+removes. Full 20-cell × 4-map tables are the ring columns of Part 12.
+
+## Part 12: NCCL fast path for the cannon col/row collectives — 16 vs 64 GPU scaling
+
+Commits `b2f9906` (NCCL path) + `5463dd8` (64-GPU script). The four cannon
+collectives (`_cannon_{col,row}_{allgather,reduce_scatter*}`) gain an NCCL path
+(`TENET_USE_NCCL=1`), mirroring the existing `allreduce_p2p!`/`allgatherv_p2p!`
+seam: `_get_nccl_comm(grid.row_comm/col_comm)` reuses the per-MPI-comm NCCL cache
+(no new infra); ROW collectives (last leg) call ncclAllGather/ncclReduceScatter
+directly; COLUMN collectives (first leg) permute the leg first↔last around the
+NCCL call (a local GPU transpose, cheap vs the cross-node IB transfer it
+replaces). Guarded `_use_nccl() && CuArray && equal-blocks (χ%N==0)` → MPI
+fallback. In the 2-rows-per-node (4×4) / 1-row-per-node (8×8) layout the
+**col_comm is the cross-node axis** — the high-value NCCL target. opus-reviewed
+CLEAN (permute round-trip + rank-mapping empirically verified). Jobs `1287248`
+(16 GPU 4×4, 2 nodes) + `1287257` (64 GPU 8×8, 8 nodes); ring vs nccl columns,
+**parity recomputed under NCCL — `F✓ B✓` every cell** (the permute path is
+numerically correct at both 4×4 and 8×8).
+
+**NCCL speedup, FLmap fwd at χ=1024 (ms ring→nccl, FR/AC/ACd track within ±15%):**
+
+| D  | 16 GPU (2 nodes) | 64 GPU (8 nodes) |
+|----|------------------|------------------|
+| 8  | 388 → 168 (2.3×) | 216 → 132 (1.6×) |
+| 10 | 704 → 313 (2.2×) | 357 → 234 (1.5×) |
+| 12 | 1096 → 500 (2.2×)| 545 → 351 (1.6×) |
+| 14 | 1495 → 687 (2.2×)| 837 → 587 (1.4×) |
+| 16 | 2169 → 997 (2.2×)| 1160 → 704 (1.7×)|
+
+Backward tracks forward (16 GPU ~1.4–1.7×, 64 GPU ~1.5–1.7× at χ=1024).
+
+**Headline — NCCL's benefit is set by the per-rank MESSAGE SIZE, not node count.**
+- **Large cells win**: at χ=1024 NCCL is 2.2× (16 GPU) / 1.5–1.7× (64 GPU). At
+  16 GPU the crossover where NCCL starts winning is ≈χ512; below it the col
+  blocks are too small for the IB transfer to amortise NCCL's fixed launch cost.
+- **The benefit SHRINKS at 64 GPU (strong scaling, fixed χ)**, contrary to the
+  naive "more nodes ⇒ more NCCL". Per-rank comm is χ²D²/√P (shrinks as 1/√P) so
+  at 8×8 each col message is 4× smaller than at 4×4 → NCCL's fixed latency is a
+  bigger fraction → the crossover moves UP to ≈χ1024, and small cells get much
+  worse (FLmap D8 χ256 fwd: 16 GPU 25→51 = 2× slower; 64 GPU 12→66 = **5.6×
+  slower**). Two competing effects — comm fraction grows with √P (pro-NCCL) but
+  per-message size shrinks (anti-NCCL); at fixed χ the latter wins.
+- **To grow the NCCL win with node count, scale WEAKLY** (raise χ with P so the
+  per-rank message stays large). NCCL fully pays off in the production regime
+  (large χ≥1024, D≥10).
+
+**Production guidance**: gate NCCL on the per-rank message `~χ·D/√P`, not blanket
+on — enable for large χ / moderate P, keep the hand ring for the strong-scaling
+tail and small cells. (Full 20-cell × 4-map ring/nccl tables: jobs 1287248 /
+1287257 `.out`; regenerate via `submit_benchmark_cannon_maps_{16,64}gpu.sh`.)
+
 ## Sofia-specific Environment
 
 ```bash

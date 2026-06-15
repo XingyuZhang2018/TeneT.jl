@@ -1,8 +1,11 @@
 # M3.5: make FRmap / ACdmap cannon RING-class by reordering the local chain
 
-Status: design, gating an M3.5 implementation. Author response to the question
-"why aren't FRmap/ACdmap the same architecture as FLmap/ACmap — can't we just
-reorder the contraction?". **Answer: yes.** The gather-class 2-level i/d chunk
+Status: **IMPLEMENTED + VALIDATED** (commits 03df56b reorder, 334575d 2³¹ floor;
+benchmarks Part 11). 4-rank CPU parity green (multi-chunk accumulate + off-diag
+trap + Db≠Dc), opus review CLEAN, GPU parity `F✓ B✓` at 4×4/8×8, FR/ACd dropped
+from 3–6× FLmap to ≈FLmap. Author response to the question "why aren't
+FRmap/ACdmap the same architecture as FLmap/ACmap — can't we just reorder the
+contraction?". **Answer: yes.** The gather-class 2-level i/d chunk
 of `FRmap_cannon_dist`/`ACdmap_cannon_dist` is **not fundamental** — it is an
 artifact of reusing the M2 serial chain order. Reordering the *local* chain so
 the cross-axis *contracted* leg dies at link 1 (exactly what makes `ACmap`
