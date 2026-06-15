@@ -301,6 +301,12 @@ function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquett
     # `model` accepted for call-site uniformity with VUMPS{General} ObsEnv;
     # Plaquette has no obs_index trait, so the arg is ignored.
     @unpack AL, C, FL = rt
+    # Cannon path: FLo block-distributed (leftenv_cannon ifobs=true, FL on both sides) → gather to full.
+    if alg.grid !== nothing
+        g = alg.grid
+        _, FLo = leftenv_cannon(AL, AL, M, FL, g; ifobs=true, alg)
+        return gather_env(PlaquetteVUMPSEnv(AL, C, FL, FLo), g)
+    end
     _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
     return PlaquetteVUMPSEnv(AL, C, FL, FLo)
 end

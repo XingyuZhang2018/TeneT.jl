@@ -797,10 +797,16 @@ function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
     alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
 
     # M5: Cannon (2D block-distributed) path — build a BLOCK-distributed runtime so the
-    # grid-routed vumps_step_cannon receives blocks. Single-environment only (cannon asserts !ifupdown).
+    # grid-routed vumps_step_cannon receives blocks. Supports ifupdown (up on M + down on
+    # _down_M(M)); leading_boundary(Tuple) then runs each via the cannon vumps_step guard.
     if alg.grid !== nothing
-        alg.ifupdown && throw(ArgumentError("init_env: the Cannon path (alg.grid set) is single-environment; set ifupdown=false."))
-        return init_VUMPSRuntime_cannon(M, χ, alg.grid, alg)
+        g = alg.grid
+        rtup = init_VUMPSRuntime_cannon(M, χ, g, alg)
+        if alg.ifupdown
+            alg.ifdownfromup && throw(ArgumentError("init_env cannon: ifdownfromup not yet supported; use ifdownfromup=false."))
+            return rtup, init_VUMPSRuntime_cannon(_down_M(M), χ, g, alg)
+        end
+        return rtup
     end
 
     Ni, Nj = size(M)
@@ -1071,6 +1077,17 @@ Two return shapes:
 function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
+    # Cannon path: compute the obs env block-distributed (leftenv/rightenv_cannon with
+    # ifobs=true), then gather to FULL for the serial energy_value (v1; see cannon.jl).
+    if alg.grid !== nothing
+        g = alg.grid
+        AC = ALCtoAC_cannon(AL, C, g)
+        _, FLo = leftenv_cannon(AL, AL, M, Fo[1], g; ifobs=true, alg, model)
+        _, FRo = rightenv_cannon(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
+        (model !== nothing && uses_oneside_obs_env(typeof(model))) &&
+            error("ObsEnv cannon: OnesideVUMPSEnv (oneside obs) not yet distributed; use a non-oneside model.")
+        return gather_env(VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo), g)
+    end
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
     _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg, model)
@@ -1091,6 +1108,17 @@ down runtime, so the `obs_index` trait is not needed.
 """
 function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt[1].FL, rt[1].FR])
+    # Cannon path: mixed obs env (ACu/ACd from up/down via ALCtoAC_cannon; FLo/FRo from
+    # leftenv/rightenv_cannon ifobs=true with the up AL/AR and down AL/AR) → gather to FULL.
+    if alg.grid !== nothing
+        g = alg.grid
+        rtup, rtdown = rt
+        ACu = ALCtoAC_cannon(rtup.AL, rtup.C, g)
+        ACd = ALCtoAC_cannon(rtdown.AL, rtdown.C, g)
+        _, FLo = leftenv_cannon(rtup.AL, rtdown.AL, M, Fo[1], g; ifobs=true, alg)
+        _, FRo = rightenv_cannon(rtup.AR, rtdown.AR, M, Fo[2], g; ifobs=true, alg)
+        return gather_env(VUMPSEnv(ACu, rtup.AR, ACd, rtdown.AR, rtup.FL, rtup.FR, FLo, FRo), g)
+    end
     atype = _arraytype(M)
     set_device_id!(atype, 1)
     rtup, rtdown = rt

@@ -56,8 +56,8 @@ function leftenv_cannon(ALu_blk, ALd_blk, M, FL_blk, grid::CannonGrid; alg, ifob
     @assert alg.ifsimple_eig "leftenv_cannon: requires ifsimple_eig=true (the eigsolve branch bypasses the cannon rrules)"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "leftenv_cannon: mixed precision is M5 (inner_etype/whole_vumps_etype/simple_eig_polish_steps must be unset)"
     @assert ndims(M.data[1]) == 5 "leftenv_cannon: leg5 single-layer-pair M only (leg4/leg8 are M5)"
-    @assert !ifobs && model === nothing "leftenv_cannon: obs/model env is deferred to M5 (R1-M12)"
     @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+    power_iter = ifobs ? alg.power_iter_obs : power_iter   # obs (mixed) env uses the larger obs power iter
 
     Ni, Nj = size(M)
     # χ is the GLOBAL bond dim (recovered from the local a-block over col_comm);
@@ -73,7 +73,9 @@ function leftenv_cannon(ALu_blk, ALd_blk, M, FL_blk, grid::CannonGrid; alg, ifob
     FL′ = Zygote.Buffer(FL_blk)
     processed_indices = Set{Int}()
     for i in 1:Ni
-        ir = mod1(i + 1, Ni)
+        # ifobs (obs/mixed env): down-row partner is Ni+1-i (or model's obs_index),
+        # AND the caller passes ALu=ALd=AL (no conj) — same FLmap kernel, just the partner.
+        ir = ifobs ? (model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)) : mod1(i + 1, Ni)
         # HOIST (unconditional + rank-uniform): gather the FIXED ALu/ALd slices
         # once for every column of this row, OUTSIDE the eig checkpoint. Immutable
         # Tuples (not a Zygote.Buffer) so Zygote accumulates the slice cotangents
@@ -137,8 +139,8 @@ function rightenv_cannon(ARu_blk, ARd_blk, M, FR_blk, grid::CannonGrid; alg, ifo
     @assert alg.ifsimple_eig "rightenv_cannon: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "rightenv_cannon: mixed precision is M5"
     @assert ndims(M.data[1]) == 5 "rightenv_cannon: leg5 single-layer-pair M only"
-    @assert !ifobs && model === nothing "rightenv_cannon: obs/model env is deferred to M5 (R1-M12)"
     @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+    power_iter = ifobs ? alg.power_iter_obs : power_iter   # obs (mixed) env uses the larger obs power iter
 
     Ni, Nj = size(M)
     χ, p_rs = ChainRulesCore.ignore_derivatives() do
@@ -149,7 +151,7 @@ function rightenv_cannon(ARu_blk, ARd_blk, M, FR_blk, grid::CannonGrid; alg, ifo
     FR′ = Zygote.Buffer(FR_blk)
     processed_indices = Set{Int}()
     for i in 1:Ni
-        ir = mod1(i + 1, Ni)
+        ir = ifobs ? (model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)) : mod1(i + 1, Ni)
         ARu_row = ntuple(j -> cannon_gather_row(ARu_blk[i, j],  grid, p_rs), Nj)   # full d
         ARd_col = ntuple(j -> cannon_gather_col(ARd_blk[ir, j], grid, p_rs), Nj)   # full i
         M_i     = ntuple(j -> M[i, j], Nj)
@@ -584,3 +586,23 @@ function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg
     _, FL = leftenv(AL, conj(AL), M; alg)
     return PlaquetteVUMPSRuntime(scatter_struct(AL, grid), C, scatter_struct(FL, grid))
 end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# cannon ObsEnv: distributed observation environment.
+# The obs envs (FLo/FRo) use the SAME FLmap/FRmap kernels as the bulk envs — leftenv/
+# rightenv with ifobs=true just change the down-row partner (ir=Ni+1-i) and power_iter
+# (power_iter_obs); ALu=ALd=AL (no conj). So leftenv_cannon/rightenv_cannon (ifobs flag
+# now live) compute FLo/FRo block-distributed. v1 then GATHERS the obs env to full and
+# hands it to the serial `energy_value` (energy expectation is not yet distributed — a
+# v2 item; energy_value is cheaper than leading_boundary, and the full env is replicated
+# after gather so every rank computes the identical scalar). The ObsEnv guard lives in
+# general.jl (dispatch on alg.grid). gather_env reuses gather_struct (take-my-block adjoint).
+# ═══════════════════════════════════════════════════════════════════════════════
+gather_env(env::VUMPSEnv, grid::CannonGrid) = VUMPSEnv(
+    gather_struct(env.ACu, grid), gather_struct(env.ARu, grid),
+    gather_struct(env.ACd, grid), gather_struct(env.ARd, grid),
+    gather_struct(env.FLu, grid), gather_struct(env.FRu, grid),
+    gather_struct(env.FLo, grid), gather_struct(env.FRo, grid))
+gather_env(env::PlaquetteVUMPSEnv, grid::CannonGrid) = PlaquetteVUMPSEnv(
+    gather_struct(env.AL, grid), env.C,                 # C replicated (not gathered)
+    gather_struct(env.FLu, grid), gather_struct(env.FLo, grid))
