@@ -842,9 +842,9 @@ function ChainRulesCore.rrule(::typeof(FRmap_cannon_dist), FR_blk, ARu_blk, ARd_
             dFR_blk = T_orig.(dFR_blk); dARu_blk = T_orig.(dARu_blk); dARd_blk = T_orig.(dARd_blk)
             dM = is_tuple ? (T_orig.(dM[1]), T_orig.(dM[2])) : T_orig.(dM)
         end
-        # map arg order FRmap_cannon_dist(FR, ARu, ARd, M, grid). Chain returns
-        # (dARd, dFR, dM1, dM2, dARu); permute to map order (dFR, dARu, dARd, dM)
-        # exactly as engine_backward(::typeof(FRmap),…) does.
+        # map arg order FRmap_cannon_dist(FR, ARu, ARd, M, grid). The M3.5 chain
+        # FRMAP_LEG5_CANNON_CHAIN ops (FR,ARu,M1,M2,ARd) returns
+        # (dFR, dARu, dM1, dM2, dARd); permute to map order (dFR, dARu, dARd, dM).
         return NoTangent(), dFR_blk, dARu_blk, dARd_blk, dM, NoTangent()
     end
     return result, frmap_cannon_dist_back
@@ -1047,9 +1047,9 @@ function ChainRulesCore.rrule(::typeof(ACdmap_cannon_dist), ACd_blk, FL_blk, FR_
             dACd_blk = T_orig.(dACd_blk); dFL_blk = T_orig.(dFL_blk); dFR_blk = T_orig.(dFR_blk)
             dM = is_tuple ? (T_orig.(dM[1]), T_orig.(dM[2])) : T_orig.(dM)
         end
-        # map arg order ACdmap_cannon_dist(ACd, FL, FR, M, grid). Chain returns
-        # (dACd, dFR, dM1, dM2, dFL); permute to map order (dACd, dFL, dFR, dM)
-        # exactly as engine_backward(::typeof(ACdmap),…) does (chain_maps.jl:147).
+        # map arg order ACdmap_cannon_dist(ACd, FL, FR, M, grid). The M3.5 chain
+        # ACDMAP_LEG5_CANNON_CHAIN ops (FL,ACd,M1,M2,FR) returns
+        # (dFL, dACd, dM1, dM2, dFR); permute to map order (dACd, dFL, dFR, dM).
         return NoTangent(), dACd_blk, dFL_blk, dFR_blk, dM, NoTangent()
     end
     return result, acdmap_cannon_dist_back
