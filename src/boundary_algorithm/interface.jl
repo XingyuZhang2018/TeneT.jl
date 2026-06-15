@@ -28,6 +28,12 @@ C4v
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
 
+    # M5 Cannon (2D block-distributed) path. When a CannonGrid is set, `vumps_step`
+    # routes to `vumps_step_cannon` (block AL/AR/FL/FR, replicated C, QR gather seam).
+    # nothing → serial path unchanged. Untyped (like ifparallelupdown) to avoid a
+    # forward-reference to CannonGrid (defined later in the module).
+    grid = nothing
+
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0
     simple_eig_polish_steps::Int = 0

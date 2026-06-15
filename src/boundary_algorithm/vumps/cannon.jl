@@ -312,3 +312,116 @@ function Cenv_cannon(C, FL_blk, FR_blk, grid::CannonGrid; alg)
     end
     return copy(λC), copy(C′)
 end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# M5: vumps_step assembly + the QR gather seam.
+# Design: docs/2026-06-15-m5-vumps-step-cannon-assembly-design.md
+#
+# The four M4 solvers cover calls 2-5 of the 6-call vumps_step pipeline. M5 adds the
+# two ENDPOINTS (ALCtoAC entry, ACCtoALAR exit) + orchestration + block init. Both
+# endpoints follow the SAME pattern (R1-confirmed lowest-risk): gather the operand
+# StructArray to FULL, run the UNMODIFIED serial kernel, scatter the output(s) back to
+# blocks. C is REPLICATED throughout (never gathered/scattered). This reuses the M4
+# gather/scatter rrules (take-my-block / allreduce) with ZERO new rrules, and inherits
+# the serial kernels' exact per-cell accumulation (errL/errR) for free.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# StructArray-level full↔block shims (differentiable: StructArray ctor rrule +
+# per-cell cannon_gather/cannon_scatter rrules). gather/scatter map over .data (the
+# UNIQUE cells), so they gather each unique cell exactly once and are rank-uniform
+# (the .pattern is replicated). bcast is init-only (outside AD) — no rrule needed.
+gather_struct(SA, grid::CannonGrid)  = StructArray([cannon_gather(t, grid)  for t in SA.data], SA.pattern)
+scatter_struct(SA, grid::CannonGrid) = StructArray([cannon_scatter(t, grid) for t in SA.data], SA.pattern)
+bcast_struct(SA, root::Integer, comm) = StructArray([MPI.bcast(t, root, comm) for t in SA.data], SA.pattern)
+
+"""
+    AC_blk = ALCtoAC_cannon(AL_blk, C, grid)
+
+Distributed entry seam (call 1). Block AL's contracted last leg (`r2`-split) ×
+replicated full C needs a reduction over the `r2` partition; v1 does it by gathering
+AL to full, running the verbatim serial `ALCtoAC`, and scattering the result AC back
+to blocks (Option A — uniform with the QR seam, lowest risk). AD: gather take-my-block
+adjoint → serial @tensor → scatter allreduce adjoint. Parity-load-bearing: `ACenv_cannon`
+seeds a FINITE power iteration from this exact AC, so it must match serial bit-equally.
+"""
+function ALCtoAC_cannon(AL_blk, C, grid::CannonGrid)
+    AL_full = gather_struct(AL_blk, grid)
+    AC_full = ALCtoAC(AL_full, C)         # VERBATIM serial kernel (general.jl:196), C replicated
+    return scatter_struct(AC_full, grid)
+end
+
+"""
+    AL_blk, AR_blk, errL, errR = ACCtoALAR_cannon(AC_blk, C, grid)
+
+The QR GATHER SEAM (exit, call 6). The per-cell full-χ QR/LQ (`qrpos`/`lqpos`) cannot
+run on a χ-block, so gather the whole AC StructArray to FULL, run the UNMODIFIED serial
+`ACCtoALAR` (which factorizes the full χ matrices on every rank identically), and scatter
+the full AL/AR back to blocks. C is already replicated (never gathered). errL/errR are
+replicated QR residuals — computed identically on every rank, NEVER allreduced (an
+allreduce would multiply by P). The exact serial accumulation index sets (ACCtoAL over
+all positions, ACCtoAR over unique data + jr=mod1(j-1,Nj)) are inherited by reusing the
+serial kernel verbatim. AD: gather take-my-block → qrpos/lqpos rrules (replicated) →
+scatter allreduce. MUST use the full `cannon_gather` (take-my-block), NOT the row/col
+reduce-scatter wrappers — those over-count the AC gradient by N1/N2 (the QR is replicated,
+not a distributed contraction). Design §2.
+"""
+function ACCtoALAR_cannon(AC_blk, C, grid::CannonGrid)
+    AC_full = gather_struct(AC_blk, grid)
+    AL_full, AR_full, errL, errR = ACCtoALAR(AC_full, C)   # VERBATIM serial kernel (general.jl:712)
+    return scatter_struct(AL_full, grid), scatter_struct(AR_full, grid), errL, errR
+end
+
+"""
+    rt′, err = vumps_step_cannon(rt, M, grid, alg)
+
+One distributed VUMPS step on a square N×N Cannon grid. Mirrors the serial `vumps_step`
+(general.jl:873) call-for-call — old AL/AR into the env updates, a single AC/C solve (NOT
+the `vumps_step_power` re-solve variant) — replacing the four solvers with their `_cannon`
+analogs and the two endpoints with the gather seams. AL/AR/FL/FR are block-stored; C is
+replicated full χ×χ. Same checkpoint wrapping as serial (leftenv/rightenv/ACenv/ACCtoALAR
+under `subop_checkpoint`; ALCtoAC and Cenv unwrapped). Square-grid/leg5/ifsimple_eig/no-
+mixed-precision asserts fire inside the `_cannon` solvers.
+"""
+function vumps_step_cannon(rt::VUMPSRuntime, M::StructArray, grid::CannonGrid, alg::VUMPS{General})
+    # The cannon env solvers / seam maps do NOT thread inner_checkpoint into their per-map
+    # calls (Cmap/FLmap/etc.), unlike serial Cenv/leftenv. It is a no-op at the default
+    # Plain(), but a non-Plain inner_checkpoint would silently diverge from serial — fail loud.
+    @assert alg.inner_checkpoint isa Plain "vumps_step_cannon: inner_checkpoint other than Plain() is not supported on the cannon path (the cannon maps don't thread it); got $(alg.inner_checkpoint)"
+    @unpack AL, C, AR, FL, FR = rt
+    sub = alg.subop_checkpoint
+    AC = ALCtoAC_cannon(AL, C, grid)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv_cannon(a, b, m, fl, grid; alg), AL, conj(AL), M, FL)
+    _, FR = checkpoint(sub, (a, b, m, fr) -> rightenv_cannon(a, b, m, fr, grid; alg), AR, conj(AR), M, FR)
+    _, AC = checkpoint(sub, (ac, fl, m, fr) -> ACenv_cannon(ac, fl, m, fr, grid; alg), AC, FL, M, FR)
+    _, C  = Cenv_cannon(C, FL, FR, grid; alg)          # C replicated χ×χ — no checkpoint (mirrors serial)
+    AL, AR, errL, errR = checkpoint(sub, (ac, c) -> ACCtoALAR_cannon(ac, c, grid), AC, C)
+    err = errL + errR
+    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    C = for_gc(C)
+    return VUMPSRuntime(AL, AR, C, FL, FR), err
+end
+
+"""
+    rt = init_VUMPSRuntime_cannon(M, χ, grid, alg)
+
+Build a block-distributed initial runtime. Canonicalization is irreducibly serial
+full-χ (no distributed variant), so build full AL/AR/C, **bcast over `grid.comm`
+UNCONDITIONALLY** (R1-F1: `initial_A → randSA` uses an un-seeded per-rank RNG, and the
+serial bcast is gated on `ifparallel` which the cannon path runs `false` — without this
+bcast each rank would scatter a slice of a DIFFERENT random tensor → mismatched blocks),
+then compute the initial FL/FR on the (now identical) full AL/AR and scatter AL/AR/FL/FR
+to blocks. C stays replicated (its distributed form IS the full χ×χ tensor).
+"""
+function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg::VUMPS{General})
+    A = initial_A(M, χ)
+    AL, L, _ = left_canonical(A)
+    R, AR, _ = right_canonical(AL)
+    C = LRtoC(L, R)
+    AL = bcast_struct(AL, 0, grid.comm)
+    AR = bcast_struct(AR, 0, grid.comm)
+    C  = bcast_struct(C,  0, grid.comm)
+    _, FL = leftenv(AL, conj(AL), M; alg)    # serial, on the bcast (identical) full AL
+    _, FR = rightenv(AR, conj(AR), M; alg)   # serial, on the bcast (identical) full AR
+    return VUMPSRuntime(scatter_struct(AL, grid), scatter_struct(AR, grid), C,
+                        scatter_struct(FL, grid), scatter_struct(FR, grid))
+end

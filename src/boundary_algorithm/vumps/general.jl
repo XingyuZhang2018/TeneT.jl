@@ -796,6 +796,13 @@ and bond dimension `χ`.
 function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
     alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
 
+    # M5: Cannon (2D block-distributed) path — build a BLOCK-distributed runtime so the
+    # grid-routed vumps_step_cannon receives blocks. Single-environment only (cannon asserts !ifupdown).
+    if alg.grid !== nothing
+        alg.ifupdown && throw(ArgumentError("init_env: the Cannon path (alg.grid set) is single-environment; set ifupdown=false."))
+        return init_VUMPSRuntime_cannon(M, χ, alg.grid, alg)
+    end
+
     Ni, Nj = size(M)
 
     if alg.ifupdown && alg.ifparallelupdown
@@ -871,6 +878,10 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
 end
 
 function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    # M5: route to the Cannon (2D block-distributed) step when a grid is set. This
+    # single guard covers BOTH vumps_itr call sites (warm-up + AD loop). Serial body
+    # below is unchanged and runs whenever grid === nothing.
+    alg.grid === nothing || return vumps_step_cannon(rt, M, alg.grid, alg)
     @unpack AL, C, AR, FL, FR = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
