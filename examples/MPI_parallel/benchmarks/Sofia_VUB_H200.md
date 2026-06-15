@@ -642,6 +642,120 @@ distributed parity validated on GPU (χ=256 D=8, all 4 maps); the production-cel
 memory check is blocked by the serial reference's size, recorded as a follow-up
 (serial-ref-free dist-only probe).**
 
+## Part 10: Cannon scaling — 2×2 (4 GPU, 1 node) vs 4×4 (16 GPU, 2 nodes) — `FLmap_cannon_dist`
+
+Jobs `1287186` (4 GPU, grid 2×2, 1 node, `COMPLETED` 22:41) + `1287187`
+(16 GPU, grid 4×4, **2 nodes × 8×H200**, `COMPLETED` 19:54), 2026-06-15,
+branch `claude/ecstatic-golick-e3f6f0` @ `d28e3da` (M2 chain-engine **default
+ON** + all four M3 cannon maps merged), `submit_benchmark_cannon.sh` /
+`submit_benchmark_cannon_16gpu.sh` → `benchmark_cannon_sofia.jl` with
+`TENET_CANNON_N1=N2={2,4}`.
+
+Same driver/methodology as Part 5 (Float64 leg5 single-M, `total_splits=128`,
+`nrep=3`, backward = Zygote-`sum` pullback, `forloop_iter=n` per cell). The
+4×4 grid is laid out **2 rows per node** (`rank = r1·4 + r2`, 8 ranks/node):
+cannon **row** comms (ring shifts + AL row-gather, tags 700/750) stay
+intra-node on NVLink; cannon **column** comms (reduce-scatter / allgather,
+tags 710/730) **cross the IB link**. Both runs: all 20 cells, parity ≤1e-10
+fwd / ≤1e-8 bwd on **every** cell (`F✓ B✓`). This is the repo's first 16-GPU
+cannon timing (Part 2's 16-GPU table is the slice `FLmap_parallel` path).
+
+**(a) 4 GPU, grid 2×2 (1 node) — current commit `d28e3da`:**
+
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | cannon fwd ring | cannon fwd nccl | slice bwd ring | slice bwd nccl | cannon bwd ring | cannon bwd nccl | parity |
+|----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
+| 8  | 256  | 1  |     29.2 |     24.9 |      9.9 |     10.3 |     80.4 |     77.8 |     31.8 |     31.1 | F✓ B✓ |
+| 8  | 512  | 1  |     55.8 |     55.7 |     40.3 |     40.6 |    173.5 |    166.4 |    145.8 |    130.3 | F✓ B✓ |
+| 8  | 768  | 1  |    124.0 |    121.1 |     99.4 |     99.2 |    370.9 |    454.4 |    323.7 |    323.0 | F✓ B✓ |
+| 8  | 1024 | 1  |    210.0 |    205.4 |    198.1 |    212.6 |    632.8 |    611.2 |    646.4 |    662.2 | F✓ B✓ |
+| 10 | 256  | 1  |     36.3 |     35.2 |     28.0 |     27.7 |    118.6 |    115.6 |     87.6 |    117.1 | F✓ B✓ |
+| 10 | 512  | 1  |    110.3 |    107.7 |    102.8 |    103.4 |    396.8 |    342.3 |    341.9 |    342.8 | F✓ B✓ |
+| 10 | 768  | 1  |    233.8 |    231.2 |    259.6 |    260.0 |    818.6 |    824.5 |    856.8 |    860.3 | F✓ B✓ |
+| 10 | 1024 | 2  |    467.4 |    461.4 |    416.7 |    413.2 |   1513.5 |   1664.7 |   1557.1 |   1624.6 | F✓ B✓ |
+| 12 | 256  | 1  |     52.3 |     52.4 |     55.7 |     56.3 |    179.4 |    174.5 |    229.8 |    249.6 | F✓ B✓ |
+| 12 | 512  | 1  |    184.4 |    182.9 |    217.7 |    217.4 |    759.3 |    598.9 |    729.0 |    726.2 | F✓ B✓ |
+| 12 | 768  | 2  |    441.5 |    437.2 |    426.8 |    426.2 |   1478.3 |   1519.2 |   1706.2 |   1762.0 | F✓ B✓ |
+| 12 | 1024 | 4  |    883.8 |    879.0 |    758.8 |    768.5 |   3010.1 |   3130.1 |   3284.4 |   3246.1 | F✓ B✓ |
+| 14 | 256  | 1  |     85.8 |     84.2 |     96.2 |     96.6 |    307.9 |    303.3 |    332.1 |    330.9 | F✓ B✓ |
+| 14 | 512  | 2  |    526.6 |    535.3 |    339.5 |    340.1 |   1274.4 |   1337.1 |   1528.4 |   1379.6 | F✓ B✓ |
+| 14 | 768  | 4  |    820.2 |    829.7 |    763.4 |    764.7 |   3139.3 |   3104.4 |   3378.0 |   3459.1 | F✓ B✓ |
+| 14 | 1024 | 8  |   1694.3 |   1688.3 |   1477.8 |   1495.7 |   6143.2 |   6071.8 |   6393.0 |   6429.9 | F✓ B✓ |
+| 16 | 256  | 1  |    115.6 |    114.7 |    162.2 |    162.1 |    506.5 |    438.4 |    570.8 |    620.6 | F✓ B✓ |
+| 16 | 512  | 3  |    484.7 |    481.8 |    526.7 |    526.7 |   1868.2 |   1827.0 |   2208.6 |   2178.1 | F✓ B✓ |
+| 16 | 768  | 7  |   1407.3 |   1414.5 |   1279.7 |   1290.3 |   5156.2 |   5032.8 |   5674.4 |   5634.8 | F✓ B✓ |
+| 16 | 1024 | 14 |   2663.3 |   2640.9 |   2477.9 |   2501.8 |   9650.2 |   9859.8 |  10777.3 |  10919.0 | F✓ B✓ |
+
+**(b) 16 GPU, grid 4×4 (2 nodes, cross-node IB) — first 16-GPU cannon data:**
+
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | cannon fwd ring | cannon fwd nccl | slice bwd ring | slice bwd nccl | cannon bwd ring | cannon bwd nccl | parity |
+|----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
+| 8  | 256  | 1  |     11.5 |     24.4 |     25.7 |     24.8 |     47.9 |    119.3 |     54.8 |     88.5 | F✓ B✓ |
+| 8  | 512  | 1  |     21.5 |     35.2 |    109.8 |     97.2 |    157.8 |    159.1 |    218.0 |    249.4 | F✓ B✓ |
+| 8  | 768  | 1  |     47.0 |     57.3 |    230.8 |    227.6 |    390.4 |    280.3 |    486.1 |    548.1 | F✓ B✓ |
+| 8  | 1024 | 1  |     80.2 |     82.0 |    439.9 |    405.4 |    630.1 |    505.2 |    970.1 |    914.5 | F✓ B✓ |
+| 10 | 256  | 1  |     14.1 |     29.3 |     43.0 |     49.2 |     75.1 |    126.0 |     90.9 |    130.1 | F✓ B✓ |
+| 10 | 512  | 1  |     48.2 |     49.3 |    164.7 |    167.8 |    281.5 |    321.2 |    395.5 |    487.8 | F✓ B✓ |
+| 10 | 768  | 1  |     87.0 |     90.9 |    393.1 |    395.5 |    646.4 |    430.7 |    876.5 |    893.0 | F✓ B✓ |
+| 10 | 1024 | 1  |    162.8 |    187.3 |    713.6 |    711.3 |   1127.6 |    789.6 |   1628.2 |   1749.6 | F✓ B✓ |
+| 12 | 256  | 1  |     24.5 |     37.0 |     65.0 |     62.3 |    109.7 |    148.8 |    181.7 |    191.3 | F✓ B✓ |
+| 12 | 512  | 1  |     65.4 |     71.2 |    309.2 |    263.4 |    418.3 |    344.8 |    656.4 |    653.7 | F✓ B✓ |
+| 12 | 768  | 1  |    150.7 |    166.7 |    636.3 |    622.9 |    989.1 |    717.7 |   1485.5 |   1582.1 | F✓ B✓ |
+| 12 | 1024 | 1  |    289.7 |    288.4 |   1117.0 |   1150.1 |   1995.4 |   1357.4 |   2837.6 |   2955.9 | F✓ B✓ |
+| 14 | 256  | 1  |     46.2 |     44.9 |    101.2 |    102.8 |    182.2 |    211.5 |    253.1 |    291.6 | F✓ B✓ |
+| 14 | 512  | 1  |    107.6 |    110.4 |    412.1 |    420.6 |    730.1 |    597.5 |   1008.5 |   1117.9 | F✓ B✓ |
+| 14 | 768  | 1  |    274.0 |    268.2 |    960.5 |    973.2 |   1620.0 |   1301.2 |   2516.9 |   2608.8 | F✓ B✓ |
+| 14 | 1024 | 2  |    523.0 |    536.7 |   1570.2 |   1573.9 |   3165.4 |   2332.0 |   4340.3 |   4198.3 | F✓ B✓ |
+| 16 | 256  | 1  |     63.0 |     61.7 |    143.0 |    144.1 |    258.9 |    258.7 |    380.7 |    417.1 | F✓ B✓ |
+| 16 | 512  | 1  |    157.9 |    154.2 |    598.3 |    598.9 |    993.1 |    790.5 |   1478.5 |   1589.1 | F✓ B✓ |
+| 16 | 768  | 2  |    427.1 |    477.2 |   1224.8 |   1266.1 |   2571.2 |   2054.3 |   3300.1 |   3344.2 | F✓ B✓ |
+| 16 | 1024 | 4  |    803.8 |    866.3 |   2193.3 |   2082.5 |   5006.7 |   3817.9 |   6070.1 |   6175.6 | F✓ B✓ |
+
+Headline reading (ring columns):
+
+- **No regression: the 4-GPU table reproduces Part 5 within a few %** (cannon
+  fwd D=16 χ=1024 2478 vs Part5 2516; D=8 χ=256 9.9 vs 10.0; cannon bwd D=16
+  χ=1024 10777 vs 10470, +2.9%). M2's engine-default-ON + the M3 map merge
+  leave `FLmap_cannon_dist`'s single-node performance unchanged, as expected
+  (neither touched its hand kernels).
+
+- **4 GPU (single-node NVLink) cannon wins; at 16 GPU (cross-node IB) the
+  picture splits by direction.**
+  - **Backward scales — 1.5–1.8× faster at 16 GPU on the heavy cells** (D=16
+    χ=1024 10777→6070 = 1.78×; D=16 χ=768 5674→3300 = 1.72×; D=14 χ=1024
+    6393→4340 = 1.47×). Backward is compute-dominated (per-chunk recompute +
+    six adjoints), so 4× more ranks beats the added cross-node traffic. Small
+    cells regress (D=8 χ=1024 646→970 = 1.5× slower) where comm dominates the
+    tiny compute.
+  - **Forward barely scales — comm-bound.** Only the two largest cells edge
+    ahead at 16 GPU (D=16 χ=1024 2478→2193 = 1.13×; D=16 χ=768 1280→1225);
+    everywhere else 16-GPU cannon fwd is *slower* than 4 GPU (D=8 χ=1024
+    198→440 = 2.2×). The per-call row/col AL slice gathers now cross IB and
+    dominate the lighter forward compute.
+
+- **Cannon vs slice at 16 GPU.** Cannon **fwd** is 2.7–5.5× slower than slice
+  (the cross-node gather, counted in isolation); **bwd** only 1.2–1.5× slower.
+  Both gaps are the map-isolated penalty of Part 5 footnote 1 — in a leftenv
+  power iteration ALu/ALd are fixed so the forward gathers amortize away, and
+  cannon keeps its memory/locality advantage (3×χ²D²/P resident, block-local
+  recompute).
+
+- **NCCL helps slice cross-node, not cannon (yet).** At 16 GPU the slice
+  **bwd** allreduce takes the NCCL fast path and gains ~1.3× (D=16 χ=1024
+  slice bwd 5007→3818 ring→nccl; D=14 χ=1024 3165→2332) — Part 4's cross-node
+  NCCL win. Cannon's bwd is NCCL-flat (6070 vs 6176) because its column/row
+  reduce-scatters are still MPI point-to-point (Part 5 footnote 2). **A
+  cross-node NCCL path for the cannon reduce-scatters is the open lever** to
+  make distributed-cannon backward scale like slice at ≥2 nodes.
+
+- **Memory pressure scales 1/P: the chunk count `n` drops ~4× at 16 GPU**
+  (D=16 χ=1024 n=14→4; D=14 χ=1024 n=8→2; D=16 χ=768 n=7→2) — each rank holds
+  χ²D⁴/(P·n), so 4× more ranks need 4× fewer forloop chunks to fit, confirming
+  the per-rank bound at the wider grid.
+
+`.out` files: `examples/MPI_parallel/Sofia/Sofia_cannon_bench_1287186.out`,
+`Sofia_cannon_bench16_1287187.out`. Footnotes 1–2 of Part 5 (output-placement
+asymmetry, NCCL coverage) apply unchanged.
+
 ## Sofia-specific Environment
 
 ```bash
