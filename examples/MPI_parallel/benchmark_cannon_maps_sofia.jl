@@ -66,10 +66,10 @@ fmt(x) = isnan(x) ? @sprintf("%10s", "skip") : @sprintf("%10.1f", x)
 
 ENV["TENET_USE_NCCL"] = "0"   # ring only
 
-report("=== Cannon $(N1)x$(N2) MAP timing: FL/FR/AC/ACd ($(nprocs) GPU, ", CUDA.name(CUDA.device()), ") — RING ===")
-report("methodology: benchmark_cannon_sofia.jl (Float64 leg5 single-M, nrep=$nrep, cannon forloop_iter=n via backward-peak); slice path untimed = parity ref")
-report("| map    | D  | χ    | n  | cannon fwd | cannon bwd | parity |")
-report("|--------|----|------|----|------------|------------|--------|")
+report("=== Cannon $(N1)x$(N2) MAP timing: FL/FR/AC/ACd ($(nprocs) GPU, ", CUDA.name(CUDA.device()), ") — RING vs NCCL ===")
+report("methodology: benchmark_cannon_sofia.jl (Float64 leg5 single-M, nrep=$nrep, cannon forloop_iter=n); slice untimed=parity ref; parity recomputed under NCCL (validates the new path)")
+report("| map    | D  | χ    | n  | fwd ring | fwd nccl | bwd ring | bwd nccl | parity |")
+report("|--------|----|------|----|----------|----------|----------|----------|--------|")
 
 # (name, slice_parallel, cannon_dist) — arg order is identical for the pair.
 const MAPS = (
@@ -100,11 +100,17 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
         cannon_fwd_f = () -> cannonf(b1, b2, b3, M, n)
         cannon_bwd_f = () -> Zygote.pullback(x -> sum(cannonf(x, b2, b3, M, n)), b1)[2](1.0)
 
-        cf = timeit(cannon_fwd_f)
-        cb = timeit(cannon_bwd_f)
+        tt = Dict{String, Float64}()
+        for (tag, on) in (("ring", "0"), ("nccl", "1"))
+            ENV["TENET_USE_NCCL"] = on
+            tt["f_$tag"] = timeit(cannon_fwd_f)
+            tt["b_$tag"] = timeit(cannon_bwd_f)
+        end
 
-        # parity (UNTIMED) — cannon block vs the matching slice of the chunked
-        # *_parallel result (full χ, but forloop-chunked → no serial-ref OOM).
+        # parity (UNTIMED) under NCCL — validates the NEW NCCL cannon path vs the
+        # chunked *_parallel slice ref (ring already validated by test_cannon_m3 +
+        # the M3.5 16-GPU run). No serial-ref OOM (slice is forloop-chunked).
+        ENV["TENET_USE_NCCL"] = "1"
         ref = slicef(T1, T2, T3, M)[a_rs[g.r1 + 1], :, :, i_rs[g.r2 + 1]]
         ef  = norm(cannon_fwd_f() - ref) / norm(ref); ref = nothing
         pf  = MPI.Allreduce(ef, MPI.MAX, comm) < 1e-10 ? "F✓" : "F✗"
@@ -112,8 +118,9 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
         eb  = norm(cannon_bwd_f()[1] - gsl) / norm(gsl); gsl = nothing
         pb  = MPI.Allreduce(eb, MPI.MAX, comm) < 1e-8 ? "B✓" : "B✗"
 
-        rank == 0 && @printf("| %-6s | %-2d | %-4d | %-2d | %s | %s | %s %s |\n",
-            name, D, χ, n, fmt(cf), fmt(cb), pf, pb)
+        ENV["TENET_USE_NCCL"] = "0"
+        rank == 0 && @printf("| %-6s | %-2d | %-4d | %-2d | %s | %s | %s | %s | %s %s |\n",
+            name, D, χ, n, fmt(tt["f_ring"]), fmt(tt["f_nccl"]), fmt(tt["b_ring"]), fmt(tt["b_nccl"]), pf, pb)
         flush(stdout)
 
         T1 = T2 = T3 = b1 = b2 = b3 = nothing

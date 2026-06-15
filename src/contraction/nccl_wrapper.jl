@@ -87,6 +87,14 @@ function _ncclAllGather(sendptr::CuPtr, recvptr::CuPtr, sendcount::Integer,
     _check(err, :ncclAllGather)
 end
 
+function _ncclReduceScatter(sendptr::CuPtr, recvptr::CuPtr, recvcount::Integer,
+                            dtype::Cint, op::Cint, comm::_NCCLComm, stream)
+    err = ccall((:ncclReduceScatter, _LIB_NCCL), Cint,
+                (CuPtr{Cvoid}, CuPtr{Cvoid}, Csize_t, Cint, Cint, _NCCLComm, CUDA.CUstream),
+                sendptr, recvptr, recvcount, dtype, op, comm, stream)
+    _check(err, :ncclReduceScatter)
+end
+
 # ncclCommRegister — associates a user GPU buffer with a comm so NCCL can
 # use zero-copy / multicast paths (NVLS on H200 needs this). Without it, NCCL
 # falls back to a path that caps busbw at ~74 GB/s (37% of theoretical) on
@@ -162,6 +170,51 @@ function _nccl_allgather_equal!(sendbuf::CuArray{T}, recvbuf::CuArray{T},
                    _nccl_dtype(T), nccl_comm, stream)
     return recvbuf
 end
+
+function _nccl_reduce_scatter_equal!(sendbuf::CuArray{T}, recvbuf::CuArray{T},
+                                     mpi_comm::MPI.Comm) where T
+    nccl_comm = _get_nccl_comm(mpi_comm)
+    stream = CUDA.stream()
+    recvcount = _nccl_elcount(T, length(recvbuf))   # per-rank OUTPUT chunk
+    _ncclReduceScatter(pointer(sendbuf), pointer(recvbuf), recvcount,
+                       _nccl_dtype(T), _NCCL_SUM, nccl_comm, stream)
+    return recvbuf
+end
+
+# ─── Cannon row/col allgather + reduce-scatter via NCCL ──────────────────────
+# NCCL AllGather/ReduceScatter concatenate/split rank buffers CONTIGUOUSLY, so the
+# gathered/scattered χ leg must be OUTERMOST (last dim, column-major) for rank r's
+# data to land in block r. ROW collectives act on the LAST leg (direct); COLUMN
+# collectives act on the FIRST leg → permute it to last, run NCCL, permute back
+# (a local GPU transpose, cheap vs the cross-node IB transfer this replaces).
+# EQUAL per-rank block sizes are REQUIRED (caller guards on χ%N==0); col_comm is
+# the cross-node, high-value axis in the 2-rows-per-node layout. Everything chains
+# on CUDA.stream() (FIFO) so no CUDA.synchronize is needed (mirrors the allreduce
+# helper). `first_leg` selects column (true) vs row (false).
+function _nccl_cannon_allgather!(blk::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
+    nd = ndims(blk)
+    nranks = MPI.Comm_size(mpi_comm)
+    b = first_leg ? permutedims(blk, (2:nd..., 1)) : blk            # gathered leg → last
+    fsz = ntuple(i -> i == nd ? size(b, nd) * nranks : size(b, i), nd)
+    full = similar(b, fsz)
+    _nccl_allgather_equal!(b, full, mpi_comm)                       # full last leg
+    return first_leg ? permutedims(full, (nd, 1:nd-1...)) : full    # restore [leg, mid...]
+end
+
+function _nccl_cannon_reduce_scatter!(partial::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
+    nd = ndims(partial)
+    nranks = MPI.Comm_size(mpi_comm)
+    b = first_leg ? permutedims(partial, (2:nd..., 1)) : partial    # reduced leg → last
+    blklen = size(b, nd) ÷ nranks
+    rsz = ntuple(i -> i == nd ? blklen : size(b, i), nd)
+    recv = similar(b, rsz)
+    _nccl_reduce_scatter_equal!(b, recv, mpi_comm)                  # sum over comm, keep my block
+    return first_leg ? permutedims(recv, (nd, 1:nd-1...)) : recv    # restore [my-block, mid...]
+end
+
+# Equal per-rank χ blocks (NCCL ReduceScatter/AllGather require uniform counts;
+# split_ranges gives off-by-1 when χ%N≠0 → fall back to the MPI p2p path).
+_equal_blocks(rs) = all(r -> length(r) == length(@inbounds rs[1]), rs)
 
 # Opt-in switch (per-call, reads ENV so a fresh process picks up the flag).
 _use_nccl() = get(ENV, "TENET_USE_NCCL", "0") == "1"

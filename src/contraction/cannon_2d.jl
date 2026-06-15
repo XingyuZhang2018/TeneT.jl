@@ -242,6 +242,9 @@ end
 function _cannon_col_reduce_scatter(partial, grid::CannonGrid, d_rs)
     N1, r1 = grid.N1, grid.r1
     N1 == 1 && return partial
+    if _use_nccl() && partial isa CuArray && _equal_blocks(d_rs)   # NCCL fast path (cross-node col axis)
+        return _nccl_cannon_reduce_scatter!(partial, grid.col_comm, true)
+    end
     acc = partial[d_rs[r1 + 1], :, :, :]
     recvbufs = Vector{typeof(acc)}(undef, N1)
     sendbufs = Vector{typeof(acc)}(undef, N1)
@@ -274,6 +277,9 @@ end
 # ordering discipline.
 function _cannon_col_allgather(dblk, grid::CannonGrid, d_rs)
     N1, r1 = grid.N1, grid.r1
+    if N1 > 1 && _use_nccl() && dblk isa CuArray && _equal_blocks(d_rs)   # NCCL fast path (cross-node col axis)
+        return _nccl_cannon_allgather!(dblk, grid.col_comm, true)
+    end
     nmid = ndims(dblk) - 1
     χ = sum(length, d_rs)
     full = similar(dblk, χ, size(dblk)[2:end]...)
@@ -338,6 +344,9 @@ end
 # Mirror of _cannon_col_allgather; same buffer/sync discipline. Tag 750.
 function _cannon_row_allgather(blk, grid::CannonGrid, l_rs)
     N2, r2 = grid.N2, grid.r2
+    if N2 > 1 && _use_nccl() && blk isa CuArray && _equal_blocks(l_rs)   # NCCL fast path (row axis, last leg)
+        return _nccl_cannon_allgather!(blk, grid.row_comm, false)
+    end
     nfront = ndims(blk) - 1
     χ2 = sum(length, l_rs)
     front = size(blk)[1:nfront]
@@ -374,6 +383,9 @@ end
 # recvbuf split in _cannon_col_reduce_scatter).
 function _cannon_row_reduce_scatter_last(dslice, grid::CannonGrid, l_rs)
     N2, r2 = grid.N2, grid.r2
+    if N2 > 1 && _use_nccl() && dslice isa CuArray && _equal_blocks(l_rs)   # NCCL fast path (row axis, last leg)
+        return _nccl_cannon_reduce_scatter!(dslice, grid.row_comm, false)
+    end
     nfront = ndims(dslice) - 1
     cols = ntuple(_ -> Colon(), nfront)
     acc = dslice[cols..., l_rs[r2 + 1]]
