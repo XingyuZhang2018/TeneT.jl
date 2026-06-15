@@ -5,7 +5,7 @@
 #SBATCH --time=01:15:00
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=24
 #SBATCH --gres=gpu:nvidia_h200:8
 #SBATCH --account=pilot_2026_0002
 
