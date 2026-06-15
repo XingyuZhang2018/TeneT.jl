@@ -102,6 +102,22 @@ function ChainRulesCore.rrule(::typeof(orth_for_ad), v)
     return v, back
 end
 
+# Grid-aware ⊥-projection for the distributed (Cannon block) iterate (M4-B3).
+# Forward identity (like orth_for_ad); the rrule projects out the eigenvector
+# component using the GLOBAL inner product cannon_dot — the local `dot` of
+# orth_for_ad is the per-rank partial projection and is WRONG on a block.
+# Used by leftenv_cannon/rightenv_cannon/ACenv_cannon via simple_eig's orth_fn
+# hook. Cenv is exempt (C is replicated → local dot == global).
+# Design: docs/2026-06-15-m4-env-cannon-integration-design.md §5.3 (R1-B3).
+orth_for_ad_cannon(v, grid::CannonGrid) = v
+function ChainRulesCore.rrule(::typeof(orth_for_ad_cannon), v, grid::CannonGrid)
+    function back(dv)
+        _dv = unthunk(dv)
+        return NoTangent(), _dv - cannon_dot(v, _dv, grid) * v, NoTangent()
+    end
+    return v, back
+end
+
 function ChainRulesCore.rrule(::Type{<:VUMPSRuntime}, AL, AR, C, FL, FR)
     rt = VUMPSRuntime(AL, AR, C, FL, FR)
     function back(∂rt)
@@ -460,6 +476,72 @@ function ChainRulesCore.rrule(::typeof(cannon_gather), blk::AbstractArray, grid:
     return full, gather_back
 end
 
+# ─── M4: distributed inner-product / norm / gather rrules (gather hoisting) ───
+# Design: docs/2026-06-15-m4-env-cannon-integration-design.md §5.3, §2.2a.
+# cannon_dot/cannon_norm are the simple_eig inner_product/norm_fn hooks on blocks.
+# The scalar allreduce-sum output (s/n) is REPLICATED on every rank, so its
+# cotangent (ds/dn) arrives identically on every rank → the local adjoint needs
+# NO extra collective. Formulas pinned to the ChainRules dot/_norm2_back
+# convention (R1-B1/B2): dot(x,y)=Σ conj(x)·y is antilinear in x, linear in y;
+# norm is a real-valued function so its cotangent is real-PROJECTED.
+function ChainRulesCore.rrule(::typeof(cannon_dot), x_blk, y_blk, grid::CannonGrid)
+    s = cannon_dot(x_blk, y_blk, grid)
+    function cannon_dot_back(ds)
+        d = unthunk(ds)
+        return NoTangent(), y_blk .* conj(d), x_blk .* d, NoTangent()
+    end
+    return s, cannon_dot_back
+end
+
+function ChainRulesCore.rrule(::typeof(cannon_norm), x_blk, grid::CannonGrid)
+    n = cannon_norm(x_blk, grid)
+    function cannon_norm_back(dn)
+        # cannon_norm is a NORMALIZATION DENOMINATOR: simple_eig does `v /= cannon_norm(v)`,
+        # broadcasting the replicated scalar n into a PER-RANK division v_blk/n. So the
+        # incoming cotangent `dn` is each rank's PIECE ∂loss/∂(use on rank r), and the true
+        # scalar cotangent is the sum over ranks: c̄ = Σ_r dn_r = allreduce(dn). Then
+        # dx_blk = real(c̄)·x_blk/n  (GLOBAL n; real-projected). Without the allreduce the
+        # cross-rank term of the normalization gradient is dropped (≈10% error). Contrast
+        # cannon_dot, which is consumed as a scalar (its ds is the genuine replicated scalar
+        # cotangent) → NO allreduce. The backward is rank-uniform (collective on grid.comm).
+        c = MPI.Allreduce(unthunk(dn), +, grid.comm)
+        return NoTangent(), x_blk .* (real(c) / n), NoTangent()
+    end
+    return n, cannon_norm_back
+end
+
+# The hoisted FIXED-operand gathers. Forward = the existing allgather; the
+# adjoint is the matching reduce-scatter (type-B input-gather adjoint, moved out
+# of the per-call *_dist rrule so it fires ONCE per env solve). Linear, so
+# accumulating slice cotangents across power-iteration reuses then reduce-
+# scattering once equals the un-hoisted per-call sum (§5.2 linearity proof).
+function ChainRulesCore.rrule(::typeof(cannon_gather_row), blk, grid::CannonGrid, l_rs)
+    full = cannon_gather_row(blk, grid, l_rs)
+    function cannon_gather_row_back(dfull)
+        d = unthunk(dfull)
+        # Device-aware densify (NOT collect, which would move a CuArray cotangent to host
+        # and feed a host array into the device reduce-scatter): `full` is the right
+        # array-type reference. Mirrors the dist rrules' densify idiom.
+        if !(d isa DenseArray)
+            buf = similar(full, eltype(d), size(d)); buf .= d; d = buf
+        end
+        return NoTangent(), _cannon_row_reduce_scatter_last(d, grid, l_rs), NoTangent(), NoTangent()
+    end
+    return full, cannon_gather_row_back
+end
+
+function ChainRulesCore.rrule(::typeof(cannon_gather_col), blk, grid::CannonGrid, a_rs)
+    full = cannon_gather_col(blk, grid, a_rs)
+    function cannon_gather_col_back(dfull)
+        d = unthunk(dfull)
+        if !(d isa DenseArray)
+            buf = similar(full, eltype(d), size(d)); buf .= d; d = buf
+        end
+        return NoTangent(), _cannon_col_reduce_scatter(d, grid, a_rs), NoTangent(), NoTangent()
+    end
+    return full, cannon_gather_col_back
+end
+
 # The whole differentiated region is collective: every rank must execute the
 # same pullback sequence (rank-uniform control flow), or the grid deadlocks.
 function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid::CannonGrid;
@@ -695,6 +777,203 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_dist), FL_blk, ALu_blk, ALd_
         return NoTangent(), dFL, dALu_blk, dALd_blk, dM, NoTangent()
     end
     return result, cannon_dist_back
+end
+
+# M4 hoisted FLmap rrule (gather hoisting). This is the FLmap_cannon_dist rrule
+# (above) with TWO surgical changes (R1-M1, mechanical — no new math):
+#   (a) the FIXED-operand gathers (ALu_row, ALd_col) are NOT done here — they are
+#       function ARGS (hoisted once, outside the power loop, by the env);
+#   (b) the type-B FIXED-operand reduce-scatters (dALu_blk = RS(dALu_row),
+#       dALd_blk = RS(dALd_col)) are NOT done here — they live in the
+#       cannon_gather_row/col rrules and fire ONCE at the hoist boundary. This
+#       rrule returns the SLICE grads dALu_row/dALd_col directly.
+# EVERYTHING else is byte-identical to the dist rrule: the type-A output-adjoint
+# allgather of dresult (per-iterate, stays), the per-l-chunk hand-adjoint chain,
+# the iterate dFL row reduce-scatter (FL is the ring-carried iterate, never
+# gathered → its reduce-scatter stays), the dM allreduce, eager _free!, densify
+# guard. No inner_etype (mixed precision is M5). Same rank-uniform control flow.
+function ChainRulesCore.rrule(::typeof(FLmap_cannon_sliced), FL_blk, ALu_row, ALd_col, M, grid::CannonGrid;
+                              forloop_iter = 1)
+    is_tuple = M isa Tuple
+    M1, M2 = is_tuple ? M : (M, conj(M))
+    result, blocks = _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
+
+    function flmap_cannon_sliced_back(dresult)
+        N2 = grid.N2
+        χ = size(ALu_row, 4)             # full d leg of the row slice
+        a_rs = split_ranges(χ, grid.N1)
+        i_rs = split_ranges(χ, grid.N2)  # ring i-blocks == last-leg l-blocks (χ over N2)
+        nl = size(ALd_col, 4)            # local l extent
+
+        d_c = unthunk(dresult)
+        # Densify structured cotangents (FillArrays.Fill from a bare `sum` loss):
+        # the column allgather hands d_c to MPI.Isend, which needs a real buffer.
+        if !(d_c isa DenseArray)
+            buf = similar(FL_blk, eltype(d_c), size(d_c))
+            buf .= d_c
+            d_c = buf
+        end
+
+        # 1. Adjoint of the output column reduce-scatter (type-A, per-iterate).
+        dpartial = _cannon_col_allgather(d_c, grid, a_rs)
+
+        # 2-3. Per l-chunk, fully local Zygote-free hand-adjoint chain; the FIXED
+        #      AL gradients accumulate on the captured SLICES (returned as-is).
+        dALu_row = zero(ALu_row)
+        dALd_col = zero(ALd_col)
+        dM1 = zero(M1)
+        dM2 = zero(M2)
+        dFL_contribs = Vector{typeof(FL_blk)}(undef, N2)
+        for t in 0:N2-1
+            dFL_contribs[t + 1] = zero(blocks[t + 1])
+        end
+        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        for ch in l_chunks
+            local Hc
+            for t in 0:N2-1
+                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
+                if t == 0
+                    Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
+                else
+                    _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
+                end
+            end
+            Tc = _cannon_fold1(Hc, M1)
+            Gc = _cannon_fold2(Tc, M2)
+            dPc = dpartial[:, :, :, ch]
+            dGc = _cannon_stage2_dG(dPc, ALu_row)
+            tmp = _cannon_stage2_dALu(dPc, Gc)
+            dALu_row .+= tmp
+            _free!(tmp); _free!(dPc); _free!(Gc)
+            tmp = _cannon_fold2_dM2(dGc, Tc)
+            dM2 .+= tmp
+            _free!(tmp)
+            dTc = _cannon_fold2_dT(dGc, M2)
+            _free!(dGc); _free!(Tc)
+            tmp = _cannon_fold1_dM1(dTc, Hc)
+            dM1 .+= tmp
+            _free!(tmp)
+            dHc = _cannon_fold1_dH(dTc, M1)
+            _free!(dTc)
+            for t in 0:N2-1
+                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
+                tmp = _cannon_stage1_dFL(dHc, ALd_slice)
+                dFL_contribs[t + 1] .+= tmp
+                _free!(tmp)
+                tmp = _cannon_stage1_dALd(dHc, blocks[t + 1])
+                view(dALd_col, i_rs[t + 1], :, :, ch) .+= tmp
+                _free!(tmp)
+            end
+            _free!(dHc); _free!(Hc)
+        end
+        _free!(dpartial)   # full-i × local-l cotangent, only sliced (getindex) above
+
+        # 4. Iterate gradient: dFL stays distributed (row reduce-scatter of the
+        #    per-destination ring contributions — UNCHANGED; FL is the iterate).
+        dFL = _cannon_row_reduce_scatter(dFL_contribs, grid)
+
+        # 5. M grads replicated (M not hoisted). NO type-B AL reduce-scatters here
+        #    — dALu_row/dALd_col are returned as SLICE grads (the gather wrappers
+        #    reduce-scatter them once at the hoist boundary).
+        allreduce_p2p!(dM1, +, grid.comm)
+        allreduce_p2p!(dM2, +, grid.comm)
+        dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
+        return NoTangent(), dFL, dALu_row, dALd_col, dM, NoTangent()
+    end
+    return result, flmap_cannon_sliced_back
+end
+
+# M4 hoisted FRmap rrule (Batch B). The FRmap_cannon_dist rrule with: (a) the FIXED
+# partners ARu_g/ARd_g are ARGS (hoisted once); (b) their type-B reduce-scatters
+# (dARu_blk=row_RS, dARd_blk=col_RS) move to the cannon_gather_row/col rrules → this
+# returns the SLICE grads dARu_g/dARd_g; (c) the ITERATE FR is col-gathered per call
+# (FR is not fixed) and its col_reduce_scatter adjoint STAYS here (dFR_blk). Output
+# allgather (B5, type-A), the FRMAP_LEG5_CANNON_CHAIN single-l chunk_backward, dM
+# allreduce, densify, eager _free!, 2³¹ floor — all byte-identical to the dist rrule.
+function ChainRulesCore.rrule(::typeof(FRmap_cannon_sliced), FR_blk, ARu_g, ARd_g, M, grid::CannonGrid;
+                              forloop_iter = 1)
+    is_tuple = M isa Tuple
+    M1, M2 = is_tuple ? M : (M, conj(M))
+    χ = size(ARd_g, 1)
+    p_rs = split_ranges(χ, grid.N1)
+    FR_g = _cannon_col_allgather(FR_blk, grid, p_rs)   # iterate gather (full d), per-call
+    result, _, _, _ = _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter)
+
+    function frmap_cannon_sliced_back(dresult)
+        d_c = unthunk(dresult)
+        if !(d_c isa DenseArray)
+            buf = similar(ARu_g, eltype(d_c), size(d_c)); buf .= d_c; d_c = buf
+        end
+        dpartial = _cannon_row_allgather(d_c, grid, p_rs)   # B5 (full i, local a; no l axis → shared)
+        dARd_g = zero(ARd_g); dFR_g = zero(FR_g); dARu_g = zero(ARu_g)
+        dM1 = zero(M1); dM2 = zero(M2)
+        nl = size(FR_g, 4)
+        l_chunks = _ring_l_chunks(length(p_rs[grid.r1+1]), nl, M1, M2, forloop_iter)
+        for ch in l_chunks
+            (dFR_c, dARu_c, dM1_c, dM2_c, dARd_c) =
+                chain_backward(FRMAP_LEG5_CANNON_CHAIN,
+                    (FR_g[:,:,:,ch], ARu_g, M1, M2, ARd_g[:,:,:,ch]), dpartial)
+            view(dFR_g,  :,:,:,ch) .+= dFR_c
+            dARu_g .+= dARu_c
+            view(dARd_g, :,:,:,ch) .+= dARd_c
+            dM1 .+= dM1_c; dM2 .+= dM2_c
+            _free!(dFR_c); _free!(dARu_c); _free!(dARd_c); _free!(dM1_c); _free!(dM2_c)
+        end
+        _free!(dpartial)
+        # iterate FR gradient → block (col reduce-scatter; KEEP — FR is the iterate).
+        dFR_blk = _cannon_col_reduce_scatter(dFR_g, grid, p_rs)
+        # ARu/ARd: SLICE grads (their reduce-scatters live in the gather wrappers).
+        allreduce_p2p!(dM1, +, grid.comm); allreduce_p2p!(dM2, +, grid.comm)
+        dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
+        return NoTangent(), dFR_blk, dARu_g, dARd_g, dM, NoTangent()
+    end
+    return result, frmap_cannon_sliced_back
+end
+
+# M4 hoisted ACmap rrule (Batch C). The ACmap_cannon_dist rrule with: (a) the FIXED
+# partners FL_g/FR_g are ARGS; (b) their type-B reduce-scatters (dFL_blk=row_RS_last,
+# dFR_blk=col_RS) move to the gather wrappers → return SLICE grads dFL_g/dFR_g; (c)
+# the ITERATE AC is row-gathered per call and its row_reduce_scatter_last adjoint
+# STAYS (dAC_blk). Output allgather (B5, type-A), the ACMAP_LEG5_CHAIN single-l
+# chunk_backward, dM allreduce, densify, eager _free! — byte-identical to the dist.
+function ChainRulesCore.rrule(::typeof(ACmap_cannon_sliced), AC_blk, FL_g, FR_g, M, grid::CannonGrid;
+                              forloop_iter = 1)
+    is_tuple = M isa Tuple
+    M1, M2 = is_tuple ? M : (M, conj(M))
+    χ = size(FL_g, 4)
+    p_rs = split_ranges(χ, grid.N1)
+    AC_g = _cannon_row_allgather(AC_blk, grid, p_rs)   # iterate gather (full d), per-call
+    result, _, _, _ = _acmap_cannon_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
+
+    function acmap_cannon_sliced_back(dresult)
+        nl = size(FR_g, 4)
+        d_c = unthunk(dresult)
+        if !(d_c isa DenseArray)
+            buf = similar(AC_g, eltype(d_c), size(d_c)); buf .= d_c; d_c = buf
+        end
+        dpartial = _cannon_col_allgather(d_c, grid, p_rs)   # B5 (full i, local l-block)
+        dAC_g = zero(AC_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
+        dM1 = zero(M1); dM2 = zero(M2)
+        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        for ch in l_chunks
+            dPc = dpartial[:, :, :, ch]
+            (dAC_c, dFR_c, dM1_c, dM2_c, dFL_c) =
+                chain_backward(ACMAP_LEG5_CHAIN, (AC_g, FR_g[:,:,:,ch], M1, M2, FL_g), dPc)
+            dAC_g .+= dAC_c
+            view(dFR_g, :,:,:,ch) .+= dFR_c
+            dFL_g .+= dFL_c
+            dM1 .+= dM1_c; dM2 .+= dM2_c
+            _free!(dAC_c); _free!(dFR_c); _free!(dFL_c); _free!(dM1_c); _free!(dM2_c); _free!(dPc)
+        end
+        _free!(dpartial)   # match FLmap/FRmap sliced discipline (Batch-A R1)
+        # iterate AC gradient → block (row reduce-scatter-last; KEEP — AC is the iterate).
+        dAC_blk = _cannon_row_reduce_scatter_last(dAC_g, grid, p_rs)
+        # FL/FR: SLICE grads (their reduce-scatters live in the gather wrappers).
+        allreduce_p2p!(dM1, +, grid.comm); allreduce_p2p!(dM2, +, grid.comm)
+        dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
+        return NoTangent(), dAC_blk, dFL_g, dFR_g, dM, NoTangent()
+    end
+    return result, acmap_cannon_sliced_back
 end
 
 # Cmap (replicated class): C replicated, FL/FR block-stored, output FULL χ×χ

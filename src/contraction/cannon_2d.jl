@@ -546,6 +546,84 @@ function FLmap_cannon_dist(FL_blk, ALu_blk, ALd_blk, M, grid::CannonGrid;
     return do_cast ? T_orig.(result) : result
 end
 
+# ─── M4: gather hoisting — differentiable gather wrappers ─────────────────────
+# Design: docs/2026-06-15-m4-env-cannon-integration-design.md §2.2a.
+# These are the DISTRIBUTED-OUTPUT gather primitives used by the env-level
+# gather hoisting (leftenv/rightenv/ACenv): the FIXED boundary slices are
+# gathered ONCE outside the power iteration, and their rrule adjoint is the
+# matching reduce-scatter (`cannon_gather_row` ↔ `_cannon_row_reduce_scatter_last`,
+# `cannon_gather_col` ↔ `_cannon_col_reduce_scatter`; rrules in autodiff/rules.jl).
+# NAMED DISTINCTLY from the replicated-output `cannon_gather` (whose adjoint is
+# take-my-block) so the wrong adjoint can never leak onto a replicated map (Cmap).
+# Forward is just the existing allgather (no behaviour change); the rrule supplies
+# the reduce-scatter so the type-B input-gather adjoint fires ONCE at the hoist
+# boundary (linearity: sum-then-scatter ≡ scatter-then-sum). The ranges argument
+# is the SAME the *_cannon_dist wrappers pass: `l_rs` (N2 partition) for the row
+# gather, `a_rs` (N1 partition) for the column gather.
+cannon_gather_row(blk, grid::CannonGrid, l_rs) = _cannon_row_allgather(blk, grid, l_rs)
+cannon_gather_col(blk, grid::CannonGrid, a_rs) = _cannon_col_allgather(blk, grid, a_rs)
+
+"""
+    FLmap_cannon_sliced(FL_blk, ALu_row, ALd_col, M, grid; forloop_iter=1) -> result_blk
+
+Hoisted FLmap: the FIXED boundary slices `ALu_row` (local-a, FULL-d) and `ALd_col`
+(FULL-i, local-l) are supplied PRE-GATHERED (gathered once, outside the power
+iteration, by `cannon_gather_row`/`cannon_gather_col`). The iterate `FL_blk` is the
+ring-carried block (never gathered — the clean FLmap case). This is the per-power-step
+map of `leftenv_cannon`; its rrule (autodiff/rules.jl) is the `FLmap_cannon_dist` rrule
+MINUS the input gathers (now args) MINUS the type-B fixed-operand reduce-scatters (now
+in the gather wrappers' rrules), returning the SLICE gradients `dALu_row`/`dALd_col`.
+No `inner_etype` — mixed precision is M5 (the env @asserts it unset). `M` is leg5
+single-layer-pair (or an `(M1,M2)` tuple); square grid not required (FLmap is on-axis).
+Design: docs/2026-06-15-m4-env-cannon-integration-design.md §2.2b/§4.
+"""
+function FLmap_cannon_sliced(FL_blk, ALu_row, ALd_col, M, grid::CannonGrid; forloop_iter = 1)
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    result, _ = _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
+    return result
+end
+
+"""
+    FRmap_cannon_sliced(FR_blk, ARu_g, ARd_g, M, grid; forloop_iter=1) -> result_blk
+
+Hoisted FRmap (Batch B): the FIXED partners `ARu_g` (a-block, FULL-d; row-gathered)
+and `ARd_g` (FULL-i, l-block; col-gathered) are supplied PRE-GATHERED (hoisted once
+by `cannon_gather_row`/`cannon_gather_col`). The ITERATE `FR_blk` is col-gathered to
+full-d INTERNALLY per call (FR is not fixed across the power iteration). Per-step map
+of `rightenv_cannon`. rrule (rules.jl) = the FRmap_cannon_dist rrule minus the fixed
+ARu/ARd gathers + their reduce-scatters (→ slice grads), keeping the iterate FR
+col-gather + its col_reduce_scatter adjoint. Square grid. See §2.2b/§4.
+"""
+function FRmap_cannon_sliced(FR_blk, ARu_g, ARd_g, M, grid::CannonGrid; forloop_iter = 1)
+    @assert grid.N1 == grid.N2 "FRmap_cannon_sliced: square grid (N1==N2)"
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    χ = size(ARd_g, 1)                                  # full i (ARd_g = [i-full, j, k, l-block])
+    p_rs = split_ranges(χ, grid.N1)
+    FR_g = _cannon_col_allgather(FR_blk, grid, p_rs)    # iterate gather (full d), per-call
+    result, _, _, _ = _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter)
+    return result
+end
+
+"""
+    ACmap_cannon_sliced(AC_blk, FL_g, FR_g, M, grid; forloop_iter=1) -> result_blk
+
+Hoisted ACmap (Batch C): the FIXED partners `FL_g` (a-block, FULL-i; row-gathered)
+and `FR_g` (FULL-d, l-block; col-gathered) are supplied PRE-GATHERED (hoisted once).
+The ITERATE `AC_blk` is row-gathered to full-d INTERNALLY per call. Per-step map of
+`ACenv_cannon`. rrule (rules.jl) = the ACmap_cannon_dist rrule minus the fixed FL/FR
+gathers + their reduce-scatters (→ slice grads), keeping the iterate AC row-gather +
+its row_reduce_scatter_last adjoint. Square grid. See §2.2b/§4.
+"""
+function ACmap_cannon_sliced(AC_blk, FL_g, FR_g, M, grid::CannonGrid; forloop_iter = 1)
+    @assert grid.N1 == grid.N2 "ACmap_cannon_sliced: square grid (N1==N2)"
+    M1, M2 = M isa Tuple ? M : (M, conj(M))
+    χ = size(FL_g, 4)                                   # full i (FL_g = [a-block, e, f, i-full])
+    p_rs = split_ranges(χ, grid.N1)
+    AC_g = _cannon_row_allgather(AC_blk, grid, p_rs)    # iterate gather (full d), per-call
+    result, _, _, _ = _acmap_cannon_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
+    return result
+end
+
 # ─── Cmap (replicated class — C replicated, FL/FR distributed) ───────────────
 # Cmap leg4 result[e,f] := FL[a,c,d,e] C[a,b] FR[b,c,d,f]; leg3 result[d,e] :=
 # FL[a,c,d] C[a,b] FR[b,c,e]. C stays REPLICATED (per the M3 design — C is

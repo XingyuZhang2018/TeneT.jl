@@ -76,6 +76,7 @@ include("models/oneside_traits.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")
 include("boundary_algorithm/vumps/c4v.jl")
+include("boundary_algorithm/vumps/cannon.jl")   # M4: distributed env (gather hoisting)
 include("boundary_algorithm/qrctmrg.jl")
 
 # ============================================================================

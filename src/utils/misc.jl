@@ -23,7 +23,7 @@ end
 function simple_eig(f, v; power_iter, checkpoint_every=5,
                     segment_checkpoint::CheckpointMethod=Plain(),
                     f_final=nothing, final_polish_steps=0,
-                    inner_product=dot, norm_fn=norm)
+                    inner_product=dot, norm_fn=norm, orth_fn=orth_for_ad)
     polish_active = f_final !== nothing && final_polish_steps > 0
     n_polish = polish_active ? min(final_polish_steps, power_iter) : 0
     n_pre = power_iter - n_polish    # total f-calls using `f` (pre-polish)
@@ -71,7 +71,7 @@ function simple_eig(f, v; power_iter, checkpoint_every=5,
 
     λ = inner_product(v, v1)
     v1 /= norm_fn(v1)
-    v1 = orth_for_ad(v1)
+    v1 = orth_fn(v1)
     return [λ], [v1]
 end
 
