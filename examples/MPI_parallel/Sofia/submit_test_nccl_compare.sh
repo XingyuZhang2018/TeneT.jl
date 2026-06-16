@@ -41,7 +41,7 @@ run_case() {
     extra="$2"
     echo ""
     echo "========== ${label} =========="
-    mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
+    mpirun --map-by ppr:8:node --bind-to none -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
         bash -c "$BASE_ENVS; $extra exec $JULIA --project=../../.. ../test_MPI_config.jl" 2>&1 \
         | grep -vE 'NCCL INFO'
 }

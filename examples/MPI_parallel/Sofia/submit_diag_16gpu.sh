@@ -27,6 +27,6 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1"
 
 echo "=== Sofia 16 GPU cross-node Allreduce diag ==="
 echo "Start: $(date)"
-mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
+mpirun --map-by ppr:8:node --bind-to none -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
     bash -c "$ENVS; exec $JULIA --project=../../.. diag_16gpu_allreduce.jl"
 echo "=== Done: $(date) ==="

@@ -41,7 +41,7 @@ run_case() {
     echo ""
     echo "=== $label ==="
     echo "  extra env: $extra"
-    mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
+    mpirun --map-by ppr:8:node --bind-to none -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
         bash -c "$BASE_ENVS; $extra; exec $JULIA --project=../../.. diag_16gpu_allreduce.jl" 2>&1 \
         | grep -vE 'This may cause|was loaded|If you.re|ensure that|In any other|file an issue|^\s*│|^\s*└' \
         | grep -E 'TeneT|Phase|sib_size|(host|MPI)|MB \(|UCX.*WARN'

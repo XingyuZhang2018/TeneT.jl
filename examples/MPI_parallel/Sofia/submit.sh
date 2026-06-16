@@ -41,7 +41,7 @@ for N in 1 2 4 8 16; do
     [ $N -gt $MAX_GPU ] && continue
     echo ""
     echo "========== ${N} GPU =========="
-    mpirun -np $N -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
+    mpirun --map-by ppr:8:node --bind-to none -np $N -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
         bash -c "$ENVS; exec $JULIA --project=../../.. ../benchmark_fg.jl"
 done
 
