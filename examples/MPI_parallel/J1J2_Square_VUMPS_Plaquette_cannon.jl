@@ -104,12 +104,21 @@ if OPT_MAXITER == 0
     rt′ = deepcopy(rt)
     fδEierr = [1.0, 1.0, 0.0, 0.0]
     say("=== SMOKE: χ$CHI_OPT forward + production backward (no LBFGS step, no observable) ===")
+    # Wall-clock split (rank 0). CUDA_LAUNCH_BLOCKING=1 already serializes kernels; the explicit
+    # MPI.Barrier + CUDA.synchronize pin the timer to the collective-complete boundary so t_fwd /
+    # t_bwd are the true forward(record) and backward(grad) wall times, not async-launch artifacts.
+    MPI.Barrier(COMM); CUDA.synchronize()
+    t0 = time()
     e, back = Zygote.pullback(A) do x
         real(TeneT.energy(restriction_ipeps(x), rt, rt′, fδEierr, params))
     end
-    say("SMOKE forward : energy_χ$CHI_OPT = $e   (χ$CHI_LOAD reference ≈ -0.496682)   Eimag = $(fδEierr[4])")
+    CUDA.synchronize(); t_fwd = time() - t0
+    say("SMOKE forward : energy_χ$CHI_OPT = $e   (χ$CHI_LOAD reference ≈ -0.496682)   Eimag = $(fδEierr[4])   | forward(record) = $(round(t_fwd, digits=1)) sec")
+    MPI.Barrier(COMM); t1 = time()
     g = back(one(e))[1]
-    say("SMOKE backward: gradient computed, |g| = $(norm(g))")
+    CUDA.synchronize(); t_bwd = time() - t1
+    say("SMOKE backward: gradient computed, |g| = $(norm(g))   | backward = $(round(t_bwd, digits=1)) sec")
+    say("=== SMOKE timing: forward(record) = $(round(t_fwd, digits=1)) sec | backward(grad) = $(round(t_bwd, digits=1)) sec ===")
     say("=== SMOKE done (rank 0) — χ$CHI_OPT cannon forward+backward succeeded ===")
 else
     # Full optimization. NOTE: observable() (post-LBFGS) is not cannon-ready for mag/ξ; that must be
