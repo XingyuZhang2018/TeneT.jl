@@ -40,8 +40,14 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     params.ifsave_env && save_rt(joinpath(params.folder, "D$(D)", "environment"), rt; file="χ$(χ).jld2")
     env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = energy_value(params.model, A, env, params)
-    mag = magnetization_value(params.model, A, env, params)
-    ξ = cor_len_value(env, params, A; method=cor_len_method)
+    # magnetization_value / cor_len_value are serial (not cannon-ized): on the distributed (block)
+    # obs env they'd run ALCtoAC on a χ-block → crash. For the cannon-Plaquette case gather the
+    # block env to full just for them. energy_value above stays block-distributed (the expensive,
+    # accuracy-critical part); mag/ξ are a cheap replicated post-measurement on the gathered env.
+    env_obs = _dist_energy_plaq(params.model, params.boundary_alg) ?
+              gather_env(env, params.boundary_alg.grid) : env
+    mag = magnetization_value(params.model, A, env_obs, params)
+    ξ = cor_len_value(env_obs, params, A; method=cor_len_method)
 
     # For Kagome merge: compute per-bond energies and use them for logging/plotting
     if params.model.lattice isa Kagome{:merge}

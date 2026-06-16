@@ -297,15 +297,22 @@ end
 Construct a `PlaquetteVUMPSEnv` from a plaquette runtime.
 Computes the observation left environment `FLo` using `ifobs=true`.
 """
+# Distributed-energy predicate: keep the cannon obs env BLOCK (don't gather) and run the
+# energy expectation block-distributed. Gated to the one model whose energy_value/imag_error
+# are cannon-ized (J1J2{Square}); every other Plaquette model still gathers to full and runs
+# serial — so "env is block" ⟺ this predicate, used identically in ObsEnv/energy_value/imag_error.
+# (`isa J1J2{Square}` resolves at runtime; J1J2 is included after this file.) (R1-B1/B2)
+_dist_energy_plaq(model, alg) = alg.grid !== nothing && model isa J1J2{Square}
+
 function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette}, model=nothing)
-    # `model` accepted for call-site uniformity with VUMPS{General} ObsEnv;
-    # Plaquette has no obs_index trait, so the arg is ignored.
     @unpack AL, C, FL = rt
-    # Cannon path: FLo block-distributed (leftenv_cannon ifobs=true, FL on both sides) → gather to full.
+    # Cannon path: FLo block-distributed (leftenv_cannon ifobs=true, FL on both sides).
     if alg.grid !== nothing
         g = alg.grid
         _, FLo = leftenv_cannon(AL, AL, M, FL, g; ifobs=true, alg)
-        return gather_env(PlaquetteVUMPSEnv(AL, C, FL, FLo), g)
+        env = PlaquetteVUMPSEnv(AL, C, FL, FLo)
+        # Block for the distributed-energy model; gather to full for all other Plaquette models.
+        return _dist_energy_plaq(model, alg) ? env : gather_env(env, g)
     end
     _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
     return PlaquetteVUMPSEnv(AL, C, FL, FLo)
@@ -316,11 +323,13 @@ end
 function imag_error(env::PlaquetteVUMPSEnv, A, iSy, params::iPEPSOptimize)
     @unpack AL, C, FLu, FLo = env
     @unpack forloop_iter, ifparallel = params.boundary_alg
-    AC = ALCtoAC(AL, C)
+    # Same predicate as ObsEnv: env is block ⟺ J1J2{Square}+grid → cannon oc_11; else full → serial.
+    grid = _dist_energy_plaq(params.model, params.boundary_alg) ? params.boundary_alg.grid : nothing
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_cannon(AL, C, grid)
     Ni, Nj = size(A)
     i, j, ir = 1, 1, 2
     jr = params.model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
-    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], iSy; ifparallel, forloop_iter)
-    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], iSy; ifparallel, forloop_iter, grid)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter, grid)
     return abs(My / n)
 end

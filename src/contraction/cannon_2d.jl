@@ -202,6 +202,24 @@ function cannon_gather(blk::AbstractArray, grid::CannonGrid)
     return full
 end
 
+# ─── Helpers for distributed observable contractions (oc_22 qrpos seam) ────
+#
+# Full χ from a χ-block: the first tensor leg is split by r1 across the column
+# communicator, so allreduce the local first-dim over col_comm (mirrors
+# FLmap_cannon_dist line ~540).
+_cannon_full_chi(blk, grid::CannonGrid) = MPI.Allreduce(size(blk, 1), +, grid.col_comm)
+
+# Rank-consistent random Q0 (χf,D1,D2,χf) block for oc_22's one power iteration.
+# CORRECTNESS-CRITICAL: every rank must hold blocks of the SAME full Q0, else the
+# distributed maps contract mismatched blocks (silent garbage, not a crash). So
+# generate full Q0 on rank 0, Bcast over grid.comm, then cannon_scatter to this
+# rank's block (reusing the audited r1/r2 slicer). Caller wraps in Zygote.@ignore.
+function _cannon_random_Q0(template, χf::Int, D1::Int, D2::Int, grid::CannonGrid)
+    Q0 = _arraytype(template)(randn(eltype(template), χf, D1, D2, χf))
+    MPI.Bcast!(Q0, 0, grid.comm)
+    return cannon_scatter(Q0, grid)
+end
+
 # ─── Distributed inner product / norm over block tiles ────────────────────
 #
 # Blocks tile the full tensor disjointly (first χ leg by r1, last by r2), so

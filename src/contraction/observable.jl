@@ -11,40 +11,50 @@ n ────┴──q ──┴──── t                        │     
       u      v                              q ────┴──── t
 ```
 """
-function oc_12(FLo, ACu, A1u, A1d, ACd, FRo, ARu, A2u, A2d, ARd; forloop_iter, ifparallel)
-    l = FLmap_parallel(FLo, ACu, ACd, (A1u, A1d); forloop_iter, ifparallel)
-    l = FLmap_parallel(l, ARu, ARd, (A2u, A2d); forloop_iter, ifparallel)
-    return dot(conj(l), FRo)
+function oc_12(FLo, ACu, A1u, A1d, ACd, FRo, ARu, A2u, A2d, ARd; forloop_iter, ifparallel, grid=nothing)
+    if grid === nothing
+        l = FLmap_parallel(FLo, ACu, ACd, (A1u, A1d); forloop_iter, ifparallel)
+        l = FLmap_parallel(l, ARu, ARd, (A2u, A2d); forloop_iter, ifparallel)
+        return dot(conj(l), FRo)
+    end
+    l = FLmap_cannon_dist(FLo, ACu, ACd, (A1u, A1d), grid; forloop_iter)
+    l = FLmap_cannon_dist(l, ARu, ARd, (A2u, A2d), grid; forloop_iter)
+    return cannon_dot(conj(l), FRo, grid)   # serial dot(conj(l),FRo)=Σl·FRo
 end
 
-function oc_21(ACu, FLu, A1u, A1d, FRu, FLo, A2u, A2d, FRo, ACd; forloop_iter, ifparallel)
-    u = ACmap_parallel(ACu, FLu, FRu, (A1u, A1d); forloop_iter, ifparallel)
-    u = ACmap_parallel(u, FLo, FRo, (A2u, A2d); forloop_iter, ifparallel)
-    return dot(conj(u), ACd)
+function oc_21(ACu, FLu, A1u, A1d, FRu, FLo, A2u, A2d, FRo, ACd; forloop_iter, ifparallel, grid=nothing)
+    if grid === nothing
+        u = ACmap_parallel(ACu, FLu, FRu, (A1u, A1d); forloop_iter, ifparallel)
+        u = ACmap_parallel(u, FLo, FRo, (A2u, A2d); forloop_iter, ifparallel)
+        return dot(conj(u), ACd)
+    end
+    u = ACmap_cannon_dist(ACu, FLu, FRu, (A1u, A1d), grid; forloop_iter)
+    u = ACmap_cannon_dist(u, FLo, FRo, (A2u, A2d), grid; forloop_iter)
+    return cannon_dot(conj(u), ACd, grid)
 end
 
 # ============================================================================
 # Two-site normalization and observable contractions (leg4 dispatch)
 # ============================================================================
 
-function contract_n_12(FLo, ACu, A1, ACd, FRo, ARu, A2, ARd; forloop_iter, ifparallel)
-    return oc_12(FLo, ACu, A1, conj(A1), ACd, FRo, ARu, A2, conj(A2), ARd; forloop_iter, ifparallel)
+function contract_n_12(FLo, ACu, A1, ACd, FRo, ARu, A2, ARd; forloop_iter, ifparallel, grid=nothing)
+    return oc_12(FLo, ACu, A1, conj(A1), ACd, FRo, ARu, A2, conj(A2), ARd; forloop_iter, ifparallel, grid)
 end
 
-function contract_o_12(FLo, ACu, A1, ACd, FRo, ARu, A2, ARd, O1, O2; forloop_iter, ifparallel)
+function contract_o_12(FLo, ACu, A1, ACd, FRo, ARu, A2, ARd, O1, O2; forloop_iter, ifparallel, grid=nothing)
     @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
     @tensor A2u[a,b,c,d,f] := A2[a,b,c,d,e] * O2[e,f]
-    return oc_12(FLo, ACu, A1u, conj(A1), ACd, FRo, ARu, A2u, conj(A2), ARd; forloop_iter, ifparallel)
+    return oc_12(FLo, ACu, A1u, conj(A1), ACd, FRo, ARu, A2u, conj(A2), ARd; forloop_iter, ifparallel, grid)
 end
 
-function contract_n_21(ACu, FLu, A1, FRu, FLo, A2, FRo, ACd; forloop_iter, ifparallel)
-    return oc_21(ACu, FLu, A1, conj(A1), FRu, FLo, A2, conj(A2), FRo, ACd; forloop_iter, ifparallel)
+function contract_n_21(ACu, FLu, A1, FRu, FLo, A2, FRo, ACd; forloop_iter, ifparallel, grid=nothing)
+    return oc_21(ACu, FLu, A1, conj(A1), FRu, FLo, A2, conj(A2), FRo, ACd; forloop_iter, ifparallel, grid)
 end
 
-function contract_o_21(ACu, FLu, A1, FRu, FLo, A2, FRo, ACd, O1, O2; forloop_iter, ifparallel)
+function contract_o_21(ACu, FLu, A1, FRu, FLo, A2, FRo, ACd, O1, O2; forloop_iter, ifparallel, grid=nothing)
     @tensor A1u[a,b,c,d,f] := A1[a,b,c,d,e] * O1[e,f]
     @tensor A2u[a,b,c,d,f] := A2[a,b,c,d,e] * O2[e,f]
-    return oc_21(ACu, FLu, A1u, conj(A1), FRu, FLo, A2u, conj(A2), FRo, ACd; forloop_iter, ifparallel)
+    return oc_21(ACu, FLu, A1u, conj(A1), FRu, FLo, A2u, conj(A2), FRo, ACd; forloop_iter, ifparallel, grid)
 end
 
 # ============================================================================
@@ -62,18 +72,22 @@ i ────┴──── l
 
 ```
 """
-function oc_11(FLo, ACu, Au, Ad, ACd, FRo; forloop_iter, ifparallel)
-    l = FLmap_parallel(FLo, ACu, ACd, (Au, Ad); forloop_iter, ifparallel)
-    return dot(conj(l), FRo)
+function oc_11(FLo, ACu, Au, Ad, ACd, FRo; forloop_iter, ifparallel, grid=nothing)
+    if grid === nothing
+        l = FLmap_parallel(FLo, ACu, ACd, (Au, Ad); forloop_iter, ifparallel)
+        return dot(conj(l), FRo)
+    end
+    l = FLmap_cannon_dist(FLo, ACu, ACd, (Au, Ad), grid; forloop_iter)
+    return cannon_dot(conj(l), FRo, grid)
 end
 
-function contract_n_11(FLo, ACu, A, ACd, FRo; forloop_iter, ifparallel)
-    return oc_11(FLo, ACu, A, conj(A), ACd, FRo; forloop_iter, ifparallel)
+function contract_n_11(FLo, ACu, A, ACd, FRo; forloop_iter, ifparallel, grid=nothing)
+    return oc_11(FLo, ACu, A, conj(A), ACd, FRo; forloop_iter, ifparallel, grid)
 end
 
-function contract_o_11(FLo, ACu, A, ACd, FRo, O; forloop_iter, ifparallel)
+function contract_o_11(FLo, ACu, A, ACd, FRo, O; forloop_iter, ifparallel, grid=nothing)
     @tensor AO[a,b,c,d,f] := A[a,b,c,d,e] * O[e,f]
-    return oc_11(FLo, ACu, AO, conj(A), ACd, FRo; forloop_iter, ifparallel)
+    return oc_11(FLo, ACu, AO, conj(A), ACd, FRo; forloop_iter, ifparallel, grid)
 end
 
 # ============================================================================
@@ -96,12 +110,18 @@ a ────┴──k     k──┴──── a
 ```
 
 """
-function oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
-    Q = FLmap_parallel(FLo, Q, ACd, (Au21, Ad21); forloop_iter, ifparallel)
-    Q = ACdmap_parallel(ARd, Q, FRo, (Au22, Ad22); forloop_iter, ifparallel)
-    Q = FRmap_parallel(FRu, ARu, Q, (Au12, Ad12); forloop_iter, ifparallel)
-    Q = ACmap_parallel(ACu, FLu, Q, (Au11, Ad11); forloop_iter, ifparallel)
-
+function oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel, grid=nothing)
+    if grid === nothing
+        Q = FLmap_parallel(FLo, Q, ACd, (Au21, Ad21); forloop_iter, ifparallel)
+        Q = ACdmap_parallel(ARd, Q, FRo, (Au22, Ad22); forloop_iter, ifparallel)
+        Q = FRmap_parallel(FRu, ARu, Q, (Au12, Ad12); forloop_iter, ifparallel)
+        Q = ACmap_parallel(ACu, FLu, Q, (Au11, Ad11); forloop_iter, ifparallel)
+        return Q
+    end
+    Q = FLmap_cannon_dist(FLo, Q, ACd, (Au21, Ad21), grid; forloop_iter)
+    Q = ACdmap_cannon_dist(ARd, Q, FRo, (Au22, Ad22), grid; forloop_iter)
+    Q = FRmap_cannon_dist(FRu, ARu, Q, (Au12, Ad12), grid; forloop_iter)
+    Q = ACmap_cannon_dist(ACu, FLu, Q, (Au11, Ad11), grid; forloop_iter)
     return Q
 end
 
@@ -135,34 +155,48 @@ function oc_Q_22_getQ_CBE(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au
     # return Q
 end
 
-function oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
-    χ = size(FLu ,1)
+function oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel, grid=nothing)
     D1 = size(Au21, 4)
     D2 = size(Ad21, 4)
-    # Q = oc_Q_22_getQ_CBE(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
-    Q = Zygote.@ignore _arraytype(FLu)(randn(eltype(FLu), χ,D1,D2,χ))
-    Q = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
-    Q, _ = qrpos(reshape(Q, χ*D1*D2, χ))
-    Q = reshape(Q, χ,D1,D2,χ)
+    if grid === nothing
+        χ = size(FLu ,1)
+        # Q = oc_Q_22_getQ_CBE(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
+        Q = Zygote.@ignore _arraytype(FLu)(randn(eltype(FLu), χ,D1,D2,χ))
+        Q = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
+        Q, _ = qrpos(reshape(Q, χ*D1*D2, χ))
+        Q = reshape(Q, χ,D1,D2,χ)
 
-    QQ = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
-    return dot(Q, QQ)
+        QQ = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
+        return dot(Q, QQ)
+    end
+    # Cannon: oc_Q_22 distributed on blocks; the full-χ qrpos cannot run on a χ-block,
+    # so gather Q → serial qrpos (replicated) → scatter back — mirrors the ACCtoALAR_cannon
+    # seam pattern with single-tensor cannon_gather/cannon_scatter (Q is one tensor).
+    χf = Zygote.@ignore _cannon_full_chi(FLu, grid)   # dimension only (MPI.Allreduce) → no grad
+    Q = Zygote.@ignore _cannon_random_Q0(FLu, χf, D1, D2, grid)        # rank-consistent block
+    Q = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel, grid)
+    Qf = cannon_gather(Q, grid)
+    Qf, _ = qrpos(reshape(Qf, χf*D1*D2, χf))
+    Qf = reshape(Qf, χf, D1, D2, χf)
+    Q = cannon_scatter(Qf, grid)
+    QQ = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel, grid)
+    return cannon_dot(Q, QQ, grid)   # serial dot(Q,QQ)=Σconj(Q)·QQ → cannon_dot(Q,QQ)
 end
 
-function contract_n_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22; forloop_iter, ifparallel)
-    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, conj(A11), A12, conj(A12), A21, conj(A21), A22, conj(A22); forloop_iter, ifparallel)
+function contract_n_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22; forloop_iter, ifparallel, grid=nothing)
+    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, conj(A11), A12, conj(A12), A21, conj(A21), A22, conj(A22); forloop_iter, ifparallel, grid)
 end
 
-function contract_o_22_1(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22, O1, O2; forloop_iter, ifparallel)
+function contract_o_22_1(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22, O1, O2; forloop_iter, ifparallel, grid=nothing)
     @tensor Au11[a,b,c,d,f] := A11[a,b,c,d,e] * O1[e,f]
     @tensor Au22[a,b,c,d,f] := A22[a,b,c,d,e] * O2[e,f]
-    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, conj(A11), A12, conj(A12), A21, conj(A21), Au22, conj(A22); forloop_iter, ifparallel)
+    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, conj(A11), A12, conj(A12), A21, conj(A21), Au22, conj(A22); forloop_iter, ifparallel, grid)
 end
 
-function contract_o_22_2(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22, O1, O2; forloop_iter, ifparallel)
+function contract_o_22_2(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22, O1, O2; forloop_iter, ifparallel, grid=nothing)
     @tensor Au12[a,b,c,d,f] := A12[a,b,c,d,e] * O1[e,f]
     @tensor Au21[a,b,c,d,f] := A21[a,b,c,d,e] * O2[e,f]
-    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, conj(A11), Au12, conj(A12), Au21, conj(A21), A22, conj(A22); forloop_iter, ifparallel)
+    return oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, conj(A11), Au12, conj(A12), Au21, conj(A21), A22, conj(A22); forloop_iter, ifparallel, grid)
 end
 
 # ============================================================================
