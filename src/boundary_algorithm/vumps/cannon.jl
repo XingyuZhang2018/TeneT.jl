@@ -403,29 +403,36 @@ function vumps_step_cannon(rt::VUMPSRuntime, M::StructArray, grid::CannonGrid, a
     return VUMPSRuntime(AL, AR, C, FL, FR), err
 end
 
+# Fixed seed for the distributed init: every rank seeds identically so initial_A / FLint / FRint
+# draw the SAME full tensors → the scattered blocks are consistent WITHOUT broadcasting full-χ
+# tensors. (The old bcast_struct used MPI.bcast, which serializes each tensor to a >2^31-byte
+# buffer and overflows MPI's Cint count at χ≳700 — e.g. 2.42 GB tensors at χ768 D16 → hang.)
+const _CANNON_INIT_SEED = 1234567
+
 """
     rt = init_VUMPSRuntime_cannon(M, χ, grid, alg)
 
-Build a block-distributed initial runtime. Canonicalization is irreducibly serial
-full-χ (no distributed variant), so build full AL/AR/C, **bcast over `grid.comm`
-UNCONDITIONALLY** (R1-F1: `initial_A → randSA` uses an un-seeded per-rank RNG, and the
-serial bcast is gated on `ifparallel` which the cannon path runs `false` — without this
-bcast each rank would scatter a slice of a DIFFERENT random tensor → mismatched blocks),
-then compute the initial FL/FR on the (now identical) full AL/AR and scatter AL/AR/FL/FR
-to blocks. C stays replicated (its distributed form IS the full χ×χ tensor).
+Build a block-distributed initial runtime — each rank PERSISTS only its χ-block. Canonicalization
+(`left_canonical`/`right_canonical`) is irreducibly full-χ (the canonical form AL†AL=I is a global
+property), so it runs redundantly per rank on a full A built from a SHARED seed (cheap, ~GB
+transient, freed before the solve). The initial FL/FR are then solved **block-distributed** via
+`leftenv_cannon`/`rightenv_cannon` — NOT a serial full-χ `leftenv`/`rightenv` (that was ~108 GB/GPU
+at χ768 D16 and forced the full-χ bcast that overflowed MPI's 2^31 count). C stays replicated.
+The shared seed (R1-F1 consistency) replaces the bcast: same seed → same full A/FL → consistent
+blocks. RNG state is saved & restored so the seed is invisible to the caller.
 """
 function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg::VUMPS{General})
+    rng_bak = copy(Random.default_rng()); Random.seed!(_CANNON_INIT_SEED)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     R, AR, _ = right_canonical(AL)
-    C = LRtoC(L, R)
-    AL = bcast_struct(AL, 0, grid.comm)
-    AR = bcast_struct(AR, 0, grid.comm)
-    C  = bcast_struct(C,  0, grid.comm)
-    _, FL = leftenv(AL, conj(AL), M; alg)    # serial, on the bcast (identical) full AL
-    _, FR = rightenv(AR, conj(AR), M; alg)   # serial, on the bcast (identical) full AR
-    return VUMPSRuntime(scatter_struct(AL, grid), scatter_struct(AR, grid), C,
-                        scatter_struct(FL, grid), scatter_struct(FR, grid))
+    C  = LRtoC(L, R)
+    FL0, FR0 = FLint(AL, M), FRint(AR, M)
+    copy!(Random.default_rng(), rng_bak)
+    AL_blk, AR_blk = scatter_struct(AL, grid), scatter_struct(AR, grid)
+    _, FL_blk = leftenv_cannon(AL_blk, conj(AL_blk), M, scatter_struct(FL0, grid), grid; alg)
+    _, FR_blk = rightenv_cannon(AR_blk, conj(AR_blk), M, scatter_struct(FR0, grid), grid; alg)
+    return VUMPSRuntime(AL_blk, AR_blk, C, FL_blk, FR_blk)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -578,13 +585,18 @@ Block-distributed plaquette init: serial canonicalization (C = LRtoC(L,L), no ri
 unconditional bcast over grid.comm, then scatter AL/FL (C replicated).
 """
 function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg::VUMPS{L}) where {L <: Plaquette}
+    # DISTRIBUTED init (see the General method above): shared-seed cross-rank consistency instead of
+    # the overflowing full-χ bcast; left_canonical stays (global, cheap); FL solved block-distributed
+    # via leftenv_cannon (no serial full-χ leftenv / 108 GB). Plaquette is left-canonical only (no AR/FR).
+    rng_bak = copy(Random.default_rng()); Random.seed!(_CANNON_INIT_SEED)
     A = initial_A(M, χ)
     AL, Lg, _ = left_canonical(A)
-    C = LRtoC(Lg, Lg)
-    AL = bcast_struct(AL, 0, grid.comm)
-    C  = bcast_struct(C,  0, grid.comm)
-    _, FL = leftenv(AL, conj(AL), M; alg)
-    return PlaquetteVUMPSRuntime(scatter_struct(AL, grid), C, scatter_struct(FL, grid))
+    C   = LRtoC(Lg, Lg)
+    FL0 = FLint(AL, M)
+    copy!(Random.default_rng(), rng_bak)
+    AL_blk = scatter_struct(AL, grid)
+    _, FL_blk = leftenv_cannon(AL_blk, conj(AL_blk), M, scatter_struct(FL0, grid), grid; alg)
+    return PlaquetteVUMPSRuntime(AL_blk, C, FL_blk)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════

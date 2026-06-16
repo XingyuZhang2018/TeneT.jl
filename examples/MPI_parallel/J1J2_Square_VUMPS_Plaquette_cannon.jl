@@ -40,6 +40,12 @@ const ENV_TOL        = getf("ENV_TOL", 1e-6)
 const FORLOOP_ITER   = geti("FORLOOP_ITER", 16)
 const SEED           = geti("SEED", 42)
 const DATA_ROOT      = get(ENV, "DATA_ROOT", joinpath(pkgdir(TeneT), "data"))
+# R1 finding: the χ768 AD OOM is the un-checkpointed maxiter_ad-step AD-loop tape, NOT the seam
+# gathers. step_checkpoint=Recompute collapses that tape (cannon-safe: only inner_checkpoint must
+# be Plain; step/subop are free). Exact (CPU-validated: identical gradient to Plain).
+const STEP_CKPT      = get(ENV, "STEP_CKPT", "recompute")   # leading_boundary AD-loop tape lever
+const BOND_CKPT      = get(ENV, "BOND_CKPT", "recompute")   # energy_value per-bond tape lever (production setting)
+_ckpt(s) = s == "offload" ? TeneT.OffloadRecompute() : s == "plain" ? TeneT.Plain() : TeneT.Recompute()
 
 Random.seed!(SEED)
 const pattern = [1 3; 2 4]
@@ -57,16 +63,20 @@ say("    folder = $folder")
 boundary_alg = VUMPS{Plaquette{Square}}(ifsimple_eig=true, ifparallel=false, forloop_iter=FORLOOP_ITER,
                                         maxiter=VUMPS_MAXITER, miniter=0, maxiter_ad=4, miniter_ad=4,
                                         power_iter=POWER_ITER, power_iter_ad=5, power_iter_obs=POWER_ITER_OBS,
-                                        show_every=1, tol=ENV_TOL, verbosity=(RANK == 0 ? 3 : 0))
+                                        show_every=1, tol=ENV_TOL, step_checkpoint=_ckpt(STEP_CKPT),
+                                        verbosity=(RANK == 0 ? 3 : 0))
 boundary_alg.grid = cannon_grid(NGRID, NGRID)
+say("    step_checkpoint = $STEP_CKPT (AD-loop tape control)")
 
 params = GradientOptimize(model=model, pattern=pattern, boundary_alg=boundary_alg,
                           optimizer=LBFGS(200; maxiter=OPT_MAXITER, verbosity=(RANK == 0 ? 4 : 0),
                                           gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           maxiter_restart=1, folder=folder, verbosity=(RANK == 0 ? 4 : 0),
                           ifSU=false, ifprecondition=false, iter_precond=0,
+                          bond_checkpoint=_ckpt(BOND_CKPT),
                           reuse_env=true, ifsave_env=false, ifload_env=false,
                           ifsave_lbfgs=false, ifload_lbfgs=false, ifplot=false)
+say("    bond_checkpoint = $BOND_CKPT (energy_value per-bond tape control)")
 
 A = init_ipeps(; atype, etype=Float64, No=NO_LOAD, D=D, χ=CHI_LOAD, params)
 

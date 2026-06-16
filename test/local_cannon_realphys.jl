@@ -36,7 +36,8 @@ end
 mkalg(grid) = VUMPS{Plaquette{Square}}(grid=grid, ifsimple_eig=true, ifparallel=false, forloop_iter=1,
                                        maxiter=50, miniter=0, maxiter_ad=4, miniter_ad=4,
                                        power_iter=2, power_iter_ad=5, power_iter_obs=20, show_every=100,
-                                       tol=1e-10, verbosity=0)
+                                       tol=1e-10, verbosity=0,
+                                       step_checkpoint=TeneT.Recompute())   # R1: collapse the AD-loop tape (cannon-safe: only inner must be Plain)
 mkparams(grid, folder; maxit=0) = GradientOptimize(model=model, pattern=pattern, boundary_alg=mkalg(grid),
     optimizer=LBFGS(20; maxiter=maxit, verbosity=(rank == 0 ? 2 : 0), gradtol=1e-7,
                     linesearch=HagerZhangLineSearch(maxfg=5)),
