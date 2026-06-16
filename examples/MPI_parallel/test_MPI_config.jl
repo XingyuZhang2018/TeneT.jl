@@ -7,7 +7,7 @@
 #   Part 1: MPI collective correctness & performance (allgatherv_p2p!, allreduce_p2p!)
 #   Part 2: FLmap_parallel forward & backward correctness & performance
 
-using CUDA, MPI, LinearAlgebra, Zygote, Printf, Random, TeneT
+using CUDA, MPI, LinearAlgebra, Zygote, Printf, Random, Statistics, TeneT
 
 MPI.Init()
 comm = MPI.COMM_WORLD
@@ -32,6 +32,29 @@ function check(name, cond)
     return cond
 end
 
+function timed_samples_ms(f, nrep, comm)
+    samples = Float64[]
+    for _ in 1:nrep
+        MPI.Barrier(comm)
+        local_sec = @elapsed begin
+            f()
+            CUDA.synchronize()
+        end
+        # Multi-rank wall time is the slowest rank for this repetition.
+        max_sec = MPI.Allreduce(local_sec, max, comm)
+        push!(samples, max_sec * 1000)
+    end
+    return samples
+end
+
+function fmt_samples(samples)
+    return join((@sprintf("%.2f", x) for x in samples), ",")
+end
+
+function sample_stats(samples)
+    return (best = minimum(samples), med = median(samples), avg = mean(samples))
+end
+
 # ═══════════════════════════════════════════════════════════════════════
 # Part 1: MPI Collective Unit Tests
 # ═══════════════════════════════════════════════════════════════════════
@@ -53,8 +76,8 @@ for (label, N) in [("small 8KB", 1024), ("medium 8MB", 1_000_000), ("large 128MB
     # ── Allgatherv timing ──
     buf = CUDA.rand(Float64, N)
     TeneT.allgatherv_p2p!(buf, Cint.(counts), comm); CUDA.synchronize(); MPI.Barrier(comm)
-    t_ag = @elapsed for _ in 1:nrep; TeneT.allgatherv_p2p!(buf, Cint.(counts), comm); CUDA.synchronize(); end
-    t_ag /= nrep
+    ag_ms = timed_samples_ms(() -> TeneT.allgatherv_p2p!(buf, Cint.(counts), comm), nrep, comm)
+    ag = sample_stats(ag_ms)
 
     # ── Allreduce correctness (verify sum equals nprocs) ──
     buf_ar = CUDA.ones(Float64, N)
@@ -64,15 +87,18 @@ for (label, N) in [("small 8KB", 1024), ("medium 8MB", 1_000_000), ("large 128MB
     # ── Allreduce timing ──
     buf = CUDA.rand(Float64, N)
     TeneT.allreduce_p2p!(buf, +, comm); CUDA.synchronize(); MPI.Barrier(comm)
-    t_ar = @elapsed for _ in 1:nrep; TeneT.allreduce_p2p!(buf, +, comm); CUDA.synchronize(); end
-    t_ar /= nrep
+    ar_ms = timed_samples_ms(() -> TeneT.allreduce_p2p!(buf, +, comm), nrep, comm)
+    ar = sample_stats(ar_ms)
 
     check("Allgatherv $label", ag_ok)
     check("Allreduce $label", ar_ok)
-    bw_ag = size_mb / (t_ag * 1000)  # GB/s
-    bw_ar = size_mb / (t_ar * 1000)  # GB/s
-    rank == 0 && @printf("  %-14s  Allgatherv: %7.2fms (%5.1f GB/s) %s   Allreduce: %7.2fms (%5.1f GB/s) %s\n",
-        label, t_ag*1000, bw_ag, ag_ok ? "✓" : "✗", t_ar*1000, bw_ar, ar_ok ? "✓" : "✗")
+    bw_ag = size_mb / ag.best  # GB/s, using ms
+    bw_ar = size_mb / ar.best  # GB/s, using ms
+    rank == 0 && @printf("  AG_SAMPLES %-14s ms=%s\n", label, fmt_samples(ag_ms))
+    rank == 0 && @printf("  AR_SAMPLES %-14s ms=%s\n", label, fmt_samples(ar_ms))
+    rank == 0 && @printf("  %-14s  Allgatherv: %7.2fms (%5.1f GB/s) %s   Allreduce: %7.2fms (%5.1f GB/s) %s   avg/med ag: %.2f/%.2fms ar: %.2f/%.2fms\n",
+        label, ag.best, bw_ag, ag_ok ? "✓" : "✗", ar.best, bw_ar, ar_ok ? "✓" : "✗",
+        ag.avg, ag.med, ar.avg, ar.med)
 end
 rank == 0 && println()
 
@@ -105,15 +131,12 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     # ── Forward timing ──
     CUDA.synchronize(); MPI.Barrier(comm)
     nrep = 3
-    t_fwd = @elapsed for _ in 1:nrep
-        TeneT.FLmap_parallel(FL, ALu, ALd, M; ifparallel=true, forloop_iter)
-        CUDA.synchronize()
-    end
-    t_fwd /= nrep
+    fwd_ms = timed_samples_ms(() -> TeneT.FLmap_parallel(FL, ALu, ALd, M; ifparallel=true, forloop_iter), nrep, comm)
+    fwd = sample_stats(fwd_ms)
 
     # ── Backward correctness & timing ──
     bwd_ok = true
-    t_bwd = 0.0
+    bwd_ms = Float64[]
     try
         # warmup
         _, bp = Zygote.pullback(x -> sum(TeneT.FLmap_parallel(x, ALu, ALd, M; ifparallel=true, forloop_iter)), FL)
@@ -121,12 +144,10 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
         CUDA.synchronize(); MPI.Barrier(comm)
         GC.gc(); CUDA.reclaim()
 
-        t_bwd = @elapsed for _ in 1:nrep
+        bwd_ms = timed_samples_ms(() -> begin
             _, bp = Zygote.pullback(x -> sum(TeneT.FLmap_parallel(x, ALu, ALd, M; ifparallel=true, forloop_iter)), FL)
             g = bp(one(eltype(FL)))[1]
-            CUDA.synchronize()
-        end
-        t_bwd /= nrep
+        end, nrep, comm)
 
         # Check gradient is finite and non-zero
         g_arr = Array(g)
@@ -134,13 +155,16 @@ for (D, χ) in vec([(D, χ) for χ in 256:256:1024, D in 8:2:16])
     catch e
         rank == 0 && println("  WARN: backward failed for D=$D χ=$χ: ", sprint(showerror, e))
         bwd_ok = false
-        t_bwd = NaN
     end
     check("FLmap backward D=$D χ=$χ", bwd_ok)
+    bwd = isempty(bwd_ms) ? (best = NaN, med = NaN, avg = NaN) : sample_stats(bwd_ms)
 
-    rank == 0 && @printf("  D=%-2d χ=%-4d (%6.1fMB)  fwd: %8.2fms %s   bwd: %8.2fms %s   bwd/fwd: %.1fx\n",
-        D, χ, tensor_mb, t_fwd*1000, fwd_ok ? "✓" : "✗", t_bwd*1000, bwd_ok ? "✓" : "✗",
-        isnan(t_bwd) ? NaN : t_bwd/t_fwd)
+    rank == 0 && @printf("  FWD_SAMPLES D=%d χ=%d ms=%s\n", D, χ, fmt_samples(fwd_ms))
+    rank == 0 && @printf("  BWD_SAMPLES D=%d χ=%d ms=%s\n", D, χ, fmt_samples(bwd_ms))
+    rank == 0 && @printf("  D=%-2d χ=%-4d (%6.1fMB)  fwd: %8.2fms %s   bwd: %8.2fms %s   bwd/fwd: %.1fx   avg/med fwd: %.2f/%.2fms bwd: %.2f/%.2fms\n",
+        D, χ, tensor_mb, fwd.best, fwd_ok ? "✓" : "✗", bwd.best, bwd_ok ? "✓" : "✗",
+        isnan(bwd.best) ? NaN : bwd.best / fwd.best,
+        fwd.avg, fwd.med, bwd.avg, bwd.med)
 
     GC.gc(); CUDA.reclaim()
 end
