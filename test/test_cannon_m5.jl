@@ -8,7 +8,7 @@
 # irrelevant to parity; both paths run the identical finite computation.
 #
 # Gates (design §6, post-R1):
-#   M5-0  isolated seam BIT-PARITY: feed IDENTICAL full AC/C → ACCtoALAR_cannon/ALCtoAC_cannon
+#   M5-0  isolated seam BIT-PARITY: feed IDENTICAL full AC/C → ACCtoALAR_cannon_gather_ref/ALCtoAC_cannon
 #         bit-match serial (no gauge ambiguity — same input). The rigorous seam proof.
 #   M5-1  full-step forward parity: vumps_step_cannon vs serial. FL/FR/C/err at 1e-8;
 #         AL/AR up-to-gauge at 1e-5 (QR amplifies the upstream block-vs-full FP-order diff
@@ -28,7 +28,7 @@ using TeneT
 using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, General, StructArray, Recompute, VUMPSRuntime,
              vumps_step, init_VUMPSRuntime_cannon, vumps_step_cannon,
-             ALCtoAC, ALCtoAC_cannon, ACCtoALAR, ACCtoALAR_cannon,
+             ALCtoAC, ALCtoAC_cannon, ACCtoALAR, ACCtoALAR_dist_cannon,
              leftenv, leftenv_cannon, rightenv, rightenv_cannon,
              ACenv, ACenv_cannon, Cenv, Cenv_cannon, checkpoint, qrpos,
              ALCtoAC_cannon_gather_ref, ACCtoALAR_cannon_gather_ref
@@ -172,13 +172,13 @@ end
         # ── ACCtoALAR seam: loss on AL+AR; grad wrt AC (block) + C (replicated) ──
         lqr_ref(ac, c) = let (al, ar, _, _) = ACCtoALAR(ac, c)
             real(sum(sum(conj(WAL[k]) .* al.data[k]) + sum(conj(WAR[k]) .* ar.data[k]) for k in 1:nu)) end
-        lqr_c(ac, c)   = let (al, ar, _, _) = ACCtoALAR_cannon(ac, c, g)
+        lqr_c(ac, c)   = let (al, ar, _, _) = ACCtoALAR_dist_cannon(ac, c, g)
             real(sum(sum(conj(WALb[k]) .* al.data[k]) + sum(conj(WARb[k]) .* ar.data[k]) for k in 1:nu)) end
         gr = Zygote.gradient(lqr_ref, AC, C); gc = Zygote.gradient(lqr_c, ACb, C)
         eAC = maximum(relb(gc[1].data[k], gr[1].data[k]) for k in 1:nu)
         eC1 = (gr[2] === nothing || gc[2] === nothing) ? 0.0 : maximum(reld(gc[2].data[k], gr[2].data[k]) for k in 1:nu)
         # Recompute wrap (R-6: seam collectives re-run on backward)
-        lqr_cr(ac, c) = let (al, ar, _, _) = checkpoint(Recompute(), ACCtoALAR_cannon, ac, c, g)
+        lqr_cr(ac, c) = let (al, ar, _, _) = checkpoint(Recompute(), ACCtoALAR_dist_cannon, ac, c, g)
             real(sum(sum(conj(WALb[k]) .* al.data[k]) + sum(conj(WARb[k]) .* ar.data[k]) for k in 1:nu)) end
         gcr = Zygote.gradient(lqr_cr, ACb, C)
         eACr = maximum(relb(gcr[1].data[k], gr[1].data[k]) for k in 1:nu)

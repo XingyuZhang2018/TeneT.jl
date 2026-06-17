@@ -389,8 +389,6 @@ function ACCtoALAR_cannon_gather_ref(AC_blk, C, grid::CannonGrid)
     return scatter_struct(AL_full, grid), scatter_struct(AR_full, grid), errL, errR
 end
 
-ACCtoALAR_cannon(AC_blk, C, grid::CannonGrid) = ACCtoALAR_cannon_gather_ref(AC_blk, C, grid)
-
 """
     rt′, err = vumps_step_cannon(rt, M, grid, alg)
 
@@ -414,7 +412,7 @@ function vumps_step_cannon(rt::VUMPSRuntime, M::StructArray, grid::CannonGrid, a
     _, FR = checkpoint(sub, (a, b, m, fr) -> rightenv_cannon(a, b, m, fr, grid; alg), AR, conj(AR), M, FR)
     _, AC = checkpoint(sub, (ac, fl, m, fr) -> ACenv_cannon(ac, fl, m, fr, grid; alg), AC, FL, M, FR)
     _, C  = Cenv_cannon(C, FL, FR, grid; alg)          # C replicated χ×χ — no checkpoint (mirrors serial)
-    AL, AR, errL, errR = checkpoint(sub, (ac, c) -> ACCtoALAR_cannon(ac, c, grid), AC, C)
+    AL, AR, errL, errR = checkpoint(sub, (ac, c) -> ACCtoALAR_dist_cannon(ac, c, grid), AC, C)
     err = errL + errR
     alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
     C = for_gc(C)
@@ -599,6 +597,16 @@ function _tsqr_front_row_axis(A_mat, grid::CannonGrid)
     return Qloc * Q2, R
 end
 
+function _tail_adjoint_rowblock(AC_col)
+    return reshape(permutedims(conj(AC_col), (2, 3, 4, 1)),
+                   size(AC_col, 2) * size(AC_col, 3) * size(AC_col, 4),
+                   size(AC_col, 1))
+end
+
+function _qtail_from_qr_rows(Q_rows, AC_col)
+    return reshape(Q_rows', size(AC_col))
+end
+
 function _tsqr_front_rowblock(A_row, grid::CannonGrid)
     # For a row block with a local first-chi leg and a full last-chi leg, the
     # serial `_to_front` equivalent is (local_a * D * D) x full_chi.
@@ -606,18 +614,38 @@ function _tsqr_front_rowblock(A_row, grid::CannonGrid)
     return _tsqr_front_col_axis(A_mat, grid)
 end
 
+qrpos_colrep(C, grid::CannonGrid) = qrpos(C)
 lqpos_colrep(C, grid::CannonGrid) = lqpos(C)
 
-function _tail_adjoint_rowblock(AC_col)
-    return reshape(permutedims(AC_col, (2, 3, 4, 1)),
-                   size(AC_col, 2) * size(AC_col, 3) * size(AC_col, 4),
-                   size(AC_col, 1))
+function _acc_to_al_tsqr_one(AC_blk, C, grid::CannonGrid)
+    χ = ChainRulesCore.ignore_derivatives() do
+        MPI.Allreduce(size(AC_blk, 1), +, grid.col_comm)
+    end
+    l_rs = split_ranges(χ, grid.N2)
+    AC_row = cannon_gather_row(AC_blk, grid, l_rs)
+    QAC, RAC = _tsqr_front_rowblock(AC_row, grid)
+    QC, RC = qrpos_colrep(C, grid)
+    AL_row = reshape(QAC * QC', size(AC_row))
+    AL_blk = AL_row[ntuple(i -> i == ndims(AL_row) ? l_rs[grid.r2 + 1] : Colon(), ndims(AL_row))...]
+    return AL_blk, norm(RAC - RC)
 end
 
-function _qtail_from_qr_rows(Q_rows, AC_col)
-    qmat = Q_rows'
-    qtail = reshape(qmat', size(AC_col, 2), size(AC_col, 3), size(AC_col, 4), size(AC_col, 1))
-    return permutedims(qtail, (4, 1, 2, 3))
+"""
+    AL_blk, errL = ACCtoAL_tsqr_cannon(AC_blk, C, grid)
+
+Plaquette QR seam using TSQR. `AC_blk` stays block-distributed:
+the last chi leg is row-gathered, the tall-skinny QR is reduced over
+`col_comm`, and the resulting row block is sliced back to this rank's last-leg
+block. The communication adjoints use the existing Cannon gather wrappers, so
+this path is valid in the AD loop as well as the forward observable loop.
+"""
+function ACCtoAL_tsqr_cannon(AC_blk, C, grid::CannonGrid)
+    blocks = map(eachindex(AC_blk.data)) do k
+        _acc_to_al_tsqr_one(AC_blk.data[k], C.data[k], grid)
+    end
+    AL_data = [first(block) for block in blocks]
+    errL = sum(last, blocks)
+    return StructArray(AL_data, AC_blk.pattern), errL
 end
 
 function _acc_to_ar_tslq_one(AC_blk, Cjr, grid::CannonGrid)
@@ -647,6 +675,12 @@ function ACCtoAR_tslq_cannon(AC_blk, C, grid::CannonGrid)
     AR_data = [first(block) for block in blocks]
     errR = sum(last, blocks)
     return StructArray(AR_data, AC_blk.pattern), errR
+end
+
+function ACCtoALAR_dist_cannon(AC_blk, C, grid::CannonGrid)
+    AL_blk, errL = ACCtoAL_tsqr_cannon(AC_blk, C, grid)
+    AR_blk, errR = ACCtoAR_tslq_cannon(AC_blk, C, grid)
+    return AL_blk, AR_blk, errL, errR
 end
 
 """
