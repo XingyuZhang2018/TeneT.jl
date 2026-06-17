@@ -51,6 +51,18 @@ function assert_block_grad(label, got, ref, g; rtol=1e-7, atol=1e-10)
     end
 end
 
+function general_vumps_step_body()
+    cannon_src = read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "cannon.jl"), String)
+    sig = "function vumps_step_cannon(rt::VUMPSRuntime, M::StructArray, grid::CannonGrid, alg::VUMPS{General})"
+    start = findfirst(sig, cannon_src)
+    @test start !== nothing
+    tail = cannon_src[last(start):end]
+    marker = "# Fixed seed for the distributed init"
+    stop = findfirst(marker, tail)
+    @test stop !== nothing
+    return tail[1:first(stop)-1]
+end
+
 const PATS = (reshape(collect(1:4), 2, 2), [1 2; 2 1])
 
 @testset "General distributed ALCtoAC forward and gradient parity" begin
@@ -141,8 +153,9 @@ end
 end
 
 @testset "General vumps_step_cannon uses distributed seams" begin
-    cannon_src = read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "cannon.jl"), String)
-    @test occursin("ACCtoALAR_dist_cannon", cannon_src)
+    step_body = general_vumps_step_body()
+    @test occursin("ACCtoALAR_dist_cannon", step_body)
+    @test !occursin("ACCtoALAR_cannon(ac, c, grid)", step_body)
     g = cannon_grid(2, 2)
     χ, D = 8, 2
     pat = reshape(collect(1:4), 2, 2)
