@@ -40,7 +40,8 @@ end
 
 function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
     @unpack AL, C, FLu, FLo = env
-    AC = ALCtoAC(AL, C)
+    grid = _dist_energy_plaq(model, params.boundary_alg) ? params.boundary_alg.grid : nothing
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_cannon(AL, C, grid)
     atype = _arraytype(AC[1])
     S = model.S
     Sx = atype(const_Sx(S))
