@@ -3,6 +3,7 @@ using MPI
 using LinearAlgebra
 using Random
 using Zygote
+using ChainRulesCore: rrule, ZeroTangent
 using TeneT
 using TeneT: cannon_grid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, General, StructArray, VUMPSRuntime, Recompute,
@@ -92,19 +93,37 @@ end
 
 @testset "row first-dimension gather primitive parity" begin
     g = cannon_grid(2, 2)
-    Random.seed!(1001 + rank)
     local_rows = g.r2 == 0 ? 3 : 2
-    blk = rand(ComplexF64, local_rows, 4)
     rs = split_ranges(5, g.N2)
+    blk = Matrix{ComplexF64}(undef, local_rows, 4)
+    for i in 1:local_rows, j in 1:4
+        row = first(rs[g.r2 + 1]) + i - 1
+        blk[i, j] = complex(100 * g.r1 + 10 * g.r2 + row, j)
+    end
     full = TeneT.cannon_gather_first_row(blk, g, rs)
-    @test size(full) == (5, 4)
-    @test full[rs[g.r2 + 1], :] == blk
+    expected_full = Matrix{ComplexF64}(undef, 5, 4)
+    for j in 0:g.N2-1, row in rs[j + 1], col in 1:4
+        expected_full[row, col] = complex(100 * g.r1 + 10 * j + row, col)
+    end
+    @test size(full) == size(expected_full)
+    @test full == expected_full
 
+    Random.seed!(1001 + rank)
     W = rand(ComplexF64, 5, 4)
     loss(x) = real(sum(conj(W) .* TeneT.cannon_gather_first_row(x, g, rs)))
     gb = Zygote.gradient(loss, blk)[1]
-    expected = TeneT._cannon_row_reduce_scatter_first(W, g, rs)
+    expected = nothing
+    for j in 0:g.N2-1
+        contrib = copy(W[rs[j + 1], :])
+        MPI.Allreduce!(contrib, +, g.row_comm)
+        if j == g.r2
+            expected = contrib
+        end
+    end
     @test isapprox(gb, expected; rtol=1e-12, atol=1e-12)
+
+    _, back = rrule(TeneT.cannon_gather_first_row, blk, g, rs)
+    @test back(ZeroTangent())[2] == zero(blk)
 end
 
 @testset "General distributed QR/LQ forward parity" begin

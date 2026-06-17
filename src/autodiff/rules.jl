@@ -534,6 +534,7 @@ function ChainRulesCore.rrule(::typeof(cannon_gather_first_row), blk, grid::Cann
     full = cannon_gather_first_row(blk, grid, a_rs)
     function cannon_gather_first_row_back(dfull)
         d = unthunk(dfull)
+        d isa AbstractZero && return NoTangent(), zero(blk), NoTangent(), NoTangent()
         if !(d isa DenseArray)
             buf = similar(full, eltype(d), size(d))
             buf .= d
