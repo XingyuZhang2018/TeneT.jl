@@ -374,3 +374,24 @@ Negative controls:
 - Forward and gradient parity tests pass on 4 CPU ranks for complex inputs.
 - `step_checkpoint=Recompute()` AD smoke passes without deadlock.
 - Plaquette `distributed_qr` behavior is not regressed.
+
+## Implementation notes
+
+- The original gather/scatter seams were renamed to `*_gather_ref` and kept as
+  reference helpers for forward/gradient parity tests.
+- `ALCtoAC_cannon` is now the production row reduce-scatter contraction and
+  carries a custom rrule for the distributed seam.
+- `ACCtoAL_tsqr_cannon` is the shared left-TSQR seam for both Plaquette and
+  General left QR.
+- `ACCtoAR_tslq_cannon` implements the right-LQ seam by running QR on
+  `_to_tail(AC)'`; for complex inputs the row-block path must conjugate the
+  block input because Julia `'` is a conjugate transpose.
+- `lqpos_colrep` handles replicated-`C` AD by allreducing the `Q`
+  contribution before returning the cotangent.
+- General `vumps_step_cannon` now routes to `ACCtoALAR_dist_cannon`.
+- Observable callers use production `ALCtoAC_cannon`; the old
+  `ALCtoAC_cannon_dist` helper has been removed.
+- The remaining full-chi gap in this phase is General initialization, which
+  still uses full canonicalization. Plaquette `distributed_qr` now has a
+  distributed init path, while the matching General init work remains future
+  work.
