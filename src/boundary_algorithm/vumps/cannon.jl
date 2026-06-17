@@ -697,7 +697,7 @@ function vumps_step_cannon(rt::PlaquetteVUMPSRuntime, M::StructArray, grid::Cann
     _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv_cannon(a, b, m, fl, grid; alg), AL, conj(AL), M, FL)
     _, AC = checkpoint(sub, (a, fl, m) -> ACenv_plaq_cannon(a, fl, m, grid; alg), AC, FL, M)
     _, C  = Cenv_plaq_cannon(C, FL, grid; alg)
-    AL, err = checkpoint(sub, (ac, c) -> ACCtoAL_cannon(ac, c, grid), AC, C)
+    AL, err = checkpoint(sub, (ac, c) -> ACCtoAL_tsqr_cannon(ac, c, grid), AC, C)
     C = for_gc(C)
     return PlaquetteVUMPSRuntime(AL, C, FL), err
 end

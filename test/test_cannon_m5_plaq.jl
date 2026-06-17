@@ -10,7 +10,7 @@ using TeneT
 using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, Plaquette, Square, StructArray, PlaquetteVUMPSRuntime,
              vumps_step, init_VUMPSRuntime_cannon, vumps_step_cannon,
-             ALCtoAC, ALCtoAC_cannon, ACCtoAL, ACCtoAL_cannon, ACCtoAL_cannon_gather_ref,
+             ALCtoAC, ALCtoAC_cannon, ACCtoAL, ACCtoAL_cannon_gather_ref, ACCtoAL_tsqr_cannon,
              leftenv, leftenv_cannon, ACenv_plaq, ACenv_plaq_cannon, Cenv_plaq, Cenv_plaq_cannon, qrpos
 import ChainRulesCore
 
@@ -102,7 +102,7 @@ end
         WAL = [rand(ComplexF64, χ, D, D, χ) for _ in 1:nu]; WALb = [cannon_scatter(W, g) for W in WAL]
         ACb = scatter_sa(AC, g)
         lr(ac, c) = let (al, _) = ACCtoAL(ac, c);        real(sum(sum(conj(WAL[k])  .* al.data[k]) for k in 1:nu)) end
-        lc(ac, c) = let (al, _) = ACCtoAL_cannon(ac, c, g); real(sum(sum(conj(WALb[k]) .* al.data[k]) for k in 1:nu)) end
+        lc(ac, c) = let (al, _) = ACCtoAL_tsqr_cannon(ac, c, g); real(sum(sum(conj(WALb[k]) .* al.data[k]) for k in 1:nu)) end
         gr = Zygote.gradient(lr, AC, C); gc = Zygote.gradient(lc, ACb, C)
         eAC = maximum(norm(gc[1].data[k] - blkof(gr[1].data[k])) / max(norm(blkof(gr[1].data[k])), 1e-12) for k in 1:nu)
         eC  = (gr[2] === nothing || gc[2] === nothing) ? 0.0 :
