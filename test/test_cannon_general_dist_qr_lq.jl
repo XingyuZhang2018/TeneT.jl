@@ -3,7 +3,7 @@ using MPI
 using LinearAlgebra
 using Random
 using Zygote
-using ChainRulesCore: rrule, ZeroTangent
+using ChainRulesCore: rrule, Tangent, ZeroTangent, @thunk
 using TeneT
 using TeneT: cannon_grid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, General, StructArray, VUMPSRuntime, Recompute,
@@ -91,6 +91,27 @@ const PATS = (reshape(collect(1:4), 2, 2), [1 2; 2 1])
     end
 end
 
+@testset "ALCtoAC cannon pullback densifies per-cell cotangents collectively" begin
+    g = cannon_grid(2, 2)
+    χ, D = 6, 2
+    pat = reshape(collect(1:4), 2, 2)
+    AL, _, C = build_inputs(χ, D, pat; seed=1175)
+    ALb = scatter_sa(AL, g)
+    AC, back = rrule(ALCtoAC_cannon, ALb, C, g)
+
+    dense = zeros(ComplexF64, size(AC.data[2]))
+    dense .= complex(rank + 1, 0)
+    cot = Tangent{Any}(;
+        data=Any[ZeroTangent(), @thunk(view(dense, :, :, :, :)), ZeroTangent(), ZeroTangent()],
+        pattern=ZeroTangent(),
+    )
+    dAL, dC = back(cot)[2:3]
+
+    @test dAL.data[1] == zero(ALb.data[1])
+    @test dC.data[1] == zero(C.data[1])
+    @test size(dAL.data[2]) == size(ALb.data[2])
+    @test size(dC.data[2]) == size(C.data[2])
+end
 @testset "row first-dimension gather primitive parity" begin
     g = cannon_grid(2, 2)
     local_rows = g.r2 == 0 ? 3 : 2

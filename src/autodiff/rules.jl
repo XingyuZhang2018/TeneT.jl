@@ -560,21 +560,18 @@ function ChainRulesCore.rrule(::typeof(ALCtoAC_cannon), AL_blk, C, grid::CannonG
     AC = ALCtoAC_cannon(AL_blk, C, grid)
     function ALCtoAC_cannon_back(dAC)
         dACb = unthunk(dAC)
-        if dACb isa AbstractZero
-            dAL0 = StructArray(map(zero, AL_blk.data), AL_blk.pattern)
-            dC0 = StructArray(map(zero, C.data), C.pattern)
-            return NoTangent(), dAL0, dC0, NoTangent()
-        end
-        dAC_data = unthunk(dACb.data)
+        dACb isa AbstractZero && return NoTangent(), zero(AL_blk), zero(C), NoTangent()
         dAL_data = Vector{Any}(undef, length(AL_blk.data))
         dC_data = Vector{Any}(undef, length(C.data))
         for k in eachindex(AL_blk.data)
             Ck = C.data[k]
-            dACk = dAC_data[k]
+            dACk = unthunk(dACb.data[k])
             if dACk isa AbstractZero
-                dAL_data[k] = zero(AL_blk.data[k])
-                dC_data[k] = zero(Ck)
-                continue
+                dACk = zero(AC.data[k])
+            elseif !(dACk isa DenseArray)
+                buf = similar(AC.data[k])
+                buf .= dACk
+                dACk = buf
             end
             l_rs = split_ranges(size(Ck, 2), grid.N2)
             br = l_rs[grid.r2 + 1]
