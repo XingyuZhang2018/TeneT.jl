@@ -3,7 +3,7 @@ using MPI
 using LinearAlgebra
 using Random
 using Zygote
-using ChainRulesCore: rrule, Tangent, ZeroTangent, @thunk
+using ChainRulesCore: rrule, Tangent, ZeroTangent, @thunk, unthunk
 using TeneT
 using TeneT: cannon_grid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, General, StructArray, VUMPSRuntime, Recompute,
@@ -147,6 +147,46 @@ end
     @test back(ZeroTangent())[2] == zero(blk)
 end
 
+@testset "lqpos_colrep pullback tangent edge cases" begin
+    g = cannon_grid(2, 2)
+    Random.seed!(1288 + rank)
+    Ck = Matrix(qr(rand(ComplexF64, 6, 6)).Q)
+    (L, Q), back = rrule(TeneT.lqpos_colrep, Ck, g)
+    dz = unthunk(back((ZeroTangent(), ZeroTangent()))[2])
+    @test dz == zero(Ck)
+
+    dQ_dense = zeros(ComplexF64, size(Q))
+    dQ_dense .= complex(rank + 1, 0)
+    dC = unthunk(back((ZeroTangent(), @thunk(view(dQ_dense, :, :))))[2])
+    @test size(L) == size(Ck)
+    @test size(dC) == size(Ck)
+end
+
+@testset "General distributed right LQ gradient parity" begin
+    g = cannon_grid(2, 2)
+    χ, D = 10, 2
+    for (ci, pat) in enumerate(PATS)
+        _, AC, C = build_inputs(χ, D, pat; seed=1250 + ci)
+        ACb = scatter_sa(AC, g)
+        Random.seed!(1275 + ci)
+        WAR = [rand(ComplexF64, χ, D, D, χ) for _ in 1:length(AC.data)]
+        WARb = [cannon_scatter(w, g) for w in WAR]
+
+        loss_ref(ac, c) = let (ar, _) = ACCtoAR(ac, c)
+            real(sum(sum(conj(WAR[k]) .* ar.data[k]) for k in eachindex(WAR)))
+        end
+        loss_can(ac, c) = let (ar, _) = ACCtoAR_tslq_cannon(ac, c, g)
+            real(sum(sum(conj(WARb[k]) .* ar.data[k]) for k in eachindex(WARb)))
+        end
+        gr = Zygote.gradient(loss_ref, AC, C)
+        gc = Zygote.gradient(loss_can, ACb, C)
+        assert_block_grad("ACCtoAR dAC", gc[1], gr[1], g)
+        for k in eachindex(C.data)
+            @test isapprox(gc[2].data[k], gr[2].data[k]; rtol=1e-7, atol=1e-10)
+        end
+    end
+end
+
 @testset "General distributed QR/LQ forward parity" begin
     g = cannon_grid(2, 2)
     χ, D = 12, 2
@@ -173,31 +213,6 @@ end
         @test maximum(norm(AR2f.data[k] - ARcf.data[k]) / max(norm(ARcf.data[k]), 1e-12) for k in eachindex(ARcf.data)) <= 1e-10
         @test isapprox(eL2, errLc; rtol=1e-10, atol=1e-10)
         @test isapprox(eR2, errRc; rtol=1e-10, atol=1e-10)
-    end
-end
-
-@testset "General distributed right LQ gradient parity" begin
-    g = cannon_grid(2, 2)
-    χ, D = 10, 2
-    for (ci, pat) in enumerate(PATS)
-        _, AC, C = build_inputs(χ, D, pat; seed=1250 + ci)
-        ACb = scatter_sa(AC, g)
-        Random.seed!(1275 + ci)
-        WAR = [rand(ComplexF64, χ, D, D, χ) for _ in 1:length(AC.data)]
-        WARb = [cannon_scatter(w, g) for w in WAR]
-
-        loss_ref(ac, c) = let (ar, _) = ACCtoAR(ac, c)
-            real(sum(sum(conj(WAR[k]) .* ar.data[k]) for k in eachindex(WAR)))
-        end
-        loss_can(ac, c) = let (ar, _) = ACCtoAR_tslq_cannon(ac, c, g)
-            real(sum(sum(conj(WARb[k]) .* ar.data[k]) for k in eachindex(WARb)))
-        end
-        gr = Zygote.gradient(loss_ref, AC, C)
-        gc = Zygote.gradient(loss_can, ACb, C)
-        assert_block_grad("ACCtoAR dAC", gc[1], gr[1], g)
-        for k in eachindex(C.data)
-            @test isapprox(gc[2].data[k], gr[2].data[k]; rtol=1e-7, atol=1e-10)
-        end
     end
 end
 
