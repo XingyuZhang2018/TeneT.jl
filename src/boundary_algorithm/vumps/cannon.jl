@@ -579,6 +579,33 @@ end
 
 ACCtoAL_cannon(AC_blk, C, grid::CannonGrid) = ACCtoAL_cannon_gather_ref(AC_blk, C, grid)
 
+function _tsqr_front_col_axis(A_mat, grid::CannonGrid)
+    Qloc, Rloc = qrpos(A_mat)
+    chi = size(Rloc, 1)
+    r_rs = split_ranges(grid.N1 * chi, grid.N1)
+    Rstack = cannon_gather_col(Rloc, grid, r_rs)
+    Q2stack, R = qrpos(Rstack)
+    Q2 = Q2stack[r_rs[grid.r1 + 1], :]
+    return Qloc * Q2, R
+end
+
+function _tsqr_front_row_axis(A_mat, grid::CannonGrid)
+    Qloc, Rloc = qrpos(A_mat)
+    chi = size(Rloc, 1)
+    r_rs = split_ranges(grid.N2 * chi, grid.N2)
+    Rstack = cannon_gather_first_row(Rloc, grid, r_rs)
+    Q2stack, R = qrpos(Rstack)
+    Q2 = Q2stack[r_rs[grid.r2 + 1], :]
+    return Qloc * Q2, R
+end
+
+function _tsqr_front_rowblock(A_row, grid::CannonGrid)
+    # For a row block with a local first-chi leg and a full last-chi leg, the
+    # serial `_to_front` equivalent is (local_a * D * D) x full_chi.
+    A_mat = reshape(A_row, size(A_row, 1) * size(A_row, 2) * size(A_row, 3), size(A_row, 4))
+    return _tsqr_front_col_axis(A_mat, grid)
+end
+
 """
     rt′, err = vumps_step_cannon(rt::PlaquetteVUMPSRuntime, M, grid, alg)
 
