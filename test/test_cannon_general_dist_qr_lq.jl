@@ -90,6 +90,23 @@ const PATS = (reshape(collect(1:4), 2, 2), [1 2; 2 1])
     end
 end
 
+@testset "row first-dimension gather primitive parity" begin
+    g = cannon_grid(2, 2)
+    Random.seed!(1001 + rank)
+    local_rows = g.r2 == 0 ? 3 : 2
+    blk = rand(ComplexF64, local_rows, 4)
+    rs = split_ranges(5, g.N2)
+    full = TeneT.cannon_gather_first_row(blk, g, rs)
+    @test size(full) == (5, 4)
+    @test full[rs[g.r2 + 1], :] == blk
+
+    W = rand(ComplexF64, 5, 4)
+    loss(x) = real(sum(conj(W) .* TeneT.cannon_gather_first_row(x, g, rs)))
+    gb = Zygote.gradient(loss, blk)[1]
+    expected = TeneT._cannon_row_reduce_scatter_first(W, g, rs)
+    @test isapprox(gb, expected; rtol=1e-12, atol=1e-12)
+end
+
 @testset "General distributed QR/LQ forward parity" begin
     g = cannon_grid(2, 2)
     χ, D = 12, 2

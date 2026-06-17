@@ -530,6 +530,19 @@ function ChainRulesCore.rrule(::typeof(cannon_gather_row), blk, grid::CannonGrid
     return full, cannon_gather_row_back
 end
 
+function ChainRulesCore.rrule(::typeof(cannon_gather_first_row), blk, grid::CannonGrid, a_rs)
+    full = cannon_gather_first_row(blk, grid, a_rs)
+    function cannon_gather_first_row_back(dfull)
+        d = unthunk(dfull)
+        if !(d isa DenseArray)
+            buf = similar(full, eltype(d), size(d))
+            buf .= d
+            d = buf
+        end
+        return NoTangent(), _cannon_row_reduce_scatter_first(d, grid, a_rs), NoTangent(), NoTangent()
+    end
+    return full, cannon_gather_first_row_back
+end
 function ChainRulesCore.rrule(::typeof(cannon_gather_col), blk, grid::CannonGrid, a_rs)
     full = cannon_gather_col(blk, grid, a_rs)
     function cannon_gather_col_back(dfull)

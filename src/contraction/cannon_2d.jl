@@ -394,6 +394,35 @@ function _cannon_row_allgather(blk, grid::CannonGrid, l_rs)
     return full
 end
 
+function _cannon_row_allgather_first(blk, grid::CannonGrid, a_rs)
+    N2, r2 = grid.N2, grid.r2
+    nrest = ndims(blk) - 1
+    chi = sum(length, a_rs)
+    full = similar(blk, chi, size(blk)[2:end]...)
+    view(full, a_rs[r2 + 1], ntuple(_ -> Colon(), nrest)...) .= blk
+    N2 == 1 && return full
+    recvbufs = Vector{typeof(blk)}(undef, N2)
+    for j in 0:N2-1
+        j == r2 && continue
+        recvbufs[j + 1] = similar(blk, length(a_rs[j + 1]), size(blk)[2:end]...)
+    end
+    synchronize(blk)
+    reqs = MPI.Request[]
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.row_comm; source = j, tag = _TAG_BASE + 770))
+    end
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Isend(blk, grid.row_comm; dest = j, tag = _TAG_BASE + 770))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N2-1
+        j == r2 && continue
+        view(full, a_rs[j + 1], ntuple(_ -> Colon(), nrest)...) .= recvbufs[j + 1]
+    end
+    return full
+end
 # Sum the row peers' full-d slice gradients and keep the local d block:
 # adjoint of _cannon_row_allgather. Direct pairwise on row_comm, tag 760.
 # Recv sizing: every row peer's slice has MY l-block columns at MY range, so
@@ -433,6 +462,36 @@ function _cannon_row_reduce_scatter_last(dslice, grid::CannonGrid, l_rs)
     return acc
 end
 
+function _cannon_row_reduce_scatter_first(dfull, grid::CannonGrid, a_rs)
+    N2, r2 = grid.N2, grid.r2
+    nrest = ndims(dfull) - 1
+    cols = ntuple(_ -> Colon(), nrest)
+    acc = dfull[a_rs[r2 + 1], cols...]
+    N2 == 1 && return acc
+    recvbufs = Vector{typeof(acc)}(undef, N2)
+    sendbufs = Vector{typeof(acc)}(undef, N2)
+    for j in 0:N2-1
+        j == r2 && continue
+        recvbufs[j + 1] = similar(acc)
+        sendbufs[j + 1] = dfull[a_rs[j + 1], cols...]
+    end
+    synchronize(dfull)
+    reqs = MPI.Request[]
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.row_comm; source = j, tag = _TAG_BASE + 780))
+    end
+    for j in 0:N2-1
+        j == r2 && continue
+        push!(reqs, MPI.Isend(sendbufs[j + 1], grid.row_comm; dest = j, tag = _TAG_BASE + 780))
+    end
+    MPI.Waitall(reqs)
+    for j in 0:N2-1
+        j == r2 && continue
+        acc .+= recvbufs[j + 1]
+    end
+    return acc
+end
 # ─── Forward ──────────────────────────────────────────────────────────────
 
 # Core shared by the replicated (FLmap_cannon) and distributed
@@ -579,6 +638,7 @@ end
 # is the SAME the *_cannon_dist wrappers pass: `l_rs` (N2 partition) for the row
 # gather, `a_rs` (N1 partition) for the column gather.
 cannon_gather_row(blk, grid::CannonGrid, l_rs) = _cannon_row_allgather(blk, grid, l_rs)
+cannon_gather_first_row(blk, grid::CannonGrid, a_rs) = _cannon_row_allgather_first(blk, grid, a_rs)
 cannon_gather_col(blk, grid::CannonGrid, a_rs) = _cannon_col_allgather(blk, grid, a_rs)
 
 """
