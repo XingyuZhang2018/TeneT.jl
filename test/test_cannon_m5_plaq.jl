@@ -24,6 +24,9 @@ scatter_sa(SA, g) = StructArray([cannon_scatter(t, g) for t in SA.data], SA.patt
 gather_sa(SA, g)  = StructArray([cannon_gather(t, g)  for t in SA.data], SA.pattern)
 scatter_rt(rt, g) = PlaquetteVUMPSRuntime(scatter_sa(rt.AL, g), rt.C, scatter_sa(rt.FL, g))   # C replicated
 ph_relerr(a, b) = (c = dot(b, a) / dot(b, b); norm(a .- b .* c) / max(norm(b), eps()))
+function cannon_source()
+    return read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "cannon.jl"), String)
+end
 
 # random (non-canonical) Plaquette runtime + leg5 M; identical on every rank.
 function build_rt(χ, D; seed, pat)
@@ -131,6 +134,9 @@ end
 
 # ── Gate M5p-4: routing via alg.grid ──────────────────────────────────────────
 @testset "Gate M5p-4: vumps_step(Plaquette) routes to cannon" begin
+    src = cannon_source()
+    @test occursin("ACCtoAL_cannon(AC_blk, C, grid::CannonGrid) = ACCtoAL_tsqr_cannon", src)
+    @test !occursin("ACCtoAL_cannon(AC_blk, C, grid::CannonGrid) = ACCtoAL_cannon_gather_ref", src)
     g = cannon_grid(2, 2)
     rt, M = build_rt(14, 2; seed=9500, pat=[1 3; 2 4])
     alg_c = algp(g); alg_c.power_iter = 15

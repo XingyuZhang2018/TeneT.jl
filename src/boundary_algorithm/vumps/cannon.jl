@@ -575,7 +575,7 @@ function ACCtoAL_cannon_gather_ref(AC_blk, C, grid::CannonGrid)
     return scatter_struct(AL_full, grid), errL
 end
 
-ACCtoAL_cannon(AC_blk, C, grid::CannonGrid) = ACCtoAL_cannon_gather_ref(AC_blk, C, grid)
+ACCtoAL_cannon(AC_blk, C, grid::CannonGrid) = ACCtoAL_tsqr_cannon(AC_blk, C, grid)
 
 function _tsqr_front_col_axis(A_mat, grid::CannonGrid)
     Qloc, Rloc = qrpos(A_mat)
