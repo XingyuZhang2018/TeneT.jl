@@ -352,7 +352,21 @@ function ALCtoAC_cannon_gather_ref(AL_blk, C, grid::CannonGrid)
     return scatter_struct(AC_full, grid)
 end
 
-ALCtoAC_cannon(AL_blk, C, grid::CannonGrid) = ALCtoAC_cannon_gather_ref(AL_blk, C, grid)
+function _ALCtoAC_cannon_one(AL_blk, Ck, grid::CannonGrid)
+    l_rs = split_ranges(size(Ck, 2), grid.N2)
+    br = l_rs[grid.r2 + 1]
+    partial = similar(AL_blk, size(AL_blk, 1), size(AL_blk, 2), size(AL_blk, 3), size(Ck, 2))
+    Cb = Ck[br, :]
+    @tensor partial[a, i, j, d] := AL_blk[a, i, j, b] * Cb[b, d]
+    return _cannon_row_reduce_scatter_last(partial, grid, l_rs)
+end
+
+function ALCtoAC_cannon(AL_blk, C, grid::CannonGrid)
+    AC_data = map(eachindex(AL_blk.data)) do k
+        _ALCtoAC_cannon_one(AL_blk.data[k], C.data[k], grid)
+    end
+    return StructArray(AC_data, AL_blk.pattern)
+end
 
 """
     AL_blk, AR_blk, errL, errR = ACCtoALAR_cannon_gather_ref(AC_blk, C, grid)

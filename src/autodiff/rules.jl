@@ -556,6 +556,44 @@ function ChainRulesCore.rrule(::typeof(cannon_gather_col), blk, grid::CannonGrid
     return full, cannon_gather_col_back
 end
 
+function ChainRulesCore.rrule(::typeof(ALCtoAC_cannon), AL_blk, C, grid::CannonGrid)
+    AC = ALCtoAC_cannon(AL_blk, C, grid)
+    function ALCtoAC_cannon_back(dAC)
+        dACb = unthunk(dAC)
+        if dACb isa AbstractZero
+            dAL0 = StructArray(map(zero, AL_blk.data), AL_blk.pattern)
+            dC0 = StructArray(map(zero, C.data), C.pattern)
+            return NoTangent(), dAL0, dC0, NoTangent()
+        end
+        dAC_data = unthunk(dACb.data)
+        dAL_data = Vector{Any}(undef, length(AL_blk.data))
+        dC_data = Vector{Any}(undef, length(C.data))
+        for k in eachindex(AL_blk.data)
+            Ck = C.data[k]
+            dACk = dAC_data[k]
+            if dACk isa AbstractZero
+                dAL_data[k] = zero(AL_blk.data[k])
+                dC_data[k] = zero(Ck)
+                continue
+            end
+            l_rs = split_ranges(size(Ck, 2), grid.N2)
+            br = l_rs[grid.r2 + 1]
+            dAC_full_d = _cannon_row_allgather(dACk, grid, l_rs)
+            Cb = Ck[br, :]
+            dALk = similar(AL_blk.data[k])
+            @tensor dALk[a, i, j, b] := dAC_full_d[a, i, j, d] * conj(Cb[b, d])
+            dCk = zero(Ck)
+            dC_local = view(dCk, br, :)
+            @tensor dC_local[b, d] = conj(AL_blk.data[k][a, i, j, b]) * dAC_full_d[a, i, j, d]
+            allreduce_p2p!(dCk, +, grid.comm)
+            dAL_data[k] = dALk
+            dC_data[k] = dCk
+        end
+        return NoTangent(), StructArray(dAL_data, AL_blk.pattern), StructArray(dC_data, C.pattern), NoTangent()
+    end
+    return AC, ALCtoAC_cannon_back
+end
+
 # The whole differentiated region is collective: every rank must execute the
 # same pullback sequence (rank-uniform control flow), or the grid deadlocks.
 function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid::CannonGrid;
