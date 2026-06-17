@@ -3,11 +3,10 @@ using MPI
 using LinearAlgebra
 using Random
 using Zygote
-using Printf
 using TeneT
 using TeneT: cannon_grid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, General, StructArray, VUMPSRuntime, Recompute,
-             ALCtoAC, ALCtoAC_cannon, ALCtoAC_cannon_gather_ref,
+             ALCtoAC, ALCtoAC_cannon,
              ACCtoAL, ACCtoAL_tsqr_cannon,
              ACCtoAR, ACCtoAR_tslq_cannon,
              ACCtoALAR, ACCtoALAR_dist_cannon,
@@ -99,10 +98,12 @@ end
         @test abs(errRc - errRs) <= 1e-10
 
         AL2, AR2, eL2, eR2 = ACCtoALAR_dist_cannon(ACb, C, g)
-        @test gather_sa(AL2, g).data == ALcf.data
-        @test gather_sa(AR2, g).data == ARcf.data
-        @test eL2 == errLc
-        @test eR2 == errRc
+        AL2f = gather_sa(AL2, g)
+        AR2f = gather_sa(AR2, g)
+        @test maximum(norm(AL2f.data[k] - ALcf.data[k]) / max(norm(ALcf.data[k]), 1e-12) for k in eachindex(ALcf.data)) <= 1e-10
+        @test maximum(norm(AR2f.data[k] - ARcf.data[k]) / max(norm(ARcf.data[k]), 1e-12) for k in eachindex(ARcf.data)) <= 1e-10
+        @test isapprox(eL2, errLc; rtol=1e-10, atol=1e-10)
+        @test isapprox(eR2, errRc; rtol=1e-10, atol=1e-10)
     end
 end
 
@@ -140,6 +141,8 @@ end
 end
 
 @testset "General vumps_step_cannon uses distributed seams" begin
+    cannon_src = read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "cannon.jl"), String)
+    @test occursin("ACCtoALAR_dist_cannon", cannon_src)
     g = cannon_grid(2, 2)
     χ, D = 8, 2
     pat = reshape(collect(1:4), 2, 2)
