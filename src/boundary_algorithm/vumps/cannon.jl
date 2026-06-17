@@ -633,7 +633,7 @@ end
 """
     AL_blk, errL = ACCtoAL_tsqr_cannon(AC_blk, C, grid)
 
-Plaquette QR seam using TSQR. `AC_blk` stays block-distributed:
+Left QR seam using TSQR. `AC_blk` stays block-distributed:
 the last chi leg is row-gathered, the tall-skinny QR is reduced over
 `col_comm`, and the resulting row block is sliced back to this rank's last-leg
 block. The communication adjoints use the existing Cannon gather wrappers, so

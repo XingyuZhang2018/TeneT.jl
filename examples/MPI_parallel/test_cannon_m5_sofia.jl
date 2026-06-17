@@ -19,7 +19,8 @@ using MPI, Zygote, LinearAlgebra, Random, Printf
 using TeneT
 using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, General, StructArray, Recompute, VUMPSRuntime,
-             vumps_step, vumps_step_cannon, ALCtoAC, ALCtoAC_cannon, ACCtoALAR, ACCtoALAR_cannon,
+             vumps_step, vumps_step_cannon, ALCtoAC, ALCtoAC_cannon, ACCtoALAR,
+             ACCtoALAR_cannon_gather_ref, ACCtoALAR_dist_cannon,
              leftenv, leftenv_cannon, rightenv, rightenv_cannon, ACenv, ACenv_cannon, checkpoint
 if !BENCH_CPU
     using CUDA
@@ -87,7 +88,7 @@ function val_seam(χ, Dc, g)
     AL = StructArray([_arr(rand(ComplexF64, χ, Dc, Dc, χ))], reshape([1],1,1))
     C  = StructArray([_arr(rand(ComplexF64, χ, χ))],          reshape([1],1,1))
     ALs, ARs, eLs, eRs = ACCtoALAR(AC, C)
-    ALc, ARc, eLc, eRc = ACCtoALAR_cannon(scatter_sa(AC, g), C, g)
+    ALc, ARc, eLc, eRc = ACCtoALAR_cannon_gather_ref(scatter_sa(AC, g), C, g)
     _sync()
     eAL = allreduce_max(relerr(gather_sa(ALc, g).data[1], ALs.data[1]))
     eAR = allreduce_max(relerr(gather_sa(ARc, g).data[1], ARs.data[1]))
@@ -150,11 +151,11 @@ function val_step_grad(χ, Dc, g)
     ALb = StructArray([cannon_scatter(AL.data[1], g)], reshape([1],1,1))
     # ACCtoALAR seam
     lqr_r(ac,c) = let (al,ar,_,_)=ACCtoALAR(ac,c);        real(sum(conj(WAL).*al.data[1])+sum(conj(WAR).*ar.data[1])) end
-    lqr_c(ac,c) = let (al,ar,_,_)=ACCtoALAR_cannon(ac,c,g); real(sum(conj(WALb).*al.data[1])+sum(conj(WARb).*ar.data[1])) end
+    lqr_c(ac,c) = let (al,ar,_,_)=ACCtoALAR_dist_cannon(ac,c,g); real(sum(conj(WALb).*al.data[1])+sum(conj(WARb).*ar.data[1])) end
     gr=Zygote.gradient(lqr_r,AC,C); gc=Zygote.gradient(lqr_c,ACb,C); _sync()
     eAC=allreduce_max(relerr(gc[1].data[1], blkof(gr[1].data[1])))
     eC1=(gr[2]===nothing||gc[2]===nothing) ? 0.0 : allreduce_max(relerr(gc[2].data[1], gr[2].data[1]))
-    lqr_cr(ac,c)=let (al,ar,_,_)=checkpoint(Recompute(),ACCtoALAR_cannon,ac,c,g); real(sum(conj(WALb).*al.data[1])+sum(conj(WARb).*ar.data[1])) end
+    lqr_cr(ac,c)=let (al,ar,_,_)=checkpoint(Recompute(),ACCtoALAR_dist_cannon,ac,c,g); real(sum(conj(WALb).*al.data[1])+sum(conj(WARb).*ar.data[1])) end
     gcr=Zygote.gradient(lqr_cr,ACb,C); _sync()
     eACr=allreduce_max(relerr(gcr[1].data[1], blkof(gr[1].data[1])))
     # ALCtoAC seam
