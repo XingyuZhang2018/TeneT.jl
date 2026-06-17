@@ -91,6 +91,23 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     return (L, Q), back
 end
 
+function ChainRulesCore.rrule(::typeof(lqpos_colrep), C::AbstractArray{T,2}, grid::CannonGrid) where {T}
+    (L, Q), lq_back = ChainRulesCore.rrule(lqpos, C)
+    function back((dL, dQ))
+        dC_Q = @thunk begin
+            dq = lq_back((zero(L), dQ))[2]
+            buf = _dense_tangent_copy_like(dq, C)
+            _allreduce_sum_subcomm!(buf, grid.comm)
+            buf
+        end
+        dC_L = @thunk begin
+            lq_back((dL, zero(Q)))[2]
+        end
+        return NoTangent(), @thunk(unthunk(dC_Q) .+ _matrix_tangent_like(dC_L, C)), NoTangent()
+    end
+    return (L, Q), back
+end
+
 orth_for_ad(v) = v
 function ChainRulesCore.rrule(::typeof(orth_for_ad), v)
     function back(dv)

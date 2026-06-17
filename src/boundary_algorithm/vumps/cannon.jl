@@ -606,6 +606,49 @@ function _tsqr_front_rowblock(A_row, grid::CannonGrid)
     return _tsqr_front_col_axis(A_mat, grid)
 end
 
+lqpos_colrep(C, grid::CannonGrid) = lqpos(C)
+
+function _tail_adjoint_rowblock(AC_col)
+    return reshape(permutedims(AC_col, (2, 3, 4, 1)),
+                   size(AC_col, 2) * size(AC_col, 3) * size(AC_col, 4),
+                   size(AC_col, 1))
+end
+
+function _qtail_from_qr_rows(Q_rows, AC_col)
+    qmat = Q_rows'
+    qtail = reshape(qmat', size(AC_col, 2), size(AC_col, 3), size(AC_col, 4), size(AC_col, 1))
+    return permutedims(qtail, (4, 1, 2, 3))
+end
+
+function _acc_to_ar_tslq_one(AC_blk, Cjr, grid::CannonGrid)
+    chi = ChainRulesCore.ignore_derivatives() do
+        MPI.Allreduce(size(AC_blk, 1), +, grid.col_comm)
+    end
+    a_rs = split_ranges(chi, grid.N1)
+    AC_col = cannon_gather_col(AC_blk, grid, a_rs)
+    A_tail_adj_rows = _tail_adjoint_rowblock(AC_col)
+    Q_rows, Rqr = _tsqr_front_row_axis(A_tail_adj_rows, grid)
+    QAC_col = _qtail_from_qr_rows(Q_rows, AC_col)
+    LAC = Rqr'
+    LC, QC = lqpos_colrep(Cjr, grid)
+    AR_col = reshape(QC' * reshape(QAC_col, size(QAC_col, 1), size(QAC_col, 2) * size(QAC_col, 3) * size(QAC_col, 4)),
+                     size(QAC_col))
+    AR_blk = AR_col[a_rs[grid.r1 + 1], :, :, :]
+    return AR_blk, norm(LAC - LC)
+end
+
+function ACCtoAR_tslq_cannon(AC_blk, C, grid::CannonGrid)
+    Nj = size(AC_blk, 2)
+    blocks = map(eachindex(AC_blk.data)) do p
+        i, j = Tuple(findfirst(==(p), AC_blk.pattern))
+        jr = mod1(j - 1, Nj)
+        _acc_to_ar_tslq_one(AC_blk[i, j], C[i, jr], grid)
+    end
+    AR_data = [first(block) for block in blocks]
+    errR = sum(last, blocks)
+    return StructArray(AR_data, AC_blk.pattern), errR
+end
+
 """
     rt′, err = vumps_step_cannon(rt::PlaquetteVUMPSRuntime, M, grid, alg)
 
