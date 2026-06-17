@@ -10,7 +10,7 @@ using TeneT
 using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, split_ranges,
              VUMPS, Plaquette, Square, StructArray, PlaquetteVUMPSRuntime,
              vumps_step, init_VUMPSRuntime_cannon, vumps_step_cannon,
-             ALCtoAC, ALCtoAC_cannon, ACCtoAL, ACCtoAL_cannon,
+             ALCtoAC, ALCtoAC_cannon, ACCtoAL, ACCtoAL_cannon, ACCtoAL_cannon_gather_ref,
              leftenv, leftenv_cannon, ACenv_plaq, ACenv_plaq_cannon, Cenv_plaq, Cenv_plaq_cannon, qrpos
 import ChainRulesCore
 
@@ -47,7 +47,7 @@ const PATS = [[1 3; 2 4], [1 2; 2 1]]   # 2×2 (Plaquette requires (2,2)); 4-uni
         AC = StructArray([rand(ComplexF64, χ, D, D, χ) for _ in 1:nu], pat)
         C  = StructArray([rand(ComplexF64, χ, χ)        for _ in 1:nu], pat)
         ALs, eLs = ACCtoAL(AC, C)
-        ALc, eLc = ACCtoAL_cannon(scatter_sa(AC, g), C, g)
+        ALc, eLc = ACCtoAL_cannon_gather_ref(scatter_sa(AC, g), C, g)
         ALcf = gather_sa(ALc, g)
         for idx in 1:nu
             @test maximum(abs, ALcf.data[idx] .- ALs.data[idx]) == 0

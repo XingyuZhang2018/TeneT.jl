@@ -30,7 +30,8 @@ using TeneT: cannon_grid, CannonGrid, cannon_scatter, cannon_gather, split_range
              vumps_step, init_VUMPSRuntime_cannon, vumps_step_cannon,
              ALCtoAC, ALCtoAC_cannon, ACCtoALAR, ACCtoALAR_cannon,
              leftenv, leftenv_cannon, rightenv, rightenv_cannon,
-             ACenv, ACenv_cannon, Cenv, Cenv_cannon, checkpoint, qrpos
+             ACenv, ACenv_cannon, Cenv, Cenv_cannon, checkpoint, qrpos,
+             ALCtoAC_cannon_gather_ref, ACCtoALAR_cannon_gather_ref
 import ChainRulesCore
 
 MPI.Init()
@@ -72,7 +73,7 @@ const ALG_KW = (ifsimple_eig=true, ifupdown=false, maxiter=1, maxiter_ad=1, verb
         C  = StructArray([rand(ComplexF64, χ, χ)        for _ in 1:nu], patt)
         # ACCtoALAR: identical full AC/C → cannon (gathered) must equal serial bit-for-bit.
         ALs, ARs, eLs, eRs = ACCtoALAR(AC, C)
-        ALc, ARc, eLc, eRc = ACCtoALAR_cannon(scatter_sa(AC, g), C, g)
+        ALc, ARc, eLc, eRc = ACCtoALAR_cannon_gather_ref(scatter_sa(AC, g), C, g)
         ALcf = gather_sa(ALc, g); ARcf = gather_sa(ARc, g)
         for idx in 1:nu
             @test maximum(abs, ALcf.data[idx] .- ALs.data[idx]) == 0
@@ -81,7 +82,7 @@ const ALG_KW = (ifsimple_eig=true, ifupdown=false, maxiter=1, maxiter_ad=1, verb
         @test eLc == eLs && eRc == eRs
         # ALCtoAC: identical full AL/C → cannon (gathered) must equal serial bit-for-bit.
         ACs = ALCtoAC(AL, C)
-        ACcf = gather_sa(ALCtoAC_cannon(scatter_sa(AL, g), C, g), g)
+        ACcf = gather_sa(ALCtoAC_cannon_gather_ref(scatter_sa(AL, g), C, g), g)
         for idx in 1:nu
             @test maximum(abs, ACcf.data[idx] .- ACs.data[idx]) == 0
         end

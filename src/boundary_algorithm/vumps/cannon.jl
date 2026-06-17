@@ -337,7 +337,7 @@ scatter_struct(SA, grid::CannonGrid) = StructArray([cannon_scatter(t, grid) for 
 bcast_struct(SA, root::Integer, comm) = StructArray([MPI.bcast(t, root, comm) for t in SA.data], SA.pattern)
 
 """
-    AC_blk = ALCtoAC_cannon(AL_blk, C, grid)
+    AC_blk = ALCtoAC_cannon_gather_ref(AL_blk, C, grid)
 
 Distributed entry seam (call 1). Block AL's contracted last leg (`r2`-split) ×
 replicated full C needs a reduction over the `r2` partition; v1 does it by gathering
@@ -346,14 +346,16 @@ to blocks (Option A — uniform with the QR seam, lowest risk). AD: gather take-
 adjoint → serial @tensor → scatter allreduce adjoint. Parity-load-bearing: `ACenv_cannon`
 seeds a FINITE power iteration from this exact AC, so it must match serial bit-equally.
 """
-function ALCtoAC_cannon(AL_blk, C, grid::CannonGrid)
+function ALCtoAC_cannon_gather_ref(AL_blk, C, grid::CannonGrid)
     AL_full = gather_struct(AL_blk, grid)
-    AC_full = ALCtoAC(AL_full, C)         # VERBATIM serial kernel (general.jl:196), C replicated
+    AC_full = ALCtoAC(AL_full, C)
     return scatter_struct(AC_full, grid)
 end
 
+ALCtoAC_cannon(AL_blk, C, grid::CannonGrid) = ALCtoAC_cannon_gather_ref(AL_blk, C, grid)
+
 """
-    AL_blk, AR_blk, errL, errR = ACCtoALAR_cannon(AC_blk, C, grid)
+    AL_blk, AR_blk, errL, errR = ACCtoALAR_cannon_gather_ref(AC_blk, C, grid)
 
 The QR GATHER SEAM (exit, call 6). The per-cell full-χ QR/LQ (`qrpos`/`lqpos`) cannot
 run on a χ-block, so gather the whole AC StructArray to FULL, run the UNMODIFIED serial
@@ -367,11 +369,13 @@ scatter allreduce. MUST use the full `cannon_gather` (take-my-block), NOT the ro
 reduce-scatter wrappers — those over-count the AC gradient by N1/N2 (the QR is replicated,
 not a distributed contraction). Design §2.
 """
-function ACCtoALAR_cannon(AC_blk, C, grid::CannonGrid)
+function ACCtoALAR_cannon_gather_ref(AC_blk, C, grid::CannonGrid)
     AC_full = gather_struct(AC_blk, grid)
-    AL_full, AR_full, errL, errR = ACCtoALAR(AC_full, C)   # VERBATIM serial kernel (general.jl:712)
+    AL_full, AR_full, errL, errR = ACCtoALAR(AC_full, C)
     return scatter_struct(AL_full, grid), scatter_struct(AR_full, grid), errL, errR
 end
+
+ACCtoALAR_cannon(AC_blk, C, grid::CannonGrid) = ACCtoALAR_cannon_gather_ref(AC_blk, C, grid)
 
 """
     rt′, err = vumps_step_cannon(rt, M, grid, alg)
@@ -548,16 +552,18 @@ function Cenv_plaq_cannon(C, FL_blk, grid::CannonGrid; alg::VUMPS{L}) where {L <
 end
 
 """
-    AL_blk, errL = ACCtoAL_cannon(AC_blk, C, grid)
+    AL_blk, errL = ACCtoAL_cannon_gather_ref(AC_blk, C, grid)
 
 Left-only QR gather seam (plaquette has no AR): gather AC to full, run the verbatim
 serial `ACCtoAL`, scatter AL. C replicated. Same AD as M5 ACCtoALAR_cannon minus the AR half.
 """
-function ACCtoAL_cannon(AC_blk, C, grid::CannonGrid)
+function ACCtoAL_cannon_gather_ref(AC_blk, C, grid::CannonGrid)
     AC_full = gather_struct(AC_blk, grid)
-    AL_full, errL = ACCtoAL(AC_full, C)           # VERBATIM serial kernel (general.jl:685)
+    AL_full, errL = ACCtoAL(AC_full, C)
     return scatter_struct(AL_full, grid), errL
 end
+
+ACCtoAL_cannon(AC_blk, C, grid::CannonGrid) = ACCtoAL_cannon_gather_ref(AC_blk, C, grid)
 
 """
     rt′, err = vumps_step_cannon(rt::PlaquetteVUMPSRuntime, M, grid, alg)
