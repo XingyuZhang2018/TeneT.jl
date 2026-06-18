@@ -43,7 +43,9 @@
     @testset "C4v_restriction 5-leg" begin
         D, d = 3, 2
         A = randn(D, D, D, D, d)
+        A0 = copy(A)
         A_sym = C4v_restriction(A)
+        @test A ≈ A0
         # applying twice should give 16x (4 operations each doubling)
         A_sym2 = C4v_restriction(A_sym)
         @test A_sym2 ≈ 16 * A_sym
@@ -57,7 +59,9 @@
     @testset "C4v_restriction 6-leg" begin
         D, d, N = 3, 2, 1
         A = randn(D, D, D, D, d, N)
+        A0 = copy(A)
         A_sym = C4v_restriction(A)
+        @test A ≈ A0
         A_sym2 = C4v_restriction(A_sym)
         @test A_sym2 ≈ 16 * A_sym
         # symmetry check

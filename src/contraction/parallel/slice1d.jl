@@ -40,8 +40,7 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=no
     return do_cast ? T_orig.(result) : result
 end
 
-function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
-    comm = MPI.COMM_WORLD
+function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing, comm=MPI.COMM_WORLD)
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
 
@@ -98,8 +97,7 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_ety
     return do_cast ? T_orig.(result) : result
 end
 
-function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_etype=nothing)
-    comm = MPI.COMM_WORLD
+function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_etype=nothing, comm=MPI.COMM_WORLD)
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
 
@@ -127,7 +125,7 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_et
     return do_cast ? T_orig.(result) : result
 end
 
-function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing)
+function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=nothing, comm=MPI.COMM_WORLD)
     N_in = (3, ndims(ALd))
     N_out = ndims(ALd)
     χ = size(FL, 1)
@@ -146,13 +144,13 @@ function FLmap_parallel(FL, ALu, ALd, M; ifparallel, forloop_iter, inner_etype=n
     # kernel. This reduces F64↔F32 conversion to once per parallel() call and
     # lets MPI allgatherv run in the lower precision (2× bandwidth).
     if ifparallel
-        return parallel(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
+        return parallel(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out, inner_etype, comm)
     else
         return forloop(FLmap, FL, ALu, ALd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
-function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter, inner_etype=nothing)
+function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter, inner_etype=nothing, comm=MPI.COMM_WORLD)
     N_in = (3, 1)
     N_out = ndims(ARd)
     χ = size(ARd, 1)
@@ -168,13 +166,13 @@ function FRmap_parallel(FR, ARu, ARd, M; ifparallel, forloop_iter, inner_etype=n
         size_out = (χ,D,χ)
     end
     if ifparallel
-        return parallel(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
+        return parallel(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out, inner_etype, comm)
     else
         return forloop(FRmap, FR, ARu, ARd, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
-function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing)
+function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing, comm=MPI.COMM_WORLD)
     N_in = (3, ndims(FR))
     N_out = ndims(FR)
     χ = size(FR, 1)
@@ -190,13 +188,13 @@ function ACmap_parallel(AC, FL, FR, M; ifparallel, forloop_iter, inner_etype=not
         size_out = (χ,D,χ)
     end
     if ifparallel
-        return parallel(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
+        return parallel(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype, comm)
     else
         return forloop(ACmap, AC, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
-function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing)
+function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter, inner_etype=nothing, comm=MPI.COMM_WORLD)
     N_in = (3, 1)
     N_out = ndims(FR)
     χ = size(FR, 1)
@@ -212,13 +210,13 @@ function ACdmap_parallel(ACd, FL, FR, M; ifparallel, forloop_iter, inner_etype=n
         size_out = (χ,D,χ)
     end
     if ifparallel
-        return parallel(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
+        return parallel(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype, comm)
     else
         return forloop(ACdmap, ACd, FL, FR, M; forloop_iter, N_in, N_out, size_out, inner_etype)
     end
 end
 
-function Mmap_parallel(AC, ACd, FL, FR; ifparallel, forloop_iter) 
+function Mmap_parallel(AC, ACd, FL, FR; ifparallel, forloop_iter, comm=MPI.COMM_WORLD)
     N_in1 = (2, 3)
     N_in2 = (4, 3)
     D1 = size(FL, 2)
@@ -227,30 +225,30 @@ function Mmap_parallel(AC, ACd, FL, FR; ifparallel, forloop_iter)
     D4 = size(AC, 2)
     size_out = (D1,D2,D3,D4)
     if ifparallel
-        return parallel_sum(Mmap, AC, ACd, FL, FR; forloop_iter, N_in1, N_in2, size_out)
+        return parallel_sum(Mmap, AC, ACd, FL, FR; forloop_iter, N_in1, N_in2, size_out, comm)
     else
         return forloop_sum(Mmap, AC, ACd, FL, FR; forloop_iter, N_in1, N_in2, size_out)
     end
 end
 
-function Mumap_parallel(AC, ACd, FL, FR, Mu; ifparallel, forloop_iter) 
+function Mumap_parallel(AC, ACd, FL, FR, Mu; ifparallel, forloop_iter, comm=MPI.COMM_WORLD)
     N_in1 = (2, 4)
     N_in2 = (4, 4)
     D1 = size(FL, 3)
     D2 = size(ACd, 3)
     D3 = size(FR, 3)
     D4 = size(AC, 3)
-    
+
     d = size(Mu, 5)
     size_out = (D1,D2,D3,D4,d)
     if ifparallel
-        return parallel_sum(Mumap, AC, ACd, FL, FR, Mu; forloop_iter, N_in1, N_in2, size_out)
+        return parallel_sum(Mumap, AC, ACd, FL, FR, Mu; forloop_iter, N_in1, N_in2, size_out, comm)
     else
         return forloop_sum(Mumap, AC, ACd, FL, FR, Mu; forloop_iter, N_in1, N_in2, size_out)
     end
 end
 
-function Mdmap_parallel(AC, ACd, FL, FR, Md; ifparallel, forloop_iter) 
+function Mdmap_parallel(AC, ACd, FL, FR, Md; ifparallel, forloop_iter, comm=MPI.COMM_WORLD)
     N_in1 = (2, 4)
     N_in2 = (4, 4)
     D1 = size(FL, 2)
@@ -260,7 +258,7 @@ function Mdmap_parallel(AC, ACd, FL, FR, Md; ifparallel, forloop_iter)
     d = size(Md, 5)
     size_out = (D1,D2,D3,D4,d)
     if ifparallel
-        return parallel_sum(Mdmap, AC, ACd, FL, FR, Md; forloop_iter, N_in1, N_in2, size_out)
+        return parallel_sum(Mdmap, AC, ACd, FL, FR, Md; forloop_iter, N_in1, N_in2, size_out, comm)
     else
         return forloop_sum(Mdmap, AC, ACd, FL, FR, Md; forloop_iter, N_in1, N_in2, size_out)
     end

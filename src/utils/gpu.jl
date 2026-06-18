@@ -10,7 +10,10 @@ _arraytype(S::StructArray) = _arraytype(S.data[1])
 
 set_device_id!(::Type{ROCArray}, i::Int) = AMDGPU.device_id!(i)
 set_device_id!(::Type{CuArray}, i::Int) = CUDA.device!(i-1)
-set_device_id!(::Type{Array}, i::Int) = task_local_storage(:cpu_device_id, i)
+function set_device_id!(::Type{Array}, i::Int)
+    task_local_storage(:cpu_device_id, i)
+    return nothing
+end
 
 get_device(::Type{ROCArray}) = AMDGPU.device()
 get_device(::Type{CuArray}) = CUDA.device()
@@ -104,6 +107,11 @@ end
 
 # Convenience: pass an array, dispatch on its type.
 gc(x::AbstractArray; threshold::Real = 0.1) = gc(typeof(x); threshold)
+
+reclaim(::Type{<:Array}) = nothing
+reclaim(::Type{<:CuArray}) = (CUDA.reclaim(); nothing)
+reclaim(::Type{<:ROCArray}) = (AMDGPU.HIP.reclaim(); nothing)
+reclaim(x::AbstractArray) = reclaim(_arraytype(x))
 
 function synchronize(x::AbstractArray)
     if x isa CuArray

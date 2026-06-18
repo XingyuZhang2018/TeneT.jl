@@ -59,7 +59,8 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     # run on ALL ranks (collective + replicated result), but all ranks racing the same obs-log file
     # hits the JLD2/IO write race that killed 1287372's checkpoint save. This gate is AFTER the
     # collective gather so control flow stays rank-uniform across every MPI collective.
-    _obsroot = params.boundary_alg.grid === nothing || params.boundary_alg.grid.rank == 0
+    _obsgrid = _effective_grid(params.boundary_alg)
+    _obsroot = _obsgrid === nothing || _obsgrid.rank == 0
     _obsroot && write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
 
     # Visualization: read all logs and plot (includes history from previous runs)

@@ -99,10 +99,13 @@ function _apply_parallel_method!(alg)
 
     if method isa SerialMethod
         alg.ifparallel = false
+        alg.grid = nothing
     elseif method isa Slice1DMethod
         alg.ifparallel = true
+        alg.grid = nothing
     elseif method isa Slice2DMethod
         alg.ifparallel = false
+        alg.grid = method.grid
     else
         throw(ArgumentError("Unsupported parallel_method $(typeof(method)). Use slice1D(...) or slice2D(...)."))
     end

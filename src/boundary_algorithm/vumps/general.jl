@@ -1082,8 +1082,8 @@ function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
     @unpack AL, AR, C, FL, FR = rt
     # Slice2D path: compute the obs env block-distributed (leftenv/rightenv_slice2d with
     # ifobs=true), then gather to FULL for the serial energy_value (v1; see slice2d.jl).
-    if alg.grid !== nothing
-        g = alg.grid
+    g = _effective_grid(alg)
+    if g !== nothing
         AC = ALCtoAC_slice2d(AL, C, g)
         _, FLo = leftenv_slice2d(AL, AL, M, Fo[1], g; ifobs=true, alg, model)
         _, FRo = rightenv_slice2d(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
@@ -1113,8 +1113,8 @@ function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMP
                 model=nothing; Fo=[rt[1].FL, rt[1].FR])
     # Slice2D path: mixed obs env (ACu/ACd from up/down via ALCtoAC_slice2d; FLo/FRo from
     # leftenv/rightenv_slice2d ifobs=true with the up AL/AR and down AL/AR) → gather to FULL.
-    if alg.grid !== nothing
-        g = alg.grid
+    g = _effective_grid(alg)
+    if g !== nothing
         rtup, rtdown = rt
         ACu = ALCtoAC_slice2d(rtup.AL, rtup.C, g)
         ACd = ALCtoAC_slice2d(rtdown.AL, rtdown.C, g)

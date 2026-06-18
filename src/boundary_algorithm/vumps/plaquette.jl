@@ -304,13 +304,17 @@ Computes the observation left environment `FLo` using `ifobs=true`.
 # are slice2d-ized (J1J2{Square}); every other Plaquette model still gathers to full and runs
 # serial — so "env is block" ⟺ this predicate, used identically in ObsEnv/energy_value/imag_error.
 # (`isa J1J2{Square}` resolves at runtime; J1J2 is included after this file.) (R1-B1/B2)
-_dist_energy_plaq(model, alg) = alg.grid !== nothing && model isa J1J2{Square}
+function _dist_energy_plaq_grid(model, alg)
+    g = _effective_grid(alg)
+    return g !== nothing && model isa J1J2{Square} ? g : nothing
+end
+_dist_energy_plaq(model, alg) = _dist_energy_plaq_grid(model, alg) !== nothing
 
 function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette}, model=nothing)
     @unpack AL, C, FL = rt
     # Slice2D path: FLo block-distributed (leftenv_slice2d ifobs=true, FL on both sides).
-    if alg.grid !== nothing
-        g = alg.grid
+    g = _effective_grid(alg)
+    if g !== nothing
         _, FLo = leftenv_slice2d(AL, AL, M, FL, g; ifobs=true, alg)
         env = PlaquetteVUMPSEnv(AL, C, FL, FLo)
         # Block for the distributed-energy model; gather to full for all other Plaquette models.
@@ -326,7 +330,7 @@ function imag_error(env::PlaquetteVUMPSEnv, A, iSy, params::iPEPSOptimize)
     @unpack AL, C, FLu, FLo = env
     @unpack forloop_iter, ifparallel = params.boundary_alg
     # Same predicate as ObsEnv: env is block ⟺ J1J2{Square}+grid → slice2d oc_11; else full → serial.
-    grid = _dist_energy_plaq(params.model, params.boundary_alg) ? params.boundary_alg.grid : nothing
+    grid = _dist_energy_plaq_grid(params.model, params.boundary_alg)
     AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
     Ni, Nj = size(A)
     i, j, ir = 1, 1, 2

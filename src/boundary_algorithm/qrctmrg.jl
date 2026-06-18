@@ -6,23 +6,41 @@
 
 # ── initialization ─────────────────────────────────────────
 
-# function init_env(M::StructArray, χ::Int, alg::QRCTMRG{C4v})
-#     M = M[1][:,:,:,:,:,1]
-#     return init_env(M, χ, alg)
-# end
+_qrctmrg_tensor(M::StructArray) = M[1]
+_qrctmrg_tensor(M::AbstractArray) = M
+
+function _qrctmrg_c4v_tensor(M::StructArray)
+    M1 = M[1]
+    return ndims(M1) == 6 && size(M1, 6) == 1 ? selectdim(M1, 6, 1) : M1
+end
+_qrctmrg_c4v_tensor(M::AbstractArray) =
+    ndims(M) == 6 && size(M, 6) == 1 ? selectdim(M, 6, 1) : M
+
+function init_env(M::StructArray, χ::Int, ::QRCTMRG{C4v})
+    M = _qrctmrg_c4v_tensor(M)
+    eltype(M) <: Complex && throw(ArgumentError("QRCTMRG only supports real-valued tensors for now."))
+
+    D = size(M, 1)
+    if M isa leg4
+        T = rand!(similar(M,χ,D,χ))
+        T += conj(permutedims(T, (3,2,1)))
+    else
+        T = rand!(similar(M,χ,D,D,χ))
+        T += conj(permutedims(T, (4,2,3,1)))
+    end
+    C = rand!(similar(M,χ,χ))
+    C += C'
+
+    return CTMEnv(C, T)
+end
 
 function init_env(M::StructArray, χ::Int, ::QRCTMRG)
     M = M[1]
     eltype(M) <: Complex && throw(ArgumentError("QRCTMRG only supports real-valued tensors for now."))
 
     D = size(M, 1)
-    # if ndims(M) == 4 && size(M, 4) == D
-    #     T = rand!(similar(M,χ,D,χ))
-    #     T += conj(permutedims(T, (3,2,1)))
-    # else
-        T = rand!(similar(M,χ,D,D,χ))
-        T += conj(permutedims(T, (4,2,3,1)))
-    # end
+    T = rand!(similar(M,χ,D,D,χ))
+    T += conj(permutedims(T, (4,2,3,1)))
     C = rand!(similar(M,χ,χ))
     C += C'
 
@@ -40,7 +58,7 @@ end
 
 One CTM left-move step for the QRCTMRG{C4v} algorithm.
 """
-function qrctmrg_step(env::CTMEnv, M::StructArray, alg::QRCTMRG{C4v})
+function qrctmrg_step(env::CTMEnv, M::Union{StructArray,AbstractArray}, alg::QRCTMRG{C4v})
     C = env.C
     T = env.T
 
@@ -48,7 +66,8 @@ function qrctmrg_step(env::CTMEnv, M::StructArray, alg::QRCTMRG{C4v})
     U, R = qr_for_ad(CT)
     U = reshape(U, size(T))
 
-    T = FLmap_parallel(T, U, U, M[1]; ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter,
+    M1 = _qrctmrg_c4v_tensor(M)
+    T = FLmap_parallel(T, U, U, M1; ifparallel=alg.ifparallel, forloop_iter=alg.forloop_iter,
                        inner_etype=alg.inner_etype)
     C_new = Cmap(R, T, U)
 
@@ -59,7 +78,7 @@ function qrctmrg_step(env::CTMEnv, M::StructArray, alg::QRCTMRG{C4v})
     return CTMEnv(C_new, T), err
 end
 
-function qrctmrg_step(env::CTMEnv, M::StructArray, alg::QRCTMRG{C3v})
+function qrctmrg_step(env::CTMEnv, M::Union{StructArray,AbstractArray}, alg::QRCTMRG{C3v})
     C = env.C
     T = env.T
 
@@ -67,7 +86,7 @@ function qrctmrg_step(env::CTMEnv, M::StructArray, alg::QRCTMRG{C3v})
     U, R = qr_for_ad(CT)
     U = reshape(U, size(T))
 
-    T = FLmap_C3v(T, U, U, M[1])
+    T = FLmap_C3v(T, U, U, _qrctmrg_tensor(M))
     # @tensor Mr[1,4,5,3,6,7] := M[1,2,3,6] * M[4,5,2,7]
     # D,d = size(M)[[1,4]]
     # Mr = reshape(Mr, D,D,D,D,d^2)

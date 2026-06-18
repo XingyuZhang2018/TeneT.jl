@@ -127,7 +127,7 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
     # killed the 64-rank χ768 J2=0.5 run 1287372 on its first save). rank 0's Array(x) is the full
     # replicated iPEPS, so the written file is identical. Serial/replicated (grid===nothing) keeps
     # the prior all-process behavior.
-    _gridfin = params.boundary_alg.grid
+    _gridfin = _effective_grid(params.boundary_alg)
     if (_gridfin === nothing || _gridfin.rank == 0) && params.save_every != 0 && iter % params.save_every == 0
         ipeps_dir = joinpath(folder0, "ipeps", "χ$χ")
         !ispath(ipeps_dir) && mkpath(ipeps_dir)

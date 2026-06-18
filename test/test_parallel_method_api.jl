@@ -63,6 +63,24 @@ end
     @test routed ≈ legacy
 end
 
+@testset "slice1D forwards explicit communicator" begin
+    if !MPI.Initialized()
+        MPI.Init()
+    end
+    comm = MPI.Comm_split(MPI.COMM_WORLD, 0, MPI.Comm_rank(MPI.COMM_WORLD))
+    method = slice1D(; comm)
+    @test method.comm == comm
+
+    FL = rand(ComplexF64, 2, 2, 2, 2)
+    ALu = rand(ComplexF64, 2, 2, 2, 2)
+    ALd = rand(ComplexF64, 2, 2, 2, 2)
+    M = rand(ComplexF64, 2, 2, 2, 2, 2)
+
+    legacy = FLmap_parallel(FL, ALu, ALd, M; ifparallel=true, forloop_iter=1, comm)
+    routed = parallel_map(FLmap, method, FL, ALu, ALd, M)
+    @test routed ≈ legacy
+end
+
 @testset "VUMPS accepts parallel_method" begin
     alg = VUMPS{General}(parallel_method=slice1D(; forloop_iter=2))
     @test alg.parallel_method isa Slice1DMethod
@@ -81,5 +99,10 @@ end
         @test !alg2.ifparallel
         @test alg2.forloop_iter == 3
         @test TeneT._effective_grid(alg2) === alg2.parallel_method.grid
+        @test alg2.grid === alg2.parallel_method.grid
+
+        alg3 = VUMPS{General}(grid=alg2.grid, parallel_method=SerialMethod(1, nothing))
+        TeneT._apply_parallel_method!(alg3)
+        @test alg3.grid === nothing
     end
 end

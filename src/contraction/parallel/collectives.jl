@@ -23,12 +23,12 @@ end
 
 # ─── Pre-allocated communication buffers ──────────────────────────────────
 
-const _comm_sendbuf = Ref{Any}(nothing)
-const _comm_recvbuf = Ref{Any}(nothing)
-const _comm_hostbuf = Ref{Any}(nothing)   # CPU staging buf for host-staged Phase 2
-const _comm_local = Ref{Any}(nothing)     # node-local communicator
-const _comm_leaders = Ref{Any}(nothing)   # inter-node leaders communicator
-const _comm_siblings = Ref{Any}(nothing)  # inter-node comm split by local_rank
+const _comm_sendbuf = Dict{Any,Any}()
+const _comm_recvbuf = Dict{Any,Any}()
+const _comm_hostbuf = Dict{DataType,Any}()     # CPU staging buf for host-staged Phase 2
+const _comm_local = Dict{UInt64,Any}()         # node-local communicator by parent comm
+const _comm_leaders = Dict{UInt64,Any}()       # inter-node leaders communicator by parent comm
+const _comm_siblings = Dict{Tuple{UInt64,Int},Any}()  # inter-node comm split by local_rank
 
 # MPI tag namespace for internal p2p collectives. Keep well above any tag the
 # caller might use (current callers use tag = rank ∈ 0..nprocs-1).
@@ -43,36 +43,67 @@ const _TAG_BASE = 1000
 # Read per-call (not precompile-const) so ENV changes apply in fresh processes.
 _host_stage_rndv() = get(ENV, "TENET_MPI_HOST_STAGE", "0") == "1"
 
-function _ensure_buf!(ref, buf, n)
-    if isnothing(ref[]) || length(ref[]) < n || eltype(ref[]) != eltype(buf)
-        ref[] = similar(buf, n)
+_comm_key(comm) = UInt64(comm.val)
+
+_base_storage(buf) = buf
+_base_storage(buf::SubArray) = _base_storage(parent(buf))
+_base_storage(buf::Base.ReshapedArray) = _base_storage(parent(buf))
+
+function _buf_device_key(buf)
+    storage = _base_storage(buf)
+    if storage isa CuArray
+        return (:cuda, Int(CUDA.device(storage).handle))
+    elseif storage isa ROCArray
+        return (:rocm, Int(AMDGPU.device(storage).device_id))
+    else
+        return (:cpu, 0)
     end
-    return view(ref[], 1:n)
+end
+
+function _ensure_buf!(cache, buf, n)
+    key = (_arraytype(_base_storage(buf)), eltype(buf), _buf_device_key(buf))
+    storage = get(cache, key, nothing)
+    if storage === nothing || length(storage) < n
+        storage = similar(buf, n)
+        cache[key] = storage
+    end
+    return view(storage, 1:n)
+end
+
+function _ensure_hostbuf!(::Type{T}, n) where T
+    storage = get(_comm_hostbuf, T, nothing)
+    if storage === nothing || length(storage) != n
+        storage = Vector{T}(undef, n)
+        _comm_hostbuf[T] = storage
+    end
+    return storage::Vector{T}
 end
 
 function _get_local_comm(comm)
-    if isnothing(_comm_local[])
+    key = _comm_key(comm)
+    if !haskey(_comm_local, key)
         rank = MPI.Comm_rank(comm)
         local_comm = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, rank)
         local_rank = MPI.Comm_rank(local_comm)
         # All ranks participate in Comm_split; leaders get color=0, others color=1
         leaders_comm = MPI.Comm_split(comm, local_rank == 0 ? 0 : 1, rank)
-        _comm_local[] = local_comm
+        _comm_local[key] = local_comm
         # Only store leaders_comm for local_rank==0; others don't use it
-        _comm_leaders[] = local_rank == 0 ? leaders_comm : nothing
+        _comm_leaders[key] = local_rank == 0 ? leaders_comm : nothing
     end
-    return _comm_local[], _comm_leaders[]
+    return _comm_local[key], _comm_leaders[key]
 end
 
 # Sibling communicator: groups ranks with the same local_rank across nodes.
 # Used for Phase 2 of allreduce to do per-slice cross-node rings in parallel.
 function _per_local_rank_comm(comm, local_comm)
-    if _comm_siblings[] === nothing
-        local_rank = MPI.Comm_rank(local_comm)
+    local_rank = MPI.Comm_rank(local_comm)
+    key = (_comm_key(comm), local_rank)
+    if !haskey(_comm_siblings, key)
         rank = MPI.Comm_rank(comm)
-        _comm_siblings[] = MPI.Comm_split(comm, local_rank, rank)
+        _comm_siblings[key] = MPI.Comm_split(comm, local_rank, rank)
     end
-    return _comm_siblings[]
+    return _comm_siblings[key]
 end
 
 # ─── Ring topology + node-layout helpers ─────────────────────────────────
@@ -296,12 +327,12 @@ function allreduce_p2p!(buf, ::typeof(+), comm)
 
     # ── Phase 1: intra-node ring reduce-scatter (send to next, recv from prev) ──
     if local_size > 1
-        _ensure_buf!(_comm_recvbuf, buf, maximum(slice_counts))
+        recvbuf = _ensure_buf!(_comm_recvbuf, buf, maximum(slice_counts))
         for step in 1:local_size-1
             send_idx = mod(local_rank - step + 1, local_size) + 1
             recv_idx = mod(local_rank - step,     local_size) + 1
             send_sub = view(buf, slice_range(send_idx))
-            recv_sub = view(_comm_recvbuf[], 1:slice_counts[recv_idx])
+            recv_sub = view(recvbuf, 1:slice_counts[recv_idx])
             synchronize(buf)
             req_send = MPI.Isend(send_sub,  local_comm; dest=next_l,   tag=_TAG_BASE + 300 + step)
             req_recv = MPI.Irecv!(recv_sub, local_comm; source=prev_l, tag=_TAG_BASE + 300 + step)
@@ -357,14 +388,14 @@ function _allreduce_ring_on_slice!(slice, comm, rank, size_)
     sub_range(i) = (sub_displs[i] + 1) : (sub_displs[i] + sub_counts[i])
     prev, next_ = _ring_neighbors(rank, size_)
 
-    _ensure_buf!(_comm_recvbuf, slice, maximum(sub_counts))
+    recvbuf = _ensure_buf!(_comm_recvbuf, slice, maximum(sub_counts))
 
     # Reduce-scatter
     for step in 1:size_-1
         send_idx = mod(rank - step + 1, size_) + 1
         recv_idx = mod(rank - step,     size_) + 1
         send_sub = view(slice, sub_range(send_idx))
-        recv_sub = view(_comm_recvbuf[], 1:sub_counts[recv_idx])
+        recv_sub = view(recvbuf, 1:sub_counts[recv_idx])
         synchronize(slice)
         req_send = MPI.Isend(send_sub,  comm; dest=next_, tag=_TAG_BASE + 500 + step)
         req_recv = MPI.Irecv!(recv_sub, comm; source=prev, tag=_TAG_BASE + 500 + step)
@@ -398,10 +429,7 @@ function _allreduce_host_staged!(slice, comm)
     T = eltype(slice)
     # Exact-size reuse: CUDA.jl's copyto!(Vector, SubArray{CuArray}) isn't
     # defined, so we copy in positional form on the full Vector.
-    if isnothing(_comm_hostbuf[]) || length(_comm_hostbuf[]) != N || eltype(_comm_hostbuf[]) != T
-        _comm_hostbuf[] = Vector{T}(undef, N)
-    end
-    hbuf = _comm_hostbuf[]::Vector{T}
+    hbuf = _ensure_hostbuf!(T, N)
     synchronize(slice)                  # Phase 1 `.+=` done
     copyto!(hbuf, 1, slice, 1, N)       # D2H
     synchronize(slice)                  # ensure transfer visible to host

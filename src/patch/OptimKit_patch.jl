@@ -13,7 +13,7 @@ struct LBFGSState{T,S}
     t₀::Float64
 end
 
-function Array(H::LBFGSInverseHessian) 
+function Array(H::LBFGSInverseHessian)
     S = []
     Y = []
     ρ = []
@@ -29,7 +29,7 @@ function Array(H::LBFGSInverseHessian)
     # return LBFGSInverseHessian(H.maxlength, H.length, H.first, S, Y, H.ρ, H.α)
 end
 
-function CuArray(H::LBFGSInverseHessian) 
+function CuArray(H::LBFGSInverseHessian)
     S = []
     Y = []
     ρ = []
@@ -44,7 +44,7 @@ function CuArray(H::LBFGSInverseHessian)
     return LBFGSInverseHessian(H.maxlength, S, Y, ρ)
 end
 
-function ROCArray(H::LBFGSInverseHessian) 
+function ROCArray(H::LBFGSInverseHessian)
     S = []
     Y = []
     ρ = []
@@ -94,7 +94,7 @@ function optimize_reload(fg, x, alg::LBFGS;
                          retract=_retract, inner=_inner, (transport!)=_transport!,
                          (scale!)=_scale!, (add!)=_add!,
                          isometrictransport=(transport! == _transport! && inner == _inner))
-    
+
     # Try to restore from state
     initial_state = nothing
     if resume_from !== nothing
@@ -104,7 +104,7 @@ function optimize_reload(fg, x, alg::LBFGS;
             initial_state = resume_from
         end
     end
-    
+
     # Initialize variables
     if initial_state !== nothing
         TangentType = _arraytype(x)
@@ -118,13 +118,13 @@ function optimize_reload(fg, x, alg::LBFGS;
         fhistory = copy(initial_state.fhistory)
         normgradhistory = copy(initial_state.normgradhistory)
         t₀ = initial_state.t₀  # Keep original start time for correct total time calculation
-        
+
         # Recompute current state quantities
         innergg = inner(x, g, g)
         normgrad = sqrt(innergg)
-        
+
         alg.verbosity >= 2 &&
-            @info @sprintf("LBFGS: resuming from iteration %d with f = %.12f, ‖∇f‖ = %.4e", 
+            @info @sprintf("LBFGS: resuming from iteration %d with f = %.12f, ‖∇f‖ = %.4e",
                           numiter, f, normgrad)
     else
         # Start from scratch
@@ -137,16 +137,16 @@ function optimize_reload(fg, x, alg::LBFGS;
         normgrad = sqrt(innergg)
         fhistory = [f]
         normgradhistory = [normgrad]
-        
+
         TangentType = typeof(g)
         ScalarType = typeof(innergg)
         m = alg.m
         H = LBFGSInverseHessian(m, TangentType[], TangentType[], ScalarType[])
-        
+
         verbosity >= 2 &&
             @info @sprintf("LBFGS: initializing with f = %.12f, ‖∇f‖ = %.4e", f, normgrad)
     end
-    
+
     t = time() - t₀
     _hasconverged = hasconverged(x, f, g, normgrad)
     _shouldstop = shouldstop(x, f, g, numfg, numiter, t)
@@ -245,7 +245,7 @@ function optimize_reload(fg, x, alg::LBFGS;
         end
 
         # Periodically save state
-        if save_state_to !== nothing && numiter % save_every == 0
+        if save_state_to !== nothing && save_every != 0 && numiter % save_every == 0
             current_state = LBFGSState(Array(x), f, Array(g), Array(H),
                                         numfg, numiter, copy(fhistory), copy(normgradhistory), t₀)
             save_lbfgs_state(alg, current_state, save_state_to)

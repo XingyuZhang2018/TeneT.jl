@@ -49,7 +49,7 @@ end
 
 function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:mps)
     @unpack AL, C, FLu, FLo = env
-    grid = _dist_energy_plaq(params.model, params.boundary_alg) ? params.boundary_alg.grid : nothing
+    grid = _dist_energy_plaq_grid(params.model, params.boundary_alg)
     if grid !== nothing && method === :mps
         return cor_len_value_slice2d_mps(AL, params, grid)
     end
