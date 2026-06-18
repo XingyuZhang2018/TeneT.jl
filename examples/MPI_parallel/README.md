@@ -6,8 +6,30 @@ Run iPEPS gradient optimization across multiple GPUs using MPI parallelism.
 
 ```
 MPI_parallel/
-├── MPI_parallel.jl         # Main optimization script (shared)
-├── test_MPI_config.jl      # Configuration validation test (shared)
+├── examples/               # Runnable optimization examples
+│   ├── MPI_parallel.jl
+│   └── J1J2_Square_VUMPS_Plaquette_slice2d.jl
+├── validation/             # MPI validation and smoke-test scripts
+│   ├── test_MPI_config.jl
+│   ├── test_MPI_checkpoint.jl
+│   ├── test_slice2d_sofia.jl
+│   ├── test_slice2d_m3_sofia.jl
+│   ├── test_slice2d_m4_sofia.jl
+│   ├── test_slice2d_m5_sofia.jl
+│   ├── run_test_slice2d_m3_sofia_cpu.jl
+│   ├── run_test_slice2d_m4_sofia_cpu.jl
+│   └── run_test_slice2d_m5_sofia_cpu.jl
+├── benchmarks/             # Benchmark drivers and result notes
+│   ├── benchmark_fg.jl
+│   ├── benchmark_slice2d_maps_sofia.jl
+│   ├── benchmark_slice2d_sofia.jl
+│   ├── bench_chain_gate_m2_sofia.jl
+│   ├── bench_chain_gate_sofia.jl
+│   ├── bench_kernel_ab_sofia.jl
+│   ├── BSC_MareNostrum5_H100.md
+│   ├── JSC_Jupiter_GH200.md
+│   ├── Sofia_VUB_H200.md
+│   └── cross_system_comparison.md
 ├── BSC/                    # BSC MareNostrum5 (H100 64GB)
 │   ├── submit.sh           # Slurm submit for optimization
 │   ├── submit_test.sh      # Slurm submit for scaling test
@@ -21,14 +43,8 @@ MPI_parallel/
 │   ├── submit.sh
 │   ├── submit_test.sh
 │   ├── submit_test_checkpoint.sh
-│   ├── bench.jl            # Per-iteration fg timing (submit.sh runs this)
 │   ├── UCX_CUDA_ISSUE.md   # Debug log for LD_PRELOAD libcuda fix
 │   └── LocalPreferences.toml
-├── benchmarks/             # Benchmark results
-│   ├── BSC_MareNostrum5_H100.md
-│   ├── JSC_Jupiter_GH200.md
-│   ├── Sofia_VUB_H200.md
-│   └── cross_system_comparison.md
 └── README.md
 ```
 

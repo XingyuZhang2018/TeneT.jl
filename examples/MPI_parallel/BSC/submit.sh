@@ -21,6 +21,6 @@ echo "Nodes: ${SLURM_NNODES}  GPUs: ${NGPU}  Start: $(date)"
 
 mpirun -np ${NGPU} bash -c \
     "export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
-     exec $JULIA --project=../../.. ../MPI_parallel.jl"
+     exec $JULIA --project=../../.. ../examples/MPI_parallel.jl"
 
 echo "=== Done: $(date) ==="

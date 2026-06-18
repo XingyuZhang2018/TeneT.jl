@@ -1,6 +1,6 @@
 # M3 Slice2D distributed maps (Cmap/FR/AC/ACd) — distributed parity vs serial.
 # Run via: julia --project=. test/run_test_slice2d_m3.jl  (mpiexec -n 4)
-# CPU Arrays only; GPU is examples/MPI_parallel/test_slice2d_m3_sofia.jl (Batch E).
+# CPU Arrays only; GPU is examples/MPI_parallel/validation/test_slice2d_m3_sofia.jl (Batch E).
 using Test, MPI, LinearAlgebra, Random, Zygote
 using TeneT
 using TeneT: slice2d_grid, Slice2DGrid, slice2d_scatter, slice2d_gather,

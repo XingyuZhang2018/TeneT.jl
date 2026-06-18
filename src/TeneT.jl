@@ -59,8 +59,11 @@ include("patch/OptimKit_patch.jl")
 # ============================================================================
 
 include("contraction/basic.jl")
-include("contraction/forloop_parallel_MPI.jl")
-include("contraction/slice2d.jl")
+include("contraction/parallel/collectives.jl")
+include("contraction/parallel/slice1d.jl")
+include("contraction/parallel/slice2d_grid.jl")
+include("contraction/parallel/slice2d_maps.jl")
+include("contraction/parallel/api.jl")
 include("contraction/chain_engine.jl")
 include("contraction/chain_maps.jl")
 include("contraction/observable.jl")
@@ -76,7 +79,11 @@ include("models/oneside_traits.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")
 include("boundary_algorithm/vumps/c4v.jl")
-include("boundary_algorithm/vumps/slice2d.jl")   # M4: distributed env (gather hoisting)
+include("boundary_algorithm/vumps/slice2d/env.jl")          # M4: distributed env (gather hoisting)
+include("boundary_algorithm/vumps/slice2d/seams.jl")
+include("boundary_algorithm/vumps/slice2d/init.jl")
+include("boundary_algorithm/vumps/slice2d/step.jl")
+include("boundary_algorithm/vumps/slice2d/observable.jl")
 include("boundary_algorithm/qrctmrg.jl")
 
 # ============================================================================
@@ -136,6 +143,7 @@ export Square, Honeycomb, Kagome
 export General, C4v, C3v, C3vTwoSite, Plaquette
 
 export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
+export ParallelMethod, SerialMethod, Slice1DMethod, Slice2DMethod, slice1D, slice2D
 
 export C4v_restriction, local_min_norm
 

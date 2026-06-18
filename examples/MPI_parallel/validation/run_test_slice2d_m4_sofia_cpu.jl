@@ -4,7 +4,7 @@
 # the SAME leftenv_slice2d code the cluster run exercises — before it reaches Sofia.
 # (The cluster run uses Sofia/submit_test_slice2d_m4.sh on CuArrays, 4×4 = 16 GPU.)
 #
-# Usage: julia --project=. examples/MPI_parallel/run_test_slice2d_m4_sofia_cpu.jl
+# Usage: julia --project=. examples/MPI_parallel/validation/run_test_slice2d_m4_sofia_cpu.jl
 using MPI
 const julia_exe = first(Base.julia_cmd().exec)
 const proj = dirname(Base.active_project())

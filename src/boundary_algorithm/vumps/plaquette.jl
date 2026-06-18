@@ -162,7 +162,8 @@ Only uses left environments (no right canonical / right environment).
 function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
     # Slice2D (2D block-distributed) path when a grid is set — routes both vumps_itr
     # call sites. Serial body below runs whenever grid === nothing.
-    alg.grid === nothing || return vumps_step_slice2d(rt, M, alg.grid, alg)
+    g = _effective_grid(alg)
+    g === nothing || return vumps_step_slice2d(rt, M, g, alg)
     @unpack AL, C, FL = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
@@ -179,7 +180,8 @@ end
 function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Plaquette})
     size(M.pattern) == (2,2) || size(M.pattern) == (2,6) || error("Plaquette VUMPS only supports 2×2 and 2×6 patterns. Got pattern of size $(size(M.pattern)).")
     # Slice2D path: build a BLOCK-distributed plaquette runtime when a grid is set.
-    alg.grid === nothing || return init_VUMPSRuntime_slice2d(M, χ, alg.grid, alg)
+    g = _effective_grid(alg)
+    g === nothing || return init_VUMPSRuntime_slice2d(M, χ, g, alg)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     C = LRtoC(L, L)   # use L on both sides (no right canonical)

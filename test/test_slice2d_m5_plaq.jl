@@ -25,7 +25,7 @@ gather_sa(SA, g)  = StructArray([slice2d_gather(t, g)  for t in SA.data], SA.pat
 scatter_rt(rt, g) = PlaquetteVUMPSRuntime(scatter_sa(rt.AL, g), rt.C, scatter_sa(rt.FL, g))   # C replicated
 ph_relerr(a, b) = (c = dot(b, a) / dot(b, b); norm(a .- b .* c) / max(norm(b), eps()))
 function slice2d_source()
-    return read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d.jl"), String)
+    return read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d", "seams.jl"), String)
 end
 
 # random (non-canonical) Plaquette runtime + leg5 M; identical on every rank.

@@ -40,7 +40,7 @@ end
 scatter_sa(SA, g) = StructArray([slice2d_scatter(t, g) for t in SA.data], SA.pattern)
 gather_sa(SA, g)  = StructArray([slice2d_gather(t, g) for t in SA.data], SA.pattern)
 function slice2d_forward_sliced_body()
-    src = read(joinpath(@__DIR__, "..", "src", "contraction", "slice2d.jl"), String)
+    src = read(joinpath(@__DIR__, "..", "src", "contraction", "parallel", "slice2d_maps.jl"), String)
     sig = "function _slice2d_forward_sliced("
     start = findfirst(sig, src)
     @test start !== nothing

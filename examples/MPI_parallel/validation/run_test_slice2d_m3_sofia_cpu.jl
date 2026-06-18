@@ -4,7 +4,7 @@
 # the SAME *_slice2d_dist code the cluster run exercises — before it ever reaches
 # Sofia. (The cluster run uses Sofia/submit_test_slice2d_m3.sh on CuArrays.)
 #
-# Usage: julia --project=. examples/MPI_parallel/run_test_slice2d_m3_sofia_cpu.jl
+# Usage: julia --project=. examples/MPI_parallel/validation/run_test_slice2d_m3_sofia_cpu.jl
 using MPI
 const julia_exe = first(Base.julia_cmd().exec)
 const proj = dirname(Base.active_project())

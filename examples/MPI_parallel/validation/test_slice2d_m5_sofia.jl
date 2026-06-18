@@ -11,7 +11,7 @@
 # Design: docs/2026-06-15-m5-vumps-step-slice2d-assembly-design.md (§6).
 #
 # Local CPU smoke (tiny dims, 4 ranks, plain Arrays):
-#   TENET_BENCH_CPU=1 julia --project=. examples/MPI_parallel/run_test_slice2d_m5_sofia_cpu.jl
+#   TENET_BENCH_CPU=1 julia --project=. examples/MPI_parallel/validation/run_test_slice2d_m5_sofia_cpu.jl
 
 const BENCH_CPU = get(ENV, "TENET_BENCH_CPU", "0") == "1"
 

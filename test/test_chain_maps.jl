@@ -465,7 +465,7 @@ end
     χ, D, d = 8, 3, 2
     # The forloop/parallel rrules hand engine_backward SubArray slices of
     # arg 3 (FLmap/ACmap: last dim; FRmap/ACdmap: dim 1 — the N_in
-    # conventions of forloop_parallel_MPI.jl:543-632) plus a view of dOut
+    # conventions of slice1d.jl's map wrappers) plus a view of dOut
     # (out dim 4 tracks the split in all four leg5 cases). `nothing` here
     # would silently send production back to per-slice Zygote tapes.
     A  = rand(ComplexF64, χ, D, D, χ); B  = rand(ComplexF64, χ, D, D, χ)

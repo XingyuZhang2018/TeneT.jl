@@ -27,7 +27,7 @@ run_case() {
     mpirun -np 8 bash -c \
         "export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
          export NCCL_DEBUG=WARN; \
-         $extra exec $JULIA --project=../../.. ../benchmark_fg.jl" 2>&1 \
+         $extra exec $JULIA --project=../../.. ../benchmarks/benchmark_fg.jl" 2>&1 \
         | grep -vE 'NCCL INFO'
 }
 

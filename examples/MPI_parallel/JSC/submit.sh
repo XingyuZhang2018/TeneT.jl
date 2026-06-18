@@ -31,6 +31,6 @@ echo "=== iPEPS MPI Parallel (JSC) ==="
 echo "Nodes: ${SLURM_NNODES}  GPUs: ${NGPU}  Start: $(date)"
 
 srun -n ${NGPU} --gpus-per-task=1 bash -c \
-    "$ENVS; exec $JULIA --project=../../.. ../MPI_parallel.jl"
+    "$ENVS; exec $JULIA --project=../../.. ../examples/MPI_parallel.jl"
 
 echo "=== Done: $(date) ==="

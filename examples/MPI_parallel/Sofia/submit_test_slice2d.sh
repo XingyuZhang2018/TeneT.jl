@@ -10,7 +10,7 @@
 #SBATCH --account=pilot_2026_0002
 
 # Sofia 4-GPU Slice2D FLmap validation: parity vs slice path + memory + timing.
-# Driver: ../test_slice2d_sofia.jl
+# Driver: ../validation/test_slice2d_sofia.jl
 # Design: docs/2026-06-10-slice2d-flmap-design.md
 
 source /etc/profile
@@ -39,7 +39,7 @@ echo "=== Sofia 4-GPU Slice2D FLmap validation ==="
 echo "Start: $(date)"
 
 mpirun -np 4 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../test_slice2d_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../validation/test_slice2d_sofia.jl"
 
 echo ""
 echo "=== Done: $(date) ==="

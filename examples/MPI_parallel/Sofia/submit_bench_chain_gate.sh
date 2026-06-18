@@ -10,7 +10,7 @@
 #SBATCH --account=pilot_2026_0002
 
 # Single-GPU chain-engine perf gate: CHAIN vs HAND vs TENSOR on the identical
-# local workload (no MPI). Driver: ../bench_chain_gate_sofia.jl
+# local workload (no MPI). Driver: ../benchmarks/bench_chain_gate_sofia.jl
 
 source /etc/profile
 source /etc/profile.d/modules.sh
@@ -32,5 +32,5 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1
 
 echo "=== Sofia 1-GPU chain-engine perf gate ==="
 echo "Start: $(date)"
-LD_LIBRARY_PATH=$CLEAN_LD $JULIA --project=../../.. ../bench_chain_gate_sofia.jl
+LD_LIBRARY_PATH=$CLEAN_LD $JULIA --project=../../.. ../benchmarks/bench_chain_gate_sofia.jl
 echo "=== Done: $(date) ==="

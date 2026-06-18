@@ -39,7 +39,7 @@ for N in 1 2 4 8 16; do
     echo ""
     echo "========== ${N} GPU =========="
     mpirun -np $N -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-        bash -c "$ENVS; exec $JULIA --project=../../.. ../test_MPI_checkpoint.jl"
+        bash -c "$ENVS; exec $JULIA --project=../../.. ../validation/test_MPI_checkpoint.jl"
 done
 
 echo ""

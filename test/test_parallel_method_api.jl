@@ -1,0 +1,85 @@
+using Test
+using TeneT
+using MPI
+
+using TeneT: ParallelMethod, Slice1DMethod, Slice2DMethod,
+             SerialMethod, slice1D, slice2D, slice2d_grid,
+             FLmap, FLmap_parallel, FLmap_slice2d_dist,
+             parallel_map, slice2d_scatter
+
+@testset "parallel method public API" begin
+    probe = Module(:ParallelAPIExportProbe)
+    Core.eval(probe, :(using TeneT))
+    for name in (:ParallelMethod, :SerialMethod, :Slice1DMethod, :Slice2DMethod, :slice1D, :slice2D)
+        @test isdefined(probe, name)
+    end
+
+    m1 = slice1D(; forloop_iter=3)
+    @test m1 isa ParallelMethod
+    @test m1 isa Slice1DMethod
+    @test m1.forloop_iter == 3
+    @test m1.inner_etype === nothing
+
+    if !MPI.Initialized()
+        MPI.Init()
+    end
+    if MPI.Comm_size(MPI.COMM_WORLD) == 1
+        m2 = slice2D(1, 1; forloop_iter=2)
+        @test m2 isa ParallelMethod
+        @test m2 isa Slice2DMethod
+        @test m2.forloop_iter == 2
+        @test m2.grid === slice2d_grid(1, 1)
+    end
+end
+
+@testset "slice2D routing matches legacy distributed wrapper" begin
+    if !MPI.Initialized()
+        MPI.Init()
+    end
+    if MPI.Comm_size(MPI.COMM_WORLD) == 1
+        method = slice2D(1, 1; forloop_iter=1)
+        FL = rand(ComplexF64, 2, 2, 2, 2)
+        ALu = rand(ComplexF64, 2, 2, 2, 2)
+        ALd = rand(ComplexF64, 2, 2, 2, 2)
+        M = rand(ComplexF64, 2, 2, 2, 2, 2)
+        FLb = slice2d_scatter(FL, method.grid)
+        ALub = slice2d_scatter(ALu, method.grid)
+        ALdb = slice2d_scatter(ALd, method.grid)
+
+        legacy = FLmap_slice2d_dist(FLb, ALub, ALdb, M, method.grid; forloop_iter=1)
+        routed = parallel_map(FLmap, method, FLb, ALub, ALdb, M)
+        @test routed ≈ legacy
+    end
+end
+
+@testset "slice1D routing matches legacy local wrapper" begin
+    FL = rand(ComplexF64, 2, 2, 2, 2)
+    ALu = rand(ComplexF64, 2, 2, 2, 2)
+    ALd = rand(ComplexF64, 2, 2, 2, 2)
+    M = rand(ComplexF64, 2, 2, 2, 2, 2)
+
+    legacy = FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter=2)
+    routed = parallel_map(FLmap, SerialMethod(2, nothing), FL, ALu, ALd, M)
+    @test routed ≈ legacy
+end
+
+@testset "VUMPS accepts parallel_method" begin
+    alg = VUMPS{General}(parallel_method=slice1D(; forloop_iter=2))
+    @test alg.parallel_method isa Slice1DMethod
+    @test alg.parallel_method.forloop_iter == 2
+
+    TeneT._apply_parallel_method!(alg)
+    @test alg.ifparallel
+    @test alg.forloop_iter == 2
+
+    if !MPI.Initialized()
+        MPI.Init()
+    end
+    if MPI.Comm_size(MPI.COMM_WORLD) == 1
+        alg2 = VUMPS{General}(parallel_method=slice2D(1, 1; forloop_iter=3))
+        TeneT._apply_parallel_method!(alg2)
+        @test !alg2.ifparallel
+        @test alg2.forloop_iter == 3
+        @test TeneT._effective_grid(alg2) === alg2.parallel_method.grid
+    end
+end

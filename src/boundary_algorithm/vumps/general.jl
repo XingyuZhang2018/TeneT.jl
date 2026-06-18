@@ -794,13 +794,14 @@ Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`
 and bond dimension `χ`.
 """
 function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
+    _apply_parallel_method!(alg)
     alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
 
     # M5: Slice2D (2D block-distributed) path — build a BLOCK-distributed runtime so the
     # grid-routed vumps_step_slice2d receives blocks. Supports ifupdown (up on M + down on
     # _down_M(M)); leading_boundary(Tuple) then runs each via the slice2d vumps_step guard.
-    if alg.grid !== nothing
-        g = alg.grid
+    g = _effective_grid(alg)
+    if g !== nothing
         rtup = init_VUMPSRuntime_slice2d(M, χ, g, alg)
         if alg.ifupdown
             alg.ifdownfromup && throw(ArgumentError("init_env slice2d: ifdownfromup not yet supported; use ifdownfromup=false."))
@@ -867,6 +868,7 @@ One step of the VUMPS algorithm with the standard (General) contraction mode.
 Uses the power-method variant: update environments first, then re-solve AC/C.
 """
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    _apply_parallel_method!(alg)
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL, C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
@@ -887,7 +889,8 @@ function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     # M5: route to the Slice2D (2D block-distributed) step when a grid is set. This
     # single guard covers BOTH vumps_itr call sites (warm-up + AD loop). Serial body
     # below is unchanged and runs whenever grid === nothing.
-    alg.grid === nothing || return vumps_step_slice2d(rt, M, alg.grid, alg)
+    g = _effective_grid(alg)
+    g === nothing || return vumps_step_slice2d(rt, M, g, alg)
     @unpack AL, C, AR, FL, FR = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)

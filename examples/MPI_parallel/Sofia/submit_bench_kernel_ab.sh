@@ -10,7 +10,7 @@
 #SBATCH --account=pilot_2026_0002
 
 # Single-GPU kernel A/B: staged slice2d kernels vs monolithic FLmap+forloop
-# on the identical local workload (no MPI). Driver: ../bench_kernel_ab_sofia.jl
+# on the identical local workload (no MPI). Driver: ../benchmarks/bench_kernel_ab_sofia.jl
 
 source /etc/profile
 source /etc/profile.d/modules.sh
@@ -32,5 +32,5 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1
 
 echo "=== Sofia 1-GPU kernel A/B ==="
 echo "Start: $(date)"
-LD_LIBRARY_PATH=$CLEAN_LD $JULIA --project=../../.. ../bench_kernel_ab_sofia.jl
+LD_LIBRARY_PATH=$CLEAN_LD $JULIA --project=../../.. ../benchmarks/bench_kernel_ab_sofia.jl
 echo "=== Done: $(date) ==="

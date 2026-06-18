@@ -14,7 +14,7 @@
 # Local CPU smoke (no GPU, tiny dims): runs the SAME *_slice2d_dist code on plain
 # Arrays under 4 ranks via TENET_BENCH_CPU=1 — confirms the driver parses + runs
 # end-to-end before it ever reaches the cluster:
-#   TENET_BENCH_CPU=1 julia --project=. examples/MPI_parallel/run_test_slice2d_m3_sofia_cpu.jl
+#   TENET_BENCH_CPU=1 julia --project=. examples/MPI_parallel/validation/run_test_slice2d_m3_sofia_cpu.jl
 # (the GPU path requires CUDA.functional(); the CPU smoke uses Array and skips
 # all CUDA calls.)
 

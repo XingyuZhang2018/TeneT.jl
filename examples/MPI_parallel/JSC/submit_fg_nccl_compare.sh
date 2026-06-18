@@ -36,7 +36,7 @@ run_case() {
     extra="$2"
     echo ""
     echo "========== ${label} =========="
-    srun -n 8 --gpus-per-task=1 bash -c "$BASE_ENVS; $extra exec $JULIA --project=../../.. ../benchmark_fg.jl" 2>&1 \
+    srun -n 8 --gpus-per-task=1 bash -c "$BASE_ENVS; $extra exec $JULIA --project=../../.. ../benchmarks/benchmark_fg.jl" 2>&1 \
         | grep -vE 'NCCL INFO'
 }
 

@@ -53,12 +53,12 @@ function assert_block_grad(label, got, ref, g; rtol=1e-7, atol=1e-10)
 end
 
 function general_vumps_step_body()
-    slice2d_src = read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d.jl"), String)
+    slice2d_src = read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d", "step.jl"), String)
     sig = "function vumps_step_slice2d(rt::VUMPSRuntime, M::StructArray, grid::Slice2DGrid, alg::VUMPS{General})"
     start = findfirst(sig, slice2d_src)
     @test start !== nothing
     tail = slice2d_src[last(start):end]
-    marker = "# Fixed seed for the distributed init"
+    marker = "function vumps_step_slice2d(rt::PlaquetteVUMPSRuntime"
     stop = findfirst(marker, tail)
     @test stop !== nothing
     return tail[1:first(stop)-1]

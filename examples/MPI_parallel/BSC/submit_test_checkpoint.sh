@@ -24,7 +24,7 @@ for N in 1 2 4 8; do
     echo "========== ${N} GPU =========="
     mpirun -np $N bash -c \
         "export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
-         exec $JULIA --project=../../.. ../test_MPI_checkpoint.jl"
+         exec $JULIA --project=../../.. ../validation/test_MPI_checkpoint.jl"
     echo ""
 done
 

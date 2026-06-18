@@ -12,7 +12,7 @@
 # 64-GPU (8×8, 8 nodes) slice2d MAP timing: FLmap / FRmap / ACmap / ACdmap fwd+bwd,
 # ring vs NCCL, over the Part-2 D×χ matrix. 8 ranks/node ⇒ row_comm is intra-node
 # (NVLink), col_comm spans ALL 8 nodes over IB — the maximal cross-node stress for
-# the NCCL col/reduce-scatter path. Driver: ../benchmark_slice2d_maps_sofia.jl with
+# the NCCL col/reduce-scatter path. Driver: ../benchmarks/benchmark_slice2d_maps_sofia.jl with
 # TENET_SLICE2D_N1=N2=8. Results → Sofia_VUB_H200.md (NCCL scaling).
 
 source /etc/profile
@@ -42,5 +42,5 @@ export NCCL_DEBUG=WARN"
 echo "=== Sofia 64-GPU (8×8, 8 nodes) slice2d MAP timing (FL/FR/AC/ACd) — RING vs NCCL ==="
 echo "Start: $(date)"
 mpirun -np 64 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmark_slice2d_maps_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_slice2d_maps_sofia.jl"
 echo "=== Done: $(date) ==="

@@ -12,7 +12,7 @@
 # M2 single-GPU chain-engine perf gate (Part 8): production code under
 # set_chain_engine!(true) [CHAIN] vs (false) [TENSOR] on six maps (FLmap,
 # FRmap, ACmap, ACdmap, Cmap, Mumap), no MPI. Driver:
-# ../bench_chain_gate_m2_sofia.jl. --time bumped to 00:45:00 (six maps now).
+# ../benchmarks/bench_chain_gate_m2_sofia.jl. --time bumped to 00:45:00 (six maps now).
 
 source /etc/profile
 source /etc/profile.d/modules.sh
@@ -34,5 +34,5 @@ export LD_PRELOAD=/usr/lib64/libcuda.so.1
 
 echo "=== Sofia 1-GPU M2 chain-engine perf gate (Part 8) ==="
 echo "Start: $(date)"
-LD_LIBRARY_PATH=$CLEAN_LD $JULIA --project=../../.. ../bench_chain_gate_m2_sofia.jl
+LD_LIBRARY_PATH=$CLEAN_LD $JULIA --project=../../.. ../benchmarks/bench_chain_gate_m2_sofia.jl
 echo "=== Done: $(date) ==="

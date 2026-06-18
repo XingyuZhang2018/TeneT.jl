@@ -29,7 +29,7 @@ export JULIA_DEPOT_PATH=$WD/.julia
 export HOME=$WD
 JULIA=$WD/julia-1.11.3/bin/julia
 MAX_GPU=${SLURM_NTASKS}
-DRIVER=$GATE/examples/MPI_parallel/J1J2_Square_VUMPS_Plaquette_slice2d.jl
+DRIVER=$GATE/examples/MPI_parallel/examples/J1J2_Square_VUMPS_Plaquette_slice2d.jl
 
 CLEAN_LD=$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v 'CUDA/12.8.0' | tr '\n' ':' || true)
 

@@ -12,7 +12,7 @@
 # 16-GPU (4×4, 2 nodes) slice2d MAP timing: FLmap / FRmap / ACmap / ACdmap fwd+bwd
 # (ring) over the Part-2 D×χ matrix — gather-class (FR/ACd) vs ring-class (FL/AC)
 # at the wider grid, where FR/ACd chunk into ≈P·n = 16·n pieces. Cross-node IB on
-# the column collectives (2 rows/node). Driver: ../benchmark_slice2d_maps_sofia.jl.
+# the column collectives (2 rows/node). Driver: ../benchmarks/benchmark_slice2d_maps_sofia.jl.
 # Results → Part 11.
 
 source /etc/profile
@@ -42,5 +42,5 @@ export NCCL_DEBUG=WARN"
 echo "=== Sofia 16-GPU (4×4, 2 nodes) slice2d MAP timing (FL/FR/AC/ACd) ==="
 echo "Start: $(date)"
 mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmark_slice2d_maps_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_slice2d_maps_sofia.jl"
 echo "=== Done: $(date) ==="

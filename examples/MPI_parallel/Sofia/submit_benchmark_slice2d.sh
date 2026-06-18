@@ -11,7 +11,7 @@
 
 # Slice2D (2×2) vs slice FLmap benchmark over the Part-2 D×χ matrix, ring and
 # NCCL columns in one job (TENET_USE_NCCL toggled in-driver per section).
-# Driver: ../benchmark_slice2d_sofia.jl
+# Driver: ../benchmarks/benchmark_slice2d_sofia.jl
 # Results land in benchmarks/Sofia_VUB_H200.md Part 5.
 
 source /etc/profile
@@ -39,5 +39,5 @@ export NCCL_DEBUG=WARN"
 echo "=== Sofia 4-GPU Slice2D vs slice benchmark ==="
 echo "Start: $(date)"
 mpirun -np 4 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmark_slice2d_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_slice2d_sofia.jl"
 echo "=== Done: $(date) ==="

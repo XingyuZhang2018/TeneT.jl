@@ -19,7 +19,7 @@
 # power_iter on a random non-canonical rt amplifies the block-vs-full FP-order diff into
 # O(1) via the ill-conditioned AC eigen-map — a fixture artifact, not a defect: the seam
 # is bit-exact, see test/test_slice2d_m5.jl Gate M5-0). NCCL OFF (hand ring) to isolate
-# correctness. Driver: ../test_slice2d_m5_sofia.jl (grid auto-derived: 16 → 4×4).
+# correctness. Driver: ../validation/test_slice2d_m5_sofia.jl (grid auto-derived: 16 → 4×4).
 # Design: docs/2026-06-15-m5-vumps-step-slice2d-assembly-design.md (§6).
 
 source /etc/profile
@@ -58,6 +58,6 @@ mpirun -np 1 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x J
 
 echo "--- 16-rank validation ---"
 mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../test_slice2d_m5_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../validation/test_slice2d_m5_sofia.jl"
 echo ""
 echo "=== Done: $(date) ==="

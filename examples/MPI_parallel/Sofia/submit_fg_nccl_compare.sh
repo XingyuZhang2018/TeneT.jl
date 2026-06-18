@@ -48,7 +48,7 @@ run_case() {
     echo "========== ${label} =========="
     echo "extra env: $extra"
     mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-        bash -c "$BASE_ENVS; $extra exec $JULIA --project=../../.. ../benchmark_fg.jl" 2>&1 \
+        bash -c "$BASE_ENVS; $extra exec $JULIA --project=../../.. ../benchmarks/benchmark_fg.jl" 2>&1 \
         | grep -vE 'This may cause|was loaded|If you.re|ensure that|In any other|file an issue|^\s*│|^\s*└|^\s*┌|Precompiling|ms  ✓|already precompiled|Being precompiled|NCCL INFO'
 }
 

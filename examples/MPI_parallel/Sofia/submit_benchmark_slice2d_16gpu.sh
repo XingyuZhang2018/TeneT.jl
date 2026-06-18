@@ -12,7 +12,7 @@
 # Slice2D 4×4 (16 GPU, 2 nodes) vs slice FLmap benchmark over the Part-2 D×χ
 # matrix. Rank layout: rank = r1*4 + r2 with 8 ranks/node ⇒ row communicators
 # (ring shifts) stay intra-node on NVLink; column communicators (reduce-
-# scatter/allgather) cross the IB link. Driver: ../benchmark_slice2d_sofia.jl
+# scatter/allgather) cross the IB link. Driver: ../benchmarks/benchmark_slice2d_sofia.jl
 # with TENET_SLICE2D_N1=4 TENET_SLICE2D_N2=4.
 
 source /etc/profile
@@ -42,5 +42,5 @@ export TENET_SLICE2D_N2=4"
 echo "=== Sofia 16-GPU (2-node) Slice2D 4x4 vs slice benchmark ==="
 echo "Start: $(date)"
 mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmark_slice2d_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_slice2d_sofia.jl"
 echo "=== Done: $(date) ==="

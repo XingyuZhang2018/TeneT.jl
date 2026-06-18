@@ -11,7 +11,7 @@
 #
 # Local CPU smoke (no GPU, tiny dims; confirms the driver parses + runs end-to-end
 # under 4 ranks on plain Arrays before it reaches the cluster):
-#   TENET_BENCH_CPU=1 julia --project=. examples/MPI_parallel/run_test_slice2d_m4_sofia_cpu.jl
+#   TENET_BENCH_CPU=1 julia --project=. examples/MPI_parallel/validation/run_test_slice2d_m4_sofia_cpu.jl
 
 const BENCH_CPU = get(ENV, "TENET_BENCH_CPU", "0") == "1"
 

@@ -11,7 +11,7 @@
 
 # 4-GPU (2×2) slice2d MAP timing: FLmap / FRmap / ACmap / ACdmap fwd+bwd (ring)
 # over the Part-2 D×χ matrix — measures the gather-class (FR/ACd) vs ring-class
-# (FL/AC) cost. Driver: ../benchmark_slice2d_maps_sofia.jl. Results → Part 11.
+# (FL/AC) cost. Driver: ../benchmarks/benchmark_slice2d_maps_sofia.jl. Results → Part 11.
 
 source /etc/profile
 source /etc/profile.d/modules.sh
@@ -40,5 +40,5 @@ export NCCL_DEBUG=WARN"
 echo "=== Sofia 4-GPU (2×2) slice2d MAP timing (FL/FR/AC/ACd) ==="
 echo "Start: $(date)"
 mpirun -np 4 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmark_slice2d_maps_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_slice2d_maps_sofia.jl"
 echo "=== Done: $(date) ==="

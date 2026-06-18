@@ -13,7 +13,7 @@
 # Zygote-sum gradient) vs the serial kernels for Cmap_slice2d / FRmap_slice2d_dist
 # / ACmap_slice2d_dist / ACdmap_slice2d_dist, plus per-map device-memory probes
 # (esp. FRmap/ACdmap bounded full-i×full-d intermediates via the 2-level chunk).
-# Driver: ../test_slice2d_m3_sofia.jl
+# Driver: ../validation/test_slice2d_m3_sofia.jl
 # Plan:   docs/2026-06-13-m3-slice2d-wrappers-plan.md (Batch E)
 
 source /etc/profile
@@ -49,7 +49,7 @@ echo "=== Sofia 4-GPU M3 Slice2D-wrapper validation (C/FR/AC/ACd parity + mem) =
 echo "Start: $(date)"
 
 mpirun -np 4 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../test_slice2d_m3_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../validation/test_slice2d_m3_sofia.jl"
 
 echo ""
 echo "=== Done: $(date) ==="

@@ -17,7 +17,7 @@
 # cross the IB link — the high-value cross-node axis this run exercises on-device
 # (incl. the GPU-densify fix in the slice2d_gather_row/col rrules). NCCL OFF this
 # run (hand ring) to isolate env-layer correctness; a follow-up flips TENET_USE_NCCL=1.
-# Driver: ../test_slice2d_m4_sofia.jl (grid auto-derived from nprocs: 16 → 4×4).
+# Driver: ../validation/test_slice2d_m4_sofia.jl (grid auto-derived from nprocs: 16 → 4×4).
 # Design: docs/2026-06-15-m4-env-slice2d-integration-design.md (Batch A / Gate 5).
 
 source /etc/profile
@@ -56,6 +56,6 @@ mpirun -np 1 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x J
 
 echo "--- 16-rank validation ---"
 mpirun -np 16 -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../test_slice2d_m4_sofia.jl"
+    bash -c "$BASE_ENVS; exec $JULIA --project=../../.. ../validation/test_slice2d_m4_sofia.jl"
 echo ""
 echo "=== Done: $(date) ==="

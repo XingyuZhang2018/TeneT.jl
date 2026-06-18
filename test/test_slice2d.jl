@@ -1,6 +1,6 @@
 # Slice2D-style 2D distributed FLmap tests. Run via: julia --project=. test/run_test_slice2d.jl
 # CPU Arrays only (no CUDA-aware MPI on local machines); GPU is covered by
-# examples/MPI_parallel/test_slice2d_sofia.jl.
+# examples/MPI_parallel/validation/test_slice2d_sofia.jl.
 using Test
 using MPI
 using LinearAlgebra
