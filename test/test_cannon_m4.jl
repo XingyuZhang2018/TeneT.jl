@@ -39,6 +39,26 @@ function build_cell(Ni, Nj, χ, D; d=2, seed=42, pattern=nothing)
 end
 scatter_sa(SA, g) = StructArray([cannon_scatter(t, g) for t in SA.data], SA.pattern)
 gather_sa(SA, g)  = StructArray([cannon_gather(t, g) for t in SA.data], SA.pattern)
+function cannon_forward_sliced_body()
+    src = read(joinpath(@__DIR__, "..", "src", "contraction", "cannon_2d.jl"), String)
+    sig = "function _cannon_forward_sliced("
+    start = findfirst(sig, src)
+    @test start !== nothing
+    tail = src[last(start):end]
+    stop = findfirst("# Replicated-AL path", tail)
+    @test stop !== nothing
+    return tail[1:first(stop)-1]
+end
+function flmap_sliced_rrule_body()
+    src = read(joinpath(@__DIR__, "..", "src", "autodiff", "rules.jl"), String)
+    sig = "function ChainRulesCore.rrule(::typeof(FLmap_cannon_sliced)"
+    start = findfirst(sig, src)
+    @test start !== nothing
+    tail = src[last(start):end]
+    stop = findfirst("# M4 hoisted FRmap rrule", tail)
+    @test stop !== nothing
+    return tail[1:first(stop)-1]
+end
 
 # global-phase-insensitive eigenvector comparison (test_cannon.jl idiom)
 function phase_ok(a_full, b_full; rtol=1e-6)
@@ -47,6 +67,21 @@ function phase_ok(a_full, b_full; rtol=1e-6)
     imax = argmax(abs.(bn))
     ph = an[imax] / bn[imax]
     return isapprox(abs(ph), 1; rtol) && isapprox(an, bn .* ph; rtol)
+end
+
+@testset "Gate 0: FLmap sliced uses row allgather for FL iterate" begin
+    body = cannon_forward_sliced_body()
+    @test occursin("FL_row = cannon_gather_row", body)
+    @test occursin("ALd_chunk = view(ALd_col, :, :, :, ch)", body)
+    @test occursin("Hc = _cannon_stage1(FL_row, ALd_chunk)", body)
+    @test !occursin("_cannon_row_shift", body)
+    @test !occursin("for t in 0:N2-1", body)
+
+    rbody = flmap_sliced_rrule_body()
+    @test occursin("ALd_chunk = view(ALd_col, :, :, :, ch)", rbody)
+    @test occursin("dFL_row .+= tmp", rbody)
+    @test occursin("view(dALd_col, :, :, :, ch) .+= tmp", rbody)
+    @test !occursin("for t in 0:N2-1", rbody)
 end
 
 # ── Gate 1: env-level eigenpair parity (the headline M4 gate) ─────────────────

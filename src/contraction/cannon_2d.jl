@@ -7,9 +7,9 @@
 # M is replicated (tiny). ALu/ALd: `FLmap_cannon` takes them replicated;
 # `FLmap_cannon_dist` takes them block-stored in the same convention and
 # assembles the irreducible per-rank slices ALu[a_r1, :, :, :] (row
-# allgather) and ALd[:, :, :, l_r2] (column allgather). Stage 1 rotates FL
-# blocks along the row ring while accumulating the pre-fold intermediate H;
-# M is folded once after the ring, then stage 2 contracts with ALu and
+# allgather) and ALd[:, :, :, l_r2] (column allgather). Stage 1 gathers the
+# FL iterate's row slice once and accumulates the pre-fold intermediate H;
+# M is folded once after the row-slice sum, then stage 2 contracts with ALu and
 # reduce-scatters along the column. Output distribution = input
 # distribution, so the map iterates without redistribution.
 
@@ -51,9 +51,9 @@ end
 
 # ─── Stage kernels (leg5) ─────────────────────────────────────────────────
 #
-# FLmap splits into ring + fold + stage 2 so distributed FLOPs stay exactly
+# FLmap splits into row-slice sum + fold + stage 2 so distributed FLOPs stay exactly
 # serial/P:
-#   ring (stage 1) contracts the i leg only, accumulating the pre-fold
+#   row-slice sum (stage 1) contracts the i leg only, accumulating the pre-fold
 #     intermediate H. The M fold is deliberately NOT in the ring: its cost is
 #     independent of the i-block extent, so folding per step would redo it N2
 #     times (overhead growing with grid size);
@@ -76,7 +76,7 @@ function _cannon_stage1(FL, ALd)
     return H
 end
 
-# In-place accumulating variant for the ring (avoids a second H-sized
+# In-place accumulating variant for the row-slice sum (avoids a second H-sized
 # temporary). The rrule backward recomputes H with the same kernels and then
 # walks the hand adjoints below — no Zygote anywhere in the chunk body.
 function _cannon_stage1_add!(H, FL, ALd)
@@ -235,21 +235,7 @@ function cannon_norm(x_blk, grid::CannonGrid)
     return sqrt(MPI.Allreduce(sum(abs2, x_blk), +, grid.comm))
 end
 
-# ─── Ring / column communication ──────────────────────────────────────────
-
-# Send `cur` to the left row neighbor (r2-1) and receive the next block from
-# the right (r2+1). Fresh exact-size buffer per step (uneven χ blocks differ
-# in size; CUDA pool makes the allocation cheap). Never mutates `cur`.
-function _cannon_row_shift(cur, grid::CannonGrid, recv_size; tag = _TAG_BASE + 700)
-    dest = mod(grid.r2 - 1, grid.N2)
-    src  = mod(grid.r2 + 1, grid.N2)
-    recv = similar(cur, recv_size)
-    synchronize(cur)
-    req_r = MPI.Irecv!(recv, grid.row_comm; source = src, tag = tag)
-    req_s = MPI.Isend(cur, grid.row_comm; dest = dest, tag = tag)
-    MPI.Waitall([req_s, req_r])
-    return recv
-end
+# ─── Row / column communication ───────────────────────────────────────────
 
 # Sum `partial` (full d leg, local l block) over the column and keep the local
 # d block. Direct algorithm: each rank sends every other rank its chunk and
@@ -324,37 +310,6 @@ function _cannon_col_allgather(dblk, grid::CannonGrid, d_rs)
         view(full, d_rs[j + 1], ntuple(_ -> Colon(), nmid)...) .= recvbufs[j + 1]
     end
     return full
-end
-
-# Sum per-destination dFL contribution blocks over the row and deliver block
-# t to rank (r1, t). Direct pairwise on row_comm, same buffer/sync discipline
-# as the column reduce-scatter: allocate everything, one synchronize, post
-# all Irecv! before all Isend.
-function _cannon_row_reduce_scatter(contribs::Vector, grid::CannonGrid)
-    N2, r2 = grid.N2, grid.r2
-    acc = contribs[r2 + 1]
-    N2 == 1 && return acc
-    recvbufs = Vector{typeof(acc)}(undef, N2)
-    for j in 0:N2-1
-        j == r2 && continue
-        recvbufs[j + 1] = similar(acc)
-    end
-    synchronize(acc)
-    reqs = MPI.Request[]
-    for j in 0:N2-1
-        j == r2 && continue
-        push!(reqs, MPI.Irecv!(recvbufs[j + 1], grid.row_comm; source = j, tag = _TAG_BASE + 740))
-    end
-    for j in 0:N2-1
-        j == r2 && continue
-        push!(reqs, MPI.Isend(contribs[j + 1], grid.row_comm; dest = j, tag = _TAG_BASE + 740))
-    end
-    MPI.Waitall(reqs)
-    for j in 0:N2-1
-        j == r2 && continue
-        acc .+= recvbufs[j + 1]
-    end
-    return acc
 end
 
 # Assemble the local-a, full-d row slice of a block-distributed tensor:
@@ -499,9 +454,9 @@ end
 # AL working set:
 #   ALu_row = ALu[a_r1, :, :, :]   (local a block, FULL d leg)
 #   ALd_col = ALd[:, :, :, l_r2]   (FULL i leg, local l block)
-# Returns (result_blk, blocks): the ring rotates ONCE caching the N2 visiting
-# FL blocks (χ²D²/N1 per rank — the AD capture, far smaller than H); the local
-# l range is then processed in `forloop_iter` chunks, each running stage1 →
+# Returns (result_blk, FL_row): the FL iterate is row-gathered once into a
+# local-a/full-i working slice (χ²D²/N1 per rank); the local l range is then
+# processed in `forloop_iter` chunks, each running stage1 →
 # fold → stage2 fully locally with transients bounded by (2+d)·|H|/forloop_iter.
 function _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::CannonGrid; forloop_iter = 1)
     N1, N2, r1, r2 = grid.N1, grid.N2, grid.r1, grid.r2
@@ -512,18 +467,7 @@ function _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::CannonGr
     @assert size(FL_blk, 1) == length(a_rs[r1 + 1]) && size(FL_blk, 4) == nl == length(i_rs[r2 + 1]) "cannon forward: FL block shape $(size(FL_blk)) inconsistent with grid ($(N1)×$(N2)) and χ=$χ"
     @assert forloop_iter ≥ 1 "FLmap_cannon: forloop_iter must be ≥ 1"
 
-    # Ring: rotate once, cache the visiting FL blocks by their i-block index.
-    blocks = Vector{typeof(FL_blk)}(undef, N2)
-    cur = FL_blk
-    for k in 0:N2-1
-        t = mod(r2 + k, N2)
-        blocks[t + 1] = cur
-        if k < N2 - 1
-            t_next = mod(r2 + k + 1, N2)
-            cur = _cannon_row_shift(cur, grid,
-                (length(a_rs[r1 + 1]), size(FL_blk, 2), size(FL_blk, 3), length(i_rs[t_next + 1])))
-        end
-    end
+    FL_row = cannon_gather_row(FL_blk, grid, i_rs)
 
     # Local pipeline per l-chunk: stage 1 accumulate → fold once → stage 2.
     # Chunk ranges are LOCAL (within the l block): ALd_col's last leg is the
@@ -532,15 +476,8 @@ function _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::CannonGr
     partial = similar(FL_blk, χ, Dg, Dh, nl)
     l_chunks = split_ranges(nl, min(forloop_iter, nl))
     for ch in l_chunks
-        local Hc
-        for t in 0:N2-1
-            ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
-            if t == 0
-                Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
-            else
-                _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
-            end
-        end
+        ALd_chunk = view(ALd_col, :, :, :, ch)
+        Hc = _cannon_stage1(FL_row, ALd_chunk)
         Gc = _cannon_fold(Hc, M1, M2)
         _free!(Hc)
         Pc = _cannon_stage2(Gc, ALu_row)
@@ -549,7 +486,7 @@ function _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::CannonGr
         _free!(Pc)
     end
     result = _cannon_col_reduce_scatter(partial, grid, a_rs)
-    return result, blocks
+    return result, FL_row
 end
 
 # Replicated-AL path: build the per-rank slices as views (no copies) and run
@@ -646,8 +583,8 @@ cannon_gather_col(blk, grid::CannonGrid, a_rs) = _cannon_col_allgather(blk, grid
 
 Hoisted FLmap: the FIXED boundary slices `ALu_row` (local-a, FULL-d) and `ALd_col`
 (FULL-i, local-l) are supplied PRE-GATHERED (gathered once, outside the power
-iteration, by `cannon_gather_row`/`cannon_gather_col`). The iterate `FL_blk` is the
-ring-carried block (never gathered — the clean FLmap case). This is the per-power-step
+iteration, by `cannon_gather_row`/`cannon_gather_col`). The iterate `FL_blk` is
+row-gathered once per map call, matching the NCCL-capable gather wrappers. This is the per-power-step
 map of `leftenv_cannon`; its rrule (autodiff/rules.jl) is the `FLmap_cannon_dist` rrule
 MINUS the input gathers (now args) MINUS the type-B fixed-operand reduce-scatters (now
 in the gather wrappers' rrules), returning the SLICE gradients `dALu_row`/`dALd_col`.

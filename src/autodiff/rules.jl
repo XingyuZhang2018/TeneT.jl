@@ -622,7 +622,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
     M1_c  = do_cast ? _downcast_eltype(inner_etype, M1) : M1
     M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
 
-    result_c, blocks = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid; forloop_iter)
+    result_c, FL_row = _cannon_forward(FL_c, ALu_c, ALd_c, M1_c, M2_c, grid; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function cannon_back(dresult)
@@ -646,32 +646,22 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
         # 1. Adjoint of the column reduce-scatter: allgather dresult blocks.
         dpartial = _cannon_col_allgather(d_c, grid, a_rs)
 
-        # 2-3. Per l-chunk, fully local: recompute H_chunk from the cached
-        #      blocks, recompute the fold chain with owned intermediates, then
+        # 2-3. Per l-chunk, fully local: contract the gathered full-i FL row
+        #      slice once, recompute the fold chain with owned intermediates, then
         #      walk the fully hand-written adjoint chain (stage2 → fold2 →
-        #      fold1 → stage1) accumulating per-destination dFL contributions
+        #      fold1 → stage1) accumulating full-i dFL contributions
         #      and the dALu/dALd/dM slices.
         ALu_slice = view(ALu_c, a_rs[r1 + 1], :, :, :)
         dALu = zero(ALu_c)
         dALd = zero(ALd_c)
         dM1 = zero(M1_c)
         dM2 = zero(M2_c)
-        dFL_contribs = Vector{typeof(FL_c)}(undef, N2)
-        for t in 0:N2-1
-            dFL_contribs[t + 1] = zero(blocks[t + 1])
-        end
+        dFL_row = zero(FL_row)
         l_chunks = split_ranges(length(l_rng), min(forloop_iter, length(l_rng)))
         for ch in l_chunks
             l_glob = l_rng[ch]
-            local Hc
-            for t in 0:N2-1
-                ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_glob)
-                if t == 0
-                    Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
-                else
-                    _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
-                end
-            end
+            ALd_chunk = view(ALd_c, :, :, :, l_glob)
+            Hc = _cannon_stage1(FL_row, ALd_chunk)
             # Recompute the fold chain with owned intermediates, then walk the
             # hand adjoints in the order that minimizes the live set; every
             # array is freed right after its last use (Zygote-free: tapes and
@@ -694,21 +684,19 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon), FL_blk, ALu, ALd, M, grid:
             _free!(tmp)
             dHc = _cannon_fold1_dH(dTc, M1_c)
             _free!(dTc)
-            for t in 0:N2-1
-                ALd_slice = view(ALd_c, i_rs[t + 1], :, :, l_glob)
-                tmp = _cannon_stage1_dFL(dHc, ALd_slice)
-                dFL_contribs[t + 1] .+= tmp
-                _free!(tmp)
-                tmp = _cannon_stage1_dALd(dHc, blocks[t + 1])
-                view(dALd, i_rs[t + 1], :, :, l_glob) .+= tmp
-                _free!(tmp)
-            end
+            tmp = _cannon_stage1_dFL(dHc, ALd_chunk)
+            dFL_row .+= tmp
+            _free!(tmp)
+            tmp = _cannon_stage1_dALd(dHc, FL_row)
+            view(dALd, :, :, :, l_glob) .+= tmp
+            _free!(tmp)
             _free!(dHc); _free!(Hc)
         end
 
-        # 4. Row reduce-scatter delivers summed dFL block t to rank (r1, t);
-        #    dFL stays distributed, matching the input convention.
-        dFL = _cannon_row_reduce_scatter(dFL_contribs, grid)
+        # 4. Adjoint of the FL row allgather: sum row-slice cotangents and keep
+        #    this rank's last-leg block.
+        dFL = _cannon_row_reduce_scatter_last(dFL_row, grid, i_rs)
+        _free!(dFL_row)
 
         # 5. Replicated-input gradients: per-rank slices summed/stitched by a
         #    single allreduce each (picks up the NCCL fast path when enabled).
@@ -751,12 +739,12 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_dist), FL_blk, ALu_blk, ALd_
     l_rs = split_ranges(χ, grid.N2)
     ALu_row = _cannon_row_allgather(ALu_c, grid, l_rs)
     ALd_col = _cannon_col_allgather(ALd_c, grid, a_rs)
-    result_c, blocks = _cannon_forward_sliced(FL_c, ALu_row, ALd_col, M1_c, M2_c, grid; forloop_iter)
+    result_c, FL_row = _cannon_forward_sliced(FL_c, ALu_row, ALd_col, M1_c, M2_c, grid; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function cannon_dist_back(dresult)
         N2 = grid.N2
-        i_rs = l_rs                  # ring i-blocks == last-leg l-blocks (χ over N2)
+        i_rs = l_rs                  # FL-row last-leg blocks (χ over N2)
         nl = size(ALd_col, 4)        # local l extent
 
         d_c = unthunk(dresult)
@@ -774,28 +762,18 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_dist), FL_blk, ALu_blk, ALd_
         dpartial = _cannon_col_allgather(d_c, grid, a_rs)
 
         # 2-3. Per l-chunk, fully local: same Zygote-free hand-adjoint chain as
-        #      the replicated rrule, but the AL gradients accumulate on the
-        #      captured SLICES (chunk ranges are local — ALd_col's last leg is
-        #      the local block).
+        #      the replicated rrule, but stage1 is one full-i contraction and
+        #      the AL gradients accumulate on the captured SLICES (chunk ranges
+        #      are local — ALd_col's last leg is the local block).
         dALu_row = zero(ALu_row)
         dALd_col = zero(ALd_col)
         dM1 = zero(M1_c)
         dM2 = zero(M2_c)
-        dFL_contribs = Vector{typeof(FL_c)}(undef, N2)
-        for t in 0:N2-1
-            dFL_contribs[t + 1] = zero(blocks[t + 1])
-        end
+        dFL_row = zero(FL_row)
         l_chunks = split_ranges(nl, min(forloop_iter, nl))
         for ch in l_chunks
-            local Hc
-            for t in 0:N2-1
-                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
-                if t == 0
-                    Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
-                else
-                    _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
-                end
-            end
+            ALd_chunk = view(ALd_col, :, :, :, ch)
+            Hc = _cannon_stage1(FL_row, ALd_chunk)
             Tc = _cannon_fold1(Hc, M1_c)
             Gc = _cannon_fold2(Tc, M2_c)
             dPc = dpartial[:, :, :, ch]
@@ -813,20 +791,18 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_dist), FL_blk, ALu_blk, ALd_
             _free!(tmp)
             dHc = _cannon_fold1_dH(dTc, M1_c)
             _free!(dTc)
-            for t in 0:N2-1
-                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
-                tmp = _cannon_stage1_dFL(dHc, ALd_slice)
-                dFL_contribs[t + 1] .+= tmp
-                _free!(tmp)
-                tmp = _cannon_stage1_dALd(dHc, blocks[t + 1])
-                view(dALd_col, i_rs[t + 1], :, :, ch) .+= tmp
-                _free!(tmp)
-            end
+            tmp = _cannon_stage1_dFL(dHc, ALd_chunk)
+            dFL_row .+= tmp
+            _free!(tmp)
+            tmp = _cannon_stage1_dALd(dHc, FL_row)
+            view(dALd_col, :, :, :, ch) .+= tmp
+            _free!(tmp)
             _free!(dHc); _free!(Hc)
         end
 
-        # 4. Row reduce-scatter delivers summed dFL block t to rank (r1, t).
-        dFL = _cannon_row_reduce_scatter(dFL_contribs, grid)
+        # 4. Adjoint of the FL row allgather.
+        dFL = _cannon_row_reduce_scatter_last(dFL_row, grid, l_rs)
+        _free!(dFL_row)
 
         # 5. AL gradients back to blocks: slice-level reduce-scatters (adjoints
         #    of the forward gathers); dM1/dM2 stay replicated allreduces.
@@ -855,20 +831,19 @@ end
 #       rrule returns the SLICE grads dALu_row/dALd_col directly.
 # EVERYTHING else is byte-identical to the dist rrule: the type-A output-adjoint
 # allgather of dresult (per-iterate, stays), the per-l-chunk hand-adjoint chain,
-# the iterate dFL row reduce-scatter (FL is the ring-carried iterate, never
-# gathered → its reduce-scatter stays), the dM allreduce, eager _free!, densify
+# the iterate FL row allgather + reduce-scatter adjoint, the dM allreduce, eager _free!, densify
 # guard. No inner_etype (mixed precision is M5). Same rank-uniform control flow.
 function ChainRulesCore.rrule(::typeof(FLmap_cannon_sliced), FL_blk, ALu_row, ALd_col, M, grid::CannonGrid;
                               forloop_iter = 1)
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
-    result, blocks = _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
+    result, FL_row = _cannon_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid; forloop_iter)
 
     function flmap_cannon_sliced_back(dresult)
         N2 = grid.N2
         χ = size(ALu_row, 4)             # full d leg of the row slice
         a_rs = split_ranges(χ, grid.N1)
-        i_rs = split_ranges(χ, grid.N2)  # ring i-blocks == last-leg l-blocks (χ over N2)
+        i_rs = split_ranges(χ, grid.N2)  # FL-row last-leg blocks (χ over N2)
         nl = size(ALd_col, 4)            # local l extent
 
         d_c = unthunk(dresult)
@@ -883,27 +858,18 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_sliced), FL_blk, ALu_row, AL
         # 1. Adjoint of the output column reduce-scatter (type-A, per-iterate).
         dpartial = _cannon_col_allgather(d_c, grid, a_rs)
 
-        # 2-3. Per l-chunk, fully local Zygote-free hand-adjoint chain; the FIXED
-        #      AL gradients accumulate on the captured SLICES (returned as-is).
+        # 2-3. Per l-chunk, fully local Zygote-free hand-adjoint chain; stage1 is
+        #      one full-i contraction and the FIXED AL gradients accumulate on the
+        #      captured SLICES (returned as-is).
         dALu_row = zero(ALu_row)
         dALd_col = zero(ALd_col)
         dM1 = zero(M1)
         dM2 = zero(M2)
-        dFL_contribs = Vector{typeof(FL_blk)}(undef, N2)
-        for t in 0:N2-1
-            dFL_contribs[t + 1] = zero(blocks[t + 1])
-        end
+        dFL_row = zero(FL_row)
         l_chunks = split_ranges(nl, min(forloop_iter, nl))
         for ch in l_chunks
-            local Hc
-            for t in 0:N2-1
-                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
-                if t == 0
-                    Hc = _cannon_stage1(blocks[t + 1], ALd_slice)
-                else
-                    _cannon_stage1_add!(Hc, blocks[t + 1], ALd_slice)
-                end
-            end
+            ALd_chunk = view(ALd_col, :, :, :, ch)
+            Hc = _cannon_stage1(FL_row, ALd_chunk)
             Tc = _cannon_fold1(Hc, M1)
             Gc = _cannon_fold2(Tc, M2)
             dPc = dpartial[:, :, :, ch]
@@ -921,22 +887,19 @@ function ChainRulesCore.rrule(::typeof(FLmap_cannon_sliced), FL_blk, ALu_row, AL
             _free!(tmp)
             dHc = _cannon_fold1_dH(dTc, M1)
             _free!(dTc)
-            for t in 0:N2-1
-                ALd_slice = view(ALd_col, i_rs[t + 1], :, :, ch)
-                tmp = _cannon_stage1_dFL(dHc, ALd_slice)
-                dFL_contribs[t + 1] .+= tmp
-                _free!(tmp)
-                tmp = _cannon_stage1_dALd(dHc, blocks[t + 1])
-                view(dALd_col, i_rs[t + 1], :, :, ch) .+= tmp
-                _free!(tmp)
-            end
+            tmp = _cannon_stage1_dFL(dHc, ALd_chunk)
+            dFL_row .+= tmp
+            _free!(tmp)
+            tmp = _cannon_stage1_dALd(dHc, FL_row)
+            view(dALd_col, :, :, :, ch) .+= tmp
+            _free!(tmp)
             _free!(dHc); _free!(Hc)
         end
         _free!(dpartial)   # full-i × local-l cotangent, only sliced (getindex) above
 
-        # 4. Iterate gradient: dFL stays distributed (row reduce-scatter of the
-        #    per-destination ring contributions — UNCHANGED; FL is the iterate).
-        dFL = _cannon_row_reduce_scatter(dFL_contribs, grid)
+        # 4. Iterate gradient: adjoint of the FL row allgather.
+        dFL = _cannon_row_reduce_scatter_last(dFL_row, grid, i_rs)
+        _free!(dFL_row)
 
         # 5. M grads replicated (M not hoisted). NO type-B AL reduce-scatters here
         #    — dALu_row/dALd_col are returned as SLICE grads (the gather wrappers
