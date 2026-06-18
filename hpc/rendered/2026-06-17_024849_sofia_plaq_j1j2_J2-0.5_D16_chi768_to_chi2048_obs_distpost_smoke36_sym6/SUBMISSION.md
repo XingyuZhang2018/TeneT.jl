@@ -1,7 +1,7 @@
-# Submission: Sofia Plaquette J1J2 Cannon distributed-post observable smoke, chi2048 obs, 36 ranks, symmetric 6x6
+# Submission: Sofia Plaquette J1J2 Slice2D distributed-post observable smoke, chi2048 obs, 36 ranks, symmetric 6x6
 
 - Cluster: Sofia
-- Purpose: Smoke-test the distributed energy/magnetization observable path at chi_obs=2048 on a 6x6 Cannon grid with a symmetric 6 nodes x 6 ranks/node layout, compare against the 16-rank smoke, and avoid writing into the formal data root. Correlation length is intentionally skipped.
+- Purpose: Smoke-test the distributed energy/magnetization observable path at chi_obs=2048 on a 6x6 Slice2D grid with a symmetric 6 nodes x 6 ranks/node layout, compare against the 16-rank smoke, and avoid writing into the formal data root. Correlation length is intentionally skipped.
 - Local code commit: working tree based on `1ce736a` plus local TSQR and distributed mag/xi changes.
 - Remote code dir: `/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT_codex_2a4a_20260616_225907_tsqr`
 - Remote workdir: `/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT_codex_2a4a_20260616_225907_tsqr/project/2026-06-17_024849_sofia_plaq_j1j2_J2-0.5_D16_chi768_to_chi2048_obs_distpost_smoke36_sym6`
@@ -14,7 +14,7 @@
 - D: 16
 - Load iPEPS: chi 768, No.10, seed 42
 - Obs chi: 2048
-- GPUs: 36 launched ranks, 6 allocated nodes, 6 ranks/node, 6x6 Cannon grid
+- GPUs: 36 launched ranks, 6 allocated nodes, 6 ranks/node, 6x6 Slice2D grid
 - VUMPS maxiter: 1
 - VUMPS maxiter_ad: 0
 - show_every: 1

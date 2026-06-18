@@ -1,7 +1,7 @@
-# Submission: Sofia Plaquette J1J2 Cannon TSQR obs smoke
+# Submission: Sofia Plaquette J1J2 Slice2D TSQR obs smoke
 
 - Cluster: Sofia
-- Purpose: Smoke-test the forward-only distributed QR/TSQR seam for Plaquette Cannon observable evaluation at chi_obs=2048.
+- Purpose: Smoke-test the forward-only distributed QR/TSQR seam for Plaquette Slice2D observable evaluation at chi_obs=2048.
 - Local code commit: working tree based on `1ce736a` plus local TSQR seam changes.
 - Remote code dir: `/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT_codex_2a4a_20260616_225907_tsqr`
 - Remote workdir: `/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT_codex_2a4a_20260616_225907_tsqr/project/2026-06-16_225907_sofia_plaq_j1j2_J2-0.5_D16_chi2048_obs_tsqr_smoke16`
@@ -14,7 +14,7 @@
 - D: 16
 - Load iPEPS: chi 512, No.50, seed 42
 - Obs chi: 2048
-- GPUs: 16 ranks, 2 nodes, 4x4 Cannon grid
+- GPUs: 16 ranks, 2 nodes, 4x4 Slice2D grid
 - VUMPS maxiter: 2 smoke
 - show_every: 1
 - power_iter: 5

@@ -16,7 +16,7 @@
 - Load iPEPS: chi 768, No.20, seed 42
 - Explicit remaining case order: `(0.52,768)`, `(0.52,1024)`, `(0.5,2048)`, `(0.52,2048)`
 - Correlation length: computed only for chi 768 (`XI_CHIS=768`); chi1024 and chi2048 use `cor_len_method=:none`
-- GPUs: 64 launched ranks, 8 allocated nodes, 8 ranks/node, 8x8 Cannon grid
+- GPUs: 64 launched ranks, 8 allocated nodes, 8 ranks/node, 8x8 Slice2D grid
 - VUMPS maxiter: 20
 - VUMPS maxiter_ad: 0
 - show_every: 1

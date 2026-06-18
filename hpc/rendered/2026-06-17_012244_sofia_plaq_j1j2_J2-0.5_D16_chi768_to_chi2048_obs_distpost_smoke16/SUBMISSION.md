@@ -1,4 +1,4 @@
-# Submission: Sofia Plaquette J1J2 Cannon distributed-post observable smoke, chi768 source
+# Submission: Sofia Plaquette J1J2 Slice2D distributed-post observable smoke, chi768 source
 
 - Cluster: Sofia
 - Purpose: Smoke-test the distributed mag/xi post-observable path at chi_obs=2048 without gathering the full Plaquette environment and without writing into the formal data root.
@@ -14,7 +14,7 @@
 - D: 16
 - Load iPEPS: chi 768, No.10, seed 42
 - Obs chi: 2048
-- GPUs: 16 ranks, 2 nodes, 4x4 Cannon grid
+- GPUs: 16 ranks, 2 nodes, 4x4 Slice2D grid
 - VUMPS maxiter: 1
 - VUMPS maxiter_ad: 0
 - show_every: 1

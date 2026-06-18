@@ -1,4 +1,4 @@
-# Submission: Sofia Plaquette J1J2 Cannon TSQR obs full
+# Submission: Sofia Plaquette J1J2 Slice2D TSQR obs full
 
 - Cluster: Sofia
 - Purpose: Full Plaquette J1J2 Square observable calculation at chi_obs=2048 using the forward-only distributed QR/TSQR seam.
@@ -14,7 +14,7 @@
 - D: 16
 - Load iPEPS: chi 512, No.50, seed 42
 - Obs chi: 2048
-- GPUs: 16 ranks, 2 nodes, 4x4 Cannon grid
+- GPUs: 16 ranks, 2 nodes, 4x4 Slice2D grid
 - VUMPS maxiter: 30
 - VUMPS maxiter_ad: 0
 - show_every: 1

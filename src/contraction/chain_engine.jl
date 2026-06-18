@@ -103,9 +103,9 @@ function chain_interlabels(ch::Chain{N}) where {N}
 end
 
 # FLmap leg5 (tuple-M), operand order (FL, ALd, M1, M2, ALu) — the current
-# left-assoc order of the serial kernel and the cannon stage pipeline.
-# Intermediates pinned to the proven hand-kernel layouts (_cannon_stage1 H,
-# _cannon_fold1 T, _cannon_fold2 G): the derived left-assoc layouts give
+# left-assoc order of the serial kernel and the slice2d stage pipeline.
+# Intermediates pinned to the proven hand-kernel layouts (_slice2d_stage1 H,
+# _slice2d_fold1 T, _slice2d_fold2 G): the derived left-assoc layouts give
 # cuTENSOR different permutation problems, costing 5-9% at production cells.
 const FLMAP_LEG5_CHAIN = Chain(
     ((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)),
@@ -178,7 +178,7 @@ end
 
 Accumulate the chain's first link into a caller buffer: `H += A ⋆ B` with the
 labels of `ch.ops[1]`/`ch.ops[2]` (α=1, β=1 in the mutating `tensorcontract!`).
-Building block for the cannon ring, mirroring `_cannon_stage1_add!`.
+Building block for the slice2d ring, mirroring `_slice2d_stage1_add!`.
 """
 function chain_link1_add!(H, ch::Chain, A, B)
     IH = _inter_labels(ch, ch.ops[1], 2)
@@ -199,7 +199,7 @@ cB = conjs[2]
 
 (for cA = cB = false: `dA = dH ⋆ conj(B)`, `dB = conj(A) ⋆ dH`, matching the
 hand kernels). Allocates both gradients; never frees its inputs. Counterpart
-of `chain_link1_add!` for the cannon ring's per-(chunk, block) dFL/dALd
+of `chain_link1_add!` for the slice2d ring's per-(chunk, block) dFL/dALd
 contributions.
 """
 function chain_link1_back(ch::Chain, dH, A, B)
@@ -215,7 +215,7 @@ end
 
 Recompute-style backward: rebuilds the intermediates I_1..I_{N-2} (the final
 output I_{N-1} is NOT an adjoint operand and is not recomputed at all — same
-as the cannon rrule, which recomputes H/T/G but never P), then walks the
+as the slice2d rrule, which recomputes H/T/G but never P), then walks the
 reversed chain with the generic pairwise adjoints of C = A° ⋆ B° (X° =
 conj-flagged X), in tensorcontract flag form with cA = (k == 2 ? conjs[1] :
 false), cB = conjs[k]:

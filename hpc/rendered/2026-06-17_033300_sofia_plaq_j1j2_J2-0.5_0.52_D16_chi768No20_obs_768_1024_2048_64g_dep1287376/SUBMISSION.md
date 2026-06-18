@@ -16,7 +16,7 @@
 - Load iPEPS: chi 768, No.20, seed 42
 - Obs chi list: 768, 1024, 2048
 - Correlation length: computed only for chi 768 (`XI_CHIS=768`)
-- GPUs: 64 launched ranks, 8 allocated nodes, 8 ranks/node, 8x8 Cannon grid
+- GPUs: 64 launched ranks, 8 allocated nodes, 8 ranks/node, 8x8 Slice2D grid
 - VUMPS maxiter: 20
 - VUMPS maxiter_ad: 0
 - show_every: 1

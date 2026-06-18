@@ -14,32 +14,32 @@ sequence as index-label tuples; the executor calls TensorOperations' runtime
 A, IA, conjA, B, IB, conjB)`) so cuTENSOR sees the same contractions as
 `@tensor`; every intermediate is owned and `TeneT._free!`d after its last
 consumer. The backward recomputes intermediates and walks generic link
-adjoints (`dA = dC·conj(B)`, `dB = conj(A)·dC`) in the cannon-v3-proven
+adjoints (`dA = dC·conj(B)`, `dB = conj(A)·dC`) in the slice2d-v3-proven
 ordering. M1 scope cuts: no per-op conj flags (tuple-M only; single-M stays a
 map-level concern), no production rerouting (hand kernels stay; switch-over is
 M2 after the perf gate).
 
 **Tech Stack:** Julia, TensorOperations 5.5.1 runtime API, CUDA.jl
-(`unsafe_free!` via existing `TeneT._free!`), existing cannon kernels as the
+(`unsafe_free!` via existing `TeneT._free!`), existing slice2d kernels as the
 parity reference. Branch: `claude/sad-saha-3ec6bf`.
 
 **Context for implementers:** Hand-kernel reference in
-`src/contraction/cannon_2d.jl`: `_cannon_stage1` (H=FL·ALd), `_cannon_fold1`
-(T=H·M1), `_cannon_fold2` (G=T·M2), `_cannon_stage2` (P=G·ALu),
-`_cannon_stage1_add!`, and 8 adjoints `_cannon_stage1_dFL/_dALd`,
-`_cannon_fold1_dH/_dM1`, `_cannon_fold2_dT/_dM2`, `_cannon_stage2_dG/_dALu`.
+`src/contraction/slice2d.jl`: `_slice2d_stage1` (H=FL·ALd), `_slice2d_fold1`
+(T=H·M1), `_slice2d_fold2` (G=T·M2), `_slice2d_stage2` (P=G·ALu),
+`_slice2d_stage1_add!`, and 8 adjoints `_slice2d_stage1_dFL/_dALd`,
+`_slice2d_fold1_dH/_dM1`, `_slice2d_fold2_dT/_dM2`, `_slice2d_stage2_dG/_dALu`.
 Serial reference `FLmap(FL, ALu, ALd, M1, M2)` in `src/contraction/basic.jl:68`.
 Tests for the engine are LOCAL (no MPI): plain
 `julia --project=. test/test_chain_engine.jl`. Use the Bash tool for julia
 commands (PowerShell mangles quotes). New testfile is standalone (not wired
-into runtests.jl), mirroring the test_cannon.jl convention.
+into runtests.jl), mirroring the test_slice2d.jl convention.
 
 ---
 
 ### Task 1: Chain type + label analysis
 
 **Files:** Create `src/contraction/chain_engine.jl`; modify `src/TeneT.jl`
-(include after `contraction/cannon_2d.jl`); create `test/test_chain_engine.jl`.
+(include after `contraction/slice2d.jl`); create `test/test_chain_engine.jl`.
 
 Test first:
 
@@ -97,7 +97,7 @@ function chain_interlabels(ch::Chain{N}) where {N}
 end
 
 # FLmap leg5 (tuple-M), operand order (FL, ALd, M1, M2, ALu) — the current
-# left-assoc order of the serial kernel and the cannon stage pipeline.
+# left-assoc order of the serial kernel and the slice2d stage pipeline.
 const FLMAP_LEG5_CHAIN = Chain(
     ((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)),
     (:d,:g,:h,:l))
@@ -105,7 +105,7 @@ const FLMAP_LEG5_CHAIN = Chain(
 
 NOTE for the implementer: verify `_link_labels`'s derived orders against the
 HAND KERNEL index orders (H[a,e,f,j,k,l] ✓, G mismatch alert: the hand
-`_cannon_fold2` emits G[a,b,c,g,h,l] but left-assoc concat gives
+`_slice2d_fold2` emits G[a,b,c,g,h,l] but left-assoc concat gives
 (:a,:l,:g,:b,:h,:c)) — that is EXPECTED and fine: the engine's intermediate
 layouts may differ from the hand kernels'; only the FINAL output (`out`) and
 the numerical values must match. The Task-2 parity test therefore compares
@@ -164,9 +164,9 @@ Commit: `feat: chain forward executor with eager frees`
 ### Task 3: accumulating first link (ring building block)
 
 Test: zero-init + two i-block adds == full first link, mirroring the
-`_cannon_stage1_add!` testset (reuse the same slicing pattern with the chain:
+`_slice2d_stage1_add!` testset (reuse the same slicing pattern with the chain:
 `chain_link1_add!(H, FLMAP_LEG5_CHAIN, FL[:, :, :, 1:6], ALd[1:6, :, :, :])`
-twice over complementary i-ranges ≈ `TeneT._cannon_stage1(FL, ALd)` rtol
+twice over complementary i-ranges ≈ `TeneT._slice2d_stage1(FL, ALd)` rtol
 1e-12 — note the engine's H layout equals the hand kernel's here:
 (:a,:e,:f,:j,:k,:l) ✓ direct comparison valid).
 
@@ -174,7 +174,7 @@ Implementation: probe `methods(TensorOperations.tensorcontract!)` and use the
 labels-or-Index2Tuple mutating form to add α=1, β=1 into a caller buffer:
 
 ```julia
-# H labels = _link_labels(ops[1], ops[2]); β=1 accumulation for the cannon ring.
+# H labels = _link_labels(ops[1], ops[2]); β=1 accumulation for the slice2d ring.
 function chain_link1_add!(H, ch::Chain, A, B)
     IH = _link_labels(ch.ops[1], ch.ops[2])
     # Index2Tuple form (verified in TensorOperations 5.5.1):
@@ -198,8 +198,8 @@ Commit: `feat: chain_link1_add! accumulating first link`
 
 Test (CPU): compare `chain_backward(FLMAP_LEG5_CHAIN, tensors, dOut)` against
 (a) Zygote pullback of `FLmap` w.r.t. all five operands (map operand order!),
-(b) the assembled hand-adjoint chain from cannon (`_cannon_stage2_dG` → … →
-`_cannon_stage1_dFL/_dALd`), both rtol 1e-10, complex tensors, including a
+(b) the assembled hand-adjoint chain from slice2d (`_slice2d_stage2_dG` → … →
+`_slice2d_stage1_dFL/_dALd`), both rtol 1e-10, complex tensors, including a
 non-trivial dOut (`rand(ComplexF64, size(out))`).
 
 Implementation (append):
@@ -253,7 +253,7 @@ body so the frees are unambiguous, e.g. compute both contractions, then
 
 Commit: `feat: generic chain backward (recompute + eager frees)`
 
-### Task 5: cannon-local-pipeline equivalence (chunked)
+### Task 5: slice2d-local-pipeline equivalence (chunked)
 
 Test: replicate the v3 local pipeline with the engine — for the 2×2-rank
 local workload (`FL_row[χ/2,D,D,χ]`, `ALd_col[χ,D,D,χ/2]`, `ALu_row`,
@@ -261,17 +261,17 @@ chunks n ∈ {1,3} over the local l range):
 
 - forward: per chunk `chain_link1_add!` over i-blocks + tail links == the
   hand staged pipeline output (use `staged`-style reference assembled from
-  cannon kernels), rtol 1e-12;
+  slice2d kernels), rtol 1e-12;
 - backward: chain_backward per chunk, gradients accumulated chunk-wise ==
   hand-adjoint chunk loop, rtol 1e-10.
 
 No new src code expected — this testset proves the engine API is sufficient
-for the M2 rerouting of `_cannon_forward_sliced` and the cannon rrule. If an
+for the M2 rerouting of `_slice2d_forward_sliced` and the slice2d rrule. If an
 API gap appears (e.g. backward needs to start from a PROVIDED H instead of
 recomputing link 1 per chunk), extend the engine minimally
 (`chain_backward(...; from1 = H)`) and note it in the report.
 
-Commit: `test: chain engine reproduces the cannon local pipeline`
+Commit: `test: chain engine reproduces the slice2d local pipeline`
 
 ### Task 6: perf gate on Sofia
 
@@ -282,7 +282,7 @@ Commit: `test: chain engine reproduces the cannon local pipeline`
 Driver: the kernel-A/B workload at cells (10,512), (12,1024), (16,1024) with
 the per-path n of Part 6 (nA formula); three paths × fwd/bwd, same timeit
 (per-rep GC outside window) and mem probe as Part 6:
-- HAND: the cannon staged/hand-adjoint functions (Part 6's path A — copy
+- HAND: the slice2d staged/hand-adjoint functions (Part 6's path A — copy
   those helper functions from `bench_kernel_ab_sofia.jl`)
 - CHAIN: `chain_apply`/`chain_link1_add!`-chunked forward and
   `chain_backward`-chunked backward (Task 5's pipeline)
@@ -307,4 +307,4 @@ Commit: `feat: chain-engine perf gate driver` then
 
 All five test groups green locally; Sofia gate recorded; no production code
 rerouted (hand kernels and all existing paths untouched and green —
-`julia --project=. test/run_test_cannon.jl` must still pass at the end).
+`julia --project=. test/run_test_slice2d.jl` must still pass at the end).

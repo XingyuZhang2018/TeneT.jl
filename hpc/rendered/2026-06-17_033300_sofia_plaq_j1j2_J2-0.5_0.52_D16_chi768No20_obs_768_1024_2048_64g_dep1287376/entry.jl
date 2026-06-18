@@ -6,14 +6,14 @@ using LinearAlgebra
 using OptimKit
 using Zygote
 using Printf
-using TeneT: cannon_grid
+using TeneT: slice2d_grid
 
 MPI.Init()
 const COMM = MPI.COMM_WORLD
 const RANK = MPI.Comm_rank(COMM)
 const NPROCS = MPI.Comm_size(COMM)
 const NGRID = isqrt(NPROCS)
-@assert NGRID * NGRID == NPROCS "Cannon needs a square process count; got nprocs=$NPROCS"
+@assert NGRID * NGRID == NPROCS "Slice2D needs a square process count; got nprocs=$NPROCS"
 
 say(msg) = (RANK == 0 && (println(msg); flush(stdout)))
 geti(k, default) = parse(Int, get(ENV, k, string(default)))
@@ -78,7 +78,7 @@ function make_boundary()
         tol=ENV_TOL,
         verbosity=(RANK == 0 ? 3 : 0),
     )
-    alg.grid = cannon_grid(NGRID, NGRID)
+    alg.grid = slice2d_grid(NGRID, NGRID)
     return alg
 end
 
@@ -138,7 +138,7 @@ function run_obs_case(A, params, j2, chi_obs)
 end
 
 function main()
-    say("=== Cannon Plaquette J1J2 Square No.20 batch obs ===")
+    say("=== Slice2D Plaquette J1J2 Square No.20 batch obs ===")
     say("nprocs=$NPROCS grid=$(NGRID)x$(NGRID) D=$D seed=$SEED")
     say("J2_LIST=$(J2_LIST) load chi=$CHI_LOAD No.$NO_LOAD obs chis=$(CHI_OBS_LIST) xi_chis=$(collect(XI_CHIS))")
     say("distributed_qr=$DISTRIBUTED_QR maxiter=$VUMPS_MAXITER maxiter_ad=0 miniter_ad=0")

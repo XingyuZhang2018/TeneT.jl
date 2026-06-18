@@ -45,7 +45,7 @@ function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
                    (size(AL[1, 1], 1) != size(C[1, 1], 1) ||
                     size(AL[1, 1], ndims(AL[1, 1])) != size(C[1, 1], 2))
     grid = is_block_env ? grid0 : nothing
-    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_cannon(AL, C, grid)
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
     atype = _arraytype(AC[1])
     S = model.S
     Sx = atype(const_Sx(S))

@@ -53,7 +53,7 @@ export SAVE_EVERY=${SAVE_EVERY:-1}; export SAVE_ENV=${SAVE_ENV:-false}; \
 export DISTRIBUTED_QR=${DISTRIBUTED_QR:-true}; \
 export STEP_CKPT=${STEP_CKPT:-recompute}; export BOND_CKPT=${BOND_CKPT:-recompute}"
 
-echo "=== Cannon Plaquette distributed_qr AD optimize D=${D:-16} J2=${J2:-0.5} chi${CHI_LOAD:-768} No.${NO_LOAD:-10} -> chi${CHI_OPT:-1024} ==="
+echo "=== Slice2D Plaquette distributed_qr AD optimize D=${D:-16} J2=${J2:-0.5} chi${CHI_LOAD:-768} No.${NO_LOAD:-10} -> chi${CHI_OPT:-1024} ==="
 echo "Project=$PROJECT"
 echo "Data root=$DATA_ROOT"
 echo "Driver=$DRIVER"

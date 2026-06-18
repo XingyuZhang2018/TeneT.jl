@@ -17,9 +17,9 @@ function oc_12(FLo, ACu, A1u, A1d, ACd, FRo, ARu, A2u, A2d, ARd; forloop_iter, i
         l = FLmap_parallel(l, ARu, ARd, (A2u, A2d); forloop_iter, ifparallel)
         return dot(conj(l), FRo)
     end
-    l = FLmap_cannon_dist(FLo, ACu, ACd, (A1u, A1d), grid; forloop_iter)
-    l = FLmap_cannon_dist(l, ARu, ARd, (A2u, A2d), grid; forloop_iter)
-    return cannon_dot(conj(l), FRo, grid)   # serial dot(conj(l),FRo)=Σl·FRo
+    l = FLmap_slice2d_dist(FLo, ACu, ACd, (A1u, A1d), grid; forloop_iter)
+    l = FLmap_slice2d_dist(l, ARu, ARd, (A2u, A2d), grid; forloop_iter)
+    return slice2d_dot(conj(l), FRo, grid)   # serial dot(conj(l),FRo)=Σl·FRo
 end
 
 function oc_21(ACu, FLu, A1u, A1d, FRu, FLo, A2u, A2d, FRo, ACd; forloop_iter, ifparallel, grid=nothing)
@@ -28,9 +28,9 @@ function oc_21(ACu, FLu, A1u, A1d, FRu, FLo, A2u, A2d, FRo, ACd; forloop_iter, i
         u = ACmap_parallel(u, FLo, FRo, (A2u, A2d); forloop_iter, ifparallel)
         return dot(conj(u), ACd)
     end
-    u = ACmap_cannon_dist(ACu, FLu, FRu, (A1u, A1d), grid; forloop_iter)
-    u = ACmap_cannon_dist(u, FLo, FRo, (A2u, A2d), grid; forloop_iter)
-    return cannon_dot(conj(u), ACd, grid)
+    u = ACmap_slice2d_dist(ACu, FLu, FRu, (A1u, A1d), grid; forloop_iter)
+    u = ACmap_slice2d_dist(u, FLo, FRo, (A2u, A2d), grid; forloop_iter)
+    return slice2d_dot(conj(u), ACd, grid)
 end
 
 # ============================================================================
@@ -77,8 +77,8 @@ function oc_11(FLo, ACu, Au, Ad, ACd, FRo; forloop_iter, ifparallel, grid=nothin
         l = FLmap_parallel(FLo, ACu, ACd, (Au, Ad); forloop_iter, ifparallel)
         return dot(conj(l), FRo)
     end
-    l = FLmap_cannon_dist(FLo, ACu, ACd, (Au, Ad), grid; forloop_iter)
-    return cannon_dot(conj(l), FRo, grid)
+    l = FLmap_slice2d_dist(FLo, ACu, ACd, (Au, Ad), grid; forloop_iter)
+    return slice2d_dot(conj(l), FRo, grid)
 end
 
 function contract_n_11(FLo, ACu, A, ACd, FRo; forloop_iter, ifparallel, grid=nothing)
@@ -118,10 +118,10 @@ function oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad
         Q = ACmap_parallel(ACu, FLu, Q, (Au11, Ad11); forloop_iter, ifparallel)
         return Q
     end
-    Q = FLmap_cannon_dist(FLo, Q, ACd, (Au21, Ad21), grid; forloop_iter)
-    Q = ACdmap_cannon_dist(ARd, Q, FRo, (Au22, Ad22), grid; forloop_iter)
-    Q = FRmap_cannon_dist(FRu, ARu, Q, (Au12, Ad12), grid; forloop_iter)
-    Q = ACmap_cannon_dist(ACu, FLu, Q, (Au11, Ad11), grid; forloop_iter)
+    Q = FLmap_slice2d_dist(FLo, Q, ACd, (Au21, Ad21), grid; forloop_iter)
+    Q = ACdmap_slice2d_dist(ARd, Q, FRo, (Au22, Ad22), grid; forloop_iter)
+    Q = FRmap_slice2d_dist(FRu, ARu, Q, (Au12, Ad12), grid; forloop_iter)
+    Q = ACmap_slice2d_dist(ACu, FLu, Q, (Au11, Ad11), grid; forloop_iter)
     return Q
 end
 
@@ -169,18 +169,18 @@ function oc_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, A
         QQ = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel)
         return dot(Q, QQ)
     end
-    # Cannon: oc_Q_22 distributed on blocks; the full-χ qrpos cannot run on a χ-block,
-    # so gather Q → serial qrpos (replicated) → scatter back — mirrors the ACCtoALAR_cannon
-    # seam pattern with single-tensor cannon_gather/cannon_scatter (Q is one tensor).
-    χf = Zygote.@ignore _cannon_full_chi(FLu, grid)   # dimension only (MPI.Allreduce) → no grad
-    Q = Zygote.@ignore _cannon_random_Q0(FLu, χf, D1, D2, grid)        # rank-consistent block
+    # Slice2D: oc_Q_22 distributed on blocks; the full-χ qrpos cannot run on a χ-block,
+    # so gather Q → serial qrpos (replicated) → scatter back — mirrors the ACCtoALAR_slice2d
+    # seam pattern with single-tensor slice2d_gather/slice2d_scatter (Q is one tensor).
+    χf = Zygote.@ignore _slice2d_full_chi(FLu, grid)   # dimension only (MPI.Allreduce) → no grad
+    Q = Zygote.@ignore _slice2d_random_Q0(FLu, χf, D1, D2, grid)        # rank-consistent block
     Q = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel, grid)
-    Qf = cannon_gather(Q, grid)
+    Qf = slice2d_gather(Q, grid)
     Qf, _ = qrpos(reshape(Qf, χf*D1*D2, χf))
     Qf = reshape(Qf, χf, D1, D2, χf)
-    Q = cannon_scatter(Qf, grid)
+    Q = slice2d_scatter(Qf, grid)
     QQ = oc_Q_22(Q, FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, Au11, Ad11, Au12, Ad12, Au21, Ad21, Au22, Ad22; forloop_iter, ifparallel, grid)
-    return cannon_dot(Q, QQ, grid)   # serial dot(Q,QQ)=Σconj(Q)·QQ → cannon_dot(Q,QQ)
+    return slice2d_dot(Q, QQ, grid)   # serial dot(Q,QQ)=Σconj(Q)·QQ → slice2d_dot(Q,QQ)
 end
 
 function contract_n_22(FLu, FLo, ACu, ACd, FRu, FRo, ARu, ARd, A11, A12, A21, A22; forloop_iter, ifparallel, grid=nothing)

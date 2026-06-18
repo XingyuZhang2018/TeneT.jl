@@ -60,7 +60,7 @@ include("patch/OptimKit_patch.jl")
 
 include("contraction/basic.jl")
 include("contraction/forloop_parallel_MPI.jl")
-include("contraction/cannon_2d.jl")
+include("contraction/slice2d.jl")
 include("contraction/chain_engine.jl")
 include("contraction/chain_maps.jl")
 include("contraction/observable.jl")
@@ -76,7 +76,7 @@ include("models/oneside_traits.jl")
 include("boundary_algorithm/vumps/general.jl")
 include("boundary_algorithm/vumps/plaquette.jl")
 include("boundary_algorithm/vumps/c4v.jl")
-include("boundary_algorithm/vumps/cannon.jl")   # M4: distributed env (gather hoisting)
+include("boundary_algorithm/vumps/slice2d.jl")   # M4: distributed env (gather hoisting)
 include("boundary_algorithm/qrctmrg.jl")
 
 # ============================================================================

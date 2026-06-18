@@ -41,8 +41,8 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     params.ifsave_env && save_rt(joinpath(params.folder, "D$(D)", "environment"), rt; file="χ$(χ).jld2")
     env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = energy_value(params.model, A, env, params)
-    # magnetization_value / cor_len_value are serial (not cannon-ized): on the distributed (block)
-    # obs env they'd run ALCtoAC on a χ-block → crash. For the cannon-Plaquette case gather the
+    # magnetization_value / cor_len_value are serial (not slice2d-ized): on the distributed (block)
+    # obs env they'd run ALCtoAC on a χ-block → crash. For the slice2d-Plaquette case gather the
     # block env to full just for them. energy_value above stays block-distributed (the expensive,
     # accuracy-critical part); mag/ξ are a cheap replicated post-measurement on the gathered env.
     env_obs = env
@@ -55,7 +55,7 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
         e = (e[1], e_perbond)  # replace aggregate e_dict with per-bond e_dict
     end
 
-    # Only the grid-root rank writes the obs log / plots. Under cannon the env gather + mag/ξ above
+    # Only the grid-root rank writes the obs log / plots. Under slice2d the env gather + mag/ξ above
     # run on ALL ranks (collective + replicated result), but all ranks racing the same obs-log file
     # hits the JLD2/IO write race that killed 1287372's checkpoint save. This gate is AFTER the
     # collective gather so control flow stays rank-uniform across every MPI collective.

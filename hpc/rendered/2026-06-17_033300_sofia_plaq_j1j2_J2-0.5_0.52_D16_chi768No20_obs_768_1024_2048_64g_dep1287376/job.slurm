@@ -51,7 +51,7 @@ export POWER_ITER=${POWER_ITER:-5}; export POWER_ITER_OBS=${POWER_ITER_OBS:-20};
 export ENV_TOL=${ENV_TOL:-1e-8}; export FORLOOP_ITER=${FORLOOP_ITER:-32}; \
 export SAVE_ENV=${SAVE_ENV:-false}; export DISTRIBUTED_QR=${DISTRIBUTED_QR:-true}"
 
-echo "=== Cannon Plaquette No.20 batch obs: D=${D:-16} J2_LIST=${J2_LIST:-0.5,0.52} chi_load=${CHI_LOAD:-768} No.${NO_LOAD:-20} obs=${CHI_OBS_LIST:-768,1024,2048} xi_chis=${XI_CHIS:-768} ==="
+echo "=== Slice2D Plaquette No.20 batch obs: D=${D:-16} J2_LIST=${J2_LIST:-0.5,0.52} chi_load=${CHI_LOAD:-768} No.${NO_LOAD:-20} obs=${CHI_OBS_LIST:-768,1024,2048} xi_chis=${XI_CHIS:-768} ==="
 echo "Project=$PROJECT"
 echo "Data root=$DATA_ROOT"
 echo "Output root=${OUTPUT_ROOT:-$DATA_ROOT}"

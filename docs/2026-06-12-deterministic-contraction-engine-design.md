@@ -1,13 +1,13 @@
-# Deterministic Contraction Engine + Full-VUMPS Cannon Roadmap — Design
+# Deterministic Contraction Engine + Full-VUMPS Slice2D Roadmap — Design
 
 **Date**: 2026-06-12
-**Status**: Direction approved by user ("cannon 实际落地本身也需要把所有的 map 都写好");
+**Status**: Direction approved by user ("slice2d 实际落地本身也需要把所有的 map 都写好");
 detailed design pending section approvals
 **Evidence base**: `benchmarks/Sofia_VUB_H200.md` Part 6 (job 1275909) — the
 staged + eager-free + hand-adjoint organization beats monolithic `@tensor` +
 `forloop` + Zygote on every cell: fwd 1.2–1.5×, bwd 1.5–1.8×, ~40–55% lower
 pool pressure, and the Zygote path needs ~2× the chunk count to fit at all.
-**Predecessors**: `docs/2026-06-10-cannon-flmap-design.md` (FLmap v1–v3),
+**Predecessors**: `docs/2026-06-10-slice2d-flmap-design.md` (FLmap v1–v3),
 `docs/2026-05-11-2d-distributed-vumps-runtime-design.md` (per-map dataflow
 analysis, partially superseded).
 
@@ -15,14 +15,14 @@ analysis, partially superseded).
 
 ## Why one effort, not two
 
-Landing Cannon in production (full VUMPS + iPEPS optimization) requires
+Landing Slice2D in production (full VUMPS + iPEPS optimization) requires
 distributed versions of every map `vumps_step` touches — FRmap, ACmap,
 ACdmap, Cmap — and each one's local compute wants exactly the staged
 organization FLmap v3 proved out. Meanwhile the A/B shows that organization
 wins on a single GPU too. So the deterministic contraction engine is the
 shared substrate: write the mechanism once, declare each map as data, get
 both the single-GPU win across all production paths and the local-compute
-layer of every cannon map.
+layer of every slice2d map.
 
 Hand-writing per-map kernels does not scale: 21 map methods
 (`src/contraction/basic.jl`) × ~3–5 pairwise stages × forward/accumulate/two
@@ -31,8 +31,8 @@ adjoints ≈ 200+ kernels. FLmap leg5 alone took 4 forward + 8 adjoint kernels.
 ## Layered architecture
 
 ```
-L4  leftenv/rightenv/ACenv/Cenv (cannon) → vumps_step → VUMPS → iPEPS ∂E/∂A
-L3  cannon distributed wrappers per map (grid comm + comm adjoints)
+L4  leftenv/rightenv/ACenv/Cenv (slice2d) → vumps_step → VUMPS → iPEPS ∂E/∂A
+L3  slice2d distributed wrappers per map (grid comm + comm adjoints)
 L2  forloop / parallel slicing (existing semantics, over chains)
 L1  contraction-chain engine (this design)
 ```
@@ -81,7 +81,7 @@ kernel call inside becomes a chain execution, and their rrules delegate the
 per-slice backward to the engine's generic adjoint walk instead of
 `Zygote.pullback(f, ...)`.
 
-### L3 — cannon wrappers per map
+### L3 — slice2d wrappers per map
 
 - **FRmap**: mirror of FLmap with directions flipped (ring along the row
   with FR blocks i↔l, a↔d swapped roles; column reduce-scatter on the first
@@ -101,8 +101,8 @@ per-slice backward to the engine's generic adjoint walk instead of
 
 ### L4 — VUMPS integration
 
-- `leftenv`/`rightenv` via distributed power iteration: `cannon_dot`/
-  `cannon_norm` + `simple_eig` hooks are DONE and parity-proven (FP-level
+- `leftenv`/`rightenv` via distributed power iteration: `slice2d_dot`/
+  `slice2d_norm` + `simple_eig` hooks are DONE and parity-proven (FP-level
   agreement with the serial eigenpair). Required before production: hoist
   the AL slice gathers out of the iteration loop (kill the per-call
   duplicate captures), persistent comm buffers (the `_comm_sendbuf`
@@ -110,7 +110,7 @@ per-slice backward to the engine's generic adjoint walk instead of
 - `ACenv`/`Cenv`, then `vumps_step` (ACCtoALAR via gather+QR per the
   2026-05-11 v1 approach), `init_VUMPSRuntime`, ObsEnv, and finally the
   iPEPS energy/gradient chain with the existing checkpoint machinery
-  (`Recompute()` segments compose with cannon and the segment boundaries
+  (`Recompute()` segments compose with slice2d and the segment boundaries
   become 1/P-sized blocks — cheaper than serial).
 
 ## Migration & testing
@@ -121,8 +121,8 @@ Map-by-map, parity-gated, old paths retained until verified:
 |-----------|-------------|------|
 | M1 | Engine + FLmap leg5 chain (port of proven kernels) | == hand kernels bitwise-ish; perf ≥ hand kernels; 4-rank suite green |
 | M2 | All FLmap/FRmap/ACmap/ACdmap/Cmap leg variants as chains; forloop/parallel rerouted | per-map parity vs @tensor 1e-12 fwd / 1e-10 grad; existing serial test suite green; **engine default ON.** Sofia Part-8 A/B (job 1285203): forward a clear win (0.63–0.83× time at scale, leaner mem at D10, parity f✓); the literal gate FAIL is harness-bound (backward `n` calibrated for rank-local not full-χ → OOM; in-process pool fragmentation at D≥12), not a proven engine regression; one real nit = Cmap bwd overhead (tiny map). Follow-ups: per-map-isolated re-run + Cmap-chain exemption. See benchmarks Part 8. |
-| M3 | cannon wrappers: Cmap, FRmap, ACmap, ACdmap; ACmap dataflow design + impl | distributed parity per map. **DONE (4-rank CPU MPI; Sofia GPU validation pending).** Design `docs/2026-06-13-acmap-cannon-dataflow-design.md` (3-lens reviewed): the cross-axis "diagonal-block trap" (FL.i, FR.l both on N2) is defeated by gathering the cross-axis FREE leg to full before the local chain, then fusing the output redistribution into an existing reduce-scatter → **NO new comm primitive**, **square grid N1=N2** (rectangular = v2). Plan `docs/2026-06-13-m3-cannon-wrappers-plan.md`: one uniform gather-class template ×4 — Cmap (replicated, take-my-block adjoint), FRmap (= ACdmap twin, gather-class NOT a ring — review caught the misclassification), ACmap (single l-chunk), ACdmap (2-level i/d chunk, χ²D⁴/(P·forloop_iter)). Local kernels = the M2 chain engine (chain_apply/chain_backward); only comm hand-written; no Zygote in any backward; eager `_free!`. Each map per-map parity 1e-12 fwd / 1e-10 grad in test/test_cannon_m3.jl (4-rank, incl. off-diagonal blocks + inner_etype fwd+grad + Db≠Dc dim guard); run_test_cannon.jl (FLmap) untouched + green. Each batch double-reviewed (spec+quality). Sofia 4-GPU memory+parity validation = Batch E (Part 9). |
-| M4 | leftenv/rightenv/ACenv/Cenv cannon; gather hoisting; buffer reuse | env-level eigenpair parity; zero-allocation steady-state iteration |
+| M3 | slice2d wrappers: Cmap, FRmap, ACmap, ACdmap; ACmap dataflow design + impl | distributed parity per map. **DONE (4-rank CPU MPI; Sofia GPU validation pending).** Design `docs/2026-06-13-acmap-slice2d-dataflow-design.md` (3-lens reviewed): the cross-axis "diagonal-block trap" (FL.i, FR.l both on N2) is defeated by gathering the cross-axis FREE leg to full before the local chain, then fusing the output redistribution into an existing reduce-scatter → **NO new comm primitive**, **square grid N1=N2** (rectangular = v2). Plan `docs/2026-06-13-m3-slice2d-wrappers-plan.md`: one uniform gather-class template ×4 — Cmap (replicated, take-my-block adjoint), FRmap (= ACdmap twin, gather-class NOT a ring — review caught the misclassification), ACmap (single l-chunk), ACdmap (2-level i/d chunk, χ²D⁴/(P·forloop_iter)). Local kernels = the M2 chain engine (chain_apply/chain_backward); only comm hand-written; no Zygote in any backward; eager `_free!`. Each map per-map parity 1e-12 fwd / 1e-10 grad in test/test_slice2d_m3.jl (4-rank, incl. off-diagonal blocks + inner_etype fwd+grad + Db≠Dc dim guard); run_test_slice2d.jl (FLmap) untouched + green. Each batch double-reviewed (spec+quality). Sofia 4-GPU memory+parity validation = Batch E (Part 9). |
+| M4 | leftenv/rightenv/ACenv/Cenv slice2d; gather hoisting; buffer reuse | env-level eigenpair parity; zero-allocation steady-state iteration |
 | M5 | vumps_step → full VUMPS distributed | fixed-point trajectory match vs serial |
 | M6 | iPEPS ∂E/∂A end-to-end | gradient parity 1e-8 (repo PR standard); Sofia production benchmark D=10+ χ≥512 |
 

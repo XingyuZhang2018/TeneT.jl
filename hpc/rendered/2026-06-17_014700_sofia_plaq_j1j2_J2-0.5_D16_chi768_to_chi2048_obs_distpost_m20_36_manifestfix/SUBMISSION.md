@@ -1,7 +1,7 @@
-# Submission: Sofia Plaquette J1J2 Cannon distributed-post observable maxiter20, chi2048 obs, 36 ranks
+# Submission: Sofia Plaquette J1J2 Slice2D distributed-post observable maxiter20, chi2048 obs, 36 ranks
 
 - Cluster: Sofia
-- Purpose: Full Plaquette J1J2 Square energy/magnetization observable calculation at chi_obs=2048 using 36 launched ranks on a 6x6 Cannon grid after the 36-rank smoke passes. Correlation length is intentionally skipped.
+- Purpose: Full Plaquette J1J2 Square energy/magnetization observable calculation at chi_obs=2048 using 36 launched ranks on a 6x6 Slice2D grid after the 36-rank smoke passes. Correlation length is intentionally skipped.
 - Local code commit: working tree based on `1ce736a` plus local TSQR and distributed mag/xi changes.
 - Remote code dir: `/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT_codex_2a4a_20260616_225907_tsqr`
 - Remote workdir: `/sofia/scratch/pilot/pilot_2026_0002/xz/TeneT_codex_2a4a_20260616_225907_tsqr/project/2026-06-17_014700_sofia_plaq_j1j2_J2-0.5_D16_chi768_to_chi2048_obs_distpost_m20_36_manifestfix`
@@ -14,7 +14,7 @@
 - D: 16
 - Load iPEPS: chi 768, No.10, seed 42
 - Obs chi: 2048
-- GPUs: 36 launched ranks, 5 allocated nodes, 6x6 Cannon grid
+- GPUs: 36 launched ranks, 5 allocated nodes, 6x6 Slice2D grid
 - VUMPS maxiter: 20
 - VUMPS maxiter_ad: 0
 - show_every: 1

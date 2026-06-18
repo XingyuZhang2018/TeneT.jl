@@ -40,7 +40,7 @@ read it first; every M2 engine change extends it). Map kernels:
 forloop_sum :488, parallel_sum :514, the seven `*_parallel` wrappers
 :543-680). AD rules: `src/autodiff/rules.jl` (rrule(forloop) :156,
 rrule(parallel) :241). Leg aliases: `src/utils/misc.jl:3-6`. Include order:
-`src/TeneT.jl` (basic :61, forloop :62, cannon :63, chain_engine :64 —
+`src/TeneT.jl` (basic :61, forloop :62, slice2d :63, chain_engine :64 —
 chain_maps.jl is inserted right after :64, before observable).
 
 **Run commands (Windows; ALWAYS use the Bash tool — PowerShell mangles
@@ -50,7 +50,7 @@ quotes):**
 cd "/d/1 - research/1.26 - iPEPS_opt/TeneT.jl/.claude/worktrees/ecstatic-golick-e3f6f0"
 julia --project=. test/test_chain_engine.jl     # M1 engine suite (standalone)
 julia --project=. test/test_chain_maps.jl       # NEW — M2 map-chain suite
-julia --project=. test/run_test_cannon.jl       # 4-rank MPI cannon suite
+julia --project=. test/run_test_slice2d.jl       # 4-rank MPI slice2d suite
 julia --project=. test/run_test_parallel_engine.jl  # NEW (Task 7) — 4-rank MPI
 julia --project=. test/runtests.jl              # full serial suite (Task 11)
 ```
@@ -100,7 +100,7 @@ research — do not delete it). Tests are CPU; `CUDA.functional()` is false here
    src/utils/gpu.jl:74).
 7. `pullback` in rules.jl is Zygote's. `_downcast_eltype` (basic.jl:14),
    `_boundary_cast` (forloop_parallel_MPI.jl:414), `_free!`
-   (cannon_2d.jl:71-72) already exist and are reused.
+   (slice2d.jl:71-72) already exist and are reused.
 8. **`Chain.out` is currently typed `NTuple{O, Symbol}`** (chain_engine.jl:19
    and the inner ctor :28) — the integer-label chains (FLmap_C3v, corner
    maps) CANNOT be constructed until Task 1 widens it. Task 1 owns this
@@ -124,7 +124,7 @@ research — do not delete it). Tests are CPU; `CUDA.functional()` is false here
 - **Engine never frees caller arrays**; every owned array freed after its last
   consumer; rrule closures capture inputs only (recompute-style backward).
 - Existing suites stay green after every task: `test_chain_engine.jl` +
-  `run_test_cannon.jl` (and from Task 7 on, `run_test_parallel_engine.jl`).
+  `run_test_slice2d.jl` (and from Task 7 on, `run_test_parallel_engine.jl`).
 
 ---
 
@@ -323,7 +323,7 @@ handles 2-leg tensors fine.)
   free-ordering EXACTLY as is (flags do not change ownership).
 
 **Step 4 — run, expect PASS, including all pre-existing testsets.** Also run
-`julia --project=. test/run_test_cannon.jl` (must stay green).
+`julia --project=. test/run_test_slice2d.jl` (must stay green).
 
 **Step 5 — commit:** `feat: per-op conj flags in the chain engine`
 
@@ -498,7 +498,7 @@ rrule in `src/autodiff/rules.jl` (near the forloop rrule):
 function ChainRulesCore.rrule(::typeof(chain_apply), ch::Chain{N}, tensors::NTuple{N, Any}) where {N}
     out = chain_apply(ch, tensors)
     # Recompute-style: the closure captures only caller-owned inputs; no
-    # intermediate ever outlives the call (the cannon/Part-6 OOM lesson).
+    # intermediate ever outlives the call (the slice2d/Part-6 OOM lesson).
     function chain_apply_pullback(dOut)
         return NoTangent(), NoTangent(), chain_backward(ch, tensors, unthunk(dOut))
     end
@@ -506,7 +506,7 @@ function ChainRulesCore.rrule(::typeof(chain_apply), ch::Chain{N}, tensors::NTup
 end
 ```
 
-**Step 5 — run both test files + cannon suite; expect PASS. Commit:**
+**Step 5 — run both test files + slice2d suite; expect PASS. Commit:**
 `feat: layout-pinning helper, engine toggle, chain_apply rrule (M2 scaffold)`
 
 ---
@@ -640,7 +640,7 @@ loaded. The Tuple{leg5,leg5} forwarder at basic.jl:100 needs no guard — it
 forwards to the pair method which has one.)
 
 **Step 4 — run all suites** (`test_chain_maps.jl`, `test_chain_engine.jl`,
-`run_test_cannon.jl`) — PASS. **Step 5 — commit:**
+`run_test_slice2d.jl`) — PASS. **Step 5 — commit:**
 `feat: FLmap family as chains (leg4/leg8/single-M) + engine_backward entry`
 
 ---
@@ -655,7 +655,7 @@ basic.jl:135/149/164 methods + single-M dispatch :179. Tests: the same
 4-case × {fwd, Zygote-on/off, engine_backward, inner_etype} block with FRmap
 geometry (`FR5 = rand(ComplexF64, χ,D,D,χ)` etc. — copy shapes from
 `test_contraction.jl:275-292`).
-**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_cannon.jl — PASS.
+**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_slice2d.jl — PASS.
 **Commit:** `feat: FRmap family as chains`
 
 ### Task 5: ACmap family (leg4, leg5 pair + 1M, leg8)
@@ -663,7 +663,7 @@ geometry (`FR5 = rand(ComplexF64, χ,D,D,χ)` etc. — copy shapes from
 Chains #8-10 (`tensors (AC, FR, M…, FL)`; map args `(AC, FL, FR, M)` ⇒ leg5
 grad permutation `(g[1], g[5], g[2], M-form)`). Guards on basic.jl:239/253/268
 + :283. Same test block, ACmap geometry.
-**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_cannon.jl — PASS.
+**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_slice2d.jl — PASS.
 **Commit:** `feat: ACmap family as chains`
 
 ### Task 6: ACdmap family (leg4, leg5 pair + 1M) + Cmap (leg3/leg4)
@@ -676,7 +676,7 @@ NO engine_backward entry (never goes through forloop/parallel — census), but
 DOES need the Zygote-on/off gradient parity test (it is differentiated
 directly in Cenv loops). ACdmap needs engine_backward (4-arg, leg4 + leg5
 forms; it has no leg8 method — do not invent one).
-**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_cannon.jl — PASS.
+**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_slice2d.jl — PASS.
 **Commit:** `feat: ACdmap family + Cmap as chains`
 
 ---
@@ -686,7 +686,7 @@ forms; it has no leg8 method — do not invent one).
 **Files:** modify `src/autodiff/rules.jl` (both rrules), extend
 `test/test_chain_maps.jl` (serial forloop reroute tests), create
 `test/test_parallel_engine.jl` + `test/run_test_parallel_engine.jl` (4-rank,
-clone the run_test_cannon.jl launcher pattern).
+clone the run_test_slice2d.jl launcher pattern).
 
 **Step 1 — failing serial tests** (append to test_chain_maps.jl):
 
@@ -770,14 +770,14 @@ never frees `dOut`; do not change the indexing in this task.
 branch); single-M + tuple-M; `Zygote.gradient` over
 `*_parallel(...; ifparallel=true, forloop_iter=2)` with toggle on vs toggle
 off; rank-0 asserts 1e-10 agreement of ALL gradients. Launcher
-`run_test_parallel_engine.jl` mirrors run_test_cannon.jl (`mpiexec -n 4`).
+`run_test_parallel_engine.jl` mirrors run_test_slice2d.jl (`mpiexec -n 4`).
 IMPORTANT: the launcher is launcher-only — the TEST file must clone
-test_cannon.jl's header (`MPI.Init()`, comm/rank consts, 4-rank assert; no
+test_slice2d.jl's header (`MPI.Init()`, comm/rank consts, 4-rank assert; no
 explicit Finalize — MPI.jl's atexit handles it), because `parallel()` touches
 `MPI.COMM_WORLD` immediately.
 
 **Step 4 — run:** test_chain_maps.jl, run_test_parallel_engine.jl,
-run_test_cannon.jl — PASS.
+run_test_slice2d.jl — PASS.
 **Step 5 — commit:** `feat: forloop/parallel rrules reroute to the chain engine`
 
 ---
@@ -838,7 +838,7 @@ engine_backward entries (forloop_sum/parallel_sum have no rrule — out of
 scope; record this in the commit message).
 
 **Step 4 — run** test_chain_maps.jl + test_chain_engine.jl +
-run_test_cannon.jl + run_test_parallel_engine.jl — PASS. **Step 5 — commit:**
+run_test_slice2d.jl + run_test_parallel_engine.jl — PASS. **Step 5 — commit:**
 `feat: Mmap/Mumap/Mdmap as chains (tree maps composed, rrule'd glue)`
 
 ---
@@ -854,7 +854,7 @@ guarded levels per map). Tests: fwd 1e-12 + Zygote-on/off grad 1e-10 for all
 `(χ,D,D,χ)`-style (basic.jl:363-366 index lists); only the OUTPUTS are 6-leg
 — read `oc_Q_22_getQ_CBE` observable.jl:108-136 for the concrete shapes; M is
 (D,D,D,D,d). These maps are near-dead in src — the tests ARE the spec.
-**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_cannon.jl +
+**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_slice2d.jl +
 run_test_parallel_engine.jl — PASS.
 **Commit:** `feat: corner maps LD/DR/RU/LU as chains`
 
@@ -875,7 +875,7 @@ validates 4-fold slot accumulation through the chain_apply rrule), and the
 qrctmrg.jl:70/93 (T is 4-leg `(χ,D,D,χ)` per qrctmrg.jl:23 — transcribe
 actual leg counts before writing tests). No engine_backward entry (not a
 forloop map).
-**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_cannon.jl +
+**Run** test_chain_maps.jl + test_chain_engine.jl + run_test_slice2d.jl +
 run_test_parallel_engine.jl — PASS.
 **Commit:** `feat: FLmap_C3v as a 7-operand chain`
 
@@ -888,7 +888,7 @@ run_test_parallel_engine.jl — PASS.
 2. Remove the `@test CHAIN_ENGINE[] == false` line in test_chain_maps.jl
    (assert `true` now).
 3. Run, in order, ALL of: `test_chain_engine.jl`, `test_chain_maps.jl`,
-   `run_test_cannon.jl`, `run_test_parallel_engine.jl`, and the FULL
+   `run_test_slice2d.jl`, `run_test_parallel_engine.jl`, and the FULL
    `test/runtests.jl` (CPU; the Float32/inner_etype and *_parallel testsets in
    test_contraction.jl now exercise the chain path — that is the point).
    Budget ≥30 min for the full suite; capture and report any failure verbatim
@@ -962,7 +962,7 @@ NOT improvise alternative layouts inline.
 
 - rrules for `forloop_sum`/`parallel_sum` (none exist today; Mmap/Mumap/Mdmap
   remain forward-only in production).
-- Cannon distributed wrappers for FRmap/ACmap/ACdmap/Cmap and the ACmap
+- Slice2D distributed wrappers for FRmap/ACmap/ACdmap/Cmap and the ACmap
   cross-axis dataflow design — M3.
 - Chains for ALCtoAC_map/CTtoT/CTCtoT/Lmap/Rmap (not in the 21; trivial
   1-2-link contractions).

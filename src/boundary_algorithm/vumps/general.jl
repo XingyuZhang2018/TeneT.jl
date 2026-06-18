@@ -796,15 +796,15 @@ and bond dimension `χ`.
 function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
     alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
 
-    # M5: Cannon (2D block-distributed) path — build a BLOCK-distributed runtime so the
-    # grid-routed vumps_step_cannon receives blocks. Supports ifupdown (up on M + down on
-    # _down_M(M)); leading_boundary(Tuple) then runs each via the cannon vumps_step guard.
+    # M5: Slice2D (2D block-distributed) path — build a BLOCK-distributed runtime so the
+    # grid-routed vumps_step_slice2d receives blocks. Supports ifupdown (up on M + down on
+    # _down_M(M)); leading_boundary(Tuple) then runs each via the slice2d vumps_step guard.
     if alg.grid !== nothing
         g = alg.grid
-        rtup = init_VUMPSRuntime_cannon(M, χ, g, alg)
+        rtup = init_VUMPSRuntime_slice2d(M, χ, g, alg)
         if alg.ifupdown
-            alg.ifdownfromup && throw(ArgumentError("init_env cannon: ifdownfromup not yet supported; use ifdownfromup=false."))
-            return rtup, init_VUMPSRuntime_cannon(_down_M(M), χ, g, alg)
+            alg.ifdownfromup && throw(ArgumentError("init_env slice2d: ifdownfromup not yet supported; use ifdownfromup=false."))
+            return rtup, init_VUMPSRuntime_slice2d(_down_M(M), χ, g, alg)
         end
         return rtup
     end
@@ -884,10 +884,10 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
 end
 
 function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
-    # M5: route to the Cannon (2D block-distributed) step when a grid is set. This
+    # M5: route to the Slice2D (2D block-distributed) step when a grid is set. This
     # single guard covers BOTH vumps_itr call sites (warm-up + AD loop). Serial body
     # below is unchanged and runs whenever grid === nothing.
-    alg.grid === nothing || return vumps_step_cannon(rt, M, alg.grid, alg)
+    alg.grid === nothing || return vumps_step_slice2d(rt, M, alg.grid, alg)
     @unpack AL, C, AR, FL, FR = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
@@ -1077,15 +1077,15 @@ Two return shapes:
 function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
-    # Cannon path: compute the obs env block-distributed (leftenv/rightenv_cannon with
-    # ifobs=true), then gather to FULL for the serial energy_value (v1; see cannon.jl).
+    # Slice2D path: compute the obs env block-distributed (leftenv/rightenv_slice2d with
+    # ifobs=true), then gather to FULL for the serial energy_value (v1; see slice2d.jl).
     if alg.grid !== nothing
         g = alg.grid
-        AC = ALCtoAC_cannon(AL, C, g)
-        _, FLo = leftenv_cannon(AL, AL, M, Fo[1], g; ifobs=true, alg, model)
-        _, FRo = rightenv_cannon(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
+        AC = ALCtoAC_slice2d(AL, C, g)
+        _, FLo = leftenv_slice2d(AL, AL, M, Fo[1], g; ifobs=true, alg, model)
+        _, FRo = rightenv_slice2d(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
         (model !== nothing && uses_oneside_obs_env(typeof(model))) &&
-            error("ObsEnv cannon: OnesideVUMPSEnv (oneside obs) not yet distributed; use a non-oneside model.")
+            error("ObsEnv slice2d: OnesideVUMPSEnv (oneside obs) not yet distributed; use a non-oneside model.")
         return gather_env(VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo), g)
     end
     AC = ALCtoAC(AL, C)
@@ -1108,15 +1108,15 @@ down runtime, so the `obs_index` trait is not needed.
 """
 function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt[1].FL, rt[1].FR])
-    # Cannon path: mixed obs env (ACu/ACd from up/down via ALCtoAC_cannon; FLo/FRo from
-    # leftenv/rightenv_cannon ifobs=true with the up AL/AR and down AL/AR) → gather to FULL.
+    # Slice2D path: mixed obs env (ACu/ACd from up/down via ALCtoAC_slice2d; FLo/FRo from
+    # leftenv/rightenv_slice2d ifobs=true with the up AL/AR and down AL/AR) → gather to FULL.
     if alg.grid !== nothing
         g = alg.grid
         rtup, rtdown = rt
-        ACu = ALCtoAC_cannon(rtup.AL, rtup.C, g)
-        ACd = ALCtoAC_cannon(rtdown.AL, rtdown.C, g)
-        _, FLo = leftenv_cannon(rtup.AL, rtdown.AL, M, Fo[1], g; ifobs=true, alg)
-        _, FRo = rightenv_cannon(rtup.AR, rtdown.AR, M, Fo[2], g; ifobs=true, alg)
+        ACu = ALCtoAC_slice2d(rtup.AL, rtup.C, g)
+        ACd = ALCtoAC_slice2d(rtdown.AL, rtdown.C, g)
+        _, FLo = leftenv_slice2d(rtup.AL, rtdown.AL, M, Fo[1], g; ifobs=true, alg)
+        _, FRo = rightenv_slice2d(rtup.AR, rtdown.AR, M, Fo[2], g; ifobs=true, alg)
         return gather_env(VUMPSEnv(ACu, rtup.AR, ACd, rtdown.AR, rtup.FL, rtup.FR, FLo, FRo), g)
     end
     atype = _arraytype(M)

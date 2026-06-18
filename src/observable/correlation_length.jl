@@ -51,7 +51,7 @@ function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:mps)
     @unpack AL, C, FLu, FLo = env
     grid = _dist_energy_plaq(params.model, params.boundary_alg) ? params.boundary_alg.grid : nothing
     if grid !== nothing && method === :mps
-        return cor_len_value_cannon_mps(AL, params, grid)
+        return cor_len_value_slice2d_mps(AL, params, grid)
     end
 
     if method === :channel
@@ -81,17 +81,17 @@ function cor_len_value(env::PlaquetteVUMPSEnv, params, M; method::Symbol=:mps)
     return ξ
 end
 
-function _cannon_matrix_eye_block(template, grid)
+function _slice2d_matrix_eye_block(template, grid)
     atype = _arraytype(template)
     T = eltype(template)
     χ = MPI.Allreduce(size(template, 1), +, grid.col_comm)
-    return cannon_scatter(atype(Matrix{T}(I, χ, χ)), grid)
+    return slice2d_scatter(atype(Matrix{T}(I, χ, χ)), grid)
 end
 
-function _cannon_arnoldi_eigvals(f, v0, howmany::Int, grid; krylovdim::Int)
+function _slice2d_arnoldi_eigvals(f, v0, howmany::Int, grid; krylovdim::Int)
     T = eltype(v0)
     V = Vector{typeof(v0)}()
-    β = cannon_norm(v0, grid)
+    β = slice2d_norm(v0, grid)
     β == 0 && error("distributed Arnoldi: zero initial vector")
     push!(V, v0 / β)
     H = zeros(T, krylovdim, krylovdim)
@@ -100,12 +100,12 @@ function _cannon_arnoldi_eigvals(f, v0, howmany::Int, grid; krylovdim::Int)
         w = f(V[j])
         for pass in 1:2
             for i in 1:j
-                h = cannon_dot(V[i], w, grid)
+                h = slice2d_dot(V[i], w, grid)
                 H[i, j] += h
                 w = w - h * V[i]
             end
         end
-        β = cannon_norm(w, grid)
+        β = slice2d_norm(w, grid)
         m = j
         if j < krylovdim
             H[j + 1, j] = β
@@ -117,22 +117,22 @@ function _cannon_arnoldi_eigvals(f, v0, howmany::Int, grid; krylovdim::Int)
     return sort(λ; by=x -> abs(x), rev=true)[1:min(howmany, length(λ))]
 end
 
-function cor_len_value_cannon_mps(AL, params, grid)
+function cor_len_value_slice2d_mps(AL, params, grid)
     χ = MPI.Allreduce(size(AL[1, 1], 1), +, grid.col_comm)
     p_rs = split_ranges(χ, grid.N1)
-    ARu_row = ntuple(j -> cannon_gather_row(AL[1, j], grid, p_rs), size(AL, 2))
-    ARd_col = ntuple(j -> cannon_gather_col(conj(AL[1, j]), grid, p_rs), size(AL, 2))
+    ARu_row = ntuple(j -> slice2d_gather_row(AL[1, j], grid, p_rs), size(AL, 2))
+    ARd_col = ntuple(j -> slice2d_gather_col(conj(AL[1, j]), grid, p_rs), size(AL, 2))
     f = R -> begin
         for j in 1:-1:(1 - size(AL, 2) + 1)
             jr = mod1(j, size(AL, 2))
-            R = Rmap_cannon_sliced(R, ARu_row[jr], ARd_col[jr], grid)
+            R = Rmap_slice2d_sliced(R, ARu_row[jr], ARd_col[jr], grid)
         end
         R
     end
-    v_init = _cannon_matrix_eye_block(AL[1, 1], grid)
+    v_init = _slice2d_matrix_eye_block(AL[1, 1], grid)
     global_dim = χ * χ
     kdim = min(global_dim, max(20, params.boundary_alg.power_iter_obs))
-    λcs = _cannon_arnoldi_eigvals(f, v_init, 5, grid; krylovdim=kdim)
+    λcs = _slice2d_arnoldi_eigvals(f, v_init, 5, grid; krylovdim=kdim)
     λ2 = zero(eltype(λcs))
     for i in 2:length(λcs)
         if !(norm(λcs[i]) ≈ norm(λcs[1]))
@@ -142,7 +142,7 @@ function cor_len_value_cannon_mps(AL, params, grid)
     end
     λ2 == 0 && return Inf
     ξ = -1/log(abs(λ2/λcs[1]))
-    params.verbosity >= 4 && println("ξ (mps/cannon) = $(ξ)")
+    params.verbosity >= 4 && println("ξ (mps/slice2d) = $(ξ)")
     return ξ
 end
 

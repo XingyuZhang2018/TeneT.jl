@@ -48,7 +48,7 @@ export POWER_ITER=${POWER_ITER:-5}; export POWER_ITER_OBS=${POWER_ITER_OBS:-40};
 export ENV_TOL=${ENV_TOL:-1e-8}; export FORLOOP_ITER=${FORLOOP_ITER:-64}; \
 export SAVE_ENV=${SAVE_ENV:-false}; export DISTRIBUTED_QR=${DISTRIBUTED_QR:-true}"
 
-echo "=== Cannon Plaquette distributed-post smoke: D=${D:-16} J2=${J2:-0.5} chi ${CHI_LOAD:-768}->${CHI_OBS:-2048} No.${NO_LOAD:-10} ==="
+echo "=== Slice2D Plaquette distributed-post smoke: D=${D:-16} J2=${J2:-0.5} chi ${CHI_LOAD:-768}->${CHI_OBS:-2048} No.${NO_LOAD:-10} ==="
 echo "Project=$PROJECT"
 echo "Data root=$DATA_ROOT"
 echo "Output root=${OUTPUT_ROOT:-$SLURM_SUBMIT_DIR/scratch_output}"

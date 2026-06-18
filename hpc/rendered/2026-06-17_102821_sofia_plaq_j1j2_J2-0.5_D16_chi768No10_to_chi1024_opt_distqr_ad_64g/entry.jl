@@ -6,14 +6,14 @@ using LinearAlgebra
 using OptimKit
 using Zygote
 using Printf
-using TeneT: cannon_grid
+using TeneT: slice2d_grid
 
 MPI.Init()
 const COMM = MPI.COMM_WORLD
 const RANK = MPI.Comm_rank(COMM)
 const NPROCS = MPI.Comm_size(COMM)
 const NGRID = isqrt(NPROCS)
-@assert NGRID * NGRID == NPROCS "Cannon needs a square process count; got nprocs=$NPROCS"
+@assert NGRID * NGRID == NPROCS "Slice2D needs a square process count; got nprocs=$NPROCS"
 
 say(msg) = (RANK == 0 && (println(msg); flush(stdout)))
 geti(k, default) = parse(Int, get(ENV, k, string(default)))
@@ -96,7 +96,7 @@ function make_boundary()
         step_checkpoint=ckpt_method("STEP_CKPT", "recompute"),
         verbosity=(RANK == 0 ? 3 : 0),
     )
-    alg.grid = cannon_grid(NGRID, NGRID)
+    alg.grid = slice2d_grid(NGRID, NGRID)
     return alg
 end
 
@@ -208,7 +208,7 @@ function main()
     folder = joinpath(DATA_ROOT, "$model", "$pattern", "VUMPS_Plaquette", "Float64", "seed$SEED")
     params = make_params(model, folder)
 
-    say("=== Cannon Plaquette distributed_qr AD optimize ===")
+    say("=== Slice2D Plaquette distributed_qr AD optimize ===")
     say("nprocs=$NPROCS grid=$(NGRID)x$(NGRID) D=$D J2=$J2 seed=$SEED")
     say("load chi=$CHI_LOAD No.$NO_LOAD -> optimize chi=$CHI_OPT OPT_MAXITER=$OPT_MAXITER")
     say("VUMPS_MAXITER=$VUMPS_MAXITER MAXITER_AD=$MAXITER_AD MINITER_AD=$MINITER_AD")

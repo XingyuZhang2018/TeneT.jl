@@ -276,25 +276,25 @@ fraction); BSC H100 8 GPU OOM'd at D=10 χ=400 entirely (memory issue
 unrelated to NCCL). **The Sofia 16 GPU 2-node win does not generalise to
 single-node setups** — keep ring as the default to avoid regressing those.
 
-## Part 5: Cannon 2×2 vs slice (4 GPU, single node) — production form `FLmap_cannon_dist`
+## Part 5: Slice2D 2×2 vs slice (4 GPU, single node) — production form `FLmap_slice2d_dist`
 
-Job `1275624` (2026-06-12, `submit_benchmark_cannon.sh` → `benchmark_cannon_sofia.jl`,
-branch `claude/sad-saha-3ec6bf` @ `e339c65`+), 1 node × 4×H200, Cannon grid 2×2.
-Design: [`docs/2026-06-10-cannon-flmap-design.md`](../../../docs/2026-06-10-cannon-flmap-design.md).
-(An earlier run of the v2 replicated-AL variant `FLmap_cannon`, job `1274276`,
-is superseded by this table — same matrix, cannon numbers within a few % except
+Job `1275624` (2026-06-12, `submit_benchmark_slice2d.sh` → `benchmark_slice2d_sofia.jl`,
+branch `claude/sad-saha-3ec6bf` @ `e339c65`+), 1 node × 4×H200, Slice2D grid 2×2.
+Design: [`docs/2026-06-10-slice2d-flmap-design.md`](../../../docs/2026-06-10-slice2d-flmap-design.md).
+(An earlier run of the v2 replicated-AL variant `FLmap_slice2d`, job `1274276`,
+is superseded by this table — same matrix, slice2d numbers within a few % except
 where noted below.)
 
 Methodology: tensors/loss as Part 2 (`test_MPI_config.jl`) — Float64 leg5
 single-M, slice path `total_splits=128`, `nrep=3`, backward = Zygote pullback
-of a bare `sum` loss. **cannon = `FLmap_cannon_dist`: FL, ALu, ALd all
+of a bare `sum` loss. **slice2d = `FLmap_slice2d_dist`: FL, ALu, ALd all
 block-stored (persistent 3×χ²D²/P per rank); the per-call row/col AL slice
 gathers ARE included in the timings** — in a leftenv power iteration ALu/ALd
-are fixed, so these gathers amortize away. Cannon sub-slices its local l
+are fixed, so these gathers amortize away. Slice2D sub-slices its local l
 range with `forloop_iter = n` per cell (column `n`; backward-peak formula
 `(4+2d)·|H|/n + residents ≤ 110 GB`, |H| = χ²D⁴/4). Timings are per-rep
 max-over-ranks with `GC.gc()` (no reclaim) between reps outside the timed
-window — reads slightly above Part 2's rank-0 `@elapsed` convention. Cannon's
+window — reads slightly above Part 2's rank-0 `@elapsed` convention. Slice2D's
 backward is fully hand-written (six single-contraction adjoints, per-chunk
 local H/T/G recompute, `unsafe_free!` after each array's last use — no
 Zygote inside the map's rrule) and returns BLOCK gradients for ALu/ALd via
@@ -303,12 +303,12 @@ cells ran (no OOM skips); parity vs the slice path ≤1e-10 fwd / ≤1e-8 bwd on
 every cell (`F✓ B✓`).
 
 Column legend — all times in ms: **slice** = the existing replicated-input
-path (`FLmap_parallel`, Part 2's subject); **cannon** = the distributed
-`FLmap_cannon`; **fwd** = one forward map call; **bwd** = one
+path (`FLmap_parallel`, Part 2's subject); **slice2d** = the distributed
+`FLmap_slice2d`; **fwd** = one forward map call; **bwd** = one
 `Zygote.pullback` construction + backward; **ring** / **nccl** =
-`TENET_USE_NCCL` off / on; **n** = Cannon's `forloop_iter` for that cell.
+`TENET_USE_NCCL` off / on; **n** = Slice2D's `forloop_iter` for that cell.
 
-| D  | χ    | n  | slice fwd ring | slice fwd nccl | cannon fwd ring | cannon fwd nccl | slice bwd ring | slice bwd nccl | cannon bwd ring | cannon bwd nccl | parity |
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | slice2d fwd ring | slice2d fwd nccl | slice bwd ring | slice bwd nccl | slice2d bwd ring | slice2d bwd nccl | parity |
 |----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
 | 8  | 256  | 1  |     32.8 |     28.8 |     10.0 |     10.2 |    113.2 |    110.9 |     46.3 |     34.9 | F✓ B✓ |
 | 8  | 512  | 1  |     74.5 |     70.9 |     40.7 |     40.4 |    343.0 |    247.4 |    148.4 |    149.1 | F✓ B✓ |
@@ -333,11 +333,11 @@ path (`FLmap_parallel`, Part 2's subject); **cannon** = the distributed
 
 Headline reading (ring columns):
 
-- **Cannon-dist forward is faster everywhere**: 1.1–3.3× vs slice (small
+- **Slice2D-dist forward is faster everywhere**: 1.1–3.3× vs slice (small
   cells up to 3.3× — no result allgatherv; big cells ~1.35×, e.g. D=16
   χ=1024: 2516 vs 3394 ms) — the per-call AL slice gathers cost only a few
   % even un-amortized.
-- **Cannon-dist backward is faster on 18/20 cells** (D=16 χ=1024: 10470 vs
+- **Slice2D-dist backward is faster on 18/20 cells** (D=16 χ=1024: 10470 vs
   12063 ms = 1.15×); exceptions D=14 χ=512 and D=16 χ=768 (~4–13% slower,
   at n-transitions). vs the superseded v2 replicated-AL run: forward within
   ~2%, backward mixed ±5% — the slice-level reduce-scatters ≈ the old full
@@ -352,12 +352,12 @@ Footnotes:
 
 1. **Output placement asymmetry** (deliberate — the honest map-level
    comparison): slice fwd *includes* the allgatherv that replicates the full
-   result on every rank; Cannon fwd ends with each rank holding only its
+   result on every rank; Slice2D fwd ends with each rank holding only its
    block — an iterating map needs no gather since output distribution =
-   input distribution. Likewise Cannon bwd leaves dFL distributed while
+   input distribution. Likewise Slice2D bwd leaves dFL distributed while
    slice bwd allgathers it.
 2. **NCCL coverage differs**: slice fwd/bwd collectives take the NCCL fast
-   path when `TENET_USE_NCCL=1`; Cannon-dist only its dM1/dM2
+   path when `TENET_USE_NCCL=1`; Slice2D-dist only its dM1/dM2
    `allreduce_p2p!` calls — the ring shift, row/col AL slice allgathers,
    column reduce-scatter/allgather, and the row/col gradient reduce-scatters
    are MPI point-to-point (no NCCL path yet).
@@ -374,7 +374,7 @@ communication on the identical local workload of one 2×2-grid rank
 
 - **A (staged)**: pairwise stage kernels with owned intermediates +
   `unsafe_free!` after last use; backward = hand-written single-contraction
-  adjoints (the `FLmap_cannon` organization).
+  adjoints (the `FLmap_slice2d` organization).
 - **B (monolithic)**: original 5-tensor `@tensor` FLmap via `forloop`;
   backward = the `forloop` rrule (per-slice Zygote pullback).
 - Both lower to the SAME cuTENSOR pairwise contractions; only the sum
@@ -401,7 +401,7 @@ backward 1.5-1.8×, pool pressure ~40-55% lower (B's dead-until-GC
 temporaries block pool reuse → continuous fresh `cudaMalloc` inside the
 timed window and reactive-GC dependence). This motivates extending the
 staged + eager-free + hand-adjoint organization to ALL maps (single-GPU
-production paths included), which the full-VUMPS Cannon integration needs
+production paths included), which the full-VUMPS Slice2D integration needs
 anyway.
 
 ## Part 7: Chain-engine perf gate (1 GPU)
@@ -512,7 +512,7 @@ dominated by benchmark-harness limits, not chain-engine regressions. Reading:
   forward is 0.61–0.81× TENSOR. At D12/D16 the rank-0 single-process probe is
   contaminated (see below).
 - **Backward — NOT measurable at these `n` (harness, not engine).** `pick_n`
-  (Part-6 coeff 8/14) was calibrated on the cannon **rank-local** workload
+  (Part-6 coeff 8/14) was calibrated on the slice2d **rank-local** workload
   (χ/2-blocks); at **full χ** a single leg5 intermediate is χ²·D⁴·8 ≈ 21 GiB at
   D10χ512, so `n=1` cannot chunk the backward under 140 GiB. CHAIN bwd ran only
   for FLmap/FRmap at D10 (120 GiB, TENSOR OOM there = engine ran where @tensor
@@ -549,32 +549,32 @@ consciously unbenched (out-of-scope per the M2 plan: corner maps' only caller
 is commented out; FLmap_C3v lives only in the qrctmrg path, no Sofia production
 benchmark today).
 
-## Part 9: M3 Cannon-wrapper 4-GPU validation — `Cmap_cannon` / `FRmap_cannon_dist` / `ACmap_cannon_dist` / `ACdmap_cannon_dist`
+## Part 9: M3 Slice2D-wrapper 4-GPU validation — `Cmap_slice2d` / `FRmap_slice2d_dist` / `ACmap_slice2d_dist` / `ACdmap_slice2d_dist`
 
 Jobs `1285915` (`forloop_iter=4`) + `1285916` (`forloop_iter=16`, 2026-06-14,
-`submit_test_cannon_m3.sh` → `test_cannon_m3_sofia.jl`, branch
-`claude/ecstatic-golick-e3f6f0` @ `7e2372f`), 1 node × 4×H200, Cannon grid 2×2.
-Plan: [Batch E](../../../docs/2026-06-13-m3-cannon-wrappers-plan.md).
+`submit_test_slice2d_m3.sh` → `test_slice2d_m3_sofia.jl`, branch
+`claude/ecstatic-golick-e3f6f0` @ `7e2372f`), 1 node × 4×H200, Slice2D grid 2×2.
+Plan: [Batch E](../../../docs/2026-06-13-m3-slice2d-wrappers-plan.md).
 
 **Result: GPU distributed parity PASSED for all four maps at χ=256 D=8 (rel
 3–5e-15, ≪ gate); the χ=400 D=10 cell OOMs on the SERIAL REFERENCE (not the
 distributed maps) — a validation-harness limit, diagnosed below.** Run via:
 
 ```bash
-cd examples/MPI_parallel/Sofia && sbatch submit_test_cannon_m3.sh
+cd examples/MPI_parallel/Sofia && sbatch submit_test_slice2d_m3.sh
 ```
 
 Methodology: each of the four M3 maps is run distributed on `CuArray`s and its
 forward + Zygote-sum-loss gradient compared (rel err, allreduced max over ranks)
 against the serial `Cmap`/`FRmap`/`ACmap`/`ACdmap` reference — the SAME
-`*_cannon_dist` code the 4-rank CPU parity gate (`test/test_cannon_m3.jl`)
+`*_slice2d_dist` code the 4-rank CPU parity gate (`test/test_slice2d_m3.jl`)
 exercises; the GPU is the only new variable. Gate: **forward rel ≤ 1e-10,
 gradient max rel ≤ 1e-8** (the CPU test gate is tighter, 1e-12 / 1e-10 — the GPU
 thresholds absorb device-FP reduction order). Two cells: a validation cell
-(`χ=256 D=8`, env defaults `TENET_CANNON_CHI_VALID`/`TENET_CANNON_D_VALID`) and a
-production cell (`χ=400 D=10`, `TENET_CANNON_CHI`/`TENET_CANNON_D`), Float64 leg5,
+(`χ=256 D=8`, env defaults `TENET_SLICE2D_CHI_VALID`/`TENET_SLICE2D_D_VALID`) and a
+production cell (`χ=400 D=10`, `TENET_SLICE2D_CHI`/`TENET_SLICE2D_D`), Float64 leg5,
 both single-M and tuple-M. Cmap any grid (replicated output); FR/AC/ACd require
-the square 2×2 grid. `forloop_iter=4` (`TENET_CANNON_FLOOP`) so `n_d=n_i ≥ 2N`,
+the square 2×2 grid. `forloop_iter=4` (`TENET_SLICE2D_FLOOP`) so `n_d=n_i ≥ 2N`,
 the regime that forces the 2-level accumulate/assign chunk for FRmap/ACdmap.
 
 **Device-memory column** = device used (`total − available`) GiB, max over ranks,
@@ -642,27 +642,27 @@ distributed parity validated on GPU (χ=256 D=8, all 4 maps); the production-cel
 memory check is blocked by the serial reference's size, recorded as a follow-up
 (serial-ref-free dist-only probe).**
 
-## Part 10: Cannon scaling — 2×2 (4 GPU, 1 node) vs 4×4 (16 GPU, 2 nodes) — `FLmap_cannon_dist`
+## Part 10: Slice2D scaling — 2×2 (4 GPU, 1 node) vs 4×4 (16 GPU, 2 nodes) — `FLmap_slice2d_dist`
 
 Jobs `1287186` (4 GPU, grid 2×2, 1 node, `COMPLETED` 22:41) + `1287187`
 (16 GPU, grid 4×4, **2 nodes × 8×H200**, `COMPLETED` 19:54), 2026-06-15,
 branch `claude/ecstatic-golick-e3f6f0` @ `d28e3da` (M2 chain-engine **default
-ON** + all four M3 cannon maps merged), `submit_benchmark_cannon.sh` /
-`submit_benchmark_cannon_16gpu.sh` → `benchmark_cannon_sofia.jl` with
-`TENET_CANNON_N1=N2={2,4}`.
+ON** + all four M3 slice2d maps merged), `submit_benchmark_slice2d.sh` /
+`submit_benchmark_slice2d_16gpu.sh` → `benchmark_slice2d_sofia.jl` with
+`TENET_SLICE2D_N1=N2={2,4}`.
 
 Same driver/methodology as Part 5 (Float64 leg5 single-M, `total_splits=128`,
 `nrep=3`, backward = Zygote-`sum` pullback, `forloop_iter=n` per cell). The
 4×4 grid is laid out **2 rows per node** (`rank = r1·4 + r2`, 8 ranks/node):
-cannon **row** comms (ring shifts + AL row-gather, tags 700/750) stay
-intra-node on NVLink; cannon **column** comms (reduce-scatter / allgather,
+slice2d **row** comms (ring shifts + AL row-gather, tags 700/750) stay
+intra-node on NVLink; slice2d **column** comms (reduce-scatter / allgather,
 tags 710/730) **cross the IB link**. Both runs: all 20 cells, parity ≤1e-10
 fwd / ≤1e-8 bwd on **every** cell (`F✓ B✓`). This is the repo's first 16-GPU
-cannon timing (Part 2's 16-GPU table is the slice `FLmap_parallel` path).
+slice2d timing (Part 2's 16-GPU table is the slice `FLmap_parallel` path).
 
 **(a) 4 GPU, grid 2×2 (1 node) — current commit `d28e3da`:**
 
-| D  | χ    | n  | slice fwd ring | slice fwd nccl | cannon fwd ring | cannon fwd nccl | slice bwd ring | slice bwd nccl | cannon bwd ring | cannon bwd nccl | parity |
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | slice2d fwd ring | slice2d fwd nccl | slice bwd ring | slice bwd nccl | slice2d bwd ring | slice2d bwd nccl | parity |
 |----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
 | 8  | 256  | 1  |     29.2 |     24.9 |      9.9 |     10.3 |     80.4 |     77.8 |     31.8 |     31.1 | F✓ B✓ |
 | 8  | 512  | 1  |     55.8 |     55.7 |     40.3 |     40.6 |    173.5 |    166.4 |    145.8 |    130.3 | F✓ B✓ |
@@ -685,9 +685,9 @@ cannon timing (Part 2's 16-GPU table is the slice `FLmap_parallel` path).
 | 16 | 768  | 7  |   1407.3 |   1414.5 |   1279.7 |   1290.3 |   5156.2 |   5032.8 |   5674.4 |   5634.8 | F✓ B✓ |
 | 16 | 1024 | 14 |   2663.3 |   2640.9 |   2477.9 |   2501.8 |   9650.2 |   9859.8 |  10777.3 |  10919.0 | F✓ B✓ |
 
-**(b) 16 GPU, grid 4×4 (2 nodes, cross-node IB) — first 16-GPU cannon data:**
+**(b) 16 GPU, grid 4×4 (2 nodes, cross-node IB) — first 16-GPU slice2d data:**
 
-| D  | χ    | n  | slice fwd ring | slice fwd nccl | cannon fwd ring | cannon fwd nccl | slice bwd ring | slice bwd nccl | cannon bwd ring | cannon bwd nccl | parity |
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | slice2d fwd ring | slice2d fwd nccl | slice bwd ring | slice bwd nccl | slice2d bwd ring | slice2d bwd nccl | parity |
 |----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
 | 8  | 256  | 1  |     11.5 |     24.4 |     25.7 |     24.8 |     47.9 |    119.3 |     54.8 |     88.5 | F✓ B✓ |
 | 8  | 512  | 1  |     21.5 |     35.2 |    109.8 |     97.2 |    157.8 |    159.1 |    218.0 |    249.4 | F✓ B✓ |
@@ -712,13 +712,13 @@ cannon timing (Part 2's 16-GPU table is the slice `FLmap_parallel` path).
 
 Headline reading (ring columns):
 
-- **No regression: the 4-GPU table reproduces Part 5 within a few %** (cannon
-  fwd D=16 χ=1024 2478 vs Part5 2516; D=8 χ=256 9.9 vs 10.0; cannon bwd D=16
+- **No regression: the 4-GPU table reproduces Part 5 within a few %** (slice2d
+  fwd D=16 χ=1024 2478 vs Part5 2516; D=8 χ=256 9.9 vs 10.0; slice2d bwd D=16
   χ=1024 10777 vs 10470, +2.9%). M2's engine-default-ON + the M3 map merge
-  leave `FLmap_cannon_dist`'s single-node performance unchanged, as expected
+  leave `FLmap_slice2d_dist`'s single-node performance unchanged, as expected
   (neither touched its hand kernels).
 
-- **4 GPU (single-node NVLink) cannon wins; at 16 GPU (cross-node IB) the
+- **4 GPU (single-node NVLink) slice2d wins; at 16 GPU (cross-node IB) the
   picture splits by direction.**
   - **Backward scales — 1.5–1.8× faster at 16 GPU on the heavy cells** (D=16
     χ=1024 10777→6070 = 1.78×; D=16 χ=768 5674→3300 = 1.72×; D=14 χ=1024
@@ -728,44 +728,44 @@ Headline reading (ring columns):
     tiny compute.
   - **Forward barely scales — comm-bound.** Only the two largest cells edge
     ahead at 16 GPU (D=16 χ=1024 2478→2193 = 1.13×; D=16 χ=768 1280→1225);
-    everywhere else 16-GPU cannon fwd is *slower* than 4 GPU (D=8 χ=1024
+    everywhere else 16-GPU slice2d fwd is *slower* than 4 GPU (D=8 χ=1024
     198→440 = 2.2×). The per-call row/col AL slice gathers now cross IB and
     dominate the lighter forward compute.
 
-- **Cannon vs slice at 16 GPU.** Cannon **fwd** is 2.7–5.5× slower than slice
+- **Slice2D vs slice at 16 GPU.** Slice2D **fwd** is 2.7–5.5× slower than slice
   (the cross-node gather, counted in isolation); **bwd** only 1.2–1.5× slower.
   Both gaps are the map-isolated penalty of Part 5 footnote 1 — in a leftenv
   power iteration ALu/ALd are fixed so the forward gathers amortize away, and
-  cannon keeps its memory/locality advantage (3×χ²D²/P resident, block-local
+  slice2d keeps its memory/locality advantage (3×χ²D²/P resident, block-local
   recompute).
 
-- **NCCL helps slice cross-node, not cannon (yet).** At 16 GPU the slice
+- **NCCL helps slice cross-node, not slice2d (yet).** At 16 GPU the slice
   **bwd** allreduce takes the NCCL fast path and gains ~1.3× (D=16 χ=1024
   slice bwd 5007→3818 ring→nccl; D=14 χ=1024 3165→2332) — Part 4's cross-node
-  NCCL win. Cannon's bwd is NCCL-flat (6070 vs 6176) because its column/row
+  NCCL win. Slice2D's bwd is NCCL-flat (6070 vs 6176) because its column/row
   reduce-scatters are still MPI point-to-point (Part 5 footnote 2). **A
-  cross-node NCCL path for the cannon reduce-scatters is the open lever** to
-  make distributed-cannon backward scale like slice at ≥2 nodes.
+  cross-node NCCL path for the slice2d reduce-scatters is the open lever** to
+  make distributed-slice2d backward scale like slice at ≥2 nodes.
 
 - **Memory pressure scales 1/P: the chunk count `n` drops ~4× at 16 GPU**
   (D=16 χ=1024 n=14→4; D=14 χ=1024 n=8→2; D=16 χ=768 n=7→2) — each rank holds
   χ²D⁴/(P·n), so 4× more ranks need 4× fewer forloop chunks to fit, confirming
   the per-rank bound at the wider grid.
 
-`.out` files: `examples/MPI_parallel/Sofia/Sofia_cannon_bench_1287186.out`,
-`Sofia_cannon_bench16_1287187.out`. Footnotes 1–2 of Part 5 (output-placement
+`.out` files: `examples/MPI_parallel/Sofia/Sofia_slice2d_bench_1287186.out`,
+`Sofia_slice2d_bench16_1287187.out`. Footnotes 1–2 of Part 5 (output-placement
 asymmetry, NCCL coverage) apply unchanged.
 
 ## Part 11: M3.5 ring-class reorder — FRmap/ACdmap gather-class → ring-class
 
 Branch `claude/ecstatic-golick-e3f6f0` @ `334575d`. Design:
-[`docs/2026-06-15-m35-cannon-ring-reorder-design.md`](../../../docs/2026-06-15-m35-cannon-ring-reorder-design.md).
+[`docs/2026-06-15-m35-slice2d-ring-reorder-design.md`](../../../docs/2026-06-15-m35-slice2d-ring-reorder-design.md).
 The M3 gather-class FRmap/ACdmap (2-level i/d chunk, a full-i×full-d intermediate
 plane) are reordered so the cross-axis **contracted** leg dies at link 1 (FL·ACd /
 FR·ARu) — exactly as ACmap already did — collapsing the plane to χ²D⁴/P. All four
-cannon maps become **single-l-chunk ring-class** with **identical communication**
+slice2d maps become **single-l-chunk ring-class** with **identical communication**
 (no new primitive; only the local chain order + chunk loop change). Driver
-`benchmark_cannon_maps_sofia.jl` (Float64 leg5 single-M, nrep=3, cannon
+`benchmark_slice2d_maps_sofia.jl` (Float64 leg5 single-M, nrep=3, slice2d
 `forloop_iter=pick_n`; parity vs the chunked `*_parallel` slice ref — no
 serial-ref OOM). Validated: 4-rank CPU parity (incl. multi-chunk accumulate,
 off-diagonal trap blocks, single-M, Db≠Dc) + opus review CLEAN + GPU parity
@@ -791,10 +791,10 @@ FLmap vs 3.1× at 4 GPU), so the reorder matters more at scale. The 4-GPU
 gather-class baseline (`1287202`) showed the same 2.4–3.8× that the reorder
 removes. Full 20-cell × 4-map tables are the ring columns of Part 12.
 
-## Part 12: NCCL fast path for the cannon col/row collectives — 16 vs 64 GPU scaling
+## Part 12: NCCL fast path for the slice2d col/row collectives — 16 vs 64 GPU scaling
 
-Commits `b2f9906` (NCCL path) + `5463dd8` (64-GPU script). The four cannon
-collectives (`_cannon_{col,row}_{allgather,reduce_scatter*}`) gain an NCCL path
+Commits `b2f9906` (NCCL path) + `5463dd8` (64-GPU script). The four slice2d
+collectives (`_slice2d_{col,row}_{allgather,reduce_scatter*}`) gain an NCCL path
 (`TENET_USE_NCCL=1`), mirroring the existing `allreduce_p2p!`/`allgatherv_p2p!`
 seam: `_get_nccl_comm(grid.row_comm/col_comm)` reuses the per-MPI-comm NCCL cache
 (no new infra); ROW collectives (last leg) call ncclAllGather/ncclReduceScatter
@@ -838,7 +838,7 @@ Backward tracks forward (16 GPU ~1.4–1.7×, 64 GPU ~1.5–1.7× at χ=1024).
 **Production guidance**: gate NCCL on the per-rank message `~χ·D/√P`, not blanket
 on — enable for large χ / moderate P, keep the hand ring for the strong-scaling
 tail and small cells. (Full 20-cell × 4-map ring/nccl tables: jobs 1287248 /
-1287257 `.out`; regenerate via `submit_benchmark_cannon_maps_{16,64}gpu.sh`.)
+1287257 `.out`; regenerate via `submit_benchmark_slice2d_maps_{16,64}gpu.sh`.)
 
 ## Sofia-specific Environment
 

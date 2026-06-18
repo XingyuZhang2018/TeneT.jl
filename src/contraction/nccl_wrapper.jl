@@ -181,7 +181,7 @@ function _nccl_reduce_scatter_equal!(sendbuf::CuArray{T}, recvbuf::CuArray{T},
     return recvbuf
 end
 
-# ─── Cannon row/col allgather + reduce-scatter via NCCL ──────────────────────
+# ─── Slice2D row/col allgather + reduce-scatter via NCCL ──────────────────────
 # NCCL AllGather/ReduceScatter concatenate/split rank buffers CONTIGUOUSLY, so the
 # gathered/scattered χ leg must be OUTERMOST (last dim, column-major) for rank r's
 # data to land in block r. ROW collectives act on the LAST leg (direct); COLUMN
@@ -191,7 +191,7 @@ end
 # the cross-node, high-value axis in the 2-rows-per-node layout. Everything chains
 # on CUDA.stream() (FIFO) so no CUDA.synchronize is needed (mirrors the allreduce
 # helper). `first_leg` selects column (true) vs row (false).
-function _nccl_cannon_allgather!(blk::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
+function _nccl_slice2d_allgather!(blk::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
     nd = ndims(blk)
     nranks = MPI.Comm_size(mpi_comm)
     b = first_leg ? permutedims(blk, (2:nd..., 1)) : blk            # gathered leg → last
@@ -201,7 +201,7 @@ function _nccl_cannon_allgather!(blk::CuArray{T}, mpi_comm::MPI.Comm, first_leg:
     return first_leg ? permutedims(full, (nd, 1:nd-1...)) : full    # restore [leg, mid...]
 end
 
-function _nccl_cannon_reduce_scatter!(partial::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
+function _nccl_slice2d_reduce_scatter!(partial::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
     nd = ndims(partial)
     nranks = MPI.Comm_size(mpi_comm)
     b = first_leg ? permutedims(partial, (2:nd..., 1)) : partial    # reduced leg → last

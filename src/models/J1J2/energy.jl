@@ -79,11 +79,11 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
 
     @unpack AL, C, FLu, FLo = env
     @unpack J1, J2 = model
-    # Cannon (grid set ⟺ block obs env, gated to J1J2{Square} in ObsEnv): contract the energy
-    # expectation block-distributed via the cannon transfer maps (grid threaded into oc_*),
-    # instead of gathering the full env. AC needs the cannon AL·C (gather AL → serial → scatter).
+    # Slice2D (grid set ⟺ block obs env, gated to J1J2{Square} in ObsEnv): contract the energy
+    # expectation block-distributed via the slice2d transfer maps (grid threaded into oc_*),
+    # instead of gathering the full env. AC needs the slice2d AL·C (gather AL → serial → scatter).
     grid = params.boundary_alg.grid
-    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_cannon(AL, C, grid)
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
 

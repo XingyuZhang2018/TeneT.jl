@@ -1,4 +1,4 @@
-# Single-GPU A/B: staged cannon kernels vs monolithic FLmap+forloop on the
+# Single-GPU A/B: staged slice2d kernels vs monolithic FLmap+forloop on the
 # IDENTICAL local workload of one 2×2-grid rank (no MPI — isolates kernel
 # organization from communication).
 #
@@ -9,7 +9,7 @@
 #
 #   A (staged):    per chunk stage1 → fold1 → fold2 → stage2, owned
 #                  intermediates with eager _free!; backward = the six
-#                  hand-written adjoints, mirroring the FLmap_cannon rrule.
+#                  hand-written adjoints, mirroring the FLmap_slice2d rrule.
 #   B (monolithic): TeneT.forloop(TeneT.FLmap, ...) — the original 5-tensor
 #                  @tensor kernel, TensorOperations-managed temporaries;
 #                  backward = the existing forloop rrule (per-slice Zygote).
@@ -66,10 +66,10 @@ function staged_fwd(FLr, ALur, ALdc, M1, M2, n)
     χ = size(ALur, 4); χl = size(ALdc, 4)
     partial = similar(FLr, χ, size(M1, 3), size(M2, 3), χl)
     for ch in TeneT.split_ranges(χl, n)
-        H = TeneT._cannon_stage1(FLr, view(ALdc, :, :, :, ch))
-        T = TeneT._cannon_fold1(H, M1)
-        G = TeneT._cannon_fold2(T, M2); TeneT._free!(T)
-        P = TeneT._cannon_stage2(G, ALur); TeneT._free!(G)
+        H = TeneT._slice2d_stage1(FLr, view(ALdc, :, :, :, ch))
+        T = TeneT._slice2d_fold1(H, M1)
+        G = TeneT._slice2d_fold2(T, M2); TeneT._free!(T)
+        P = TeneT._slice2d_stage2(G, ALur); TeneT._free!(G)
         view(partial, :, :, :, ch) .= P
         TeneT._free!(P); TeneT._free!(H)
     end
@@ -77,33 +77,33 @@ function staged_fwd(FLr, ALur, ALdc, M1, M2, n)
 end
 
 # A: staged backward — the six hand adjoints with eager frees (mirrors the
-# FLmap_cannon rrule chunk body).
+# FLmap_slice2d rrule chunk body).
 function staged_bwd(FLr, ALur, ALdc, M1, M2, dout, n)
     dFL = zero(FLr); dALu = zero(ALur); dALd = zero(ALdc)
     dM1 = zero(M1); dM2 = zero(M2)
     χl = size(ALdc, 4)
     for ch in TeneT.split_ranges(χl, n)
         ALd_ch = view(ALdc, :, :, :, ch)
-        H = TeneT._cannon_stage1(FLr, ALd_ch)
-        T = TeneT._cannon_fold1(H, M1)
-        G = TeneT._cannon_fold2(T, M2)
+        H = TeneT._slice2d_stage1(FLr, ALd_ch)
+        T = TeneT._slice2d_fold1(H, M1)
+        G = TeneT._slice2d_fold2(T, M2)
         dP = dout[:, :, :, ch]
-        dG = TeneT._cannon_stage2_dG(dP, ALur)
-        tmp = TeneT._cannon_stage2_dALu(dP, G); dALu .+= tmp
+        dG = TeneT._slice2d_stage2_dG(dP, ALur)
+        tmp = TeneT._slice2d_stage2_dALu(dP, G); dALu .+= tmp
         TeneT._free!(tmp); TeneT._free!(dP); TeneT._free!(G)
-        tmp = TeneT._cannon_fold2_dM2(dG, T); dM2 .+= tmp; TeneT._free!(tmp)
-        dT = TeneT._cannon_fold2_dT(dG, M2); TeneT._free!(dG); TeneT._free!(T)
-        tmp = TeneT._cannon_fold1_dM1(dT, H); dM1 .+= tmp; TeneT._free!(tmp)
-        dH = TeneT._cannon_fold1_dH(dT, M1); TeneT._free!(dT)
-        tmp = TeneT._cannon_stage1_dFL(dH, ALd_ch); dFL .+= tmp; TeneT._free!(tmp)
-        tmp = TeneT._cannon_stage1_dALd(dH, FLr)
+        tmp = TeneT._slice2d_fold2_dM2(dG, T); dM2 .+= tmp; TeneT._free!(tmp)
+        dT = TeneT._slice2d_fold2_dT(dG, M2); TeneT._free!(dG); TeneT._free!(T)
+        tmp = TeneT._slice2d_fold1_dM1(dT, H); dM1 .+= tmp; TeneT._free!(tmp)
+        dH = TeneT._slice2d_fold1_dH(dT, M1); TeneT._free!(dT)
+        tmp = TeneT._slice2d_stage1_dFL(dH, ALd_ch); dFL .+= tmp; TeneT._free!(tmp)
+        tmp = TeneT._slice2d_stage1_dALd(dH, FLr)
         view(dALd, :, :, :, ch) .+= tmp
         TeneT._free!(tmp); TeneT._free!(dH); TeneT._free!(H)
     end
     return (dFL, dALu, dALd, dM1, dM2)
 end
 
-println("=== Kernel A/B: staged cannon kernels vs FLmap+forloop (1 GPU, ", CUDA.name(CUDA.device()), ", CLB=", get(ENV, "CUDA_LAUNCH_BLOCKING", "0"), ") ===")
+println("=== Kernel A/B: staged slice2d kernels vs FLmap+forloop (1 GPU, ", CUDA.name(CUDA.device()), ", CLB=", get(ENV, "CUDA_LAUNCH_BLOCKING", "0"), ") ===")
 println("| D  | χ    | nA | nB | A fwd ms | B fwd ms | A bwd ms | B bwd ms | A fwd mem | B fwd mem | A bwd mem | B bwd mem | parity |")
 println("|----|------|----|----|----------|----------|----------|----------|-----------|-----------|-----------|-----------|--------|")
 

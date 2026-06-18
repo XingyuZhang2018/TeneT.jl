@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:nvidia_h200:1
 #SBATCH --account=pilot_2026_0002
 
-# Single-GPU kernel A/B: staged cannon kernels vs monolithic FLmap+forloop
+# Single-GPU kernel A/B: staged slice2d kernels vs monolithic FLmap+forloop
 # on the identical local workload (no MPI). Driver: ../bench_kernel_ab_sofia.jl
 
 source /etc/profile

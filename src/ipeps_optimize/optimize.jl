@@ -121,7 +121,7 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         close(logfile)
     end
 
-    # Save iPEPS checkpoint. Under cannon (grid set) the iPEPS is REPLICATED on every rank, so
+    # Save iPEPS checkpoint. Under slice2d (grid set) the iPEPS is REPLICATED on every rank, so
     # only the grid-root rank writes No.<iter>.jld2 — if all N² ranks race the same file, JLD2's
     # checksum re-read on close hits `EOFError: read end of file` and the whole MPI job dies (this
     # killed the 64-rank χ768 J2=0.5 run 1287372 on its first save). rank 0's Array(x) is the full

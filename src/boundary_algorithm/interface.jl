@@ -28,12 +28,12 @@ C4v
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
 
-    # M5 Cannon (2D block-distributed) path. When a CannonGrid is set, `vumps_step`
-    # routes to `vumps_step_cannon` (block AL/AR/FL/FR, replicated C, QR gather seam).
+    # M5 Slice2D (2D block-distributed) path. When a Slice2DGrid is set, `vumps_step`
+    # routes to `vumps_step_slice2d` (block AL/AR/FL/FR, replicated C, QR gather seam).
     # nothing → serial path unchanged. Untyped (like ifparallelupdown) to avoid a
-    # forward-reference to CannonGrid (defined later in the module).
+    # forward-reference to Slice2DGrid (defined later in the module).
     grid = nothing
-    # Opt-in forward-only distributed QR seam for Plaquette Cannon observation runs.
+    # Opt-in forward-only distributed QR seam for Plaquette Slice2D observation runs.
     # The default gather QR seam remains in place for AD/optimization.
     distributed_qr::Bool = false
 

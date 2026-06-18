@@ -1,5 +1,5 @@
 # Chain-engine (M1) local tests. Run: julia --project=. test/test_chain_engine.jl
-# Plain serial julia — NO MPI (mirrors the standalone test_cannon.jl convention).
+# Plain serial julia — NO MPI (mirrors the standalone test_slice2d.jl convention).
 using Test, LinearAlgebra, Random, Zygote
 using TeneT
 using TeneT: Chain, chain_interlabels, FLMAP_LEG5_CHAIN
@@ -17,7 +17,7 @@ using TensorOperations: tensorcontract, tensorcontract!
     @test ils[3] == (:a,:l,:g,:b,:h,:c)        # G
     @test ils[4] == out
 
-    # FLMAP_LEG5_CHAIN pins the hand-kernel layouts (_cannon_stage1/_fold1/_fold2)
+    # FLMAP_LEG5_CHAIN pins the hand-kernel layouts (_slice2d_stage1/_fold1/_fold2)
     pls = chain_interlabels(FLMAP_LEG5_CHAIN)
     @test pls[1] == (:a,:e,:f,:j,:k,:l)        # H (hand == derived)
     @test pls[2] == (:a,:f,:k,:g,:b,:p,:l)     # T (hand layout, ≠ derived)
@@ -49,7 +49,7 @@ end
     χ, D = 12, 3
     FL  = rand(ComplexF64, χ, D, D, χ)
     ALd = rand(ComplexF64, χ, D, D, χ)
-    Href = TeneT._cannon_stage1(FL, ALd)
+    Href = TeneT._slice2d_stage1(FL, ALd)
     # zero-init + two complementary i-block adds == full first link.
     # Engine H labels (:a,:e,:f,:j,:k,:l) equal the hand layout — direct compare.
     H2 = zero(Href)
@@ -109,19 +109,19 @@ end
     @test grads[4] ≈ dM2_z  rtol = 1e-10   # M2
     @test grads[5] ≈ dALu_z rtol = 1e-10   # ALu
 
-    # (b) vs the hand-adjoint chain, assembled exactly as the FLmap_cannon
+    # (b) vs the hand-adjoint chain, assembled exactly as the FLmap_slice2d
     #     rrule walks it on a single full chunk.
-    H = TeneT._cannon_stage1(FL, ALd)
-    T = TeneT._cannon_fold1(H, M1)
-    G = TeneT._cannon_fold2(T, M2)
-    dG     = TeneT._cannon_stage2_dG(dOut, ALu)
-    dALu_h = TeneT._cannon_stage2_dALu(dOut, G)
-    dM2_h  = TeneT._cannon_fold2_dM2(dG, T)
-    dT     = TeneT._cannon_fold2_dT(dG, M2)
-    dM1_h  = TeneT._cannon_fold1_dM1(dT, H)
-    dH     = TeneT._cannon_fold1_dH(dT, M1)
-    dFL_h  = TeneT._cannon_stage1_dFL(dH, ALd)
-    dALd_h = TeneT._cannon_stage1_dALd(dH, FL)
+    H = TeneT._slice2d_stage1(FL, ALd)
+    T = TeneT._slice2d_fold1(H, M1)
+    G = TeneT._slice2d_fold2(T, M2)
+    dG     = TeneT._slice2d_stage2_dG(dOut, ALu)
+    dALu_h = TeneT._slice2d_stage2_dALu(dOut, G)
+    dM2_h  = TeneT._slice2d_fold2_dM2(dG, T)
+    dT     = TeneT._slice2d_fold2_dT(dG, M2)
+    dM1_h  = TeneT._slice2d_fold1_dM1(dT, H)
+    dH     = TeneT._slice2d_fold1_dH(dT, M1)
+    dFL_h  = TeneT._slice2d_stage1_dFL(dH, ALd)
+    dALd_h = TeneT._slice2d_stage1_dALd(dH, FL)
     @test grads[1] ≈ dFL_h  rtol = 1e-12
     @test grads[2] ≈ dALd_h rtol = 1e-12
     @test grads[3] ≈ dM1_h  rtol = 1e-12
@@ -136,9 +136,9 @@ end
     @test all(g2 ≈ g1 for (g2, g1) in zip(grads2, grads))
 end
 
-@testset "chain engine reproduces the cannon local pipeline" begin
-    # Single 2×2-grid rank's LOCAL workload (cf. _cannon_forward_sliced and the
-    # FLmap_cannon rrule chunk body): a-block χ/2 row slices, full-i ALd column
+@testset "chain engine reproduces the slice2d local pipeline" begin
+    # Single 2×2-grid rank's LOCAL workload (cf. _slice2d_forward_sliced and the
+    # FLmap_slice2d rrule chunk body): a-block χ/2 row slices, full-i ALd column
     # slice, ring i-blocks delivered as views, l range processed in chunks.
     Random.seed!(17)
     χ, D, d = 12, 3, 2
@@ -169,13 +169,13 @@ end
         partial_hand   = zeros(ComplexF64, size(full_engine))
         partial_engine = zeros(ComplexF64, size(full_engine))
         for ch in l_chunks
-            # hand staged pipeline (the _cannon_forward_sliced chunk body)
-            Hh = TeneT._cannon_stage1(view(FL_row, :, :, :, i_rs[1]),
+            # hand staged pipeline (the _slice2d_forward_sliced chunk body)
+            Hh = TeneT._slice2d_stage1(view(FL_row, :, :, :, i_rs[1]),
                                       view(ALd_col, i_rs[1], :, :, ch))
-            TeneT._cannon_stage1_add!(Hh, view(FL_row, :, :, :, i_rs[2]),
+            TeneT._slice2d_stage1_add!(Hh, view(FL_row, :, :, :, i_rs[2]),
                                       view(ALd_col, i_rs[2], :, :, ch))
-            G = TeneT._cannon_fold(Hh, M1, M2)
-            P = TeneT._cannon_stage2(G, ALu_row)
+            G = TeneT._slice2d_fold(Hh, M1, M2)
+            P = TeneT._slice2d_stage2(G, ALu_row)
             view(partial_hand, :, :, :, ch) .= P
             # engine: zero H (chunk dims from the hand kernel — H layouts are
             # equal, proven in the link1 testset), accumulate the i-blocks as
@@ -192,35 +192,35 @@ end
         @test partial_engine ≈ partial_hand rtol = 1e-12
         @test partial_engine ≈ full_engine rtol = 1e-12
 
-        # ── backward: hand reference = the FLmap_cannon rrule chunk body ───
+        # ── backward: hand reference = the FLmap_slice2d rrule chunk body ───
         dFL_h  = zeros(ComplexF64, size(FL_row))
         dALd_h = zeros(ComplexF64, size(ALd_col))
         dALu_h = zeros(ComplexF64, size(ALu_row))
         dM1_h  = zeros(ComplexF64, size(M1))
         dM2_h  = zeros(ComplexF64, size(M2))
         for ch in l_chunks
-            Hc = TeneT._cannon_stage1(view(FL_row, :, :, :, i_rs[1]),
+            Hc = TeneT._slice2d_stage1(view(FL_row, :, :, :, i_rs[1]),
                                       view(ALd_col, i_rs[1], :, :, ch))
-            TeneT._cannon_stage1_add!(Hc, view(FL_row, :, :, :, i_rs[2]),
+            TeneT._slice2d_stage1_add!(Hc, view(FL_row, :, :, :, i_rs[2]),
                                       view(ALd_col, i_rs[2], :, :, ch))
-            Tc = TeneT._cannon_fold1(Hc, M1)
-            Gc = TeneT._cannon_fold2(Tc, M2)
+            Tc = TeneT._slice2d_fold1(Hc, M1)
+            Gc = TeneT._slice2d_fold2(Tc, M2)
             dPc = dpartial[:, :, :, ch]
-            dGc = TeneT._cannon_stage2_dG(dPc, ALu_row)
-            dALu_h .+= TeneT._cannon_stage2_dALu(dPc, Gc)
-            dM2_h .+= TeneT._cannon_fold2_dM2(dGc, Tc)
-            dTc = TeneT._cannon_fold2_dT(dGc, M2)
-            dM1_h .+= TeneT._cannon_fold1_dM1(dTc, Hc)
-            dHc = TeneT._cannon_fold1_dH(dTc, M1)
+            dGc = TeneT._slice2d_stage2_dG(dPc, ALu_row)
+            dALu_h .+= TeneT._slice2d_stage2_dALu(dPc, Gc)
+            dM2_h .+= TeneT._slice2d_fold2_dM2(dGc, Tc)
+            dTc = TeneT._slice2d_fold2_dT(dGc, M2)
+            dM1_h .+= TeneT._slice2d_fold1_dM1(dTc, Hc)
+            dHc = TeneT._slice2d_fold1_dH(dTc, M1)
             for t in 1:2
                 view(dFL_h, :, :, :, i_rs[t]) .+=
-                    TeneT._cannon_stage1_dFL(dHc, view(ALd_col, i_rs[t], :, :, ch))
+                    TeneT._slice2d_stage1_dFL(dHc, view(ALd_col, i_rs[t], :, :, ch))
                 view(dALd_h, i_rs[t], :, :, ch) .+=
-                    TeneT._cannon_stage1_dALd(dHc, view(FL_row, :, :, :, i_rs[t]))
+                    TeneT._slice2d_stage1_dALd(dHc, view(FL_row, :, :, :, i_rs[t]))
             end
         end
 
-        # ── backward: engine path (NO _cannon_* kernels) ───────────────────
+        # ── backward: engine path (NO _slice2d_* kernels) ───────────────────
         dFL_e  = zeros(ComplexF64, size(FL_row))
         dALd_e = zeros(ComplexF64, size(ALd_col))
         dALu_e = zeros(ComplexF64, size(ALu_row))
