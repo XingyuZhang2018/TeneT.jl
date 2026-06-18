@@ -378,6 +378,7 @@ function _cannon_row_allgather_first(blk, grid::CannonGrid, a_rs)
     end
     return full
 end
+
 # Sum the row peers' full-d slice gradients and keep the local d block:
 # adjoint of _cannon_row_allgather. Direct pairwise on row_comm, tag 760.
 # Recv sizing: every row peer's slice has MY l-block columns at MY range, so
@@ -447,6 +448,7 @@ function _cannon_row_reduce_scatter_first(dfull, grid::CannonGrid, a_rs)
     end
     return acc
 end
+
 # ─── Forward ──────────────────────────────────────────────────────────────
 
 # Core shared by the replicated (FLmap_cannon) and distributed
@@ -616,6 +618,22 @@ function FRmap_cannon_sliced(FR_blk, ARu_g, ARd_g, M, grid::CannonGrid; forloop_
     p_rs = split_ranges(χ, grid.N1)
     FR_g = _cannon_col_allgather(FR_blk, grid, p_rs)    # iterate gather (full d), per-call
     result, _, _, _ = _frmap_cannon_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter)
+    return result
+end
+
+function Rmap_cannon_sliced(R_blk, ARu_g, ARd_g, grid::CannonGrid)
+    @assert grid.N1 == grid.N2 "Rmap_cannon_sliced: square grid (N1==N2)"
+    χ = size(ARd_g, 1)
+    p_rs = split_ranges(χ, grid.N1)
+    R_g = _cannon_col_allgather(R_blk, grid, p_rs)
+    if ndims(ARu_g) == 3
+        @tensor partial[a, d] := ARu_g[a, b, c] * R_g[c, e] * ARd_g[d, b, e]
+    else
+        @tensor partial[a, d] := ARu_g[a, b, f, c] * R_g[c, e] * ARd_g[d, b, f, e]
+    end
+    result = _cannon_row_reduce_scatter_last(partial, grid, p_rs)
+    _free!(R_g)
+    _free!(partial)
     return result
 end
 

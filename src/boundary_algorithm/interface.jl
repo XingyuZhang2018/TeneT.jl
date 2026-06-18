@@ -33,6 +33,9 @@ C4v
     # nothing → serial path unchanged. Untyped (like ifparallelupdown) to avoid a
     # forward-reference to CannonGrid (defined later in the module).
     grid = nothing
+    # Opt-in forward-only distributed QR seam for Plaquette Cannon observation runs.
+    # The default gather QR seam remains in place for AD/optimization.
+    distributed_qr::Bool = false
 
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0

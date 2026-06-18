@@ -46,13 +46,39 @@ end
 
 # adjoint for QR factorization
 # https://journals.aps.org/prx/abstract/10.1103/PhysRevX.9.031041 eq.(5)
+function _matrix_tangent_like(dX, X)
+    d = unthunk(dX)
+    d isa AbstractArray || return zero(X)
+    return size(d) == size(X) ? d : reshape(d, size(X))
+end
+
+function _dense_tangent_copy_like(dX, X)
+    d = _matrix_tangent_like(dX, X)
+    buf = similar(X, eltype(d), size(X))
+    buf .= d
+    return buf
+end
+
+function _allreduce_sum_subcomm!(buf, comm)
+    MPI.Comm_size(comm) == 1 && return buf
+    if _use_nccl() && buf isa CuArray
+        return _nccl_allreduce!(buf, comm)
+    elseif buf isa CuArray
+        return _allreduce_host_staged!(buf, comm)
+    else
+        synchronize(buf)
+        MPI.Allreduce!(buf, +, comm)
+        return buf
+    end
+end
+
 function ChainRulesCore.rrule(::typeof(qr_for_ad), A::AbstractArray{T,2}) where {T}
     Q, R = qr_for_ad(A)
     ε = real(T)(1e-12)   # eltype-matched regularization to avoid Float64 upcast on F32 inputs
     function back((dQ, dR))
         dA = @thunk begin
-            _dQ = unthunk(dQ)
-            _dR = unthunk(dR)
+            _dQ = _matrix_tangent_like(dQ, Q)
+            _dR = _matrix_tangent_like(dR, R)
             M = R * _dR' - _dQ' * Q
             _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * ε)')
         end
@@ -66,8 +92,8 @@ function ChainRulesCore.rrule(::typeof(qrpos), A::AbstractArray{T,2}) where {T}
     ε = real(T)(1e-12)
     function back((dQ, dR))
         dA = @thunk begin
-            _dQ = unthunk(dQ)
-            _dR = unthunk(dR)
+            _dQ = _matrix_tangent_like(dQ, Q)
+            _dR = _matrix_tangent_like(dR, R)
             M = R * _dR' - _dQ' * Q
             _arraytype(A)((_dQ + Q * Hermitian(M, :L)) / UpperTriangular(R + I * ε)')
         end
@@ -81,14 +107,31 @@ function ChainRulesCore.rrule(::typeof(lqpos), A::AbstractArray{T,2}) where {T}
     ε = real(T)(1e-12)
     function back((dL, dQ))
         dA = @thunk begin
-            _dL = unthunk(dL)
-            _dQ = unthunk(dQ)
+            _dL = _matrix_tangent_like(dL, L)
+            _dQ = _matrix_tangent_like(dQ, Q)
             M = L' * _dL - _dQ * Q'
             _arraytype(A)(LowerTriangular(L + I * ε)' \ (_dQ + Hermitian(M, :L) * Q))
         end
         return NoTangent(), dA
     end
     return (L, Q), back
+end
+
+function ChainRulesCore.rrule(::typeof(qrpos_colrep), C::AbstractArray{T,2}, grid::CannonGrid) where {T}
+    (Q, R), qr_back = ChainRulesCore.rrule(qrpos, C)
+    function back((dQ, dR))
+        dC_Q = @thunk begin
+            dq = qr_back((dQ, zero(R)))[2]
+            buf = _dense_tangent_copy_like(dq, C)
+            _allreduce_sum_subcomm!(buf, grid.comm)
+            buf
+        end
+        dC_R = @thunk begin
+            qr_back((zero(Q), dR))[2]
+        end
+        return NoTangent(), @thunk(unthunk(dC_Q) .+ _matrix_tangent_like(dC_R, C)), NoTangent()
+    end
+    return (Q, R), back
 end
 
 function ChainRulesCore.rrule(::typeof(lqpos_colrep), C::AbstractArray{T,2}, grid::CannonGrid) where {T}
@@ -561,6 +604,7 @@ function ChainRulesCore.rrule(::typeof(cannon_gather_first_row), blk, grid::Cann
     end
     return full, cannon_gather_first_row_back
 end
+
 function ChainRulesCore.rrule(::typeof(cannon_gather_col), blk, grid::CannonGrid, a_rs)
     full = cannon_gather_col(blk, grid, a_rs)
     function cannon_gather_col_back(dfull)

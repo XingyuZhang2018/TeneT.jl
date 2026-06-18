@@ -5,7 +5,8 @@
 # square N×N Cannon grid. The FIXED boundary operands (ALu/ALd for leftenv) are
 # gathered ONCE outside the power iteration (gather hoisting); the per-power-step
 # map is the already-sliced `FLmap_cannon_sliced` (no per-call gather of the fixed
-# operands — the iterate is the ring-carried block, never gathered). `simple_eig`
+# operands; the iterate is row-gathered once through the NCCL-capable gather wrapper).
+# `simple_eig`
 # runs with the distributed `cannon_dot` / `cannon_norm` / `orth_for_ad_cannon`
 # hooks so the eigenvalue, normalization and ⊥-projection are GLOBAL across the
 # grid (a plain local `dot`/`norm` would use only the per-rank block).
@@ -633,7 +634,7 @@ end
 """
     AL_blk, errL = ACCtoAL_tsqr_cannon(AC_blk, C, grid)
 
-Left QR seam using TSQR. `AC_blk` stays block-distributed:
+ Left QR seam using TSQR. `AC_blk` stays block-distributed:
 the last chi leg is row-gathered, the tall-skinny QR is reduced over
 `col_comm`, and the resulting row block is sliced back to this rank's last-leg
 block. The communication adjoints use the existing Cannon gather wrappers, so
@@ -709,6 +710,16 @@ Block-distributed plaquette init: serial canonicalization (C = LRtoC(L,L), no ri
 unconditional bcast over grid.comm, then scatter AL/FL (C replicated).
 """
 function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg::VUMPS{L}) where {L <: Plaquette}
+    if alg.distributed_qr
+        rng_bak = copy(Random.default_rng()); Random.seed!(_CANNON_INIT_SEED + grid.rank)
+        A_blk = _initial_A_cannon_block(M, χ, grid)
+        AL_blk, Lg = _left_canonical_tsqr_cannon(A_blk, grid)
+        C = LRtoC(Lg, Lg)
+        FL0_blk = _initial_FL_cannon_block(M, χ, grid)
+        copy!(Random.default_rng(), rng_bak)
+        _, FL_blk = leftenv_cannon(AL_blk, conj(AL_blk), M, FL0_blk, grid; alg)
+        return PlaquetteVUMPSRuntime(AL_blk, C, FL_blk)
+    end
     # DISTRIBUTED init (see the General method above): shared-seed cross-rank consistency instead of
     # the overflowing full-χ bcast; left_canonical stays (global, cheap); FL solved block-distributed
     # via leftenv_cannon (no serial full-χ leftenv / 108 GB). Plaquette is left-canonical only (no AR/FR).
@@ -721,6 +732,35 @@ function init_VUMPSRuntime_cannon(M::StructArray, χ::Int, grid::CannonGrid, alg
     AL_blk = scatter_struct(AL, grid)
     _, FL_blk = leftenv_cannon(AL_blk, conj(AL_blk), M, scatter_struct(FL0, grid), grid; alg)
     return PlaquetteVUMPSRuntime(AL_blk, C, FL_blk)
+end
+
+function _initial_A_cannon_block(M::StructArray, χ::Int, grid::CannonGrid)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    sizes = [(D = size(m, 4); (length(a_rs[grid.r1 + 1]), D, D, length(l_rs[grid.r2 + 1]))) for m in M.data]
+    return randSA(M, sizes)
+end
+
+function _initial_FL_cannon_block(M::StructArray, χ::Int, grid::CannonGrid)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    sizes = [(D = size(m, 1); (length(a_rs[grid.r1 + 1]), D, D, length(l_rs[grid.r2 + 1]))) for m in M.data]
+    return randSA(M, sizes)
+end
+
+function _left_canonical_tsqr_cannon(A_blk::StructArray, grid::CannonGrid)
+    blocks = map(eachindex(A_blk.data)) do k
+        χ = MPI.Allreduce(size(A_blk.data[k], 1), +, grid.col_comm)
+        l_rs = split_ranges(χ, grid.N2)
+        A_row = cannon_gather_row(A_blk.data[k], grid, l_rs)
+        Q, R = _tsqr_front_rowblock(A_row, grid)
+        AL_row = reshape(Q, size(A_row))
+        AL_blk = AL_row[ntuple(i -> i == ndims(AL_row) ? l_rs[grid.r2 + 1] : Colon(), ndims(AL_row))...]
+        AL_blk, R / norm(R)
+    end
+    AL_data = [first(block) for block in blocks]
+    L_data = [last(block) for block in blocks]
+    return StructArray(AL_data, A_blk.pattern), StructArray(L_data, A_blk.pattern)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════

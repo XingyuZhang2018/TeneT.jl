@@ -25,7 +25,8 @@ converges the boundary, and evaluates expectation values.
 `cor_len_method` chooses the correlation-length estimator (see
 [`cor_len_value`](@ref)): `:mps` (default, pure boundary-MPS transfer
 matrix; cheap) or `:channel` (channel TM with bulk M; closer to the
-physical ξ at finite χ).
+physical ξ at finite χ). Use `:none` to skip the correlation-length
+calculation and write `NaN` in the observable log.
 """
 function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction_ipeps,
                     cor_len_method::Symbol=:mps)
@@ -44,10 +45,9 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     # obs env they'd run ALCtoAC on a χ-block → crash. For the cannon-Plaquette case gather the
     # block env to full just for them. energy_value above stays block-distributed (the expensive,
     # accuracy-critical part); mag/ξ are a cheap replicated post-measurement on the gathered env.
-    env_obs = _dist_energy_plaq(params.model, params.boundary_alg) ?
-              gather_env(env, params.boundary_alg.grid) : env
+    env_obs = env
     mag = magnetization_value(params.model, A, env_obs, params)
-    ξ = cor_len_value(env_obs, params, A; method=cor_len_method)
+    ξ = cor_len_method === :none ? nothing : cor_len_value(env_obs, params, A; method=cor_len_method)
 
     # For Kagome merge: compute per-bond energies and use them for logging/plotting
     if params.model.lattice isa Kagome{:merge}

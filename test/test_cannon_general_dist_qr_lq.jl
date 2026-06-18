@@ -112,6 +112,7 @@ end
     @test size(dAL.data[2]) == size(ALb.data[2])
     @test size(dC.data[2]) == size(C.data[2])
 end
+
 @testset "row first-dimension gather primitive parity" begin
     g = cannon_grid(2, 2)
     local_rows = g.r2 == 0 ? 3 : 2
