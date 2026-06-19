@@ -171,6 +171,7 @@ end
     include("test_checkpoint.jl")
     include("test_contraction.jl")
     include("test_parallel_method_api.jl")
+    include("test_nccl_wrapper_static.jl")
     include("test_script_paths.jl")
     include("test_2d_classical.jl")
     include("test_boundary.jl")
