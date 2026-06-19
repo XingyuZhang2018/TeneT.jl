@@ -22,6 +22,7 @@ SMOKE="${SCRIPT_DIR}/nccl_smoke.jl"
 export TENET_NCCL_WRAPPER="${REPO_ROOT}/src/contraction/parallel/nccl_wrapper.jl"
 
 JULIA="${JULIA:-/home/ugen/ugen563458/tools/julia-1.11.3/bin/julia}"
+MPI_MAP_FLAGS="${MPI_MAP_FLAGS:---map-by ppr:4:node --bind-to none}"
 
 echo "=== BSC 2-GPU NCCL smoke ==="
 echo "script_dir=${SCRIPT_DIR}"
@@ -30,12 +31,13 @@ echo "start=$(date)"
 echo "nodes=${SLURM_NNODES} tasks=${SLURM_NTASKS} gpus=${SLURM_GPUS:-unset}"
 echo "julia=${JULIA}"
 echo "mpirun=$(command -v mpirun)"
+echo "mpi_map_flags=${MPI_MAP_FLAGS}"
 
 export JULIA_DEPOT_PATH="${HOME}/.julia:"
 export JULIA_NUM_THREADS=1
 
 "${JULIA}" --project="${PROJECT_DIR}" --startup-file=no -e 'using MPI, CUDA; include(ENV["TENET_NCCL_WRAPPER"]); println("PROJECT_LOAD_OK")'
 
-mpirun -np 2 bash -c "export CUDA_VISIBLE_DEVICES=\${OMPI_COMM_WORLD_LOCAL_RANK}; export TENET_USE_NCCL=1; export NCCL_DEBUG=WARN; export TENET_NCCL_WRAPPER=${TENET_NCCL_WRAPPER}; exec ${JULIA} --project=${PROJECT_DIR} --startup-file=no ${SMOKE}"
+mpirun ${MPI_MAP_FLAGS} -np 2 bash -c "export CUDA_VISIBLE_DEVICES=\${OMPI_COMM_WORLD_LOCAL_RANK}; export TENET_USE_NCCL=1; export NCCL_DEBUG=WARN; export TENET_NCCL_WRAPPER=${TENET_NCCL_WRAPPER}; exec ${JULIA} --project=${PROJECT_DIR} --startup-file=no ${SMOKE}"
 
 echo "done=$(date)"

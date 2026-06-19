@@ -10,6 +10,16 @@ The smoke runs 2 MPI ranks on 2 H100 GPUs and verifies:
 - NCCL allgather
 - NCCL reduce-scatter
 
+`submit_test.sh` launches OpenMPI with:
+
+```bash
+--map-by ppr:4:node --bind-to none
+```
+
+This matches the BSC node shape of 4 H100 GPUs per node while still allowing
+the smoke to run with `-np 2`. Override `MPI_MAP_FLAGS` in the environment if
+you need to test a different mapping policy.
+
 ## Prewarm
 
 If the BSC compute/login environment cannot download Julia packages directly,
