@@ -245,29 +245,30 @@ by `slice2d_gather_row`/`slice2d_gather_col`). The ITERATE `FR_blk` is col-gathe
 full-d INTERNALLY per call (FR is not fixed across the power iteration). Per-step map
 of `rightenv_slice2d`. rrule (rules.jl) = the FRmap_slice2d_dist rrule minus the fixed
 ARu/ARd gathers + their reduce-scatters (→ slice grads), keeping the iterate FR
-col-gather + its col_reduce_scatter adjoint. Square grid. See §2.2b/§4.
+col-gather + its col_reduce_scatter adjoint. Supports N1×N2 grids via separate
+r1/r2 partitions. See §2.2b/§4.
 """
 function FRmap_slice2d_sliced(FR_blk, ARu_g, ARd_g, M, grid::Slice2DGrid; forloop_iter = 1)
-    @assert grid.N1 == grid.N2 "FRmap_slice2d_sliced: square grid (N1==N2)"
     M1, M2 = M isa Tuple ? M : (M, conj(M))
     χ = size(ARd_g, 1)                                  # full i (ARd_g = [i-full, j, k, l-block])
-    p_rs = split_ranges(χ, grid.N1)
-    FR_g = _slice2d_col_allgather(FR_blk, grid, p_rs)    # iterate gather (full d), per-call
-    result, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    FR_g = _slice2d_col_allgather(FR_blk, grid, a_rs)    # iterate gather (full d), per-call
+    result, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, a_rs, l_rs; forloop_iter)
     return result
 end
 
 function Rmap_slice2d_sliced(R_blk, ARu_g, ARd_g, grid::Slice2DGrid)
-    @assert grid.N1 == grid.N2 "Rmap_slice2d_sliced: square grid (N1==N2)"
     χ = size(ARd_g, 1)
-    p_rs = split_ranges(χ, grid.N1)
-    R_g = _slice2d_col_allgather(R_blk, grid, p_rs)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    R_g = _slice2d_col_allgather(R_blk, grid, a_rs)
     if ndims(ARu_g) == 3
         @tensor partial[a, d] := ARu_g[a, b, c] * R_g[c, e] * ARd_g[d, b, e]
     else
         @tensor partial[a, d] := ARu_g[a, b, f, c] * R_g[c, e] * ARd_g[d, b, f, e]
     end
-    result = _slice2d_row_reduce_scatter_last(partial, grid, p_rs)
+    result = _slice2d_row_reduce_scatter_last(partial, grid, l_rs)
     _free!(R_g)
     _free!(partial)
     return result
@@ -281,15 +282,16 @@ and `FR_g` (FULL-d, l-block; col-gathered) are supplied PRE-GATHERED (hoisted on
 The ITERATE `AC_blk` is row-gathered to full-d INTERNALLY per call. Per-step map of
 `ACenv_slice2d`. rrule (rules.jl) = the ACmap_slice2d_dist rrule minus the fixed FL/FR
 gathers + their reduce-scatters (→ slice grads), keeping the iterate AC row-gather +
-its row_reduce_scatter_last adjoint. Square grid. See §2.2b/§4.
+its row_reduce_scatter_last adjoint. Supports N1×N2 grids via separate r1/r2
+partitions. See §2.2b/§4.
 """
 function ACmap_slice2d_sliced(AC_blk, FL_g, FR_g, M, grid::Slice2DGrid; forloop_iter = 1)
-    @assert grid.N1 == grid.N2 "ACmap_slice2d_sliced: square grid (N1==N2)"
     M1, M2 = M isa Tuple ? M : (M, conj(M))
     χ = size(FL_g, 4)                                   # full i (FL_g = [a-block, e, f, i-full])
-    p_rs = split_ranges(χ, grid.N1)
-    AC_g = _slice2d_row_allgather(AC_blk, grid, p_rs)    # iterate gather (full d), per-call
-    result, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    AC_g = _slice2d_row_allgather(AC_blk, grid, l_rs)    # iterate gather (full d), per-call
+    result, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, a_rs; forloop_iter)
     return result
 end
 
@@ -340,7 +342,7 @@ function _ring_l_chunks(na::Int, nl::Int, M1, M2, forloop_iter::Int)
     return split_ranges(nl, n_eff)
 end
 
-# ─── FRmap (cross-axis gather class — SQUARE grid, RING reorder, single l-chunk) ─
+# ─── FRmap (cross-axis gather class, RING reorder, single l-chunk) ────────────
 # result[a,e,f,i] := ARd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] ARu[a,b,c,d]
 # M3.5 RING reorder (docs/2026-06-15-m35-slice2d-ring-reorder-design.md): the local
 # chain is FRMAP_LEG5_SLICE2D_CHAIN = ops (FR, ARu, M1, M2, ARd) — FR·ARu kills the
@@ -352,16 +354,18 @@ end
 # 2-level d/i chunk. Gathers (in FRmap_slice2d_dist) are UNCHANGED (i full on ARd, d
 # full on FR+ARu); F5 row_reduce_scatter_last (full i last leg, sum l over row, keep
 # i-block r2) is UNCHANGED. Leg placement: l is on FR_g.4 and ARd_g.4 (the chunked
-# local block); ARu_g has NO l (full d). Square grid REQUIRED (single p_rs). Local
-# einsum is FRMAP_LEG5_SLICE2D_CHAIN via chain_apply (whole-chain API), NOT a ring,
-# NOT a hand kernel. (FRMAP_LEG5_SLICE2D_CHAIN is defined in chain_maps.jl, included
-# after this file, and resolves at call time via Julia's global late-binding.)
-function _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter = 1)
-    # ARd_g = ARd[i∈1:χ, j, k, l∈p_rs[r2+1]]   (col_allgather, full i)
-    # FR_g  = FR[d∈1:χ, g, h, l∈p_rs[r2+1]]    (col_allgather, full d)
-    # ARu_g = ARu[a∈p_rs[r1+1], b, c, d∈1:χ]   (row_allgather, full d)
-    χ = sum(length, p_rs)
-    na = length(p_rs[grid.r1 + 1])             # local a extent
+# local block); ARu_g has NO l (full d). The first χ leg uses the r1 partition
+# `a_rs = split_ranges(χ, N1)` and the last χ leg uses the r2 partition
+# `l_rs = split_ranges(χ, N2)`, so rectangular grids do not need a block transpose.
+# Local einsum is FRMAP_LEG5_SLICE2D_CHAIN via chain_apply (whole-chain API), NOT a
+# ring, NOT a hand kernel. (FRMAP_LEG5_SLICE2D_CHAIN is defined in chain_maps.jl,
+# included after this file, and resolves at call time via Julia's global late-binding.)
+function _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, a_rs, l_rs; forloop_iter = 1)
+    # ARd_g = ARd[i∈1:χ, j, k, l∈l_rs[r2+1]]   (col_allgather, full i)
+    # FR_g  = FR[d∈1:χ, g, h, l∈l_rs[r2+1]]    (col_allgather, full d)
+    # ARu_g = ARu[a∈a_rs[r1+1], b, c, d∈1:χ]   (row_allgather, full d)
+    χ = sum(length, a_rs)
+    na = length(a_rs[grid.r1 + 1])             # local a extent
     nl = size(FR_g, 4)                          # local l extent (FR_g/ARd_g last leg)
     # out (a,e,f,i): e = M1's FIRST leg (:e in (:e,:j,:g,:b,:p)) = size(M1,1);
     # f = M2's FIRST leg (:f in (:f,:k,:h,:c,:p)) = size(M2,1); i is FULL.
@@ -381,34 +385,33 @@ function _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; f
     end
     # F5: sum l over row (full last leg i), keep i-block r2.
     @assert size(partial, 4) == χ "FRmap F5: partial last leg must be full i"
-    result = _slice2d_row_reduce_scatter_last(partial, grid, p_rs)   # tag 760
+    result = _slice2d_row_reduce_scatter_last(partial, grid, l_rs)   # tag 760
     return result, ARd_g, FR_g, ARu_g
 end
 
 """
     FRmap_slice2d_dist(FR_blk, ARu_blk, ARd_blk, M, grid; forloop_iter=1, inner_etype=nothing)
 
-Distributed FRmap on a SQUARE N×N Slice2D grid (RING class via the M3.5 reorder —
-`@assert N1==N2`). FR/ARu/ARd are block-stored (first χ leg by r1, last χ leg by
+Distributed FRmap on an N1×N2 Slice2D grid (RING class via the M3.5 reorder).
+FR/ARu/ARd are block-stored (first χ leg by r1, last χ leg by
 r2; `slice2d_scatter` convention), M replicated. Two cross-axis legs (contracted
 `d`, output `i`) are gathered to full before the local chain so the off-diagonal
-`(a,i)` blocks are actually contracted (the diagonal trap). The single `p_rs =
-split_ranges(χ, N)` is licensed by the square assertion. `forloop_iter` is now the
-FLmap-style SINGLE l-chunk count (= #l-chunks): the M3.5 reorder
+`(a,i)` blocks are actually contracted (the diagonal trap). The r1/r2 partitions
+are tracked separately as `a_rs = split_ranges(χ, N1)` and
+`l_rs = split_ranges(χ, N2)`. `forloop_iter` is the FLmap-style SINGLE l-chunk
+count (= #l-chunks): the M3.5 reorder
 (`FRMAP_LEG5_SLICE2D_CHAIN`, FR·ARu kills the cross-axis contracted `d` at link 1)
 makes every carried intermediate a-block×l-block (χ²D⁴/(P·forloop_iter)), so a
 single l-loop that accumulates `Σ_l` suffices — no full-i×full-d plane, no 2-level
 `d/i` chunk. Local einsum is `FRMAP_LEG5_SLICE2D_CHAIN` via `chain_apply`
 (whole-chain engine API), NOT a ring, NOT a hand kernel. Collective over
 `grid.comm` (gathers + `row_reduce_scatter_last` UNCHANGED from the gather-class
-version — only the local chain order/chunk changed). Rectangular grids (N1≠N2) are
-M3 v2 (a real block transpose). See
+version — only the local chain order/chunk changed). See
 docs/2026-06-15-m35-slice2d-ring-reorder-design.md and Batch B of
 docs/2026-06-13-m3-slice2d-wrappers-plan.md.
 """
 function FRmap_slice2d_dist(FR_blk, ARu_blk, ARd_blk, M, grid::Slice2DGrid;
                            forloop_iter = 1, inner_etype = nothing)
-    @assert grid.N1 == grid.N2 "FRmap_slice2d_dist: M3 v1 requires a square grid (N1==N2)"
     M1, M2 = M isa Tuple ? M : (M, conj(M))
     T_orig = eltype(FR_blk)
     do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -419,22 +422,23 @@ function FRmap_slice2d_dist(FR_blk, ARu_blk, ARd_blk, M, grid::Slice2DGrid;
         M1 = _downcast_eltype(inner_etype, M1); M2 = _downcast_eltype(inner_etype, M2)
     end
     χ = MPI.Allreduce(size(ARd_blk, 1), +, grid.col_comm)       # F0
-    p_rs = split_ranges(χ, grid.N1)
-    ARd_g = _slice2d_col_allgather(ARd_blk, grid, p_rs)         # F1: full i (tag 730)
-    ARu_g = _slice2d_row_allgather(ARu_blk, grid, p_rs)         # F2: full d (tag 750)
-    FR_g  = _slice2d_col_allgather(FR_blk,  grid, p_rs)         # F3: full d (tag 730)
-    result, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    ARd_g = _slice2d_col_allgather(ARd_blk, grid, a_rs)         # F1: full i (tag 730)
+    ARu_g = _slice2d_row_allgather(ARu_blk, grid, l_rs)         # F2: full d (tag 750)
+    FR_g  = _slice2d_col_allgather(FR_blk,  grid, a_rs)         # F3: full d (tag 730)
+    result, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, a_rs, l_rs; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end
 
-# ─── ACmap (cross-axis gather class — SQUARE grid, SINGLE l-chunk) ───────────
+# ─── ACmap (cross-axis gather class, SINGLE l-chunk) ─────────────────────────
 # Design: docs/2026-06-13-acmap-slice2d-dataflow-design.md §2-§4.
 # result[i,j,k,l] := AC[a,b,c,d] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] FL[a,e,f,i]
 # Two cross-axis legs: contracted d (AC.4=r2, FR.1=r1) + output i (FL.4=r2,
 # result.1=r1). The diagonal trap (i and l both on r2) is defeated by gathering
-# FL's free leg i to FULL before the local chain (F2). Square grid REQUIRED:
-# p_rs = split_ranges(χ,N) is the single partition for every leg (risk 2 — the
-# r1- and r2-partitions coincide only when N1==N2).
+# FL's free leg i to FULL before the local chain (F2). The first χ leg uses
+# `a_rs = split_ranges(χ, N1)` and the last χ leg uses
+# `l_rs = split_ranges(χ, N2)`.
 # SINGLE l-chunk (NOT the 2-level d/i chunk of FRmap/ACdmap): ACmap's pinned
 # chain intermediates I1=(a,c,h,l,b,g), I2=(a,l,e,j,c,h,p), I3=(l,j,k,a,e,f)
 # carry only the LOCAL a-block + the (chunked) output l; the output i and
@@ -448,11 +452,11 @@ end
 # block) and partial.4 (local block) — the chunked leg.
 # (ACMAP_LEG5_CHAIN is defined in chain_maps.jl, included after this file, and
 # resolves at call time via Julia's global late-binding.)
-function _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter = 1)
-    # AC_g = AC[a∈p_rs[r1+1], b, c, d∈1:χ]   (row_allgather, full d)
-    # FR_g = FR[d∈1:χ, g, h, l∈p_rs[r2+1]]   (col_allgather, full d)
-    # FL_g = FL[a∈p_rs[r1+1], e, f, i∈1:χ]   (row_allgather, full i)
-    χ = sum(length, p_rs)
+function _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, a_rs; forloop_iter = 1)
+    # AC_g = AC[a∈a_rs[r1+1], b, c, d∈1:χ]   (row_allgather, full d)
+    # FR_g = FR[d∈1:χ, g, h, l∈l_rs[r2+1]]   (col_allgather, full d)
+    # FL_g = FL[a∈a_rs[r1+1], e, f, i∈1:χ]   (row_allgather, full i)
+    χ = sum(length, a_rs)
     nl = size(FR_g, 4)                       # local l extent
     # out (i,j,k,l): j = M1's leg :j in (:e,:j,:g,:b,:p) = size(M1,2);
     # k = M2's leg :k in (:f,:k,:h,:c,:p) = size(M2,2). (i is FULL; l is the local
@@ -470,32 +474,31 @@ function _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; for
     end
     # F5: sum a over col (full first leg i), keep i-block r1.
     @assert size(partial, 1) == χ "ACmap F5: partial first leg must be full i (risk 5)"
-    result = _slice2d_col_reduce_scatter(partial, grid, p_rs)   # tag 710
+    result = _slice2d_col_reduce_scatter(partial, grid, a_rs)   # tag 710
     return result, AC_g, FR_g, FL_g
 end
 
 """
     ACmap_slice2d_dist(AC_blk, FL_blk, FR_blk, M, grid; forloop_iter=1, inner_etype=nothing)
 
-Distributed ACmap on a SQUARE N×N Slice2D grid (gather class — `@assert
-N1==N2`). AC/FL/FR are block-stored (first χ leg by r1, last χ leg by r2;
+Distributed ACmap on an N1×N2 Slice2D grid (gather class). AC/FL/FR are
+block-stored (first χ leg by r1, last χ leg by r2;
 `slice2d_scatter` convention), M replicated. Two cross-axis legs (contracted
 `d`, output `i`) are gathered to full before the local chain so the off-diagonal
 `(i,l)` blocks are actually contracted (the diagonal trap defeated by gathering
-the cross-axis FREE leg `i` on FL). The single `p_rs = split_ranges(χ, N)` is
-licensed by the square assertion. `forloop_iter` sets a SINGLE memory chunk over
-the LOCAL `l`-block (ACmap's intermediates carry local-a + chunked-l, never a
-full-i×full-d plane, so one l-loop suffices — unlike FRmap/ACdmap's 2-level
-chunk). Output `[i,j,k,l]` is block-distributed (i on r1, l on r2 — same
+the cross-axis FREE leg `i` on FL). The r1/r2 partitions are tracked separately as
+`a_rs = split_ranges(χ, N1)` and `l_rs = split_ranges(χ, N2)`. `forloop_iter` sets
+a SINGLE memory chunk over the LOCAL `l`-block (ACmap's intermediates carry
+local-a + chunked-l, never a full-i×full-d plane, so one l-loop suffices — unlike
+FRmap/ACdmap's 2-level chunk). Output `[i,j,k,l]` is block-distributed (i on r1, l on r2 — same
 convention as the AC input, so the map iterates). Local einsum is
 `ACMAP_LEG5_CHAIN` via `chain_apply` (whole-chain engine API), NOT a ring, NOT a
-hand kernel. Collective over `grid.comm`. Rectangular grids (N1≠N2) are M3 v2 (a
-real block transpose). See docs/2026-06-13-m3-slice2d-wrappers-plan.md Batch C
-and docs/2026-06-13-acmap-slice2d-dataflow-design.md §2-§4.
+hand kernel. Collective over `grid.comm`. See
+docs/2026-06-13-m3-slice2d-wrappers-plan.md Batch C and
+docs/2026-06-13-acmap-slice2d-dataflow-design.md §2-§4.
 """
 function ACmap_slice2d_dist(AC_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
                            forloop_iter = 1, inner_etype = nothing)
-    @assert grid.N1 == grid.N2 "ACmap_slice2d_dist: M3 v1 requires a square grid (N1==N2)"
     M1, M2 = M isa Tuple ? M : (M, conj(M))
     T_orig = eltype(AC_blk)
     do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -505,15 +508,16 @@ function ACmap_slice2d_dist(AC_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
         M1 = _downcast_eltype(inner_etype, M1); M2 = _downcast_eltype(inner_etype, M2)
     end
     χ = MPI.Allreduce(size(AC_blk, 1), +, grid.col_comm)      # F0
-    p_rs = split_ranges(χ, grid.N1)
-    AC_g = _slice2d_row_allgather(AC_blk, grid, p_rs)          # F1: full d (tag 750)
-    FL_g = _slice2d_row_allgather(FL_blk, grid, p_rs)          # F2: full i (tag 750)
-    FR_g = _slice2d_col_allgather(FR_blk, grid, p_rs)          # F3: full d (tag 730)
-    result, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    AC_g = _slice2d_row_allgather(AC_blk, grid, l_rs)          # F1: full d (tag 750)
+    FL_g = _slice2d_row_allgather(FL_blk, grid, l_rs)          # F2: full i (tag 750)
+    FR_g = _slice2d_col_allgather(FR_blk, grid, a_rs)          # F3: full d (tag 730)
+    result, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, a_rs; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end
 
-# ─── ACdmap (cross-axis gather class — SQUARE grid, RING reorder, single l-chunk) ─
+# ─── ACdmap (cross-axis gather class, RING reorder, single l-chunk) ───────────
 # Design: docs/2026-06-15-m35-slice2d-ring-reorder-design.md (supersedes the 2-level
 # i/d chunk of docs/2026-06-13-acmap-slice2d-dataflow-design.md §5-§6).
 # result[a,b,c,d] := ACd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] FL[a,e,f,i]
@@ -530,16 +534,18 @@ end
 # Gathers (in ACdmap_slice2d_dist) are UNCHANGED (i full on ACd+FL, d full on FR);
 # F5 row_reduce_scatter_last (full d last leg, sum l over row, keep d-block r2) is
 # UNCHANGED. Leg placement: l is on ACd_g.4 and FR_g.4 (the chunked local block);
-# FL_g has NO l (a-block × full i). Square grid REQUIRED (single p_rs). Local einsum
-# is ACDMAP_LEG5_SLICE2D_CHAIN via chain_apply (whole-chain API), NOT a ring, NOT a
-# hand kernel. (ACDMAP_LEG5_SLICE2D_CHAIN is in chain_maps.jl, included after this
-# file, resolved at call time via global late-binding.)
-function _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter = 1)
-    # ACd_g = ACd[i∈1:χ, j, k, l∈p_rs[r2+1]]  (col_allgather, full i)
-    # FR_g  = FR[d∈1:χ, g, h, l∈p_rs[r2+1]]   (col_allgather, full d)
-    # FL_g  = FL[a∈p_rs[r1+1], e, f, i∈1:χ]   (row_allgather, full i)
-    χ = sum(length, p_rs)
-    na = length(p_rs[grid.r1 + 1])             # local a extent
+# FL_g has NO l (a-block × full i). The first χ leg uses
+# `a_rs = split_ranges(χ, N1)` and the last χ leg uses
+# `l_rs = split_ranges(χ, N2)`, so rectangular grids do not need a block transpose.
+# Local einsum is ACDMAP_LEG5_SLICE2D_CHAIN via chain_apply (whole-chain API), NOT a
+# ring, NOT a hand kernel. (ACDMAP_LEG5_SLICE2D_CHAIN is in chain_maps.jl, included
+# after this file, resolved at call time via global late-binding.)
+function _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, a_rs, l_rs; forloop_iter = 1)
+    # ACd_g = ACd[i∈1:χ, j, k, l∈l_rs[r2+1]]  (col_allgather, full i)
+    # FR_g  = FR[d∈1:χ, g, h, l∈l_rs[r2+1]]   (col_allgather, full d)
+    # FL_g  = FL[a∈a_rs[r1+1], e, f, i∈1:χ]   (row_allgather, full i)
+    χ = sum(length, a_rs)
+    na = length(a_rs[grid.r1 + 1])             # local a extent
     nl = size(ACd_g, 4)                         # local l extent (ACd_g/FR_g last leg)
     # out (a,b,c,d): b = M1's leg :b in (:e,:j,:g,:b,:p) = size(M1,4);
     # c = M2's leg :c in (:f,:k,:h,:c,:p) = size(M2,4). NOT size(M1,2)/size(M2,2)
@@ -560,20 +566,21 @@ function _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, p_rs; f
     end
     # F5: sum l over row (full last leg d), keep d-block r2.
     @assert size(partial, 4) == χ "ACdmap F5: partial last leg must be full d (mirror of ACmap risk-5)"
-    result = _slice2d_row_reduce_scatter_last(partial, grid, p_rs)   # tag 760
+    result = _slice2d_row_reduce_scatter_last(partial, grid, l_rs)   # tag 760
     return result, ACd_g, FR_g, FL_g
 end
 
 """
     ACdmap_slice2d_dist(ACd_blk, FL_blk, FR_blk, M, grid; forloop_iter=1, inner_etype=nothing)
 
-Distributed ACdmap on a SQUARE N×N Slice2D grid (RING class via the M3.5 reorder —
-`@assert N1==N2`). ACd/FL/FR are block-stored (first χ leg by r1, last χ leg by r2;
+Distributed ACdmap on an N1×N2 Slice2D grid (RING class via the M3.5 reorder).
+ACd/FL/FR are block-stored (first χ leg by r1, last χ leg by r2;
 `slice2d_scatter` convention), M replicated. Two cross-axis legs (contracted `i`,
 output `d`) are gathered to full before the local chain so the off-diagonal `(a,d)`
-blocks are actually contracted (the diagonal trap, transposed vs ACmap). The single
-`p_rs = split_ranges(χ, N)` is licensed by the square assertion. `forloop_iter` is
-now the FLmap-style SINGLE l-chunk count (= #l-chunks): the M3.5 reorder
+blocks are actually contracted (the diagonal trap, transposed vs ACmap). The r1/r2
+partitions are tracked separately as `a_rs = split_ranges(χ, N1)` and
+`l_rs = split_ranges(χ, N2)`. `forloop_iter` is the FLmap-style SINGLE l-chunk
+count (= #l-chunks): the M3.5 reorder
 (`ACDMAP_LEG5_SLICE2D_CHAIN`, FL·ACd kills the cross-axis contracted `i` at link 1)
 makes every carried intermediate a-block×l-block (χ²D⁴/(P·forloop_iter)), so a
 single l-loop that accumulates `Σ_l` suffices — no full-i×full-d plane, no 2-level
@@ -581,14 +588,12 @@ single l-loop that accumulates `Σ_l` suffices — no full-i×full-d plane, no 2
 block-distributed (a on r1, d on r2). Local einsum is `ACDMAP_LEG5_SLICE2D_CHAIN`
 via `chain_apply` (whole-chain engine API), NOT a ring, NOT a hand kernel.
 Collective over `grid.comm` (gathers + `row_reduce_scatter_last` UNCHANGED from the
-gather-class version — only the local chain order/chunk changed). Rectangular grids
-(N1≠N2) are M3 v2 (a real block transpose). See
+gather-class version — only the local chain order/chunk changed). See
 docs/2026-06-15-m35-slice2d-ring-reorder-design.md and Batch D of
 docs/2026-06-13-m3-slice2d-wrappers-plan.md.
 """
 function ACdmap_slice2d_dist(ACd_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
                             forloop_iter = 1, inner_etype = nothing)
-    @assert grid.N1 == grid.N2 "ACdmap_slice2d_dist: M3 v1 requires a square grid (N1==N2)"
     M1, M2 = M isa Tuple ? M : (M, conj(M))
     T_orig = eltype(ACd_blk)
     do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
@@ -598,10 +603,11 @@ function ACdmap_slice2d_dist(ACd_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
         M1 = _downcast_eltype(inner_etype, M1); M2 = _downcast_eltype(inner_etype, M2)
     end
     χ = MPI.Allreduce(size(ACd_blk, 1), +, grid.col_comm)        # F0
-    p_rs = split_ranges(χ, grid.N1)
-    ACd_g = _slice2d_col_allgather(ACd_blk, grid, p_rs)          # F1: full i (tag 730)
-    FL_g  = _slice2d_row_allgather(FL_blk, grid, p_rs)           # F2: full i (tag 750)
-    FR_g  = _slice2d_col_allgather(FR_blk, grid, p_rs)           # F3: full d (tag 730)
-    result, _, _, _ = _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    ACd_g = _slice2d_col_allgather(ACd_blk, grid, a_rs)          # F1: full i (tag 730)
+    FL_g  = _slice2d_row_allgather(FL_blk, grid, l_rs)           # F2: full i (tag 750)
+    FR_g  = _slice2d_col_allgather(FR_blk, grid, a_rs)           # F3: full d (tag 730)
+    result, _, _, _ = _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, a_rs, l_rs; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end

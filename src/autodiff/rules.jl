@@ -968,20 +968,21 @@ function ChainRulesCore.rrule(::typeof(FRmap_slice2d_sliced), FR_blk, ARu_g, ARd
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
     χ = size(ARd_g, 1)
-    p_rs = split_ranges(χ, grid.N1)
-    FR_g = _slice2d_col_allgather(FR_blk, grid, p_rs)   # iterate gather (full d), per-call
-    result, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    FR_g = _slice2d_col_allgather(FR_blk, grid, a_rs)   # iterate gather (full d), per-call
+    result, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1, M2, grid, a_rs, l_rs; forloop_iter)
 
     function frmap_slice2d_sliced_back(dresult)
         d_c = unthunk(dresult)
         if !(d_c isa DenseArray)
             buf = similar(ARu_g, eltype(d_c), size(d_c)); buf .= d_c; d_c = buf
         end
-        dpartial = _slice2d_row_allgather(d_c, grid, p_rs)   # B5 (full i, local a; no l axis → shared)
+        dpartial = _slice2d_row_allgather(d_c, grid, l_rs)   # B5 (full i, local a; no l axis → shared)
         dARd_g = zero(ARd_g); dFR_g = zero(FR_g); dARu_g = zero(ARu_g)
         dM1 = zero(M1); dM2 = zero(M2)
         nl = size(FR_g, 4)
-        l_chunks = _ring_l_chunks(length(p_rs[grid.r1+1]), nl, M1, M2, forloop_iter)
+        l_chunks = _ring_l_chunks(length(a_rs[grid.r1+1]), nl, M1, M2, forloop_iter)
         for ch in l_chunks
             (dFR_c, dARu_c, dM1_c, dM2_c, dARd_c) =
                 chain_backward(FRMAP_LEG5_SLICE2D_CHAIN,
@@ -994,7 +995,7 @@ function ChainRulesCore.rrule(::typeof(FRmap_slice2d_sliced), FR_blk, ARu_g, ARd
         end
         _free!(dpartial)
         # iterate FR gradient → block (col reduce-scatter; KEEP — FR is the iterate).
-        dFR_blk = _slice2d_col_reduce_scatter(dFR_g, grid, p_rs)
+        dFR_blk = _slice2d_col_reduce_scatter(dFR_g, grid, a_rs)
         # ARu/ARd: SLICE grads (their reduce-scatters live in the gather wrappers).
         allreduce_p2p!(dM1, +, grid.comm); allreduce_p2p!(dM2, +, grid.comm)
         dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
@@ -1014,9 +1015,10 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_sliced), AC_blk, FL_g, FR_g
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
     χ = size(FL_g, 4)
-    p_rs = split_ranges(χ, grid.N1)
-    AC_g = _slice2d_row_allgather(AC_blk, grid, p_rs)   # iterate gather (full d), per-call
-    result, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    AC_g = _slice2d_row_allgather(AC_blk, grid, l_rs)   # iterate gather (full d), per-call
+    result, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, a_rs; forloop_iter)
 
     function acmap_slice2d_sliced_back(dresult)
         nl = size(FR_g, 4)
@@ -1024,7 +1026,7 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_sliced), AC_blk, FL_g, FR_g
         if !(d_c isa DenseArray)
             buf = similar(AC_g, eltype(d_c), size(d_c)); buf .= d_c; d_c = buf
         end
-        dpartial = _slice2d_col_allgather(d_c, grid, p_rs)   # B5 (full i, local l-block)
+        dpartial = _slice2d_col_allgather(d_c, grid, a_rs)   # B5 (full i, local l-block)
         dAC_g = zero(AC_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
         dM1 = zero(M1); dM2 = zero(M2)
         l_chunks = split_ranges(nl, min(forloop_iter, nl))
@@ -1040,7 +1042,7 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_sliced), AC_blk, FL_g, FR_g
         end
         _free!(dpartial)   # match FLmap/FRmap sliced discipline (Batch-A R1)
         # iterate AC gradient → block (row reduce-scatter-last; KEEP — AC is the iterate).
-        dAC_blk = _slice2d_row_reduce_scatter_last(dAC_g, grid, p_rs)
+        dAC_blk = _slice2d_row_reduce_scatter_last(dAC_g, grid, l_rs)
         # FL/FR: SLICE grads (their reduce-scatters live in the gather wrappers).
         allreduce_p2p!(dM1, +, grid.comm); allreduce_p2p!(dM2, +, grid.comm)
         dM = is_tuple ? (dM1, dM2) : dM1 .+ conj(dM2)
@@ -1114,11 +1116,10 @@ end
 # old gather-class version (only the local chain order/chunk changed). l is the
 # aligned CONTRACTED leg: dpartial (no l axis) is SHARED across chunks; the
 # l-carrying operands FR_g/ARd_g are sliced. Captured footprint: 3·χ²D²/N gathered
-# slices + M1/M2 + p_rs — never a χ²D⁴ array, never a χ×χ plane. Same rank-uniform /
-# densify / do_cast discipline as FLmap_slice2d_dist.
+# slices + M1/M2 + a_rs/l_rs — never a χ²D⁴ array, never a χ×χ plane. Same
+# rank-uniform / densify / do_cast discipline as FLmap_slice2d_dist.
 function ChainRulesCore.rrule(::typeof(FRmap_slice2d_dist), FR_blk, ARu_blk, ARd_blk, M, grid::Slice2DGrid;
                               forloop_iter = 1, inner_etype = nothing)
-    @assert grid.N1 == grid.N2 "FRmap_slice2d_dist: M3 v1 requires a square grid (N1==N2)"
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
     T_orig = eltype(FR_blk)
@@ -1130,11 +1131,12 @@ function ChainRulesCore.rrule(::typeof(FRmap_slice2d_dist), FR_blk, ARu_blk, ARd
     M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
 
     χ = MPI.Allreduce(size(ARd_c, 1), +, grid.col_comm)
-    p_rs = split_ranges(χ, grid.N1)
-    ARd_g = _slice2d_col_allgather(ARd_c, grid, p_rs)    # F1: full i (tag 730)
-    ARu_g = _slice2d_row_allgather(ARu_c, grid, p_rs)    # F2: full d (tag 750)
-    FR_g  = _slice2d_col_allgather(FR_c,  grid, p_rs)    # F3: full d (tag 730)
-    result_c, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1_c, M2_c, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    ARd_g = _slice2d_col_allgather(ARd_c, grid, a_rs)    # F1: full i (tag 730)
+    ARu_g = _slice2d_row_allgather(ARu_c, grid, l_rs)    # F2: full d (tag 750)
+    FR_g  = _slice2d_col_allgather(FR_c,  grid, a_rs)    # F3: full d (tag 730)
+    result_c, _, _, _ = _frmap_slice2d_forward_sliced(ARd_g, FR_g, ARu_g, M1_c, M2_c, grid, a_rs, l_rs; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function frmap_slice2d_dist_back(dresult)
@@ -1151,7 +1153,7 @@ function ChainRulesCore.rrule(::typeof(FRmap_slice2d_dist), FR_blk, ARu_blk, ARd
         # B5: adjoint of F5 row_reduce_scatter_last (760) → row_allgather (750);
         # full i (last leg), local a. dpartial has NO l axis (l is contracted) →
         # SHARED across every l-sub-chunk.
-        dpartial = _slice2d_row_allgather(d_c, grid, p_rs)
+        dpartial = _slice2d_row_allgather(d_c, grid, l_rs)
 
         # B4: SINGLE-l accumulate (mirror of the M3.5 ring-reorder forward over
         # FRMAP_LEG5_SLICE2D_CHAIN = ops (FR,ARu,M1,M2,ARd); chain_backward recomputes
@@ -1162,7 +1164,7 @@ function ChainRulesCore.rrule(::typeof(FRmap_slice2d_dist), FR_blk, ARu_blk, ARd
         dARd_g = zero(ARd_g); dFR_g = zero(FR_g); dARu_g = zero(ARu_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
         nl = size(FR_g, 4)
-        l_chunks = _ring_l_chunks(length(p_rs[grid.r1+1]), nl, M1_c, M2_c, forloop_iter)  # match forward's 2^31 floor
+        l_chunks = _ring_l_chunks(length(a_rs[grid.r1+1]), nl, M1_c, M2_c, forloop_iter)  # match forward's 2^31 floor
         for ch in l_chunks
             (dFR_c, dARu_c, dM1_c, dM2_c, dARd_c) =
                 chain_backward(FRMAP_LEG5_SLICE2D_CHAIN,
@@ -1178,13 +1180,13 @@ function ChainRulesCore.rrule(::typeof(FRmap_slice2d_dist), FR_blk, ARu_blk, ARd
 
         # B3: adjoint of F3 col_allgather on FR (730) → col_reduce_scatter (710);
         #     dFR_g full d, local l-block → keep d-block r1.
-        dFR_blk  = _slice2d_col_reduce_scatter(dFR_g, grid, p_rs)
+        dFR_blk  = _slice2d_col_reduce_scatter(dFR_g, grid, a_rs)
         # B2: adjoint of F2 row_allgather on ARu (750) → row_reduce_scatter_last
         #     (760); dARu_g a-block, full d → keep d-block r2.
-        dARu_blk = _slice2d_row_reduce_scatter_last(dARu_g, grid, p_rs)
+        dARu_blk = _slice2d_row_reduce_scatter_last(dARu_g, grid, l_rs)
         # B1: adjoint of F1 col_allgather on ARd (730) → col_reduce_scatter (710);
         #     dARd_g full i, local l-block → keep i-block r1.
-        dARd_blk = _slice2d_col_reduce_scatter(dARd_g, grid, p_rs)
+        dARd_blk = _slice2d_col_reduce_scatter(dARd_g, grid, a_rs)
 
         # BM: replicated-M gradients, single allreduce each (NCCL fast path).
         allreduce_p2p!(dM1, +, grid.comm)
@@ -1212,14 +1214,13 @@ end
 # the SAME single l-chunk, then the adjoint comm pairs (B5 col_allgather ↔ F5
 # col_reduce_scatter; B3 col_reduce_scatter ↔ F3 col_allgather; B2/B1
 # row_reduce_scatter_last ↔ F2/F1 row_allgather).
-# Captured footprint: 3·χ²D²/N gathered slices (AC_g a-block/full-d, FL_g
-# a-block/full-i, FR_g full-d/l-block) + M1/M2 + p_rs + forloop_iter — never a
-# χ²D⁴ array, never a χ×χ (i,l) plane (full i coexists only with the local
+# Captured footprint: 3 gathered χ²D²-axis slices (AC_g a-block/full-d, FL_g
+# a-block/full-i, FR_g full-d/l-block) + M1/M2 + a_rs/l_rs + forloop_iter — never
+# a χ²D⁴ array, never a χ×χ (i,l) plane (full i coexists only with the local
 # l-block). Same rank-uniform / densify / do_cast discipline as
 # FLmap_slice2d_dist.
 function ChainRulesCore.rrule(::typeof(ACmap_slice2d_dist), AC_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
                               forloop_iter = 1, inner_etype = nothing)
-    @assert grid.N1 == grid.N2 "ACmap_slice2d_dist: M3 v1 requires a square grid (N1==N2)"
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
     T_orig = eltype(AC_blk)
@@ -1231,11 +1232,12 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_dist), AC_blk, FL_blk, FR_b
     M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
 
     χ = MPI.Allreduce(size(AC_c, 1), +, grid.col_comm)
-    p_rs = split_ranges(χ, grid.N1)
-    AC_g = _slice2d_row_allgather(AC_c, grid, p_rs)      # F1: full d (tag 750)
-    FL_g = _slice2d_row_allgather(FL_c, grid, p_rs)      # F2: full i (tag 750)
-    FR_g = _slice2d_col_allgather(FR_c, grid, p_rs)      # F3: full d (tag 730)
-    result_c, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1_c, M2_c, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    AC_g = _slice2d_row_allgather(AC_c, grid, l_rs)      # F1: full d (tag 750)
+    FL_g = _slice2d_row_allgather(FL_c, grid, l_rs)      # F2: full i (tag 750)
+    FR_g = _slice2d_col_allgather(FR_c, grid, a_rs)      # F3: full d (tag 730)
+    result_c, _, _, _ = _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1_c, M2_c, grid, a_rs; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function acmap_slice2d_dist_back(dresult)
@@ -1253,7 +1255,7 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_dist), AC_blk, FL_blk, FR_b
 
         # B5: adjoint of F5 col_reduce_scatter (710) → col_allgather (730); full
         # i (first leg), local l-block.
-        dpartial = _slice2d_col_allgather(d_c, grid, p_rs)
+        dpartial = _slice2d_col_allgather(d_c, grid, a_rs)
 
         # B4: SAME single l-chunk as the forward (chain_backward recomputes
         # I1/I2/I3 → same local-a + chunked-l intermediates). Zero-init the
@@ -1278,13 +1280,13 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_dist), AC_blk, FL_blk, FR_b
 
         # B3: adjoint of F3 col_allgather on FR (730) → col_reduce_scatter (710);
         #     dFR_g full d, local l-block → keep d-block r1.
-        dFR_blk = _slice2d_col_reduce_scatter(dFR_g, grid, p_rs)
+        dFR_blk = _slice2d_col_reduce_scatter(dFR_g, grid, a_rs)
         # B2: adjoint of F2 row_allgather on FL (750) → row_reduce_scatter_last
         #     (760); dFL_g a-block, full i → keep i-block r2.
-        dFL_blk = _slice2d_row_reduce_scatter_last(dFL_g, grid, p_rs)
+        dFL_blk = _slice2d_row_reduce_scatter_last(dFL_g, grid, l_rs)
         # B1: adjoint of F1 row_allgather on AC (750) → row_reduce_scatter_last
         #     (760); dAC_g a-block, full d → keep d-block r2.
-        dAC_blk = _slice2d_row_reduce_scatter_last(dAC_g, grid, p_rs)
+        dAC_blk = _slice2d_row_reduce_scatter_last(dAC_g, grid, l_rs)
 
         # BM: replicated-M gradients, single allreduce each (NCCL fast path).
         allreduce_p2p!(dM1, +, grid.comm)
@@ -1316,13 +1318,12 @@ end
 # row_allgather) — UNCHANGED from the old gather-class version (only the local chain
 # order/chunk changed). l is the aligned CONTRACTED leg: dpartial (no l axis) is
 # SHARED across chunks; the l-carrying operands ACd_g/FR_g are sliced. Captured
-# footprint: 3·χ²D²/N gathered slices + M1/M2 + p_rs — never a χ²D⁴ array, never a
-# χ×χ (a,d) plane. KEPT EXPLICIT — NOT DRY-merged with FRmap (the i↔d structural
-# twin): the i↔d slicing is the highest cross-leak risk. Same rank-uniform /
-# densify / do_cast discipline as FLmap_slice2d_dist.
+# footprint: 3 gathered χ²D²-axis slices + M1/M2 + a_rs/l_rs — never a χ²D⁴ array,
+# never a χ×χ (a,d) plane. KEPT EXPLICIT — NOT DRY-merged with FRmap (the i↔d
+# structural twin): the i↔d slicing is the highest cross-leak risk. Same
+# rank-uniform / densify / do_cast discipline as FLmap_slice2d_dist.
 function ChainRulesCore.rrule(::typeof(ACdmap_slice2d_dist), ACd_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
                               forloop_iter = 1, inner_etype = nothing)
-    @assert grid.N1 == grid.N2 "ACdmap_slice2d_dist: M3 v1 requires a square grid (N1==N2)"
     is_tuple = M isa Tuple
     M1, M2 = is_tuple ? M : (M, conj(M))
     T_orig = eltype(ACd_blk)
@@ -1334,11 +1335,12 @@ function ChainRulesCore.rrule(::typeof(ACdmap_slice2d_dist), ACd_blk, FL_blk, FR
     M2_c  = do_cast ? _downcast_eltype(inner_etype, M2) : M2
 
     χ = MPI.Allreduce(size(ACd_c, 1), +, grid.col_comm)
-    p_rs = split_ranges(χ, grid.N1)
-    ACd_g = _slice2d_col_allgather(ACd_c, grid, p_rs)    # F1: full i (tag 730)
-    FL_g  = _slice2d_row_allgather(FL_c,  grid, p_rs)    # F2: full i (tag 750)
-    FR_g  = _slice2d_col_allgather(FR_c,  grid, p_rs)    # F3: full d (tag 730)
-    result_c, _, _, _ = _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1_c, M2_c, grid, p_rs; forloop_iter)
+    a_rs = split_ranges(χ, grid.N1)
+    l_rs = split_ranges(χ, grid.N2)
+    ACd_g = _slice2d_col_allgather(ACd_c, grid, a_rs)    # F1: full i (tag 730)
+    FL_g  = _slice2d_row_allgather(FL_c,  grid, l_rs)    # F2: full i (tag 750)
+    FR_g  = _slice2d_col_allgather(FR_c,  grid, a_rs)    # F3: full d (tag 730)
+    result_c, _, _, _ = _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1_c, M2_c, grid, a_rs, l_rs; forloop_iter)
     result = do_cast ? T_orig.(result_c) : result_c
 
     function acdmap_slice2d_dist_back(dresult)
@@ -1356,7 +1358,7 @@ function ChainRulesCore.rrule(::typeof(ACdmap_slice2d_dist), ACd_blk, FL_blk, FR
         # full d (last leg), local a. dpartial has NO l axis (l is contracted) →
         # SHARED across every l-sub-chunk (NOT sliced — that would be ACmap's
         # output-leg pattern, wrong here).
-        dpartial = _slice2d_row_allgather(d_c, grid, p_rs)
+        dpartial = _slice2d_row_allgather(d_c, grid, l_rs)
 
         # B4: SINGLE-l accumulate (mirror of the M3.5 ring-reorder forward over
         # ACDMAP_LEG5_SLICE2D_CHAIN = ops (FL,ACd,M1,M2,FR); chain_backward recomputes
@@ -1367,7 +1369,7 @@ function ChainRulesCore.rrule(::typeof(ACdmap_slice2d_dist), ACd_blk, FL_blk, FR
         dACd_g = zero(ACd_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
         nl = size(ACd_g, 4)
-        l_chunks = _ring_l_chunks(length(p_rs[grid.r1+1]), nl, M1_c, M2_c, forloop_iter)  # match forward's 2^31 floor
+        l_chunks = _ring_l_chunks(length(a_rs[grid.r1+1]), nl, M1_c, M2_c, forloop_iter)  # match forward's 2^31 floor
         for ch in l_chunks
             (dFL_c, dACd_c, dM1_c, dM2_c, dFR_c) =
                 chain_backward(ACDMAP_LEG5_SLICE2D_CHAIN,
@@ -1383,13 +1385,13 @@ function ChainRulesCore.rrule(::typeof(ACdmap_slice2d_dist), ACd_blk, FL_blk, FR
 
         # B3: adjoint of F3 col_allgather on FR (730) → col_reduce_scatter (710);
         #     dFR_g full d, local l-block → keep d-block r1.
-        dFR_blk  = _slice2d_col_reduce_scatter(dFR_g, grid, p_rs)
+        dFR_blk  = _slice2d_col_reduce_scatter(dFR_g, grid, a_rs)
         # B2: adjoint of F2 row_allgather on FL (750) → row_reduce_scatter_last
         #     (760); dFL_g a-block, full i → keep i-block r2.
-        dFL_blk  = _slice2d_row_reduce_scatter_last(dFL_g, grid, p_rs)
+        dFL_blk  = _slice2d_row_reduce_scatter_last(dFL_g, grid, l_rs)
         # B1: adjoint of F1 col_allgather on ACd (730) → col_reduce_scatter (710);
         #     dACd_g full i, local l-block → keep i-block r1.
-        dACd_blk = _slice2d_col_reduce_scatter(dACd_g, grid, p_rs)
+        dACd_blk = _slice2d_col_reduce_scatter(dACd_g, grid, a_rs)
 
         # BM: replicated-M gradients, single allreduce each (NCCL fast path).
         allreduce_p2p!(dM1, +, grid.comm)

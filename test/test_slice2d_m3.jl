@@ -121,7 +121,7 @@ println("rank $rank: test_slice2d_m3.jl batch A done")
         out1 = slice2d_gather(FRmap_slice2d_dist(FRb, ARub, ARdb, M1, g), g)
         @test out1 ≈ FRmap(FR, ARu, ARd, M1) rtol = 1e-12
     end
-    @test_skip "FRmap_slice2d_dist rectangular grid (N1≠N2) deferred to M3 v2"
+    # Rectangular coverage lives in test_slice2d_m3_rect.jl.
 end
 
 @testset "FRmap_slice2d_dist gradient parity (square grid)" begin
@@ -209,8 +209,7 @@ println("rank $rank: test_slice2d_m3.jl batch B done")
         out1 = slice2d_gather(ACmap_slice2d_dist(ACb, FLb, FRb, M1, g), g)
         @test out1 ≈ ACmap(AC, FL, FR, M1) rtol = 1e-12
     end
-    # rectangular grids are M3 v2 — explicitly skipped:
-    @test_skip "ACmap_slice2d_dist rectangular grid (N1≠N2) deferred to M3 v2"
+    # Rectangular coverage lives in test_slice2d_m3_rect.jl.
 end
 
 @testset "ACmap_slice2d_dist gradient parity (square grid)" begin
@@ -277,7 +276,8 @@ end
 # Batch D — ACdmap_slice2d_dist (cross-axis gather class, 2-level i/d chunk).
 # result[a,b,c,d] := ACd[i,j,k,l] FR[d,g,h,l] M1[e,j,g,b,p] M2[f,k,h,c,p] FL[a,e,f,i]
 # Cross-axis the OTHER way vs ACmap: contracted i (ACd.1=r1, FL.4=r2) + output d
-# (FR.1=r1, result.4=r2). Square grid only; off-diagonal (a,d) trap guard.
+# (FR.1=r1, result.4=r2). The 2x2 case below guards the off-diagonal (a,d) trap;
+# rectangular coverage lives in test_slice2d_m3_rect.jl.
 # ─────────────────────────────────────────────────────────────────────────────
 
 @testset "ACdmap_slice2d_dist forward parity (square grid)" begin
@@ -297,7 +297,7 @@ end
         out1 = slice2d_gather(ACdmap_slice2d_dist(ACdb, FLb, FRb, M1, g), g)
         @test out1 ≈ ACdmap(ACd, FL, FR, M1) rtol = 1e-12
     end
-    @test_skip "ACdmap_slice2d_dist rectangular grid (N1≠N2) deferred to M3 v2"
+    # Rectangular coverage lives in test_slice2d_m3_rect.jl.
 end
 
 @testset "ACdmap_slice2d_dist gradient parity (square grid)" begin

@@ -1,8 +1,8 @@
 # M4: env-level Slice2D integration with gather hoisting.
 # Design: docs/2026-06-15-m4-env-slice2d-integration-design.md
 #
-# Distributed boundary-environment solvers on block-distributed tensors over a
-# square N×N Slice2D grid. The FIXED boundary operands (ALu/ALd for leftenv) are
+# Distributed boundary-environment solvers on block-distributed tensors over an
+# N1×N2 Slice2D grid. The FIXED boundary operands (ALu/ALd for leftenv) are
 # gathered ONCE outside the power iteration (gather hoisting); the per-power-step
 # map is the already-sliced `FLmap_slice2d_sliced` (no per-call gather of the fixed
 # operands; the iterate is row-gathered once through the NCCL-capable gather wrapper).
@@ -38,7 +38,7 @@ end
 """
     λL, FL_blk = leftenv_slice2d(ALu_blk, ALd_blk, M, FL_blk, grid; alg)
 
-Distributed `leftenv` on a square N×N Slice2D grid. `ALu_blk`/`ALd_blk`/`FL_blk` are
+Distributed `leftenv` on an N1×N2 Slice2D grid. `ALu_blk`/`ALd_blk`/`FL_blk` are
 block-stored `StructArray`s (`slice2d_scatter` convention: first χ leg by r1, last by
 r2); `M` is the REPLICATED (full) leg5 MPO `StructArray`. Returns the per-cell
 eigenvalues `λL` and the block-stored left environment `FL_blk`, same convention as
@@ -48,12 +48,11 @@ sliced `FLmap_slice2d_sliced`. Mirrors the serial `leftenv` control flow (patter
 dedup, ir=mod1(i+1,Ni) down-partner, j=2:Nj cycle) — that loop is rank-uniform
 because `M.pattern` is replicated, so the collectives never desync.
 
-Preconditions (asserted, fail loud — the deferred features are M5): square grid,
+Preconditions (asserted, fail loud — the deferred features are M5):
 `ifsimple_eig=true`, no mixed precision (`inner_etype`/`whole_vumps_etype`/polish
 unset), no obs, leg5 M. Design: docs/2026-06-15-m4-env-slice2d-integration-design.md.
 """
 function leftenv_slice2d(ALu_blk, ALd_blk, M, FL_blk, grid::Slice2DGrid; alg, ifobs=false, model=nothing)
-    @assert grid.N1 == grid.N2 "leftenv_slice2d: M3 v1 requires a square grid (N1==N2)"
     @assert alg.ifsimple_eig "leftenv_slice2d: requires ifsimple_eig=true (the eigsolve branch bypasses the slice2d rrules)"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "leftenv_slice2d: mixed precision is M5 (inner_etype/whole_vumps_etype/simple_eig_polish_steps must be unset)"
     @assert ndims(M.data[1]) == 5 "leftenv_slice2d: leg5 single-layer-pair M only (leg4/leg8 are M5)"
@@ -131,12 +130,11 @@ end
 """
     λR, FR_blk = rightenv_slice2d(ARu_blk, ARd_blk, M, FR_blk, grid; alg)
 
-Distributed `rightenv` on a square N×N Slice2D grid (gather hoisting). Block-stored
+Distributed `rightenv` on an N1×N2 Slice2D grid (gather hoisting). Block-stored
 ARu/ARd/FR; replicated leg5 M. Same preconditions/fail-loud asserts as leftenv_slice2d
-(square, ifsimple_eig, no mixed precision, no obs, leg5). Design Batch B.
+(ifsimple_eig, no mixed precision, no obs, leg5). Design Batch B.
 """
 function rightenv_slice2d(ARu_blk, ARd_blk, M, FR_blk, grid::Slice2DGrid; alg, ifobs=false, model=nothing)
-    @assert grid.N1 == grid.N2 "rightenv_slice2d: square grid (N1==N2)"
     @assert alg.ifsimple_eig "rightenv_slice2d: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "rightenv_slice2d: mixed precision is M5"
     @assert ndims(M.data[1]) == 5 "rightenv_slice2d: leg5 single-layer-pair M only"
@@ -144,17 +142,17 @@ function rightenv_slice2d(ARu_blk, ARd_blk, M, FR_blk, grid::Slice2DGrid; alg, i
     power_iter = ifobs ? alg.power_iter_obs : power_iter   # obs (mixed) env uses the larger obs power iter
 
     Ni, Nj = size(M)
-    χ, p_rs = ChainRulesCore.ignore_derivatives() do
+    χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
         c = MPI.Allreduce(size(ARu_blk[1, 1], 1), +, grid.col_comm)
-        (c, split_ranges(c, grid.N1))
+        (c, split_ranges(c, grid.N1), split_ranges(c, grid.N2))
     end
     λR = Zygote.Buffer(randSA(Array, M.pattern))
     FR′ = Zygote.Buffer(FR_blk)
     processed_indices = Set{Int}()
     for i in 1:Ni
         ir = ifobs ? (model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)) : mod1(i + 1, Ni)
-        ARu_row = ntuple(j -> slice2d_gather_row(ARu_blk[i, j],  grid, p_rs), Nj)   # full d
-        ARd_col = ntuple(j -> slice2d_gather_col(ARd_blk[ir, j], grid, p_rs), Nj)   # full i
+        ARu_row = ntuple(j -> slice2d_gather_row(ARu_blk[i, j],  grid, l_rs), Nj)   # full d
+        ARd_col = ntuple(j -> slice2d_gather_col(ARd_blk[ir, j], grid, a_rs), Nj)   # full i
         M_i     = ntuple(j -> M[i, j], Nj)
         p = FR_blk.pattern[i, Nj]
         if p ∉ processed_indices
@@ -205,29 +203,28 @@ end
 """
     λAC, AC_blk = ACenv_slice2d(AC_blk, FL_blk, M, FR_blk, grid; alg)
 
-Distributed `ACenv` on a square N×N Slice2D grid (gather hoisting). Block-stored
+Distributed `ACenv` on an N1×N2 Slice2D grid (gather hoisting). Block-stored
 AC/FL/FR; replicated leg5 M. Same fail-loud asserts as leftenv_slice2d. Loops the
 unit-cell COLUMN (outer j); the eig chains the cell ROW i; non-leading cells use the
 GLOBAL `slice2d_norm`. Design Batch C / R1-M13.
 """
 function ACenv_slice2d(AC_blk, FL_blk, M, FR_blk, grid::Slice2DGrid; alg)
-    @assert grid.N1 == grid.N2 "ACenv_slice2d: square grid (N1==N2)"
     @assert alg.ifsimple_eig "ACenv_slice2d: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "ACenv_slice2d: mixed precision is M5"
     @assert ndims(M.data[1]) == 5 "ACenv_slice2d: leg5 single-layer-pair M only"
     @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
 
     Ni, Nj = size(M)
-    χ, p_rs = ChainRulesCore.ignore_derivatives() do
+    χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
         c = MPI.Allreduce(size(AC_blk[1, 1], 1), +, grid.col_comm)
-        (c, split_ranges(c, grid.N1))
+        (c, split_ranges(c, grid.N1), split_ranges(c, grid.N2))
     end
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC_blk)
     processed_indices = Set{Int}()
     for j in 1:Nj
-        FL_col = ntuple(ip -> slice2d_gather_row(FL_blk[ip, j], grid, p_rs), Ni)   # full i
-        FR_col = ntuple(ip -> slice2d_gather_col(FR_blk[ip, j], grid, p_rs), Ni)   # full d
+        FL_col = ntuple(ip -> slice2d_gather_row(FL_blk[ip, j], grid, l_rs), Ni)   # full i
+        FR_col = ntuple(ip -> slice2d_gather_col(FR_blk[ip, j], grid, a_rs), Ni)   # full d
         M_j    = ntuple(ip -> M[ip, j], Ni)
         p = AC_blk.pattern[1, j]
         if p ∉ processed_indices
@@ -262,7 +259,8 @@ end
 # serial Cenv (general.jl:640-681): the jr=mod1(j+1,Nj) FL-column offset, the
 # i=2:Ni non-leading cells normalized by `norm` (local == global on a replicated C).
 # Cmap has no MPO arg and no eig_checkpoint (cheap map — serial Cenv skips it too).
-# Grid-agnostic (Cmap works on any grid; the others assert square).
+# Grid-agnostic (Cmap works on any grid; the cross-axis maps also carry separate
+# r1/r2 partitions on rectangular grids).
 function _simple_eig_Cmap_slice2d(C1j, FL_full, FR_full; power_iter,
                                  segment_checkpoint::CheckpointMethod=Plain())
     Ni = length(FL_full)
@@ -348,24 +346,23 @@ and FL[:,jr] (col-gather, "FR" slot). Reuses `_simple_eig_ACmap_slice2d` /
 `ACmap_slice2d_sliced` verbatim; mirrors ACenv_slice2d (non-leading cells use GLOBAL slice2d_norm).
 """
 function ACenv_plaq_slice2d(AC_blk, FL_blk, M, grid::Slice2DGrid; alg::VUMPS{L}) where {L <: Plaquette}
-    @assert grid.N1 == grid.N2 "ACenv_plaq_slice2d: square grid (N1==N2)"
     @assert alg.ifsimple_eig "ACenv_plaq_slice2d: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "ACenv_plaq_slice2d: mixed precision is not supported on the slice2d path"
     @assert ndims(M.data[1]) == 5 "ACenv_plaq_slice2d: leg5 single-layer-pair M only"
     @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
 
     Ni, Nj = size(M)
-    χ, p_rs = ChainRulesCore.ignore_derivatives() do
+    χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
         c = MPI.Allreduce(size(AC_blk[1, 1], 1), +, grid.col_comm)
-        (c, split_ranges(c, grid.N1))
+        (c, split_ranges(c, grid.N1), split_ranges(c, grid.N2))
     end
     λAC = Zygote.Buffer(randSA(Array, M.pattern))
     AC′ = Zygote.Buffer(AC_blk)
     processed_indices = Set{Int}()
     for j in 1:Nj
         jr = _plaq_jr(L, j, Nj)
-        FLj_col  = ntuple(ip -> slice2d_gather_row(FL_blk[ip, j],  grid, p_rs), Ni)   # FL slot (full i)
-        FLjr_col = ntuple(ip -> slice2d_gather_col(FL_blk[ip, jr], grid, p_rs), Ni)   # FR slot (full d)
+        FLj_col  = ntuple(ip -> slice2d_gather_row(FL_blk[ip, j],  grid, l_rs), Ni)   # FL slot (full i)
+        FLjr_col = ntuple(ip -> slice2d_gather_col(FL_blk[ip, jr], grid, a_rs), Ni)   # FR slot (full d)
         M_j      = ntuple(ip -> M[ip, j], Ni)
         p = AC_blk.pattern[1, j]
         if p ∉ processed_indices

@@ -1,13 +1,13 @@
 """
     rt′, err = vumps_step_slice2d(rt, M, grid, alg)
 
-One distributed VUMPS step on a square N×N Slice2D grid. Mirrors the serial `vumps_step`
+One distributed VUMPS step on an N1×N2 Slice2D grid. Mirrors the serial `vumps_step`
 (general.jl:873) call-for-call — old AL/AR into the env updates, a single AC/C solve (NOT
 the `vumps_step_power` re-solve variant) — replacing the four solvers with their `_slice2d`
 analogs and the two endpoints with the gather seams. AL/AR/FL/FR are block-stored; C is
 replicated full χ×χ. Same checkpoint wrapping as serial (leftenv/rightenv/ACenv/ACCtoALAR
-under `subop_checkpoint`; ALCtoAC and Cenv unwrapped). Square-grid/leg5/ifsimple_eig/no-
-mixed-precision asserts fire inside the `_slice2d` solvers.
+under `subop_checkpoint`; ALCtoAC and Cenv unwrapped). Leg5/ifsimple_eig/no-mixed-
+precision asserts fire inside the `_slice2d` solvers.
 """
 function vumps_step_slice2d(rt::VUMPSRuntime, M::StructArray, grid::Slice2DGrid, alg::VUMPS{General})
     # The slice2d env solvers / seam maps do NOT thread inner_checkpoint into their per-map
