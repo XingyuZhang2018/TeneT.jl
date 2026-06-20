@@ -114,7 +114,7 @@ function _tail_adjoint_rowblock(AC_col)
 end
 
 function _qtail_from_qr_rows(Q_rows, AC_col)
-    return reshape(Q_rows', size(AC_col))
+    return reshape(copy(Q_rows'), size(AC_col))
 end
 
 function _tsqr_front_rowblock(A_row, grid::Slice2DGrid)
