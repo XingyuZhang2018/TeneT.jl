@@ -85,6 +85,19 @@ function ACCtoAL_slice2d_gather_ref(AC_blk, C, grid::Slice2DGrid)
     return scatter_struct(AL_full, grid), errL
 end
 
+"""
+    AR_blk, errR = ACCtoAR_slice2d_gather_ref(AC_blk, C, grid)
+
+Right-only LQ gather seam. This is the serial fallback for grids where the
+distributed TSLQ first QR stage would be locally wide and therefore outside the
+current `qrpos` pullback's tall/square contract.
+"""
+function ACCtoAR_slice2d_gather_ref(AC_blk, C, grid::Slice2DGrid)
+    AC_full = gather_struct(AC_blk, grid)
+    AR_full, errR = ACCtoAR(AC_full, C)
+    return scatter_struct(AR_full, grid), errR
+end
+
 ACCtoAL_slice2d(AC_blk, C, grid::Slice2DGrid) = ACCtoAL_tsqr_slice2d(AC_blk, C, grid)
 
 function _tsqr_front_col_axis(A_mat, grid::Slice2DGrid)
@@ -127,6 +140,18 @@ end
 qrpos_colrep(C, grid::Slice2DGrid) = qrpos(C)
 lqpos_colrep(C, grid::Slice2DGrid) = lqpos(C)
 
+function _min_split_len(n::Integer, parts::Integer)
+    return minimum(length, split_ranges(n, parts))
+end
+
+function _tsqr_first_stage_would_be_wide(AC_blk, C, grid::Slice2DGrid, axis::Symbol)
+    sample = AC_blk.data[1]
+    χ = size(C.data[1], 1)
+    Drows = size(sample, 2) * size(sample, 3)
+    parts = axis === :left ? grid.N1 : grid.N2
+    return _min_split_len(χ, parts) * Drows < χ
+end
+
 function _acc_to_al_tsqr_one(AC_blk, C, grid::Slice2DGrid)
     χ = ChainRulesCore.ignore_derivatives() do
         MPI.Allreduce(size(AC_blk, 1), +, grid.col_comm)
@@ -150,6 +175,9 @@ block. The communication adjoints use the existing Slice2D gather wrappers, so
 this path is valid in the AD loop as well as the forward observable loop.
 """
 function ACCtoAL_tsqr_slice2d(AC_blk, C, grid::Slice2DGrid)
+    if _tsqr_first_stage_would_be_wide(AC_blk, C, grid, :left)
+        return ACCtoAL_slice2d_gather_ref(AC_blk, C, grid)
+    end
     blocks = map(eachindex(AC_blk.data)) do k
         _acc_to_al_tsqr_one(AC_blk.data[k], C.data[k], grid)
     end
@@ -176,6 +204,9 @@ function _acc_to_ar_tslq_one(AC_blk, Cjr, grid::Slice2DGrid)
 end
 
 function ACCtoAR_tslq_slice2d(AC_blk, C, grid::Slice2DGrid)
+    if _tsqr_first_stage_would_be_wide(AC_blk, C, grid, :right)
+        return ACCtoAR_slice2d_gather_ref(AC_blk, C, grid)
+    end
     Nj = size(AC_blk, 2)
     blocks = map(eachindex(AC_blk.data)) do p
         i, j = Tuple(findfirst(==(p), AC_blk.pattern))
