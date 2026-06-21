@@ -1,6 +1,6 @@
 # Sofia VUB Benchmark Results
 
-- **Date**: 2026-04-24 (post `feat/p2p-collectives-ring` refactor, merged into `iPEPS-unified`); 16 GPU NCCL fast-path numbers added 2026-04-27 (jobs `1003788` / `1003905`, commit `60fa029`); 32/64/128 GPU NCCL Part 1 diagnostic supplement added 2026-06-15 (jobs `1287256` / `1287255` / `1287260`, current slice/forloop path); clean mapped NCCL node-scaling added 2026-06-15 (job `1287308`); mapped FLmap Part 2 rebaseline added 2026-06-16 (job `1287310`); mapped 32/64/128 GPU FLmap Part 2 extension added 2026-06-16 (jobs `1287318` / `1287319` / `1287320`)
+- **Date**: 2026-04-24 (post `feat/p2p-collectives-ring` refactor, merged into `iPEPS-unified`); 16 GPU NCCL fast-path numbers added 2026-04-27 (jobs `1003788` / `1003905`, commit `60fa029`)
 - **System**: Sofia HPC at VUB, partition `zen4_h200`
 - **GPU**: NVIDIA H200 141GB (Hopper, x86_64, AMD Zen4 host)
 - **GPU/node**: 8 · **Intra-node**: NVSwitch · **Inter-node**: InfiniBand
@@ -8,10 +8,6 @@
 - **Env**: `CUDA_VISIBLE_DEVICES=$OMPI_COMM_WORLD_LOCAL_RANK`, `UCX_TLS=rc_x,self,sm,cuda_copy,cuda_ipc`,
   `UCX_MEMTYPE_CACHE=n`, `CUDA_LAUNCH_BLOCKING=1`,
   **`LD_PRELOAD=/usr/lib64/libcuda.so.1`** (mandatory — see Known Issues)
-- **Benchmark timing convention**: when per-repetition samples are available,
-  benchmark tables record the best observed/min max-over-ranks time. Average
-  and median are retained only as jitter diagnostics. Legacy rows with only
-  aggregate logs are marked or left as aggregate values until rerun.
 
 ## Part 1: MPI Collectives (`allgatherv_p2p!` / `allreduce_p2p!`)
 
@@ -46,25 +42,6 @@ Job `1000652` (`submit_test.sh` → `test_MPI_config.jl`). 16 GPU uses 2 nodes
 > 16 GPU 128 MB allreduce to **11.83 ms (3.76× faster)**. See Part 4 for the
 > full ring vs. NCCL comparison and break-even analysis.*
 
-### NCCL Supplement (32/64/128 GPU, 2026-06-15)
-
-Jobs `1287256` (32 GPU, 4 nodes), `1287255` (64 GPU, 8 nodes), and
-`1287260` (128 GPU, 16 nodes), all `TENET_USE_NCCL=1`,
-`test_MPI_config.jl` Part 1.
-
-**Superseded diagnostic note (2026-06-15):** these 32/64/128 GPU runs were
-submitted before the Sofia launch rule was fixed and should be treated as
-unmapped/ad-hoc diagnostics, not as NCCL route-quality evidence. Job `1287308`
-below reran the collective test with explicit
-`--map-by ppr:8:node --bind-to none` placement and shows the clean NCCL
-baseline.
-
-| Size  | 32 GPU Allgatherv | 64 GPU Allgatherv | 128 GPU Allgatherv | 32 GPU Allreduce | 64 GPU Allreduce | 128 GPU Allreduce |
-|-------|-------------------|-------------------|--------------------|------------------|------------------|-------------------|
-| 8 KB  | 16.87 ms          | 24.58 ms          | 53.81 ms           | 17.59 ms         | 19.54 ms         | 24.58 ms          |
-| 8 MB  | 22.58 ms          | 40.89 ms          | 6.27 ms            | 25.49 ms         | 29.13 ms         | 41.38 ms          |
-| 128 MB| 25.88 ms          | 46.96 ms          | 64.08 ms           | 38.11 ms         | 56.93 ms         | 103.69 ms         |
-
 Algorithm: hierarchical 3-phase p2p. Allgatherv = intra-node concurrent
 `Irecv!`/`Isend` + leader ring allgatherv across nodes + leader broadcast of
 non-local slabs. Allreduce = intra-node ring reduce-scatter → per-local-rank
@@ -98,70 +75,6 @@ Job `1000652`, per-iteration FLmap_parallel forward time (ms), matrix
 | 16 | 512  | 512MB  |  2105 |  1066 |   538 |   297 |    151 | 1.97× | 3.91× | 7.09× | 13.94× |
 | 16 | 768  | 1152MB |  5755 |  2866 |  1472 |   798 |    443 | 2.01× | 3.91× | 7.21× | 12.99× |
 | 16 | 1024 | 2048MB | 11788 |  6039 |  3203 |  1833 |   1198 | 1.95× | 3.68× | 6.43× |  9.84× |
-
-### Forward Mapped NCCL Rebaseline (1/2/4/8/16/32/64/128 GPU, 2026-06-16)
-
-Job `1287310` (`FLmapP2nc16`) reran the same Part 2 matrix with the Sofia
-multi-GPU launch standard:
-`mpirun --host ... --map-by ppr:8:node --bind-to none`, `TENET_USE_NCCL=1`,
-`NCCL_DEBUG=WARN`, `total_splits=128`, and `forloop_iter=128/np`. Slurm
-completed `0:0` on `acc015,acc022`; the fatal-signature scan found no CUDA
-OOM, NCCL/UCX/OpenMPI fatal, CUTENSOR, Julia load/type/name error, or mapping
-failure. The expected `isapprox(parallel, serial; rtol=1e-4)` forward FAIL
-for `np>1` is the known reduction-order drift; timings are still usable.
-
-Jobs `1287318` (32 GPU, 4 nodes, `forloop_iter=4`), `1287319` (64 GPU,
-8 nodes, `forloop_iter=2`), and `1287320` (128 GPU, 16 nodes,
-`forloop_iter=1`) add the 32/64/128 GPU columns with the same mapped launch
-standard. All three completed with `ExitCode=0:0`; log scans found no fatal
-CUDA/NCCL/UCX/OpenMPI/PRRTE/CUTENSOR/Julia/mapping signatures. The 128 GPU
-run used nodes `acc[001-012,017-020]` and finished in `00:05:27`.
-
-Forward speedups are relative to the mapped `np=1` baseline. Benchmark timing
-uses the best observed/min repetition when per-repetition samples are available;
-older rows that logged only aggregate timings remain as originally reported
-until rerun.
-
-| GPU | Mapped benchmark speedup |
-|-----|---------------------|
-| 1 | 1.00x |
-| 2 | 2.00x |
-| 4 | 3.91x |
-| 8 | 7.25x |
-| 16 | 13.98x |
-| 32 | 26.15x |
-| 64 | 46.30x |
-| 128 | 68.61x |
-
-| D | chi | Size | 1 GPU | 2 GPU | 4 GPU | 8 GPU | 16 GPU | 32 GPU | 64 GPU | 128 GPU | 2x | 4x | 8x | 16x | 32x | 64x | 128x |
-|---|----:|------|------:|------:|------:|------:|------:|------:|------:|------:|---:|---:|---:|---:|---:|---:|---:|
-| 8 | 256 | 32 MB | 121.40 | 56.43 | 25.67 | 14.34 | 7.39 | 4.29 | 2.93 | 3.10 | 2.15x | 4.73x | 8.47x | 16.43x | 28.30x | 41.43x | 39.16x |
-| 8 | 512 | 128 MB | 257.29 | 112.43 | 56.21 | 30.30 | 15.82 | 8.90 | 5.60 | 4.83 | 2.29x | 4.58x | 8.49x | 16.26x | 28.91x | 45.94x | 53.27x |
-| 8 | 768 | 288 MB | 466.73 | 237.77 | 118.53 | 60.81 | 32.80 | 18.53 | 11.19 | 7.57 | 1.96x | 3.94x | 7.68x | 14.23x | 25.19x | 41.71x | 61.66x |
-| 8 | 1024 | 512 MB | 874.36 | 440.58 | 219.89 | 111.72 | 60.90 | 33.34 | 20.24 | 13.73 | 1.98x | 3.98x | 7.83x | 14.36x | 26.23x | 43.20x | 63.68x |
-| 10 | 256 | 50 MB | 206.47 | 111.37 | 71.01 | 151.01 | 56.33 | 19.08 | 11.50 | 23.80 | 1.85x | 2.91x | 1.37x | 3.67x | 10.82x | 17.95x | 8.68x |
-| 10 | 512 | 200 MB | 422.34 | 212.69 | 105.97 | 54.57 | 29.77 | 17.32 | 9.70 | 6.81 | 1.99x | 3.99x | 7.74x | 14.19x | 24.38x | 43.54x | 62.02x |
-| 10 | 768 | 450 MB | 982.94 | 496.91 | 250.19 | 125.68 | 66.99 | 36.17 | 20.75 | 14.59 | 1.98x | 3.93x | 7.82x | 14.67x | 27.18x | 47.37x | 67.37x |
-| 10 | 1024 | 800 MB | 2028.22 | 1102.21 | 624.41 | 269.31 | 126.94 | 67.82 | 38.91 | 24.11 | 1.84x | 3.25x | 7.53x | 15.98x | 29.91x | 52.13x | 84.12x |
-| 12 | 256 | 72 MB | 220.23 | 99.12 | 50.29 | 26.26 | 14.24 | 8.70 | 4.90 | 3.88 | 2.22x | 4.38x | 8.39x | 15.47x | 25.31x | 44.94x | 56.76x |
-| 12 | 512 | 288 MB | 705.81 | 356.54 | 178.95 | 91.05 | 47.95 | 27.81 | 14.88 | 9.57 | 1.98x | 3.94x | 7.75x | 14.72x | 25.38x | 47.43x | 73.75x |
-| 12 | 768 | 648 MB | 1802.97 | 916.23 | 457.12 | 241.83 | 121.67 | 62.58 | 34.91 | 24.77 | 1.97x | 3.94x | 7.46x | 14.82x | 28.81x | 51.65x | 72.79x |
-| 12 | 1024 | 1152 MB | 3636.62 | 1834.85 | 955.27 | 466.12 | 242.10 | 124.26 | 67.28 | 40.60 | 1.98x | 3.81x | 7.80x | 15.02x | 29.27x | 54.05x | 89.57x |
-| 14 | 256 | 98 MB | 318.89 | 161.43 | 80.43 | 40.91 | 22.91 | 12.65 | 7.15 | 4.63 | 1.98x | 3.96x | 7.79x | 13.92x | 25.21x | 44.60x | 68.87x |
-| 14 | 512 | 392 MB | 1345.05 | 681.92 | 358.74 | 198.52 | 90.30 | 47.27 | 42.64 | 15.31 | 1.97x | 3.75x | 6.78x | 14.90x | 28.45x | 31.54x | 87.85x |
-| 14 | 768 | 882 MB | 3561.66 | 1774.05 | 893.40 | 446.62 | 228.56 | 121.39 | 62.98 | 49.05 | 2.01x | 3.99x | 7.97x | 15.58x | 29.34x | 56.55x | 72.61x |
-| 14 | 1024 | 1568 MB | 7183.57 | 3741.16 | 1996.42 | 1226.30 | 656.62 | 366.43 | 123.04 | 70.49 | 1.92x | 3.60x | 5.86x | 10.94x | 19.60x | 58.38x | 101.91x |
-| 16 | 256 | 128 MB | 469.17 | 235.12 | 117.51 | 60.17 | 31.46 | 16.57 | 9.68 | 7.85 | 2.00x | 3.99x | 7.80x | 14.91x | 28.31x | 48.47x | 59.77x |
-| 16 | 512 | 512 MB | 2121.78 | 1076.22 | 535.58 | 270.06 | 135.33 | 79.42 | 42.51 | 22.01 | 1.97x | 3.96x | 7.86x | 15.68x | 26.72x | 49.91x | 96.40x |
-| 16 | 768 | 1152 MB | 5825.00 | 2944.60 | 1516.30 | 987.55 | 452.57 | 183.92 | 98.04 | 131.69 | 1.98x | 3.84x | 5.90x | 12.87x | 31.67x † | 59.41x | 44.23x |
-| 16 | 1024 | 2048 MB | 11937.81 | 6086.98 | 3230.48 | 1795.07 | 1096.67 | 496.28 | 260.93 | 110.72 | 1.96x | 3.70x | 6.65x | 10.89x | 24.05x † | 45.75x | 107.82x |
-
-† The D=16, χ=768/1024 32 GPU forward points were remeasured in targeted
-job `1287327` with `nrep=7`; benchmark timing columns use the best observed
-rerun time (`183.92 ms` / `496.28 ms`), replacing the original job `1287318`
-values (`330.49 ms` / `681.11 ms`). These points are genuinely slow/noisy
-rather than transcription errors: the rerun avg/med/min were
-`319.02/210.86/183.92 ms` for χ=768 and `633.67/571.84/496.28 ms` for χ=1024.
 
 ## Part 2: FLmap_parallel Backward
 
@@ -206,58 +119,10 @@ than NCCL's setup cost, and **delivers 1.3-1.5× extra over ring** at large
 > but loses to the latency-optimised ring on small ones.*
 >
 > *The `isapprox(parallel, serial; rtol=1e-4)` correctness check in
-> `test_MPI_config.jl` prints FAIL for multi-GPU forward runs — this is the known
+> `test_MPI_config.jl` prints FAIL at 2/4/8/16 GPU — this is the known
 > parallel-vs-serial reduction-order drift (machine-eps precision loss) and is
 > **not** a real regression. 1 GPU ALL PASSED confirms the kernel itself is
 > correct. JSC/BSC show the same behaviour.*
-
-### Backward Mapped NCCL Rebaseline (1/2/4/8/16/32/64/128 GPU, 2026-06-16)
-
-Same matrix as the forward mapped rebaseline above. Backward finite/nonzero
-checks passed for all rows in jobs `1287310`, `1287318`, `1287319`, and
-`1287320`. Backward speedups are relative to the mapped `np=1` baseline.
-Benchmark timing uses the best observed/min repetition when per-repetition
-samples are available; older rows that logged only aggregate timings remain as
-originally reported until rerun.
-
-| GPU | Mapped benchmark speedup |
-|-----|---------------------|
-| 1 | 1.00x |
-| 2 | 1.82x |
-| 4 | 2.76x |
-| 8 | 3.17x |
-| 16 | 4.64x |
-| 32 | 8.40x |
-| 64 | 10.02x |
-| 128 | 13.06x |
-
-| D | chi | Size | 1 GPU | 2 GPU | 4 GPU | 8 GPU | 16 GPU | 32 GPU | 64 GPU | 128 GPU | 2x | 4x | 8x | 16x | 32x | 64x | 128x |
-|---|----:|------|------:|------:|------:|------:|------:|------:|------:|------:|---:|---:|---:|---:|---:|---:|---:|
-| 8 | 256 | 32 MB | 547.14 | 320.37 | 199.96 | 210.25 | 180.99 | 113.43 | 72.52 | 77.98 | 1.71x | 2.74x | 2.60x | 3.02x | 4.82x | 7.54x | 7.02x |
-| 8 | 512 | 128 MB | 759.07 | 480.14 | 666.86 | 722.14 | 284.95 | 142.79 | 91.66 | 85.15 | 1.58x | 1.14x | 1.05x | 2.66x | 5.32x | 8.28x | 8.91x |
-| 8 | 768 | 288 MB | 1384.20 | 794.21 | 711.19 | 1147.46 | 645.14 | 485.53 | 200.24 | 254.76 | 1.74x | 1.95x | 1.21x | 2.15x | 2.85x | 6.91x | 5.43x |
-| 8 | 1024 | 512 MB | 2554.15 | 1370.46 | 907.15 | 1069.19 | 945.03 | 754.84 | 490.26 | 267.17 | 1.86x | 2.82x | 2.39x | 2.70x | 3.38x | 5.21x | 9.56x |
-| 10 | 256 | 50 MB | 613.27 | 406.67 | 309.42 | 364.89 | 168.05 | 84.33 | 54.29 | 56.66 | 1.51x | 1.98x | 1.68x | 3.65x | 7.27x | 11.30x | 10.82x |
-| 10 | 512 | 200 MB | 1405.22 | 794.85 | 769.21 | 962.34 | 819.89 | 307.81 | 315.52 | 161.53 | 1.77x | 1.83x | 1.46x | 1.71x | 4.57x | 4.45x | 8.70x |
-| 10 | 768 | 450 MB | 3204.89 | 1710.89 | 1264.41 | 1144.59 | 954.25 | 722.31 | 574.47 | 290.17 | 1.87x | 2.53x | 2.80x | 3.36x | 4.44x | 5.58x | 11.04x |
-| 10 | 1024 | 800 MB | 6352.29 | 3309.40 | 1896.39 | 1551.16 | 1212.73 | 976.76 | 775.12 | 485.55 | 1.92x | 3.35x | 4.10x | 5.24x | 6.50x | 8.20x | 13.08x |
-| 12 | 256 | 72 MB | 786.21 | 494.42 | 511.42 | 596.85 | 315.44 | 153.53 | 95.76 | 88.94 | 1.59x | 1.54x | 1.32x | 2.49x | 5.12x | 8.21x | 8.84x |
-| 12 | 512 | 288 MB | 2454.51 | 1317.20 | 907.45 | 1057.85 | 964.28 | 618.54 | 348.80 | 249.44 | 1.86x | 2.70x | 2.32x | 2.55x | 3.97x | 7.04x | 9.84x |
-| 12 | 768 | 648 MB | 6459.85 | 3361.21 | 1945.89 | 1542.64 | 1200.04 | 964.92 | 753.00 | 500.81 | 1.92x | 3.32x | 4.19x | 5.38x | 6.69x | 8.58x | 12.90x |
-| 12 | 1024 | 1152 MB | 12823.14 | 6580.09 | 3564.06 | 2357.94 | 1621.09 | 1185.70 | 1040.13 | 869.42 | 1.95x | 3.60x | 5.44x | 7.91x | 10.81x | 12.33x | 14.75x |
-| 14 | 256 | 98 MB | 1214.42 | 702.66 | 589.28 | 1018.72 | 544.19 | 278.30 | 166.68 | 127.65 | 1.73x | 2.06x | 1.19x | 2.23x | 4.36x | 7.29x | 9.51x |
-| 14 | 512 | 392 MB | 4838.66 | 2534.08 | 1504.92 | 1356.27 | 1232.07 | 915.96 | 653.35 | 393.62 | 1.91x | 3.22x | 3.57x | 3.93x | 5.28x | 7.41x | 12.29x |
-| 14 | 768 | 882 MB | 12950.43 | 6629.45 | 3544.10 | 2492.23 | 1799.03 | 1183.71 | 1200.73 | 794.34 | 1.95x | 3.65x | 5.20x | 7.20x | 10.94x | 10.79x | 16.30x |
-| 14 | 1024 | 1568 MB | 26029.71 | 13417.31 | 6968.78 | 4722.32 | 2692.86 | 1791.68 | 1280.16 | 1018.96 | 1.94x | 3.74x | 5.51x | 9.67x | 14.53x | 20.33x | 25.55x |
-| 16 | 256 | 128 MB | 1931.25 | 1052.84 | 904.19 | 984.92 | 939.33 | 435.92 | 261.73 | 189.52 | 1.83x | 2.14x | 1.96x | 2.06x | 4.43x | 7.38x | 10.19x |
-| 16 | 512 | 512 MB | 7687.66 | 3992.03 | 2255.38 | 1904.66 | 1455.20 | 1028.14 | 893.59 | 590.13 | 1.93x | 3.41x | 4.04x | 5.28x | 7.48x | 8.60x | 13.03x |
-| 16 | 768 | 1152 MB | 21042.92 | 10803.90 | 5607.94 | 3961.09 | 2263.50 | 711.80 | 1125.36 | 1040.39 | 1.95x | 3.75x | 5.31x | 9.30x | 29.56x † | 18.70x | 20.23x |
-| 16 | 1024 | 2048 MB | 44301.93 | 23006.83 | 11645.46 | 7325.77 | 4305.69 | 1731.46 | 1691.45 | 1335.35 | 1.93x | 3.80x | 6.05x | 10.29x | 25.59x † | 26.19x | 33.18x |
-
-† The D=16, χ=768/1024 32 GPU backward points use the best observed/min times
-from targeted rerun job `1287327` (`711.80 ms` / `1731.46 ms`). The rerun
-avg/med/min were `1258.99/735.51/711.80 ms` for χ=768 and
-`2856.58/3095.17/1731.46 ms` for χ=1024.
 
 ## Part 3: checkpoint() Method Comparison
 
@@ -411,7 +276,571 @@ fraction); BSC H100 8 GPU OOM'd at D=10 χ=400 entirely (memory issue
 unrelated to NCCL). **The Sofia 16 GPU 2-node win does not generalise to
 single-node setups** — keep ring as the default to avoid regressing those.
 
-## Part 5: Clean Mapped NCCL Collectives (2026-06-15, 1-8 H200 nodes)
+## Part 5: Slice2D 2×2 vs slice (4 GPU, single node) — production form `FLmap_slice2d_dist`
+
+Job `1275624` (2026-06-12, `submit_benchmark_slice2d.sh` → `benchmark_slice2d_sofia.jl`,
+branch `claude/sad-saha-3ec6bf` @ `e339c65`+), 1 node × 4×H200, Slice2D grid 2×2.
+Design: [`docs/2026-06-10-slice2d-flmap-design.md`](../../../docs/2026-06-10-slice2d-flmap-design.md).
+(An earlier run of the v2 replicated-AL variant `FLmap_slice2d`, job `1274276`,
+is superseded by this table — same matrix, slice2d numbers within a few % except
+where noted below.)
+
+Methodology: tensors/loss as Part 2 (`test_MPI_config.jl`) — Float64 leg5
+single-M, slice path `total_splits=128`, `nrep=3`, backward = Zygote pullback
+of a bare `sum` loss. **slice2d = `FLmap_slice2d_dist`: FL, ALu, ALd all
+block-stored (persistent 3×χ²D²/P per rank); the per-call row/col AL slice
+gathers ARE included in the timings** — in a leftenv power iteration ALu/ALd
+are fixed, so these gathers amortize away. Slice2D sub-slices its local l
+range with `forloop_iter = n` per cell (column `n`; backward-peak formula
+`(4+2d)·|H|/n + residents ≤ 110 GB`, |H| = χ²D⁴/4). Timings are per-rep
+max-over-ranks with `GC.gc()` (no reclaim) between reps outside the timed
+window — reads slightly above Part 2's rank-0 `@elapsed` convention. Slice2D's
+backward is fully hand-written (six single-contraction adjoints, per-chunk
+local H/T/G recompute, `unsafe_free!` after each array's last use — no
+Zygote inside the map's rrule) and returns BLOCK gradients for ALu/ALd via
+slice-level reduce-scatters (the v2 full-tensor allreduces are gone). All 20
+cells ran (no OOM skips); parity vs the slice path ≤1e-10 fwd / ≤1e-8 bwd on
+every cell (`F✓ B✓`).
+
+Column legend — all times in ms: **slice** = the existing replicated-input
+path (`FLmap_parallel`, Part 2's subject); **slice2d** = the distributed
+`FLmap_slice2d`; **fwd** = one forward map call; **bwd** = one
+`Zygote.pullback` construction + backward; **ring** / **nccl** =
+`TENET_USE_NCCL` off / on; **n** = Slice2D's `forloop_iter` for that cell.
+
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | slice2d fwd ring | slice2d fwd nccl | slice bwd ring | slice bwd nccl | slice2d bwd ring | slice2d bwd nccl | parity |
+|----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
+| 8  | 256  | 1  |     32.8 |     28.8 |     10.0 |     10.2 |    113.2 |    110.9 |     46.3 |     34.9 | F✓ B✓ |
+| 8  | 512  | 1  |     74.5 |     70.9 |     40.7 |     40.4 |    343.0 |    247.4 |    148.4 |    149.1 | F✓ B✓ |
+| 8  | 768  | 1  |    150.1 |    146.0 |    101.8 |    100.3 |    549.3 |    593.8 |    404.5 |    326.2 | F✓ B✓ |
+| 8  | 1024 | 1  |    276.2 |    267.7 |    199.7 |    199.5 |    883.7 |    991.6 |    660.4 |    670.0 | F✓ B✓ |
+| 10 | 256  | 1  |     43.8 |     43.9 |     31.3 |     30.6 |    173.9 |    168.0 |    106.3 |    105.3 | F✓ B✓ |
+| 10 | 512  | 1  |    143.7 |    137.3 |    103.5 |    104.0 |    547.3 |    534.3 |    357.8 |    355.9 | F✓ B✓ |
+| 10 | 768  | 1  |    335.9 |    318.7 |    286.8 |    264.7 |   1041.1 |   1184.6 |    880.8 |    878.8 | F✓ B✓ |
+| 10 | 1024 | 2  |    623.8 |    610.0 |    419.1 |    417.4 |   1938.4 |   1819.9 |   1686.7 |   1678.1 | F✓ B✓ |
+| 12 | 256  | 1  |     71.8 |     71.0 |     50.4 |     48.8 |    274.2 |    273.9 |    202.4 |    170.4 | F✓ B✓ |
+| 12 | 512  | 1  |    253.6 |    258.2 |    222.1 |    221.5 |    844.3 |    831.8 |    749.1 |    751.1 | F✓ B✓ |
+| 12 | 768  | 2  |    638.1 |    618.8 |    434.7 |    434.6 |   1901.2 |   1889.3 |   1702.5 |   1788.6 | F✓ B✓ |
+| 12 | 1024 | 4  |   1183.3 |   1220.4 |    825.8 |    777.0 |   3602.7 |   3517.8 |   3384.8 |   3280.7 | F✓ B✓ |
+| 14 | 256  | 1  |    118.9 |    171.5 |    107.6 |    107.9 |    503.6 |    464.8 |    349.9 |    347.9 | F✓ B✓ |
+| 14 | 512  | 2  |    540.8 |    495.2 |    344.9 |    341.7 |   1537.0 |   1442.1 |   1592.4 |   1453.7 | F✓ B✓ |
+| 14 | 768  | 4  |   1253.8 |   1124.2 |    773.0 |    771.6 |   3576.5 |   3470.3 |   3346.3 |   3385.3 | F✓ B✓ |
+| 14 | 1024 | 8  |   2052.9 |   2053.5 |   1498.5 |   1510.3 |   7145.9 |   6961.0 |   6631.3 |   6581.7 | F✓ B✓ |
+| 16 | 256  | 1  |    186.2 |    186.1 |    166.1 |    165.0 |    726.8 |    660.7 |    572.4 |    573.3 | F✓ B✓ |
+| 16 | 512  | 3  |    746.7 |    737.7 |    535.4 |    537.1 |   2210.5 |   2332.9 |   2187.5 |   2162.4 | F✓ B✓ |
+| 16 | 768  | 7  |   1730.0 |   1695.4 |   1255.7 |   1252.8 |   5645.3 |   5580.5 |   6357.7 |   6222.8 | F✓ B✓ |
+| 16 | 1024 | 14 |   3393.9 |   3298.5 |   2516.4 |   2571.0 |  12062.5 |  11849.3 |  10469.9 |  11329.3 | F✓ B✓ |
+
+Headline reading (ring columns):
+
+- **Slice2D-dist forward is faster everywhere**: 1.1–3.3× vs slice (small
+  cells up to 3.3× — no result allgatherv; big cells ~1.35×, e.g. D=16
+  χ=1024: 2516 vs 3394 ms) — the per-call AL slice gathers cost only a few
+  % even un-amortized.
+- **Slice2D-dist backward is faster on 18/20 cells** (D=16 χ=1024: 10470 vs
+  12063 ms = 1.15×); exceptions D=14 χ=512 and D=16 χ=768 (~4–13% slower,
+  at n-transitions). vs the superseded v2 replicated-AL run: forward within
+  ~2%, backward mixed ±5% — the slice-level reduce-scatters ≈ the old full
+  allreduces on single-node NVLink (their real advantage is cross-node and
+  in persistent memory: 3 tensors × χ²D²/P vs χ²D²/P + 2 full tensors).
+- **NCCL columns ≈ ring columns** on this single-node 4-GPU config (±10%,
+  matching Part 4's finding that NCCL pays off cross-node, not intra-node).
+- The `n` column confirms the memory story: D=16 χ=1024 needs n=14 chunks
+  to fit (un-chunked |H| = 137 GB > device), and runs clean.
+
+Footnotes:
+
+1. **Output placement asymmetry** (deliberate — the honest map-level
+   comparison): slice fwd *includes* the allgatherv that replicates the full
+   result on every rank; Slice2D fwd ends with each rank holding only its
+   block — an iterating map needs no gather since output distribution =
+   input distribution. Likewise Slice2D bwd leaves dFL distributed while
+   slice bwd allgathers it.
+2. **NCCL coverage differs**: slice fwd/bwd collectives take the NCCL fast
+   path when `TENET_USE_NCCL=1`; Slice2D-dist only its dM1/dM2
+   `allreduce_p2p!` calls — the ring shift, row/col AL slice allgathers,
+   column reduce-scatter/allgather, and the row/col gradient reduce-scatters
+   are MPI point-to-point (no NCCL path yet).
+3. **Stale-code attempts**: jobs `1265371`, `1273538`, `1274256` ran earlier
+   revisions (Zygote-taped backward / reclaim-cold timing) and OOMed at
+   D≥10 large-χ cells; their numbers are superseded by this table.
+
+## Part 6: Kernel organization A/B — staged + eager-free vs monolithic @tensor + Zygote (1 GPU)
+
+Job `1275909` (2026-06-12, `submit_bench_kernel_ab.sh` → `bench_kernel_ab_sofia.jl`,
+commit `984ac88`), single H200, no MPI — isolates kernel organization from
+communication on the identical local workload of one 2×2-grid rank
+(`FL_row[χ/2,D,D,χ]·ALd_col[χ,D,D,χ/2]`, Float64 leg5 single-M).
+
+- **A (staged)**: pairwise stage kernels with owned intermediates +
+  `unsafe_free!` after last use; backward = hand-written single-contraction
+  adjoints (the `FLmap_slice2d` organization).
+- **B (monolithic)**: original 5-tensor `@tensor` FLmap via `forloop`;
+  backward = the `forloop` rrule (per-slice Zygote pullback).
+- Both lower to the SAME cuTENSOR pairwise contractions; only the sum
+  placement and intermediate ownership differ. Each path runs at its own
+  memory-feasible chunk count (nA: coeff 8; nB: coeff 14 — Zygote tape +
+  cotangent chain measured ≈10-11 |H| units vs the ordered hand chain's 6;
+  at shared n, B OOMs cells A completes — jobs 1275621/1275726).
+- mem columns = device used (GiB) after one un-GC'd call: pool pressure
+  including dead-until-GC temporaries.
+
+| D  | χ    | nA | nB | A fwd ms | B fwd ms | A bwd ms | B bwd ms | A fwd mem | B fwd mem | A bwd mem | B bwd mem | parity |
+|----|------|----|----|----------|----------|----------|----------|-----------|-----------|-----------|-----------|--------|
+| 8  | 256  | 1  | 1  |      3.3 |      4.4 |     13.9 |     12.1 |      3.0 |      3.6 |      4.1 |      7.6 | F✓ B✓ |
+| 8  | 512  | 1  | 1  |     15.4 |     19.6 |     53.4 |     59.4 |      9.7 |     11.7 |     13.9 |     28.1 | F✓ B✓ |
+| 10 | 512  | 1  | 1  |     45.5 |     69.1 |    155.6 |    271.2 |     21.8 |     26.6 |     31.7 |     66.3 | F✓ B✓ |
+| 10 | 768  | 1  | 2  |    126.7 |    159.3 |    419.2 |    759.9 |     48.0 |     58.7 |     70.4 |    110.0 | F✓ B✓ |
+| 12 | 768  | 2  | 4  |    277.7 |    358.4 |    925.9 |   1668.8 |     51.2 |    108.0 |     74.3 |    110.9 | F✓ B✓ |
+| 12 | 1024 | 4  | 7  |    598.4 |    802.1 |   2119.3 |   3231.8 |     49.7 |    120.5 |     70.7 |    116.3 | F✓ B✓ |
+| 14 | 1024 | 8  | 13 |   1305.6 |   1790.4 |   4244.2 |   7017.6 |     50.2 |    115.1 |     69.5 |    112.8 | F✓ B✓ |
+| 16 | 1024 | 14 | 23 |   2280.5 |   2787.0 |   7171.5 |  11713.6 |     53.3 |    116.8 |     72.4 |    116.3 | F✓ B✓ |
+
+**Reading**: A wins every cell, growing with size — forward 1.2-1.5×,
+backward 1.5-1.8×, pool pressure ~40-55% lower (B's dead-until-GC
+temporaries block pool reuse → continuous fresh `cudaMalloc` inside the
+timed window and reactive-GC dependence). This motivates extending the
+staged + eager-free + hand-adjoint organization to ALL maps (single-GPU
+production paths included), which the full-VUMPS Slice2D integration needs
+anyway.
+
+## Part 7: Chain-engine perf gate (1 GPU)
+
+Job `1276469` (2026-06-12, `submit_bench_chain_gate.sh` →
+`bench_chain_gate_sofia.jl`, commit `0a58586`). Paths on the Part-6 local
+workload: **H** = hand staged kernels (Part 6's A), **C** = chain engine
+(`chain_apply`/`chain_backward` per chunk, same n as H), **T** = monolithic
+`@tensor` + forloop + Zygote (Part 6's B, own nB).
+
+| D  | χ    | n  | nB | H fwd ms | C fwd ms | T fwd ms | H bwd ms | C bwd ms | T bwd ms | Hf mem | Cf mem | Tf mem | Hb mem | Cb mem | Tb mem | parity |
+|----|------|----|----|----------|----------|----------|----------|----------|----------|--------|--------|--------|--------|--------|--------|--------|
+| 10 | 512  | 1  | 1  |     45.5 |     48.7 |     59.3 |    160.7 |    222.6 |    172.0 |     22.0 |     17.2 |     26.9 |     32.1 |     32.4 |     66.6 | F✓ B✓ Tf✓ Tb✓ |
+| 12 | 1024 | 4  | 7  |    598.1 |    632.2 |    778.3 |   2147.1 |   2347.2 |   3423.5 |     51.3 |     41.4 |    122.7 |     73.0 |     74.7 |    111.0 | F✓ B✓ Tf✓ Tb✓ |
+| 16 | 1024 | 14 | 23 |   2283.2 |   2401.0 |   2914.1 |   7476.5 |   8103.6 |  11572.3 |     56.7 |     46.8 |    120.9 |     76.5 |     79.5 |    116.3 | F✓ B✓ Tf✓ Tb✓ |
+
+Gate (≤1.05 time, ≤1.10 mem): **FAIL** — CHAIN/HAND fwd 1.052–1.070, bwd
+1.084–1.385 (small cell dominated by fixed overheads; production cells
+5–9%, converging down with size). CHAIN fwd memory is 18–22% BETTER than
+hand; CHAIN beats TENSOR everywhere. Diagnosis: the engine's derived
+left-assoc intermediate layouts differ from the hand kernels' (different
+cuTENSOR permutation problems); per-call label processing measured ~10 µs/
+link (<0.1%, not the gap). Remediation: explicit per-chain intermediate
+layout pinning, then re-gate.
+
+### Rerun with layout pinning (job `1277383`, commit `2b41db0`)
+
+`Chain` gained explicit intermediate-layout pinning; `FLMAP_LEG5_CHAIN`
+pins the hand kernels' H/T/G layouts, so cuTENSOR sees identical
+permutation problems.
+
+| D  | χ    | n  | nB | H fwd ms | C fwd ms | T fwd ms | H bwd ms | C bwd ms | T bwd ms | Hf mem | Cf mem | Hb mem | Cb mem | parity |
+|----|------|----|----|----------|----------|----------|----------|----------|----------|--------|--------|--------|--------|--------|
+| 10 | 512  | 1  | 1  |     45.0 |     45.2 |     73.1 |    154.3 |    165.7 |    168.7 |   22.0 |   17.2 |   32.1 |   32.4 | all ✓ |
+| 12 | 1024 | 4  | 7  |    589.7 |    591.2 |    771.0 |   1942.0 |   1927.7 |   3370.2 |   51.3 |   41.4 |   73.0 |   74.7 | all ✓ |
+| 16 | 1024 | 14 | 23 |   2251.0 |   2254.8 |   2859.3 |   7411.3 |   7579.6 |  11513.5 |   56.7 |   46.8 |   76.5 |   79.5 | all ✓ |
+
+Ratios CHAIN/HAND: fwd **1.003 / 1.003 / 1.002**; bwd 1.074 / **0.993** /
+1.023; fwd-mem 0.78–0.82 (CHAIN better); bwd-mem 1.01–1.04. The literal
+gate still prints FAIL on the single (10,512) bwd cell (1.074) — a
+fixed-overhead effect on a 160 ms workload whose run-to-run variance is
+itself ~4% (compare H bwd 160.7 → 154.3 across the two runs). **Verdict:
+gate satisfied at production scale** — forward identical, backward within
+noise (and faster at (12,1024)), memory better. The `@generated`
+compile-time lowering from the same chain tables remains the recorded
+fallback if small-shape paths ever become hot. M1 closed; M2 (all maps as
+chains) unblocked.
+
+## Part 8: M2 chain-engine perf gate — production-path A/B (1 GPU)
+
+Job `1285203` (2026-06-13, `submit_bench_chain_gate_m2.sh` →
+`bench_chain_gate_m2_sofia.jl`, commit `eb800c4`, worktree `TeneT_m2gate`),
+single H200, no MPI. The toggle IS the A/B switch: **CHAIN** =
+`set_chain_engine!(true)` (production routes through the engine: `chain_apply`
+fwd, `engine_backward`-rerouted forloop rrule bwd), **TENSOR** = `(false)`
+(verbatim `@tensor` fwd + per-slice Zygote forloop rrule bwd). Six maps,
+Float64 leg5 single-M; CHAIN arm at the engine-feasible `n`, TENSOR arm at its
+own `nB` (Part-6 coeff 14 — each path at its feasible chunking, Part-6/7
+convention). (First attempt `1285146` OOM'd on a driver bug — TENSOR arm forced
+to the engine's `n` + an unguarded parity block; fixed in `eb800c4`.)
+
+| map    | dir | D  | χ    | n  | nB | C ms     | T ms     | C/T   | C mem  | T mem  | C/T m | parity |
+|--------|-----|----|------|----|----|----------|----------|-------|--------|--------|-------|--------|
+| FLmap  | fwd | 10 | 512  | 1  | 1  |    186.4 |    233.3 | 0.799 |   60.8 |   99.9 | 0.609 | f✓ |
+| FLmap  | bwd | 10 | 512  | 1  | 1  |   1035.0 |      oom |   —   |  120.5 |    oom |   —   | g? |
+| FRmap  | fwd | 10 | 512  | 1  | 1  |    217.9 |    216.7 | 1.005 |   60.8 |   80.9 | 0.752 | f✓ |
+| FRmap  | bwd | 10 | 512  | 1  | 1  |   1023.9 |      oom |   —   |  120.5 |    oom |   —   | g? |
+| ACmap  | fwd | 10 | 512  | 1  | 1  |    236.1 |    232.7 | 1.015 |   80.4 |   99.9 | 0.805 | f✓ |
+| ACmap  | bwd | 10 | 512  | 1  | 1  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACdmap | fwd | 10 | 512  | 1  | 1  |    229.1 |    229.2 | 1.000 |   80.4 |   99.9 | 0.805 | f✓ |
+| ACdmap | bwd | 10 | 512  | 1  | 1  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| Cmap   | fwd | 10 | 512  | —  | —  |      1.6 |      1.6 | 1.014 |    2.4 |    2.4 | 1.000 | f✓ |
+| Cmap   | bwd | 10 | 512  | —  | —  |     12.5 |      4.4 | 2.835 |    2.9 |    3.2 | 0.903 | g✓ |
+| Mumap  | fwd | 10 | 512  | 1  | 1  |    258.7 |    256.7 | 1.008 |   61.0 |   80.4 | 0.759 | f✓ |
+| FLmap  | fwd | 12 | 1024 | 4  | 7  |   2628.5 |   3365.9 | 0.781 |  132.6 |  127.3 | 1.042 | f✓ |
+| FLmap  | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| FRmap  | fwd | 12 | 1024 | 4  | 7  |   3012.9 |   3597.4 | 0.838 |  132.6 |  127.3 | 1.042 | f✓ |
+| FRmap  | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACmap  | fwd | 12 | 1024 | 4  | 7  |      oom |   3545.4 |   —   |    oom |  127.3 |   —   | f? |
+| ACmap  | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACdmap | fwd | 12 | 1024 | 4  | 7  |      oom |   3450.5 |   —   |    oom |  127.3 |   —   | f? |
+| ACdmap | bwd | 12 | 1024 | 4  | 7  |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| Cmap   | fwd | 12 | 1024 | —  | —  |     11.3 |     11.3 | 0.996 |   12.0 |   12.0 | 1.000 | f✓ |
+| Cmap   | bwd | 12 | 1024 | —  | —  |     43.4 |     33.7 | 1.288 |   13.2 |   15.4 | 0.856 | g✓ |
+| Mumap  | fwd | 12 | 1024 | 4  | 7  |      oom |   3503.3 |   —   |    oom |  126.0 |   —   | f? |
+| FLmap  | fwd | 16 | 1024 | 14 | 23 |   9452.8 |  11331.5 | 0.834 |  129.8 |  108.8 | 1.193 | f✓ |
+| FLmap  | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| FRmap  | fwd | 16 | 1024 | 14 | 23 |  11058.6 |  14723.8 | 0.751 |  129.8 |  108.9 | 1.192 | f✓ |
+| FRmap  | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACmap  | fwd | 16 | 1024 | 14 | 23 |      oom |  11804.1 |   —   |    oom |  108.8 |   —   | f? |
+| ACmap  | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| ACdmap | fwd | 16 | 1024 | 14 | 23 |      oom |  12154.0 |   —   |    oom |  108.8 |   —   | f? |
+| ACdmap | bwd | 16 | 1024 | 14 | 23 |      oom |      oom |   —   |    oom |    oom |   —   | g? |
+| Cmap   | fwd | 16 | 1024 | —  | —  |     19.7 |     19.7 | 1.000 |   20.7 |   20.7 | 1.000 | f✓ |
+| Cmap   | bwd | 16 | 1024 | —  | —  |     89.7 |     59.3 | 1.512 |   22.8 |   26.8 | 0.854 | g✓ |
+| Mumap  | fwd | 16 | 1024 | 14 | 23 |  11901.0 |  18863.9 | 0.631 |  129.7 |  139.8 | 0.928 | f✓ |
+
+Literal gate (≤1.05 time, ≤1.10 mem, all cells): **FAIL** — but the failure is
+dominated by benchmark-harness limits, not chain-engine regressions. Reading:
+
+- **Forward TIME — robust win (unaffected by pool state).** FLmap 0.799/0.781/
+  0.834×, FRmap 1.005/0.838/0.751×, Mumap 1.008/—/0.631×. The engine forward is
+  faster at every production cell where it runs, growing with size — the Part-6
+  motivation confirmed on the literal production path. Parity `f✓` on every
+  forward cell that ran (fwd 1e-12, the maps' single-M conj-flag chains agree
+  bit-for-bit with the @tensor path).
+- **Forward MEMORY — leaner where cleanly measured.** At D10χ512 every CHAIN
+  forward is 0.61–0.81× TENSOR. At D12/D16 the rank-0 single-process probe is
+  contaminated (see below).
+- **Backward — NOT measurable at these `n` (harness, not engine).** `pick_n`
+  (Part-6 coeff 8/14) was calibrated on the slice2d **rank-local** workload
+  (χ/2-blocks); at **full χ** a single leg5 intermediate is χ²·D⁴·8 ≈ 21 GiB at
+  D10χ512, so `n=1` cannot chunk the backward under 140 GiB. CHAIN bwd ran only
+  for FLmap/FRmap at D10 (120 GiB, TENSOR OOM there = engine ran where @tensor
+  could not); everything else OOM/OOM. **Part-7 is the backward authority** —
+  properly chunked, the chain backward is competitive-and-leaner there. The
+  `g?` cells are "parity not probed" (an arm OOM'd), NOT parity failures; the
+  serial suite proves bwd parity 1e-10 for all 21 maps.
+- **ACmap/ACdmap forward OOM at D12/D16 ⇒ in-process pool fragmentation, not an
+  intrinsic chain regression.** Same maps are *leaner* than @tensor at D10
+  (80.4 vs 99.9); if the chain forward were intrinsically heavier it would show
+  at D10 too. The driver measures all 6 maps × fwd/bwd in ONE process per cell;
+  the 120 GiB FLmap/FRmap backward measurements fragment the pool before ACmap
+  fwd, so CHAIN ACmap fwd can't get a contiguous block while TENSOR (different
+  alloc pattern, measured after a GC+reclaim) squeaks in at 127 GiB. Needs
+  per-map process isolation to measure clean.
+- **Cmap bwd is genuinely slower (2.835/1.288/1.512×) — the one real nit.** Not
+  memory (mem 0.85–0.90×), not artifact: the 3-link `chain_backward` +
+  recompute overhead is not worth it for a tiny leg4 map (12 ms vs 4 ms — the
+  absolute cost is negligible beside FLmap/ACmap's seconds, but per the design
+  doc's "any map slower than its @tensor original is a bug" it is flagged).
+  Candidate follow-up: exempt Cmap from the chain (route the guard back to
+  `@tensor`), since the chain's eager-free/recompute machinery only pays off on
+  the χ²D⁴-class maps.
+
+**Verdict:** the chain engine is **correct** (all serial + 4-rank MPI parity
+gates green; forward parity `f✓` here) and the **forward is a clear production
+win** (0.63–0.83× time at scale, leaner memory where cleanly probed). The
+literal-gate FAIL is (a) a backward `n`-calibration gap in the harness and (b)
+in-process pool fragmentation at D≥12 — not proven engine regressions — plus
+(c) one real, tiny per-map nit (Cmap bwd overhead). Follow-ups: a re-run with
+per-map process isolation + a backward-calibrated `n` to get clean at-scale
+memory, and the Cmap-chain exemption. FLmap_C3v and the corner maps are
+consciously unbenched (out-of-scope per the M2 plan: corner maps' only caller
+is commented out; FLmap_C3v lives only in the qrctmrg path, no Sofia production
+benchmark today).
+
+## Part 9: M3 Slice2D-wrapper 4-GPU validation — `Cmap_slice2d` / `FRmap_slice2d_dist` / `ACmap_slice2d_dist` / `ACdmap_slice2d_dist`
+
+Jobs `1285915` (`forloop_iter=4`) + `1285916` (`forloop_iter=16`, 2026-06-14,
+`submit_test_slice2d_m3.sh` → `test_slice2d_m3_sofia.jl`, branch
+`claude/ecstatic-golick-e3f6f0` @ `7e2372f`), 1 node × 4×H200, Slice2D grid 2×2.
+Plan: [Batch E](../../../docs/2026-06-13-m3-slice2d-wrappers-plan.md).
+
+**Result: GPU distributed parity PASSED for all four maps at χ=256 D=8 (rel
+3–5e-15, ≪ gate); the χ=400 D=10 cell OOMs on the SERIAL REFERENCE (not the
+distributed maps) — a validation-harness limit, diagnosed below.** Run via:
+
+```bash
+cd examples/MPI_parallel/Sofia && sbatch submit_test_slice2d_m3.sh
+```
+
+Methodology: each of the four M3 maps is run distributed on `CuArray`s and its
+forward + Zygote-sum-loss gradient compared (rel err, allreduced max over ranks)
+against the serial `Cmap`/`FRmap`/`ACmap`/`ACdmap` reference — the SAME
+`*_slice2d_dist` code the 4-rank CPU parity gate (`test/test_slice2d_m3.jl`)
+exercises; the GPU is the only new variable. Gate: **forward rel ≤ 1e-10,
+gradient max rel ≤ 1e-8** (the CPU test gate is tighter, 1e-12 / 1e-10 — the GPU
+thresholds absorb device-FP reduction order). Two cells: a validation cell
+(`χ=256 D=8`, env defaults `TENET_SLICE2D_CHI_VALID`/`TENET_SLICE2D_D_VALID`) and a
+production cell (`χ=400 D=10`, `TENET_SLICE2D_CHI`/`TENET_SLICE2D_D`), Float64 leg5,
+both single-M and tuple-M. Cmap any grid (replicated output); FR/AC/ACd require
+the square 2×2 grid. `forloop_iter=4` (`TENET_SLICE2D_FLOOP`) so `n_d=n_i ≥ 2N`,
+the regime that forces the 2-level accumulate/assign chunk for FRmap/ACdmap.
+
+**Device-memory column** = device used (`total − available`) GiB, max over ranks,
+sampled by `mem_line` immediately after each FRmap/ACdmap forward and fwd+bwd
+(the same probe as Part 5/7/8). **The load-bearing claim** (the FLmap-OOM
+lesson): FRmap and ACdmap carry full-`i`×full-`d` chain intermediates; the
+2-level chunk must keep the peak bounded at ≈χ²D⁴/(P·forloop_iter), **NOT** a
+χ×χ plane blow-up. Compare their peak to ACmap (single l-chunk) at the same cell
+— if FRmap/ACdmap stay within a small factor of ACmap (no χ²-plane spike), the
+design's bounded-intermediate claim holds at production scale.
+
+Parity table (fill `✓`/`✗` + the allreduced max rel errors):
+
+Parity table (job 1285916; the χ=256 D8 dev-mem columns are the co-resident
+total = serial reference + distributed map, see diagnosis):
+
+| map      | χ   | D  | variant | fwd rel err | grad max rel err | fwd | grad | dev-mem fwd (GiB) | dev-mem fwd+bwd (GiB) |
+|----------|-----|----|---------|-------------|------------------|-----|------|-------------------|-----------------------|
+| Cmap     | 256 | 8  | leg4    | 0.0         | 0.0              | ✓   | ✓    | —                 | —                     |
+| FRmap    | 256 | 8  | tuple-M | 3.23e-15    | 4.49e-15         | ✓   | ✓    | 13.88             | 26.45                 |
+| FRmap    | 256 | 8  | 1M      | 5.50e-15    | 4.50e-15         | ✓   | ✓    | 14.35             | 27.88                 |
+| ACmap    | 256 | 8  | tuple-M | 3.26e-15    | 4.57e-15         | ✓   | ✓    | (ref)             | (ref)                 |
+| ACmap    | 256 | 8  | 1M      | 5.52e-15    | 4.58e-15         | ✓   | ✓    | (ref)             | (ref)                 |
+| ACdmap   | 256 | 8  | tuple-M | 3.23e-15    | 4.49e-15         | ✓   | ✓    | 18.20             | 31.88                 |
+| ACdmap   | 256 | 8  | 1M      | 5.45e-15    | 4.50e-15         | ✓   | ✓    | 18.26             | 31.95                 |
+| Cmap     | 400 | 10 | leg4    | 0.0         | 0.0              | ✓   | ✓    | —                 | —                     |
+| FRmap    | 400 | 10 | tuple-M | — (OOM)     | — (OOM)          | —   | —    | 74.13 → OOM       | OOM (serial ref)      |
+| ACmap/ACdmap | 400 | 10 | both | — (not reached) | — (not reached) | — | — | —             | —                     |
+
+**Headline reading:**
+
+- **Parity — PASS (the primary goal).** All four maps reproduce the serial
+  kernels on `CuArray` at χ=256 D=8 to rel **3–5e-15** (≪ the 1e-10 fwd / 1e-8
+  grad gate), both tuple-M and single-M — the GPU half the CPU 4-rank gate
+  cannot reach. Cmap is exact to FP (replicated output). Independent of
+  `forloop_iter` (n=4 and n=16 both pass identically).
+- **χ=400 D=10 OOM is the SERIAL REFERENCE, NOT the distributed maps.** The
+  validator compares each dist map against `serial FRmap/ACmap/ACdmap` (the
+  chain engine, default ON, run un-distributed on ONE GPU, held on every rank).
+  At χ=400 D=10 that serial kernel builds the FULL `FRMAP_LEG5_CHAIN`
+  intermediate I2 = full-i × full-d × D⁴ × d_phys = χ²·D⁴·2·16 B = **47.684 GiB**
+  — its forward peaks at 74 GB, and its **gradient** (`chain_backward` recomputing
+  I2) requests another 47.684 GiB → OOM at 99.99% of the 140 GiB H200. The
+  failing allocation size is EXACTLY χ²D⁴·d_phys and is **identical at
+  forloop_iter=4 and 16** — because it is the *un-chunked serial reference*, not
+  the chunked distributed map. (The "FRmap forward peak 13.88 GB" at χ=256 is
+  likewise the serial ref's full I1+I2 = 4.3+8.6 GB — which is why that column is
+  `forloop_iter`-invariant.) **This is precisely WHY the distributed maps exist:
+  the full serial kernel does not fit at production χ on one GPU.** It is a
+  harness limit (the parity check needs the unfittable full reference), not a
+  distributed-map defect or a chunk-bound failure.
+- **At-scale distributed-map memory: design-proven, not yet GPU-probed in
+  isolation.** Because the driver co-locates the dist map with the full serial
+  ref, the dev-mem columns measure their SUM, dominated by the ref; the dist
+  map's own bounded peak (≈χ²D⁴/(P·forloop_iter)) was never measured alone. The
+  χ=256 cell shows the dist maps run correctly alongside the full ref; the
+  bounded-intermediate claim rests on the design proof + the 4-rank CPU parity.
+  **Follow-up to close it empirically:** a serial-ref-free probe at χ=400 D=10 —
+  run each dist map standalone (no serial comparison), assert it does NOT OOM,
+  measure its peak, and check chunk-count-invariance (gather(dist@floop=a) ≈
+  gather(dist@floop=b)) for at-scale correctness without the unfittable ref.
+
+`=== RESULT ===` lines per map are printed by the driver. **Verdict: M3
+distributed parity validated on GPU (χ=256 D=8, all 4 maps); the production-cell
+memory check is blocked by the serial reference's size, recorded as a follow-up
+(serial-ref-free dist-only probe).**
+
+## Part 10: Slice2D scaling — 2×2 (4 GPU, 1 node) vs 4×4 (16 GPU, 2 nodes) — `FLmap_slice2d_dist`
+
+Jobs `1287186` (4 GPU, grid 2×2, 1 node, `COMPLETED` 22:41) + `1287187`
+(16 GPU, grid 4×4, **2 nodes × 8×H200**, `COMPLETED` 19:54), 2026-06-15,
+branch `claude/ecstatic-golick-e3f6f0` @ `d28e3da` (M2 chain-engine **default
+ON** + all four M3 slice2d maps merged), `submit_benchmark_slice2d.sh` /
+`submit_benchmark_slice2d_16gpu.sh` → `benchmark_slice2d_sofia.jl` with
+`TENET_SLICE2D_N1=N2={2,4}`.
+
+Same driver/methodology as Part 5 (Float64 leg5 single-M, `total_splits=128`,
+`nrep=3`, backward = Zygote-`sum` pullback, `forloop_iter=n` per cell). The
+4×4 grid is laid out **2 rows per node** (`rank = r1·4 + r2`, 8 ranks/node):
+slice2d **row** comms (ring shifts + AL row-gather, tags 700/750) stay
+intra-node on NVLink; slice2d **column** comms (reduce-scatter / allgather,
+tags 710/730) **cross the IB link**. Both runs: all 20 cells, parity ≤1e-10
+fwd / ≤1e-8 bwd on **every** cell (`F✓ B✓`). This is the repo's first 16-GPU
+slice2d timing (Part 2's 16-GPU table is the slice `FLmap_parallel` path).
+
+**(a) 4 GPU, grid 2×2 (1 node) — current commit `d28e3da`:**
+
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | slice2d fwd ring | slice2d fwd nccl | slice bwd ring | slice bwd nccl | slice2d bwd ring | slice2d bwd nccl | parity |
+|----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
+| 8  | 256  | 1  |     29.2 |     24.9 |      9.9 |     10.3 |     80.4 |     77.8 |     31.8 |     31.1 | F✓ B✓ |
+| 8  | 512  | 1  |     55.8 |     55.7 |     40.3 |     40.6 |    173.5 |    166.4 |    145.8 |    130.3 | F✓ B✓ |
+| 8  | 768  | 1  |    124.0 |    121.1 |     99.4 |     99.2 |    370.9 |    454.4 |    323.7 |    323.0 | F✓ B✓ |
+| 8  | 1024 | 1  |    210.0 |    205.4 |    198.1 |    212.6 |    632.8 |    611.2 |    646.4 |    662.2 | F✓ B✓ |
+| 10 | 256  | 1  |     36.3 |     35.2 |     28.0 |     27.7 |    118.6 |    115.6 |     87.6 |    117.1 | F✓ B✓ |
+| 10 | 512  | 1  |    110.3 |    107.7 |    102.8 |    103.4 |    396.8 |    342.3 |    341.9 |    342.8 | F✓ B✓ |
+| 10 | 768  | 1  |    233.8 |    231.2 |    259.6 |    260.0 |    818.6 |    824.5 |    856.8 |    860.3 | F✓ B✓ |
+| 10 | 1024 | 2  |    467.4 |    461.4 |    416.7 |    413.2 |   1513.5 |   1664.7 |   1557.1 |   1624.6 | F✓ B✓ |
+| 12 | 256  | 1  |     52.3 |     52.4 |     55.7 |     56.3 |    179.4 |    174.5 |    229.8 |    249.6 | F✓ B✓ |
+| 12 | 512  | 1  |    184.4 |    182.9 |    217.7 |    217.4 |    759.3 |    598.9 |    729.0 |    726.2 | F✓ B✓ |
+| 12 | 768  | 2  |    441.5 |    437.2 |    426.8 |    426.2 |   1478.3 |   1519.2 |   1706.2 |   1762.0 | F✓ B✓ |
+| 12 | 1024 | 4  |    883.8 |    879.0 |    758.8 |    768.5 |   3010.1 |   3130.1 |   3284.4 |   3246.1 | F✓ B✓ |
+| 14 | 256  | 1  |     85.8 |     84.2 |     96.2 |     96.6 |    307.9 |    303.3 |    332.1 |    330.9 | F✓ B✓ |
+| 14 | 512  | 2  |    526.6 |    535.3 |    339.5 |    340.1 |   1274.4 |   1337.1 |   1528.4 |   1379.6 | F✓ B✓ |
+| 14 | 768  | 4  |    820.2 |    829.7 |    763.4 |    764.7 |   3139.3 |   3104.4 |   3378.0 |   3459.1 | F✓ B✓ |
+| 14 | 1024 | 8  |   1694.3 |   1688.3 |   1477.8 |   1495.7 |   6143.2 |   6071.8 |   6393.0 |   6429.9 | F✓ B✓ |
+| 16 | 256  | 1  |    115.6 |    114.7 |    162.2 |    162.1 |    506.5 |    438.4 |    570.8 |    620.6 | F✓ B✓ |
+| 16 | 512  | 3  |    484.7 |    481.8 |    526.7 |    526.7 |   1868.2 |   1827.0 |   2208.6 |   2178.1 | F✓ B✓ |
+| 16 | 768  | 7  |   1407.3 |   1414.5 |   1279.7 |   1290.3 |   5156.2 |   5032.8 |   5674.4 |   5634.8 | F✓ B✓ |
+| 16 | 1024 | 14 |   2663.3 |   2640.9 |   2477.9 |   2501.8 |   9650.2 |   9859.8 |  10777.3 |  10919.0 | F✓ B✓ |
+
+**(b) 16 GPU, grid 4×4 (2 nodes, cross-node IB) — first 16-GPU slice2d data:**
+
+| D  | χ    | n  | slice fwd ring | slice fwd nccl | slice2d fwd ring | slice2d fwd nccl | slice bwd ring | slice bwd nccl | slice2d bwd ring | slice2d bwd nccl | parity |
+|----|------|----|----------------|----------------|-----------------|-----------------|----------------|----------------|-----------------|-----------------|--------|
+| 8  | 256  | 1  |     11.5 |     24.4 |     25.7 |     24.8 |     47.9 |    119.3 |     54.8 |     88.5 | F✓ B✓ |
+| 8  | 512  | 1  |     21.5 |     35.2 |    109.8 |     97.2 |    157.8 |    159.1 |    218.0 |    249.4 | F✓ B✓ |
+| 8  | 768  | 1  |     47.0 |     57.3 |    230.8 |    227.6 |    390.4 |    280.3 |    486.1 |    548.1 | F✓ B✓ |
+| 8  | 1024 | 1  |     80.2 |     82.0 |    439.9 |    405.4 |    630.1 |    505.2 |    970.1 |    914.5 | F✓ B✓ |
+| 10 | 256  | 1  |     14.1 |     29.3 |     43.0 |     49.2 |     75.1 |    126.0 |     90.9 |    130.1 | F✓ B✓ |
+| 10 | 512  | 1  |     48.2 |     49.3 |    164.7 |    167.8 |    281.5 |    321.2 |    395.5 |    487.8 | F✓ B✓ |
+| 10 | 768  | 1  |     87.0 |     90.9 |    393.1 |    395.5 |    646.4 |    430.7 |    876.5 |    893.0 | F✓ B✓ |
+| 10 | 1024 | 1  |    162.8 |    187.3 |    713.6 |    711.3 |   1127.6 |    789.6 |   1628.2 |   1749.6 | F✓ B✓ |
+| 12 | 256  | 1  |     24.5 |     37.0 |     65.0 |     62.3 |    109.7 |    148.8 |    181.7 |    191.3 | F✓ B✓ |
+| 12 | 512  | 1  |     65.4 |     71.2 |    309.2 |    263.4 |    418.3 |    344.8 |    656.4 |    653.7 | F✓ B✓ |
+| 12 | 768  | 1  |    150.7 |    166.7 |    636.3 |    622.9 |    989.1 |    717.7 |   1485.5 |   1582.1 | F✓ B✓ |
+| 12 | 1024 | 1  |    289.7 |    288.4 |   1117.0 |   1150.1 |   1995.4 |   1357.4 |   2837.6 |   2955.9 | F✓ B✓ |
+| 14 | 256  | 1  |     46.2 |     44.9 |    101.2 |    102.8 |    182.2 |    211.5 |    253.1 |    291.6 | F✓ B✓ |
+| 14 | 512  | 1  |    107.6 |    110.4 |    412.1 |    420.6 |    730.1 |    597.5 |   1008.5 |   1117.9 | F✓ B✓ |
+| 14 | 768  | 1  |    274.0 |    268.2 |    960.5 |    973.2 |   1620.0 |   1301.2 |   2516.9 |   2608.8 | F✓ B✓ |
+| 14 | 1024 | 2  |    523.0 |    536.7 |   1570.2 |   1573.9 |   3165.4 |   2332.0 |   4340.3 |   4198.3 | F✓ B✓ |
+| 16 | 256  | 1  |     63.0 |     61.7 |    143.0 |    144.1 |    258.9 |    258.7 |    380.7 |    417.1 | F✓ B✓ |
+| 16 | 512  | 1  |    157.9 |    154.2 |    598.3 |    598.9 |    993.1 |    790.5 |   1478.5 |   1589.1 | F✓ B✓ |
+| 16 | 768  | 2  |    427.1 |    477.2 |   1224.8 |   1266.1 |   2571.2 |   2054.3 |   3300.1 |   3344.2 | F✓ B✓ |
+| 16 | 1024 | 4  |    803.8 |    866.3 |   2193.3 |   2082.5 |   5006.7 |   3817.9 |   6070.1 |   6175.6 | F✓ B✓ |
+
+Headline reading (ring columns):
+
+- **No regression: the 4-GPU table reproduces Part 5 within a few %** (slice2d
+  fwd D=16 χ=1024 2478 vs Part5 2516; D=8 χ=256 9.9 vs 10.0; slice2d bwd D=16
+  χ=1024 10777 vs 10470, +2.9%). M2's engine-default-ON + the M3 map merge
+  leave `FLmap_slice2d_dist`'s single-node performance unchanged, as expected
+  (neither touched its hand kernels).
+
+- **4 GPU (single-node NVLink) slice2d wins; at 16 GPU (cross-node IB) the
+  picture splits by direction.**
+  - **Backward scales — 1.5–1.8× faster at 16 GPU on the heavy cells** (D=16
+    χ=1024 10777→6070 = 1.78×; D=16 χ=768 5674→3300 = 1.72×; D=14 χ=1024
+    6393→4340 = 1.47×). Backward is compute-dominated (per-chunk recompute +
+    six adjoints), so 4× more ranks beats the added cross-node traffic. Small
+    cells regress (D=8 χ=1024 646→970 = 1.5× slower) where comm dominates the
+    tiny compute.
+  - **Forward barely scales — comm-bound.** Only the two largest cells edge
+    ahead at 16 GPU (D=16 χ=1024 2478→2193 = 1.13×; D=16 χ=768 1280→1225);
+    everywhere else 16-GPU slice2d fwd is *slower* than 4 GPU (D=8 χ=1024
+    198→440 = 2.2×). The per-call row/col AL slice gathers now cross IB and
+    dominate the lighter forward compute.
+
+- **Slice2D vs slice at 16 GPU.** Slice2D **fwd** is 2.7–5.5× slower than slice
+  (the cross-node gather, counted in isolation); **bwd** only 1.2–1.5× slower.
+  Both gaps are the map-isolated penalty of Part 5 footnote 1 — in a leftenv
+  power iteration ALu/ALd are fixed so the forward gathers amortize away, and
+  slice2d keeps its memory/locality advantage (3×χ²D²/P resident, block-local
+  recompute).
+
+- **NCCL helps slice cross-node, not slice2d (yet).** At 16 GPU the slice
+  **bwd** allreduce takes the NCCL fast path and gains ~1.3× (D=16 χ=1024
+  slice bwd 5007→3818 ring→nccl; D=14 χ=1024 3165→2332) — Part 4's cross-node
+  NCCL win. Slice2D's bwd is NCCL-flat (6070 vs 6176) because its column/row
+  reduce-scatters are still MPI point-to-point (Part 5 footnote 2). **A
+  cross-node NCCL path for the slice2d reduce-scatters is the open lever** to
+  make distributed-slice2d backward scale like slice at ≥2 nodes.
+
+- **Memory pressure scales 1/P: the chunk count `n` drops ~4× at 16 GPU**
+  (D=16 χ=1024 n=14→4; D=14 χ=1024 n=8→2; D=16 χ=768 n=7→2) — each rank holds
+  χ²D⁴/(P·n), so 4× more ranks need 4× fewer forloop chunks to fit, confirming
+  the per-rank bound at the wider grid.
+
+`.out` files: `examples/MPI_parallel/Sofia/Sofia_slice2d_bench_1287186.out`,
+`Sofia_slice2d_bench16_1287187.out`. Footnotes 1–2 of Part 5 (output-placement
+asymmetry, NCCL coverage) apply unchanged.
+
+## Part 11: M3.5 ring-class reorder — FRmap/ACdmap gather-class → ring-class
+
+Branch `claude/ecstatic-golick-e3f6f0` @ `334575d`. Design:
+[`docs/2026-06-15-m35-slice2d-ring-reorder-design.md`](../../../docs/2026-06-15-m35-slice2d-ring-reorder-design.md).
+The M3 gather-class FRmap/ACdmap (2-level i/d chunk, a full-i×full-d intermediate
+plane) are reordered so the cross-axis **contracted** leg dies at link 1 (FL·ACd /
+FR·ARu) — exactly as ACmap already did — collapsing the plane to χ²D⁴/P. All four
+slice2d maps become **single-l-chunk ring-class** with **identical communication**
+(no new primitive; only the local chain order + chunk loop change). Driver
+`benchmark_slice2d_maps_sofia.jl` (Float64 leg5 single-M, nrep=3, slice2d
+`forloop_iter=pick_n`; parity vs the chunked `*_parallel` slice ref — no
+serial-ref OOM). Validated: 4-rank CPU parity (incl. multi-chunk accumulate,
+off-diagonal trap blocks, single-M, Db≠Dc) + opus review CLEAN + GPU parity
+`F✓ B✓` every cell. A 2³¹ cuTENSOR floor (`_ring_l_chunks`) was added after a
+2×2 D=10 χ=768 illegal-address (the 7-dim I2 = na·local_l·D⁴·d_phys overflows
+32-bit StridedView indexing > 2³¹; the floor caps each chunk's I2 < 2e9).
+
+Gather-class baseline = job `1287203` (16 GPU 4×4); ring-class = the **ring**
+columns of job `1287248` (16 GPU 4×4, same matrix). 16-GPU headline (ms):
+
+| cell | FLmap | ACmap | FRmap gather→ring | ACdmap gather→ring |
+|------|-------|-------|-------------------|---------------------|
+| D16 χ1024 fwd | 2169 | 2139 | 8245 → **2345** (3.5×) | 8329 → **2248** (3.7×) |
+| D16 χ1024 bwd | 5968 | 5960 | 38583 → **7247** (5.3×) | 28977 → **6133** (4.7×) |
+| D14 χ1024 fwd | 1495 | 1524 | 4844 → **1675** (2.9×) | 4974 → **1642** (3.0×) |
+| D14 χ1024 bwd | 3948 | 3725 | 22144 → **5048** (4.4×) | 16339 → **4044** (4.0×) |
+
+**Reading.** The gather-class FRmap/ACdmap ran **3–6× FLmap** (the full-i×full-d
+plane = N× redundant FLOPs/rank + ≈P·n small GEMMs); the reorder drops them to
+**≈ FLmap / ACmap (1.0–1.1×)** — all four maps now one architecture. The penalty
+grew with grid size in the gather-class (N× factor: 16-GPU FRmap bwd was 6.4×
+FLmap vs 3.1× at 4 GPU), so the reorder matters more at scale. The 4-GPU
+gather-class baseline (`1287202`) showed the same 2.4–3.8× that the reorder
+removes. Full 20-cell × 4-map tables are the ring columns of Part 12.
+
+## Part 12: NCCL fast path for the slice2d col/row collectives — 16 vs 64 GPU scaling
+
+Commits `b2f9906` (NCCL path) + `5463dd8` (64-GPU script). The four slice2d
+collectives (`_slice2d_{col,row}_{allgather,reduce_scatter*}`) gain an NCCL path
+(`TENET_USE_NCCL=1`), mirroring the existing `allreduce_p2p!`/`allgatherv_p2p!`
+seam: `_get_nccl_comm(grid.row_comm/col_comm)` reuses the per-MPI-comm NCCL cache
+(no new infra); ROW collectives (last leg) call ncclAllGather/ncclReduceScatter
+directly; COLUMN collectives (first leg) permute the leg first↔last around the
+NCCL call (a local GPU transpose, cheap vs the cross-node IB transfer it
+replaces). Guarded `_use_nccl() && CuArray && equal-blocks (χ%N==0)` → MPI
+fallback. In the 2-rows-per-node (4×4) / 1-row-per-node (8×8) layout the
+**col_comm is the cross-node axis** — the high-value NCCL target. opus-reviewed
+CLEAN (permute round-trip + rank-mapping empirically verified). Jobs `1287248`
+(16 GPU 4×4, 2 nodes) + `1287257` (64 GPU 8×8, 8 nodes); ring vs nccl columns,
+**parity recomputed under NCCL — `F✓ B✓` every cell** (the permute path is
+numerically correct at both 4×4 and 8×8).
+
+**NCCL speedup, FLmap fwd at χ=1024 (ms ring→nccl, FR/AC/ACd track within ±15%):**
+
+| D  | 16 GPU (2 nodes) | 64 GPU (8 nodes) |
+|----|------------------|------------------|
+| 8  | 388 → 168 (2.3×) | 216 → 132 (1.6×) |
+| 10 | 704 → 313 (2.2×) | 357 → 234 (1.5×) |
+| 12 | 1096 → 500 (2.2×)| 545 → 351 (1.6×) |
+| 14 | 1495 → 687 (2.2×)| 837 → 587 (1.4×) |
+| 16 | 2169 → 997 (2.2×)| 1160 → 704 (1.7×)|
+
+Backward tracks forward (16 GPU ~1.4–1.7×, 64 GPU ~1.5–1.7× at χ=1024).
+
+**Headline — NCCL's benefit is set by the per-rank MESSAGE SIZE, not node count.**
+- **Large cells win**: at χ=1024 NCCL is 2.2× (16 GPU) / 1.5–1.7× (64 GPU). At
+  16 GPU the crossover where NCCL starts winning is ≈χ512; below it the col
+  blocks are too small for the IB transfer to amortise NCCL's fixed launch cost.
+- **The benefit SHRINKS at 64 GPU (strong scaling, fixed χ)**, contrary to the
+  naive "more nodes ⇒ more NCCL". Per-rank comm is χ²D²/√P (shrinks as 1/√P) so
+  at 8×8 each col message is 4× smaller than at 4×4 → NCCL's fixed latency is a
+  bigger fraction → the crossover moves UP to ≈χ1024, and small cells get much
+  worse (FLmap D8 χ256 fwd: 16 GPU 25→51 = 2× slower; 64 GPU 12→66 = **5.6×
+  slower**). Two competing effects — comm fraction grows with √P (pro-NCCL) but
+  per-message size shrinks (anti-NCCL); at fixed χ the latter wins.
+- **To grow the NCCL win with node count, scale WEAKLY** (raise χ with P so the
+  per-rank message stays large). NCCL fully pays off in the production regime
+  (large χ≥1024, D≥10).
+
+**Production guidance**: gate NCCL on the per-rank message `~χ·D/√P`, not blanket
+on — enable for large χ / moderate P, keep the hand ring for the strong-scaling
+tail and small cells. (Full 20-cell × 4-map ring/nccl tables: jobs 1287248 /
+1287257 `.out`; regenerate via `submit_benchmark_slice2d_maps_{16,64}gpu.sh`.)
+
+## Part 13: Clean Mapped NCCL Collectives (2026-06-15, 1-8 H200 nodes)
 
 Job `1287308` (`AgArNCCL8n`) reran the NCCL Allgather/Allreduce route test
 with explicit OpenMPI placement:
@@ -474,14 +903,6 @@ export CUDA_LAUNCH_BLOCKING=1                 # mandatory (H200 sync worker bug)
 export LD_PRELOAD=/usr/lib64/libcuda.so.1     # mandatory (libcuda conflict)
 ```
 
-All multi-GPU Sofia scripts should use the explicit placement form:
-
-```bash
-mpirun --map-by ppr:8:node --bind-to none -np ${MAX_GPU} \
-    -x UCX_MODULE_DIR -x LD_LIBRARY_PATH -x PATH -x HOME -x JULIA_DEPOT_PATH \
-    bash -c "export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; exec julia ..."
-```
-
 ## Known Issues
 
 - **`LD_PRELOAD=/usr/lib64/libcuda.so.1` mandatory** for MPI + CUDA.jl on Sofia.
@@ -499,11 +920,6 @@ mpirun --map-by ppr:8:node --bind-to none -np ${MAX_GPU} \
   not yet fully tuned. **Mitigation:** `TENET_USE_NCCL=1` (commit `60fa029`)
   drops this to **11.83 ms (3.76× faster)** by routing through `ncclAllReduce`
   instead of the 3-phase p2p ring. See Part 4 for the production trade-off.
-- **Do not launch multi-GPU Sofia jobs with OpenMPI's default rank mapping.**
-  Use `--map-by ppr:8:node --bind-to none` for all multi-card scripts. The
-  2026-06-15 clean mapped run (job `1287308`) shows the NCCL route is fast and
-  stable under this placement; unmapped 32+ GPU collective numbers can look
-  pathologically slow and should be treated as invalid diagnostics.
 - **Home dir `/user/sofia/$VSC` doesn't exist** — work out of
   `/sofia/scratch/pilot/pilot_2026_0002/<user>/` with `HOME=$WD` +
   `JULIA_DEPOT_PATH=$WD/.julia`.

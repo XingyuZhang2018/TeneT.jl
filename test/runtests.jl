@@ -170,6 +170,9 @@ end
     include("test_utils.jl")
     include("test_checkpoint.jl")
     include("test_contraction.jl")
+    include("test_parallel_method_api.jl")
+    include("test_nccl_wrapper_static.jl")
+    include("test_script_paths.jl")
     include("test_2d_classical.jl")
     include("test_boundary.jl")
     include("test_autodiff.jl")
@@ -177,6 +180,12 @@ end
     include("test_tm_spectrum.jl")
     include("test_tm_spectrum_plot.jl")
     include("test_patch.jl")
+    # M2 chain-engine parity suite + the CHAIN_ENGINE[]==true flip assertion
+    # (Task 11). Verified to include cleanly under this preamble — its
+    # `using TeneT: ...` internals and Zygote do not clash with the imports
+    # above. CI-gating the flip here is the point; it is no longer a
+    # manual-only suite.
+    include("test_chain_maps.jl")
 
     if get(ENV, "TENET_TEST_MPI", "false") == "true"
         include("test_mpi.jl")

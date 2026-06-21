@@ -370,9 +370,9 @@
     end
 
     # =========================================================================
-    # forloop_parallel_MPI.jl tests
+    # slice1d parallel-map tests
     # =========================================================================
-    @testset "forloop_parallel_MPI.jl" begin
+    @testset "slice1d parallel maps" begin
 
         @testset "split_count" begin
             counts = split_count(10, 3)

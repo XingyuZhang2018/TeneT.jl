@@ -79,7 +79,11 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
 
     @unpack AL, C, FLu, FLo = env
     @unpack J1, J2 = model
-    AC = ALCtoAC(AL, C)
+    # Slice2D (grid set ⟺ block obs env, gated to J1J2{Square} in ObsEnv): contract the energy
+    # expectation block-distributed via the slice2d transfer maps (grid threaded into oc_*),
+    # instead of gathering the full env. AC needs the slice2d AL·C (gather AL → serial → scatter).
+    grid = _effective_grid(params.boundary_alg)
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
 
@@ -102,15 +106,15 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
 
         params.verbosity >= 4 && println("===========$i,$j===========")
         args12 = (FLo[i,j], AL[i,j], A[i,j], AL[ir,j], FLo[i,j], AC[i,jr], A[i,jr], AC[ir,jr])
-        e = _contract_barebones(contract_o_12, args12, terms, params)
-        n = _contract_one(contract_n_12, args12, params)
+        e = _contract_barebones(contract_o_12, args12, terms, params; grid)
+        n = _contract_one(contract_n_12, args12, params; grid)
         params.verbosity >= 4 && println("bond_J1H = $(J1h * e/n)")
         etol += J1h * e/n
         e_dict["bond_J1H_energy"]["$(i),$(j)"] = J1h * e/n
 
         args21 = (AC[i,j], FLu[i,j], A[i,j], FLu[i,jr], FLo[ir,j], A[ir,j], FLo[ir,jr], AC[i,j])
-        e = _contract_barebones(contract_o_21, args21, terms, params)
-        n = _contract_one(contract_n_21, args21, params)
+        e = _contract_barebones(contract_o_21, args21, terms, params; grid)
+        n = _contract_one(contract_n_21, args21, params; grid)
         params.verbosity >= 4 && println("bond_J1V = $(J1v * e/n)")
         etol += J1v * e/n
         e_dict["bond_J1V_energy"]["$(i),$(j)"] = J1v * e/n
@@ -118,8 +122,8 @@ function energy_value(model::J1J2{Square}, A, env::PlaquetteVUMPSEnv, params::iP
         # J2 diagonal bonds connect same sublattice → no rotation
         _terms_j2 = model.ifrotate ? terms_norot : terms
         args22 = (FLu[i,j], FLo[ir,j], AL[i,j], AL[i,j], FLu[i,j], FLo[ir,j], AC[i,jr], AC[i,jr], A[i,j], A[i,jr], A[ir,j], A[ir,jr])
-        e = _contract_barebones(contract_o_22_1, args22, _terms_j2, params)
-        n = _contract_one(contract_n_22, args22, params)
+        e = _contract_barebones(contract_o_22_1, args22, _terms_j2, params; grid)
+        n = _contract_one(contract_n_22, args22, params; grid)
         params.verbosity >= 4 && println("bond_J2\\ = $(J2 * e/n)")
         etol += J2 * e/n * 2 # factor of 2 for the two diagonals in the plaquette
         e_dict["bond_J2\\_energy"]["$(i),$(j)"] = J2 * e/n

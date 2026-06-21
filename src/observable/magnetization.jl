@@ -40,7 +40,12 @@ end
 
 function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
     @unpack AL, C, FLu, FLo = env
-    AC = ALCtoAC(AL, C)
+    grid0 = _dist_energy_plaq_grid(model, params.boundary_alg)
+    is_block_env = grid0 !== nothing &&
+                   (size(AL[1, 1], 1) != size(C[1, 1], 1) ||
+                    size(AL[1, 1], ndims(AL[1, 1])) != size(C[1, 1], 2))
+    grid = is_block_env ? grid0 : nothing
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
     atype = _arraytype(AC[1])
     S = model.S
     Sx = atype(const_Sx(S))
@@ -60,11 +65,11 @@ function magnetization_value(model, A, env::PlaquetteVUMPSEnv, params)
         params.verbosity >= 4 && println("===========$i,$j===========")
         ir = Ni + 1 - i
         jr = model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
-        Mx = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sx; ifparallel, forloop_iter)
-        My = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sy; ifparallel, forloop_iter)
-        Mz = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter)
+        Mx = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sx; ifparallel, forloop_iter, grid)
+        My = etype == Float64 ? 0.0 : contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sy; ifparallel, forloop_iter, grid)
+        Mz = contract_o_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr], Sz; ifparallel, forloop_iter, grid)
 
-        n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter)
+        n = contract_n_11(FLo[i,j],AC[i,j],A[i,j],AC[ir,j],FLo[i,jr]; ifparallel, forloop_iter, grid)
         Mag = [Mx/n, My/n, Mz/n]
         Mnorm[i,j] = norm(Mag)
         params.verbosity >= 4 && println("M = $(Mag)\n|M| = $(Mnorm)")

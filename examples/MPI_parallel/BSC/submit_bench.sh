@@ -25,7 +25,7 @@ for N in 1 2 4 8; do
     echo "========== ${N} GPU =========="
     mpirun -np $N bash -c \
         "export CUDA_VISIBLE_DEVICES=\$OMPI_COMM_WORLD_LOCAL_RANK; \
-         exec $JULIA --project=../../.. ../benchmark_fg.jl"
+         exec $JULIA --project=../../.. ../benchmarks/benchmark_fg.jl"
 done
 
 echo ""

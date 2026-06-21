@@ -3,31 +3,41 @@
 """
     C4v_restriction(A)
 
-Impose C4v symmetry on an iPEPS tensor `A` with indices `(l, d, r, u, p, n)` (6-leg)
-by averaging over all C4v symmetry operations (reflections and rotations).
+Impose C4v symmetry on an iPEPS tensor `A` with indices `(l, d, r, u, p)`
+or `(l, d, r, u, p, n)`. The input is left unchanged.
 """
+function C4v_restriction(A::AbstractArray{<:Number, 5})
+    B = copy(A)
+    B = B + permutedims(conj(B), (1,4,3,2,5)) # up-down reflection
+    B = B + permutedims(conj(B), (3,2,1,4,5)) # left-right reflection
+    B = B + permutedims(conj(B), (2,1,4,3,5)) # diagonal reflection
+    B = B + permutedims(conj(B), (4,3,2,1,5)) # rotation
+    return B
+end
+
 function C4v_restriction(A::AbstractArray{<:Number, 6})
-    A += permutedims(conj(A), (1,4,3,2,5,6)) # up-down reflection
-    A += permutedims(conj(A), (3,2,1,4,5,6)) # left-right reflection
-    A += permutedims(conj(A), (2,1,4,3,5,6)) # diagonal reflection
-    A += permutedims(conj(A), (4,3,2,1,5,6)) # rotation
-    return A/norm(A) 
+    B = copy(A)
+    B = B + permutedims(conj(B), (1,4,3,2,5,6)) # up-down reflection
+    B = B + permutedims(conj(B), (3,2,1,4,5,6)) # left-right reflection
+    B = B + permutedims(conj(B), (2,1,4,3,5,6)) # diagonal reflection
+    B = B + permutedims(conj(B), (4,3,2,1,5,6)) # rotation
+    return B
 end
 
 """
     _restriction_ipeps(A)
 
-Default restriction for iPEPS tensor. Simply normalizes the tensor to have unit Frobenius norm.
+Default restriction for iPEPS tensor. Leaves the tensor unchanged.
 ```
         4
         |
- 1 -- ipeps -- 3
+  1 -- ipeps -- 3
         |
         2
 ```
 """
 function _restriction_ipeps(A)
-    return A/norm(A)
+    return A
 end
 
 # --- Central canonical forms ---
@@ -476,7 +486,7 @@ function _gauge_fixed(A::AbstractArray{T}, params) where {T <: Complex{<:Forward
     G !== nothing && return G
     return find_local_min_norm_G(map(_primal_value, A), params)
 end
-    
+
 """
     local_min_norm(A, params; ifignore_gauge=true)
 
@@ -484,7 +494,7 @@ Apply the minimum-norm gauge transformation to iPEPS tensor `A`.
 If `ifignore_gauge=true`, the gauge optimization is excluded from AD.
 """
 function local_min_norm(A, params; ifignore_gauge=true)
-    A /= norm(A) 
+    A /= norm(A)
     G = ifignore_gauge ? _gauge_fixed(A, params) : find_local_min_norm_G(A, params)
     AG = gauge_transfer(A, G, params)
     return AG

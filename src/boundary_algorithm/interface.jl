@@ -28,6 +28,18 @@ C4v
     ifparallel::Bool = false
     ifsimple_eig::Bool = true
 
+    # M5 Slice2D (2D block-distributed) path. When a Slice2DGrid is set, `vumps_step`
+    # routes to `vumps_step_slice2d` (block AL/AR/FL/FR, replicated C, QR gather seam).
+    # nothing → serial path unchanged. Untyped (like ifparallelupdown) to avoid a
+    # forward-reference to Slice2DGrid (defined later in the module).
+    grid = nothing
+    # New public parallel API. When set, this method object takes precedence over
+    # legacy `ifparallel`/`grid` routing at the high-level VUMPS boundary.
+    parallel_method = nothing
+    # Opt-in forward-only distributed QR seam for Plaquette Slice2D observation runs.
+    # The default gather QR seam remains in place for AD/optimization.
+    distributed_qr::Bool = false
+
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0
     simple_eig_polish_steps::Int = 0
@@ -79,6 +91,33 @@ C4v
     eig_checkpoint::CheckpointMethod     = ifcheckpoint ? Recompute() : Plain()
     subop_checkpoint::CheckpointMethod   = ifcheckpoint ? OffloadRecompute() : Plain()
     step_checkpoint::CheckpointMethod    = ifcheckpoint ? OffloadRecompute() : Plain()
+end
+
+function _apply_parallel_method!(alg)
+    method = alg.parallel_method
+    method === nothing && return alg
+
+    if method isa SerialMethod
+        alg.ifparallel = false
+        alg.grid = nothing
+    elseif method isa Slice1DMethod
+        alg.ifparallel = true
+        alg.grid = nothing
+    elseif method isa Slice2DMethod
+        alg.ifparallel = false
+        alg.grid = method.grid
+    else
+        throw(ArgumentError("Unsupported parallel_method $(typeof(method)). Use slice1D(...) or slice2D(...)."))
+    end
+
+    alg.forloop_iter = method.forloop_iter
+    alg.inner_etype = method.inner_etype
+    return alg
+end
+
+function _effective_grid(alg)
+    _apply_parallel_method!(alg)
+    return alg.parallel_method isa Slice2DMethod ? alg.parallel_method.grid : alg.grid
 end
 
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)

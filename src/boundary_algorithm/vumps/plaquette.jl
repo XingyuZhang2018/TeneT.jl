@@ -160,6 +160,10 @@ One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
 function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
+    # Slice2D (2D block-distributed) path when a grid is set — routes both vumps_itr
+    # call sites. Serial body below runs whenever grid === nothing.
+    g = _effective_grid(alg)
+    g === nothing || return vumps_step_slice2d(rt, M, g, alg)
     @unpack AL, C, FL = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
@@ -175,6 +179,9 @@ end
 
 function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Plaquette})
     size(M.pattern) == (2,2) || size(M.pattern) == (2,6) || error("Plaquette VUMPS only supports 2×2 and 2×6 patterns. Got pattern of size $(size(M.pattern)).")
+    # Slice2D path: build a BLOCK-distributed plaquette runtime when a grid is set.
+    g = _effective_grid(alg)
+    g === nothing || return init_VUMPSRuntime_slice2d(M, χ, g, alg)
     A = initial_A(M, χ)
     AL, L, _ = left_canonical(A)
     C = LRtoC(L, L)   # use L on both sides (no right canonical)
@@ -292,10 +299,27 @@ end
 Construct a `PlaquetteVUMPSEnv` from a plaquette runtime.
 Computes the observation left environment `FLo` using `ifobs=true`.
 """
+# Distributed-energy predicate: keep the slice2d obs env BLOCK (don't gather) and run the
+# energy expectation block-distributed. Gated to the one model whose energy_value/imag_error
+# are slice2d-ized (J1J2{Square}); every other Plaquette model still gathers to full and runs
+# serial — so "env is block" ⟺ this predicate, used identically in ObsEnv/energy_value/imag_error.
+# (`isa J1J2{Square}` resolves at runtime; J1J2 is included after this file.) (R1-B1/B2)
+function _dist_energy_plaq_grid(model, alg)
+    g = _effective_grid(alg)
+    return g !== nothing && model isa J1J2{Square} ? g : nothing
+end
+_dist_energy_plaq(model, alg) = _dist_energy_plaq_grid(model, alg) !== nothing
+
 function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette}, model=nothing)
-    # `model` accepted for call-site uniformity with VUMPS{General} ObsEnv;
-    # Plaquette has no obs_index trait, so the arg is ignored.
     @unpack AL, C, FL = rt
+    # Slice2D path: FLo block-distributed (leftenv_slice2d ifobs=true, FL on both sides).
+    g = _effective_grid(alg)
+    if g !== nothing
+        _, FLo = leftenv_slice2d(AL, AL, M, FL, g; ifobs=true, alg)
+        env = PlaquetteVUMPSEnv(AL, C, FL, FLo)
+        # Block for the distributed-energy model; gather to full for all other Plaquette models.
+        return _dist_energy_plaq(model, alg) ? env : gather_env(env, g)
+    end
     _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
     return PlaquetteVUMPSEnv(AL, C, FL, FLo)
 end
@@ -305,11 +329,13 @@ end
 function imag_error(env::PlaquetteVUMPSEnv, A, iSy, params::iPEPSOptimize)
     @unpack AL, C, FLu, FLo = env
     @unpack forloop_iter, ifparallel = params.boundary_alg
-    AC = ALCtoAC(AL, C)
+    # Same predicate as ObsEnv: env is block ⟺ J1J2{Square}+grid → slice2d oc_11; else full → serial.
+    grid = _dist_energy_plaq_grid(params.model, params.boundary_alg)
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
     Ni, Nj = size(A)
     i, j, ir = 1, 1, 2
     jr = params.model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
-    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], iSy; ifparallel, forloop_iter)
-    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], iSy; ifparallel, forloop_iter, grid)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter, grid)
     return abs(My / n)
 end

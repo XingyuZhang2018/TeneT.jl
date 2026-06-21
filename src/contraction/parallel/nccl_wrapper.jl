@@ -87,6 +87,14 @@ function _ncclAllGather(sendptr::CuPtr, recvptr::CuPtr, sendcount::Integer,
     _check(err, :ncclAllGather)
 end
 
+function _ncclReduceScatter(sendptr::CuPtr, recvptr::CuPtr, recvcount::Integer,
+                            dtype::Cint, op::Cint, comm::_NCCLComm, stream)
+    err = ccall((:ncclReduceScatter, _LIB_NCCL), Cint,
+                (CuPtr{Cvoid}, CuPtr{Cvoid}, Csize_t, Cint, Cint, _NCCLComm, CUDA.CUstream),
+                sendptr, recvptr, recvcount, dtype, op, comm, stream)
+    _check(err, :ncclReduceScatter)
+end
+
 # ncclCommRegister — associates a user GPU buffer with a comm so NCCL can
 # use zero-copy / multicast paths (NVLS on H200 needs this). Without it, NCCL
 # falls back to a path that caps busbw at ~74 GB/s (37% of theoretical) on
@@ -162,6 +170,91 @@ function _nccl_allgather_equal!(sendbuf::CuArray{T}, recvbuf::CuArray{T},
                    _nccl_dtype(T), nccl_comm, stream)
     return recvbuf
 end
+
+function _nccl_reduce_scatter_equal!(sendbuf::CuArray{T}, recvbuf::CuArray{T},
+                                     mpi_comm::MPI.Comm) where T
+    nccl_comm = _get_nccl_comm(mpi_comm)
+    stream = CUDA.stream()
+    recvcount = _nccl_elcount(T, length(recvbuf))   # per-rank OUTPUT chunk
+    _ncclReduceScatter(pointer(sendbuf), pointer(recvbuf), recvcount,
+                       _nccl_dtype(T), _NCCL_SUM, nccl_comm, stream)
+    return recvbuf
+end
+
+# ─── Slice2D row/col allgather + reduce-scatter via NCCL ──────────────────────
+# NCCL AllGather/ReduceScatter concatenate/split rank buffers CONTIGUOUSLY, so the
+# gathered/scattered χ leg must be OUTERMOST (last dim, column-major) for rank r's
+# data to land in block r. ROW collectives act on the LAST leg (direct); COLUMN
+# collectives act on the FIRST leg → transpose it to last with cuBLAS GEAM, run
+# NCCL, transpose back. Using cuBLAS avoids CUDA.jl-generated transpose kernels,
+# which can fail to load on some cluster CUDA stacks.
+# EQUAL per-rank block sizes are REQUIRED (caller guards on χ%N==0); col_comm is
+# the cross-node, high-value axis in the 2-rows-per-node layout. Everything chains
+# on CUDA.stream() (FIFO) so no CUDA.synchronize is needed (mirrors the allreduce
+# helper). `first_leg` selects column (true) vs row (false).
+function _nccl_transpose2d!(dst::CuArray{T,2}, src::CuArray{T,2}) where {T<:Union{Float32,Float64,ComplexF32,ComplexF64}}
+    @assert size(dst) == (size(src, 2), size(src, 1))
+    length(src) == 0 && return dst
+    CUDA.CUBLAS.geam!('T', 'T', one(T), src, zero(T), src, dst)
+    return dst
+end
+
+function _nccl_transpose2d!(dst::CuArray{T,2}, src::CuArray{T,2}) where T
+    throw(ArgumentError("Slice2D NCCL first-leg transpose uses cuBLAS GEAM and supports Float32/Float64/ComplexF32/ComplexF64; got $T"))
+end
+
+function _nccl_pack_first_leg_last(blk::CuArray{T}) where T
+    nfirst = size(blk, 1)
+    rest = length(blk) ÷ nfirst
+    packed = similar(blk, rest, nfirst)
+    return _nccl_transpose2d!(packed, reshape(blk, nfirst, rest))
+end
+
+function _nccl_unpack_last_leg_first(packed::CuArray{T,2}, first_len::Int, rest_dims) where T
+    rest = size(packed, 1)
+    @assert size(packed, 2) == first_len
+    unpacked = similar(packed, first_len, rest)
+    _nccl_transpose2d!(unpacked, packed)
+    return reshape(unpacked, first_len, rest_dims...)
+end
+
+function _nccl_slice2d_allgather!(blk::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
+    nranks = MPI.Comm_size(mpi_comm)
+    if first_leg
+        rest_dims = size(blk)[2:end]
+        packed = _nccl_pack_first_leg_last(blk)                     # [mid-flat, local first leg]
+        full_packed = similar(packed, size(packed, 1), size(packed, 2) * nranks)
+        _nccl_allgather_equal!(packed, full_packed, mpi_comm)       # full first leg is packed last
+        return _nccl_unpack_last_leg_first(full_packed, size(blk, 1) * nranks, rest_dims)
+    else
+        nd = ndims(blk)
+        fsz = ntuple(i -> i == nd ? size(blk, nd) * nranks : size(blk, i), nd)
+        full = similar(blk, fsz)
+        return _nccl_allgather_equal!(blk, full, mpi_comm)          # full last leg
+    end
+end
+
+function _nccl_slice2d_reduce_scatter!(partial::CuArray{T}, mpi_comm::MPI.Comm, first_leg::Bool) where T
+    nranks = MPI.Comm_size(mpi_comm)
+    if first_leg
+        rest_dims = size(partial)[2:end]
+        packed = _nccl_pack_first_leg_last(partial)                 # [mid-flat, full first leg]
+        blklen = size(packed, 2) ÷ nranks
+        recv = similar(packed, size(packed, 1), blklen)
+        _nccl_reduce_scatter_equal!(packed, recv, mpi_comm)         # keep my first-leg block, packed last
+        return _nccl_unpack_last_leg_first(recv, blklen, rest_dims)
+    else
+        nd = ndims(partial)
+        blklen = size(partial, nd) ÷ nranks
+        rsz = ntuple(i -> i == nd ? blklen : size(partial, i), nd)
+        recv = similar(partial, rsz)
+        return _nccl_reduce_scatter_equal!(partial, recv, mpi_comm) # keep my last-leg block
+    end
+end
+
+# Equal per-rank χ blocks (NCCL ReduceScatter/AllGather require uniform counts;
+# split_ranges gives off-by-1 when χ%N≠0 → fall back to the MPI p2p path).
+_equal_blocks(rs) = all(r -> length(r) == length(@inbounds rs[1]), rs)
 
 # Opt-in switch (per-call, reads ENV so a fresh process picks up the flag).
 _use_nccl() = get(ENV, "TENET_USE_NCCL", "0") == "1"

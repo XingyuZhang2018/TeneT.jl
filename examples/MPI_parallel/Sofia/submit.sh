@@ -10,7 +10,7 @@
 #SBATCH --account=pilot_2026_0002
 
 # Sofia (VUB) — iPEPS fg benchmark at D=10 χ=400 across 1/2/4/8 GPUs.
-# Runs ../benchmark_fg.jl which does 1 warmup + 1 timed forward + 1 warmup + 1 timed fg.
+# Runs ../benchmarks/benchmark_fg.jl which does 1 warmup + 1 timed forward + 1 warmup + 1 timed fg.
 
 source /etc/profile
 source /etc/profile.d/modules.sh
@@ -42,7 +42,7 @@ for N in 1 2 4 8 16; do
     echo ""
     echo "========== ${N} GPU =========="
     mpirun --map-by ppr:8:node --bind-to none -np $N -x UCX_MODULE_DIR -x LD_LIBRARY_PATH=$CLEAN_LD -x PATH -x HOME -x JULIA_DEPOT_PATH \
-        bash -c "$ENVS; exec $JULIA --project=../../.. ../benchmark_fg.jl"
+        bash -c "$ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_fg.jl"
 done
 
 echo ""

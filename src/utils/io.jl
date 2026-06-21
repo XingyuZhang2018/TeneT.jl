@@ -1,11 +1,12 @@
-function save_rt(folder, rt; file::String)
+function save_rt(folder, rt; file::String="rt.jld2")
+    isdir(folder) || mkpath(folder)
     p = joinpath(folder, file)
     rt_save = Array(rt)
     @info "save a $(typeof(rt)) environment to $p"
     save(p, "rt", rt_save; iotype=IOStream)
 end
 
-function load_rt(folder, atype, ifparallelupdown=false; file::String)
+function load_rt(folder, atype, ifparallelupdown=false; file::String="rt.jld2")
     p = joinpath(folder, file)
     rt = load(p, "rt"; iotype=IOStream)
     if ifparallelupdown
@@ -114,6 +115,7 @@ read_last_log(params::iPEPSOptimize, D::Int) = read_last_log(params.folder, D)
     write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
 
 Write energy, magnetization, and correlation length to a log file.
+If `ξ === nothing`, write `NaN` for the correlation length field.
 """
 function write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
     path = joinpath(folder, "observable")
@@ -140,6 +142,10 @@ function write_obs_log(e, mag, ξ, χ, folder, ::iPEPSOptimize)
             write(io, @sprintf("%s %.15f %.15f %.15f %.15f\t", pos, real(m_dict[pos]["|M|"]), real(m_dict[pos]["Mx"]), real(m_dict[pos]["My"]), real(m_dict[pos]["Mz"])))
             write(io, "\n")
         end
-        write(io, @sprintf("correlation_length:\n%.15f\n", real(ξ)))
+        if ξ === nothing
+            write(io, "correlation_length:\nNaN\n")
+        else
+            write(io, @sprintf("correlation_length:\n%.15f\n", real(ξ)))
+        end
     end
 end

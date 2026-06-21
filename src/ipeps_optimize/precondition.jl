@@ -94,6 +94,11 @@ function precondition_invese_single_envir(A, grad, rt::PlaquetteVUMPSRuntime, pa
     _G_cache[] = nothing          # reset so the first plain call below computes fresh G
     A_prime = build_restricted_A(A)   # populates _G_cache; all JVP+VJP calls reuse it
 
+    # NOTE: 3-arg ObsEnv → model defaults to `nothing`, so `_dist_energy_plaq` is false and the
+    # slice2d obs env is GATHERED to full even when a grid is set. That keeps this preconditioner
+    # body (serial ALCtoAC / contract_* below) consistent — full env + serial code. The
+    # distributed-energy path (block env) is intentionally NOT used here; slice2d-izing the
+    # preconditioner would require passing `params.model` AND a slice2d body.
     env = ObsEnv(rt, A_prime, params.boundary_alg)
     @unpack AL, C, FLu, FLo = env
     AC = ALCtoAC(AL, C)

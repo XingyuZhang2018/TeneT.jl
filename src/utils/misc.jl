@@ -7,22 +7,23 @@ const leg8 = Union{<:AbstractArray{T, 8}, Vector{<:AbstractArray{T, 8}}, StructA
 
 # ─── Simple eigenvalue solver ────────────────────────────────────────────────
 """
-    _power_iter_segment(f, v, n)
+    _power_iter_segment(f, v, n, norm_fn=norm)
 
-Run `n` steps of power iteration: v = f(v) / norm(v).
+Run `n` steps of power iteration: v = f(v) / norm_fn(v).
 Used as a checkpoint-able segment inside simple_eig.
 """
-function _power_iter_segment(f, v, n)
+function _power_iter_segment(f, v, n, norm_fn=norm)
     for _ in 1:n
         v = f(v)
-        v /= norm(v)
+        v /= norm_fn(v)
     end
     return v
 end
 
 function simple_eig(f, v; power_iter, checkpoint_every=5,
                     segment_checkpoint::CheckpointMethod=Plain(),
-                    f_final=nothing, final_polish_steps=0)
+                    f_final=nothing, final_polish_steps=0,
+                    inner_product=dot, norm_fn=norm, orth_fn=orth_for_ad)
     polish_active = f_final !== nothing && final_polish_steps > 0
     n_polish = polish_active ? min(final_polish_steps, power_iter) : 0
     n_pre = power_iter - n_polish    # total f-calls using `f` (pre-polish)
@@ -33,13 +34,13 @@ function simple_eig(f, v; power_iter, checkpoint_every=5,
         if n > 0 && checkpoint_every > 0 && checkpoint_every < n
             while n > 0
                 seg = min(checkpoint_every, n)
-                v = checkpoint(segment_checkpoint, _power_iter_segment, f, v, seg)
+                v = checkpoint(segment_checkpoint, _power_iter_segment, f, v, seg, norm_fn)
                 n -= seg
             end
         else
             for _ in 1:n
                 v = f(v)
-                v /= norm(v)
+                v /= norm_fn(v)
             end
         end
         v1 = f(v)
@@ -51,26 +52,26 @@ function simple_eig(f, v; power_iter, checkpoint_every=5,
             if checkpoint_every > 0 && checkpoint_every < np
                 while np > 0
                     seg = min(checkpoint_every, np)
-                    v = checkpoint(segment_checkpoint, _power_iter_segment, f, v, seg)
+                    v = checkpoint(segment_checkpoint, _power_iter_segment, f, v, seg, norm_fn)
                     np -= seg
                 end
             else
                 for _ in 1:np
                     v = f(v)
-                    v /= norm(v)
+                    v /= norm_fn(v)
                 end
             end
         end
         for _ in 1:(n_polish - 1)
             v = f_final(v)
-            v /= norm(v)
+            v /= norm_fn(v)
         end
         v1 = f_final(v)
     end
 
-    λ = dot(v, v1)
-    v1 /= norm(v1)
-    v1 = orth_for_ad(v1)
+    λ = inner_product(v, v1)
+    v1 /= norm_fn(v1)
+    v1 = orth_fn(v1)
     return [λ], [v1]
 end
 

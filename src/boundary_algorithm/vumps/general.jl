@@ -794,7 +794,21 @@ Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`
 and bond dimension `χ`.
 """
 function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
+    _apply_parallel_method!(alg)
     alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
+
+    # M5: Slice2D (2D block-distributed) path — build a BLOCK-distributed runtime so the
+    # grid-routed vumps_step_slice2d receives blocks. Supports ifupdown (up on M + down on
+    # _down_M(M)); leading_boundary(Tuple) then runs each via the slice2d vumps_step guard.
+    g = _effective_grid(alg)
+    if g !== nothing
+        rtup = init_VUMPSRuntime_slice2d(M, χ, g, alg)
+        if alg.ifupdown
+            alg.ifdownfromup && throw(ArgumentError("init_env slice2d: ifdownfromup not yet supported; use ifdownfromup=false."))
+            return rtup, init_VUMPSRuntime_slice2d(_down_M(M), χ, g, alg)
+        end
+        return rtup
+    end
 
     Ni, Nj = size(M)
 
@@ -854,6 +868,7 @@ One step of the VUMPS algorithm with the standard (General) contraction mode.
 Uses the power-method variant: update environments first, then re-solve AC/C.
 """
 function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    _apply_parallel_method!(alg)
     @unpack AL, C, AR, FL, FR = rt
     AC = ALCtoAC(AL, C)
     _, ACp = ACenv(AC, FL, M, FR; alg)
@@ -871,6 +886,11 @@ function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
 end
 
 function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    # M5: route to the Slice2D (2D block-distributed) step when a grid is set. This
+    # single guard covers BOTH vumps_itr call sites (warm-up + AD loop). Serial body
+    # below is unchanged and runs whenever grid === nothing.
+    g = _effective_grid(alg)
+    g === nothing || return vumps_step_slice2d(rt, M, g, alg)
     @unpack AL, C, AR, FL, FR = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC(AL, C)
@@ -1060,6 +1080,17 @@ Two return shapes:
 function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
+    # Slice2D path: compute the obs env block-distributed (leftenv/rightenv_slice2d with
+    # ifobs=true), then gather to FULL for the serial energy_value (v1; see slice2d.jl).
+    g = _effective_grid(alg)
+    if g !== nothing
+        AC = ALCtoAC_slice2d(AL, C, g)
+        _, FLo = leftenv_slice2d(AL, AL, M, Fo[1], g; ifobs=true, alg, model)
+        _, FRo = rightenv_slice2d(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
+        (model !== nothing && uses_oneside_obs_env(typeof(model))) &&
+            error("ObsEnv slice2d: OnesideVUMPSEnv (oneside obs) not yet distributed; use a non-oneside model.")
+        return gather_env(VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo), g)
+    end
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
     _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg, model)
@@ -1080,6 +1111,17 @@ down runtime, so the `obs_index` trait is not needed.
 """
 function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt[1].FL, rt[1].FR])
+    # Slice2D path: mixed obs env (ACu/ACd from up/down via ALCtoAC_slice2d; FLo/FRo from
+    # leftenv/rightenv_slice2d ifobs=true with the up AL/AR and down AL/AR) → gather to FULL.
+    g = _effective_grid(alg)
+    if g !== nothing
+        rtup, rtdown = rt
+        ACu = ALCtoAC_slice2d(rtup.AL, rtup.C, g)
+        ACd = ALCtoAC_slice2d(rtdown.AL, rtdown.C, g)
+        _, FLo = leftenv_slice2d(rtup.AL, rtdown.AL, M, Fo[1], g; ifobs=true, alg)
+        _, FRo = rightenv_slice2d(rtup.AR, rtdown.AR, M, Fo[2], g; ifobs=true, alg)
+        return gather_env(VUMPSEnv(ACu, rtup.AR, ACd, rtdown.AR, rtup.FL, rtup.FR, FLo, FRo), g)
+    end
     atype = _arraytype(M)
     set_device_id!(atype, 1)
     rtup, rtdown = rt

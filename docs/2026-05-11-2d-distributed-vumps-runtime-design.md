@@ -527,7 +527,7 @@ Regression detection: if new commit slows baseline `D=10 χ=540 N=8` benchmark b
 | Optimization | Trigger | Effort |
 |-------------|---------|--------|
 | Distributed TSQR for ACCtoAL/AR | D ≥ 20 | ~3 weeks |
-| SUMMA / Cannon's compute-comm overlap | Per-step time map-dominated | ~2 weeks |
+| SUMMA / Slice2D's compute-comm overlap | Per-step time map-dominated | ~2 weeks |
 | Block-cyclic 2D partition | Load imbalance > 20% | ~1 week |
 | F32/F16 in alltoall messages | Message size bottleneck | ~1 week |
 | D leg slicing | D ≥ 24 (4-D partition grid) | ~6 weeks (research) |
@@ -577,7 +577,7 @@ Mnemonic: "row" = horizontal slice of the grid; "col" = vertical slice.
 - Hong & Kung 1981 — I/O complexity lower bound for matrix multiplication
 - Loomis & Whitney 1949 — surface-volume inequality (foundation for comm lower bounds)
 - Solomonik & Demmel 2011 — Communication-Optimal Parallel 2.5D Matrix Multiplication
-- Cannon 1969 — A cellular computer to implement the Kalman Filter Algorithm
+- Slice2D 1969 — A cellular computer to implement the Kalman Filter Algorithm
 - van de Geijn & Watts 1997 — SUMMA: scalable universal matrix multiplication
 - Demmel et al. 2012 — Communication-avoiding QR (TSQR / CAQR)
 - Kossaifi et al. 2019 — Tensor decompositions and applications (review)

@@ -40,7 +40,7 @@ for N in 1 2 4 8; do
     [ $N -gt $MAX_GPU ] && continue
     echo ""
     echo "========== ${N} GPU =========="
-    srun -n $N --gpus-per-task=1 bash -c "$ENVS; exec $JULIA --project=../../.. ../benchmark_fg.jl"
+    srun -n $N --gpus-per-task=1 bash -c "$ENVS; exec $JULIA --project=../../.. ../benchmarks/benchmark_fg.jl"
 done
 
 echo ""
