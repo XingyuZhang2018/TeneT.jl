@@ -27,6 +27,12 @@ ph_relerr(a, b) = (c = dot(b, a) / dot(b, b); norm(a .- b .* c) / max(norm(b), e
 function slice2d_source()
     return read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d", "seams.jl"), String)
 end
+function slice2d_step_source()
+    return read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d", "step.jl"), String)
+end
+function slice2d_env_source()
+    return read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d", "env.jl"), String)
+end
 
 # random (non-canonical) Plaquette runtime + leg5 M; identical on every rank.
 function build_rt(χ, D; seed, pat)
@@ -87,6 +93,28 @@ end
         @test maxC  ≤ 1e-9
         @test maxAC ≤ 1e-9
         @test abs(err_c - err_s) ≤ 1e-9
+    end
+end
+
+# ── Gate M5p-1b: inner_checkpoint=Recompute reaches slice2d map calls ─────────
+@testset "Gate M5p-1b: Plaquette slice2d inner_checkpoint=Recompute" begin
+    step_src = slice2d_step_source()
+    env_src = slice2d_env_source()
+    @test occursin("_assert_inner_method(alg.inner_checkpoint)", step_src)
+    @test !occursin("inner_checkpoint other than Plain()", step_src)
+    @test occursin("checkpoint(inner_checkpoint, ACmap_slice2d_sliced", env_src)
+
+    g = slice2d_grid(2, 2)
+    rt, M = build_rt(8, 2; seed=760, pat=[1 3; 2 4])
+    rtb = scatter_rt(rt, g)
+    alg_plain = algp(g); alg_plain.power_iter = 2
+    alg_recompute = algp(g); alg_recompute.power_iter = 2; alg_recompute.inner_checkpoint = Recompute()
+
+    rt_plain, err_plain = vumps_step_slice2d(rtb, M, g, alg_plain)
+    rt_recompute, err_recompute = vumps_step_slice2d(rtb, M, g, alg_recompute)
+    @test err_recompute ≈ err_plain
+    for idx in 1:length(rt_plain.AL.data)
+        @test rt_recompute.AL.data[idx] == rt_plain.AL.data[idx]
     end
 end
 

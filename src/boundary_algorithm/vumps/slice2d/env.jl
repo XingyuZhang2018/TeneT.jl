@@ -21,11 +21,13 @@
 # chain on the captured slices, and the gather rrules fire once on the OUTER tape).
 function _simple_eig_FLmap_slice2d(FLij_blk, ALu_row, ALd_col, M_i, grid::Slice2DGrid;
                                   power_iter, forloop_iter,
-                                  segment_checkpoint::CheckpointMethod=Plain())
+                                  segment_checkpoint::CheckpointMethod=Plain(),
+                                  inner_checkpoint::CheckpointMethod=Plain())
     Nj = length(ALu_row)
     function f(v)
         for j in 1:Nj
-            v = FLmap_slice2d_sliced(v, ALu_row[j], ALd_col[j], M_i[j], grid; forloop_iter)
+            v = checkpoint(inner_checkpoint, FLmap_slice2d_sliced,
+                           v, ALu_row[j], ALd_col[j], M_i[j], grid; forloop_iter)
         end
         return v
     end
@@ -56,7 +58,8 @@ function leftenv_slice2d(ALu_blk, ALd_blk, M, FL_blk, grid::Slice2DGrid; alg, if
     @assert alg.ifsimple_eig "leftenv_slice2d: requires ifsimple_eig=true (the eigsolve branch bypasses the slice2d rrules)"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "leftenv_slice2d: mixed precision is M5 (inner_etype/whole_vumps_etype/simple_eig_polish_steps must be unset)"
     @assert ndims(M.data[1]) == 5 "leftenv_slice2d: leg5 single-layer-pair M only (leg4/leg8 are M5)"
-    @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+    @unpack power_iter, forloop_iter, segment_checkpoint, inner_checkpoint, eig_checkpoint = alg
+    _assert_inner_method(inner_checkpoint)
     power_iter = ifobs ? alg.power_iter_obs : power_iter   # obs (mixed) env uses the larger obs power iter
 
     Ni, Nj = size(M)
@@ -88,7 +91,7 @@ function leftenv_slice2d(ALu_blk, ALd_blk, M, FL_blk, grid::Slice2DGrid; alg, if
         if p ∉ processed_indices
             λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap_slice2d,
                                     FL_blk[i, 1], ALu_row, ALd_col, M_i, grid;
-                                    power_iter, forloop_iter, segment_checkpoint)
+                                    power_iter, forloop_iter, segment_checkpoint, inner_checkpoint)
             λL[i, 1], FL′[i, 1] = selectpos(λLs, FLi1s, Nj)
             push!(processed_indices, p)
             length(processed_indices) == length(FL_blk.data) && break
@@ -96,7 +99,8 @@ function leftenv_slice2d(ALu_blk, ALd_blk, M, FL_blk, grid::Slice2DGrid; alg, if
         for j in 2:Nj
             p2 = FL_blk.pattern[i, j]
             if p2 ∉ processed_indices
-                FL′[i, j] = FLmap_slice2d_sliced(FL′[i, j-1], ALu_row[j-1], ALd_col[j-1], M_i[j-1], grid; forloop_iter)
+                FL′[i, j] = checkpoint(inner_checkpoint, FLmap_slice2d_sliced,
+                                        FL′[i, j-1], ALu_row[j-1], ALd_col[j-1], M_i[j-1], grid; forloop_iter)
                 λL[i, j] = λL[i, 1]
                 push!(processed_indices, p2)
                 length(processed_indices) == length(FL_blk.data) && break
@@ -113,11 +117,13 @@ end
 # (col-gather, full i). The ITERATE FR is col-gathered per-call inside the map.
 function _simple_eig_FRmap_slice2d(FRiNj_blk, ARu_row, ARd_col, M_i, grid::Slice2DGrid;
                                   power_iter, forloop_iter,
-                                  segment_checkpoint::CheckpointMethod=Plain())
+                                  segment_checkpoint::CheckpointMethod=Plain(),
+                                  inner_checkpoint::CheckpointMethod=Plain())
     Nj = length(ARu_row)
     function f(v)
         for j in Nj:-1:1
-            v = FRmap_slice2d_sliced(v, ARu_row[j], ARd_col[j], M_i[j], grid; forloop_iter)
+            v = checkpoint(inner_checkpoint, FRmap_slice2d_sliced,
+                           v, ARu_row[j], ARd_col[j], M_i[j], grid; forloop_iter)
         end
         return v
     end
@@ -138,7 +144,8 @@ function rightenv_slice2d(ARu_blk, ARd_blk, M, FR_blk, grid::Slice2DGrid; alg, i
     @assert alg.ifsimple_eig "rightenv_slice2d: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "rightenv_slice2d: mixed precision is M5"
     @assert ndims(M.data[1]) == 5 "rightenv_slice2d: leg5 single-layer-pair M only"
-    @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+    @unpack power_iter, forloop_iter, segment_checkpoint, inner_checkpoint, eig_checkpoint = alg
+    _assert_inner_method(inner_checkpoint)
     power_iter = ifobs ? alg.power_iter_obs : power_iter   # obs (mixed) env uses the larger obs power iter
 
     Ni, Nj = size(M)
@@ -158,7 +165,7 @@ function rightenv_slice2d(ARu_blk, ARd_blk, M, FR_blk, grid::Slice2DGrid; alg, i
         if p ∉ processed_indices
             λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap_slice2d,
                                    FR_blk[i, Nj], ARu_row, ARd_col, M_i, grid;
-                                   power_iter, forloop_iter, segment_checkpoint)
+                                   power_iter, forloop_iter, segment_checkpoint, inner_checkpoint)
             λR[i, Nj], FR′[i, Nj] = selectpos(λRs, FR1s, Nj)
             push!(processed_indices, p)
             length(processed_indices) == length(FR_blk.data) && break
@@ -166,7 +173,8 @@ function rightenv_slice2d(ARu_blk, ARd_blk, M, FR_blk, grid::Slice2DGrid; alg, i
         for j in Nj-1:-1:1
             p2 = FR_blk.pattern[i, j]
             if p2 ∉ processed_indices
-                FR′[i, j] = FRmap_slice2d_sliced(FR′[i, j+1], ARu_row[j+1], ARd_col[j+1], M_i[j+1], grid; forloop_iter)
+                FR′[i, j] = checkpoint(inner_checkpoint, FRmap_slice2d_sliced,
+                                        FR′[i, j+1], ARu_row[j+1], ARd_col[j+1], M_i[j+1], grid; forloop_iter)
                 λR[i, j] = λR[i, Nj]
                 push!(processed_indices, p2)
                 length(processed_indices) == length(FR_blk.data) && break
@@ -186,11 +194,13 @@ end
 # AC-tensor leg `i` (grid r1 split) is a DIFFERENT index from the cell-row i here.
 function _simple_eig_ACmap_slice2d(AC1j_blk, FL_col, FR_col, M_j, grid::Slice2DGrid;
                                   power_iter, forloop_iter,
-                                  segment_checkpoint::CheckpointMethod=Plain())
+                                  segment_checkpoint::CheckpointMethod=Plain(),
+                                  inner_checkpoint::CheckpointMethod=Plain())
     Ni = length(FL_col)
     function f(v)
         for i in 1:Ni
-            v = ACmap_slice2d_sliced(v, FL_col[i], FR_col[i], M_j[i], grid; forloop_iter)
+            v = checkpoint(inner_checkpoint, ACmap_slice2d_sliced,
+                           v, FL_col[i], FR_col[i], M_j[i], grid; forloop_iter)
         end
         return v
     end
@@ -212,7 +222,8 @@ function ACenv_slice2d(AC_blk, FL_blk, M, FR_blk, grid::Slice2DGrid; alg)
     @assert alg.ifsimple_eig "ACenv_slice2d: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "ACenv_slice2d: mixed precision is M5"
     @assert ndims(M.data[1]) == 5 "ACenv_slice2d: leg5 single-layer-pair M only"
-    @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+    @unpack power_iter, forloop_iter, segment_checkpoint, inner_checkpoint, eig_checkpoint = alg
+    _assert_inner_method(inner_checkpoint)
 
     Ni, Nj = size(M)
     χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
@@ -230,7 +241,7 @@ function ACenv_slice2d(AC_blk, FL_blk, M, FR_blk, grid::Slice2DGrid; alg)
         if p ∉ processed_indices
             λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_slice2d,
                                    AC_blk[1, j], FL_col, FR_col, M_j, grid;
-                                   power_iter, forloop_iter, segment_checkpoint)
+                                   power_iter, forloop_iter, segment_checkpoint, inner_checkpoint)
             λAC[1, j], AC′[1, j] = selectpos(λACs, ACs, Ni)
             push!(processed_indices, p)
             length(processed_indices) == length(AC_blk.data) && break
@@ -238,7 +249,8 @@ function ACenv_slice2d(AC_blk, FL_blk, M, FR_blk, grid::Slice2DGrid; alg)
         for i in 2:Ni
             p2 = AC_blk.pattern[i, j]
             if p2 ∉ processed_indices
-                ACij = ACmap_slice2d_sliced(AC′[i-1, j], FL_col[i-1], FR_col[i-1], M_j[i-1], grid; forloop_iter)
+                ACij = checkpoint(inner_checkpoint, ACmap_slice2d_sliced,
+                                  AC′[i-1, j], FL_col[i-1], FR_col[i-1], M_j[i-1], grid; forloop_iter)
                 AC′[i, j] = ACij / slice2d_norm(ACij, grid)   # GLOBAL norm (not per-rank local)
                 λAC[i, j] = λAC[1, j]
                 push!(processed_indices, p2)
@@ -257,11 +269,13 @@ end
 # Mirrors serial Cenv (general.jl:640-681): the jr=mod1(j+1,Nj) FL-column offset,
 # and i=2:Ni non-leading cells normalized by `norm` (C is replicated).
 function _simple_eig_Cmap_slice2d(C1j, FL_row, FR_col, grid::Slice2DGrid, a_rs, l_rs; power_iter,
-                                 segment_checkpoint::CheckpointMethod=Plain())
+                                 segment_checkpoint::CheckpointMethod=Plain(),
+                                 inner_checkpoint::CheckpointMethod=Plain())
     Ni = length(FL_row)
     function f(v)
         for i in 1:Ni
-            v = Cmap_slice2d_sliced(v, FL_row[i], FR_col[i], grid, a_rs, l_rs)
+            v = checkpoint(inner_checkpoint, Cmap_slice2d_sliced,
+                           v, FL_row[i], FR_col[i], grid, a_rs, l_rs)
         end
         return v
     end
@@ -277,7 +291,8 @@ dot/norm is OK because C is replicated.
 """
 function Cenv_slice2d(C, FL_blk, FR_blk, grid::Slice2DGrid; alg)
     @assert alg.ifsimple_eig "Cenv_slice2d: requires ifsimple_eig=true"
-    @unpack power_iter, segment_checkpoint = alg
+    @unpack power_iter, segment_checkpoint, inner_checkpoint = alg
+    _assert_inner_method(inner_checkpoint)
     Ni, Nj = size(C)
     χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
         c = MPI.Allreduce(size(FL_blk[1, 1], 1), +, grid.col_comm)
@@ -292,7 +307,7 @@ function Cenv_slice2d(C, FL_blk, FR_blk, grid::Slice2DGrid; alg)
         FR_col = ntuple(ip -> slice2d_gather_col(FR_blk[ip, j],  grid, a_rs), Ni)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FL_row, FR_col, grid, a_rs, l_rs; power_iter, segment_checkpoint)
+            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FL_row, FR_col, grid, a_rs, l_rs; power_iter, segment_checkpoint, inner_checkpoint)
             λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
             push!(processed_indices, p)
             length(processed_indices) == length(C.data) && break
@@ -300,7 +315,8 @@ function Cenv_slice2d(C, FL_blk, FR_blk, grid::Slice2DGrid; alg)
         for i in 2:Ni
             p2 = C.pattern[i, j]
             if p2 ∉ processed_indices
-                Cij = Cmap_slice2d_sliced(C′[i-1, j], FL_row[i-1], FR_col[i-1], grid, a_rs, l_rs)
+                Cij = checkpoint(inner_checkpoint, Cmap_slice2d_sliced,
+                                 C′[i-1, j], FL_row[i-1], FR_col[i-1], grid, a_rs, l_rs)
                 C′[i, j] = Cij / norm(Cij)            # local norm OK — C replicated (local == global)
                 λC[i, j] = λC[1, j]
                 push!(processed_indices, p2)
@@ -346,7 +362,8 @@ function ACenv_plaq_slice2d(AC_blk, FL_blk, M, grid::Slice2DGrid; alg::VUMPS{L})
     @assert alg.ifsimple_eig "ACenv_plaq_slice2d: requires ifsimple_eig=true"
     @assert alg.inner_etype === nothing && alg.whole_vumps_etype === nothing && alg.simple_eig_polish_steps == 0 "ACenv_plaq_slice2d: mixed precision is not supported on the slice2d path"
     @assert ndims(M.data[1]) == 5 "ACenv_plaq_slice2d: leg5 single-layer-pair M only"
-    @unpack power_iter, forloop_iter, segment_checkpoint, eig_checkpoint = alg
+    @unpack power_iter, forloop_iter, segment_checkpoint, inner_checkpoint, eig_checkpoint = alg
+    _assert_inner_method(inner_checkpoint)
 
     Ni, Nj = size(M)
     χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
@@ -365,7 +382,7 @@ function ACenv_plaq_slice2d(AC_blk, FL_blk, M, grid::Slice2DGrid; alg::VUMPS{L})
         if p ∉ processed_indices
             λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_slice2d,
                                    AC_blk[1, j], FLj_col, FLjr_col, M_j, grid;
-                                   power_iter, forloop_iter, segment_checkpoint)
+                                   power_iter, forloop_iter, segment_checkpoint, inner_checkpoint)
             λAC[1, j], AC′[1, j] = selectpos(λACs, ACs, Ni)
             push!(processed_indices, p)
             length(processed_indices) == length(AC_blk.data) && break
@@ -373,7 +390,8 @@ function ACenv_plaq_slice2d(AC_blk, FL_blk, M, grid::Slice2DGrid; alg::VUMPS{L})
         for i in 2:Ni
             p2 = AC_blk.pattern[i, j]
             if p2 ∉ processed_indices
-                ACij = ACmap_slice2d_sliced(AC′[i-1, j], FLj_col[i-1], FLjr_col[i-1], M_j[i-1], grid; forloop_iter)
+                ACij = checkpoint(inner_checkpoint, ACmap_slice2d_sliced,
+                                  AC′[i-1, j], FLj_col[i-1], FLjr_col[i-1], M_j[i-1], grid; forloop_iter)
                 AC′[i, j] = ACij / slice2d_norm(ACij, grid)
                 λAC[i, j] = λAC[1, j]
                 push!(processed_indices, p2)
@@ -392,7 +410,8 @@ FL operands stay slice2D-sized via row/column gathers. Mirrors Cenv_slice2d.
 """
 function Cenv_plaq_slice2d(C, FL_blk, grid::Slice2DGrid; alg::VUMPS{L}) where {L <: Plaquette}
     @assert alg.ifsimple_eig "Cenv_plaq_slice2d: requires ifsimple_eig=true"
-    @unpack power_iter, segment_checkpoint = alg
+    @unpack power_iter, segment_checkpoint, inner_checkpoint = alg
+    _assert_inner_method(inner_checkpoint)
     Ni, Nj = size(C)
     χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
         c = MPI.Allreduce(size(FL_blk[1, 1], 1), +, grid.col_comm)
@@ -408,7 +427,7 @@ function Cenv_plaq_slice2d(C, FL_blk, grid::Slice2DGrid; alg::VUMPS{L}) where {L
         FLjr_col = ntuple(ip -> slice2d_gather_col(FL_blk[ip, jr], grid, a_rs), Ni)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FLjl_row, FLjr_col, grid, a_rs, l_rs; power_iter, segment_checkpoint)
+            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FLjl_row, FLjr_col, grid, a_rs, l_rs; power_iter, segment_checkpoint, inner_checkpoint)
             λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
             push!(processed_indices, p)
             length(processed_indices) == length(C.data) && break
@@ -416,7 +435,8 @@ function Cenv_plaq_slice2d(C, FL_blk, grid::Slice2DGrid; alg::VUMPS{L}) where {L
         for i in 2:Ni
             p2 = C.pattern[i, j]
             if p2 ∉ processed_indices
-                Cij = Cmap_slice2d_sliced(C′[i-1, j], FLjl_row[i-1], FLjr_col[i-1], grid, a_rs, l_rs)
+                Cij = checkpoint(inner_checkpoint, Cmap_slice2d_sliced,
+                                 C′[i-1, j], FLjl_row[i-1], FLjr_col[i-1], grid, a_rs, l_rs)
                 C′[i, j] = Cij / norm(Cij)    # local norm OK — C replicated
                 λC[i, j] = λC[1, j]
                 push!(processed_indices, p2)
