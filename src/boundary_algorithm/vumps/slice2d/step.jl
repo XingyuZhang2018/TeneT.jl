@@ -10,10 +10,9 @@ under `subop_checkpoint`; ALCtoAC and Cenv unwrapped). Leg5/ifsimple_eig/no-mixe
 precision asserts fire inside the `_slice2d` solvers.
 """
 function vumps_step_slice2d(rt::VUMPSRuntime, M::StructArray, grid::Slice2DGrid, alg::VUMPS{General})
-    # The slice2d env solvers / seam maps do NOT thread inner_checkpoint into their per-map
-    # calls (Cmap/FLmap/etc.), unlike serial Cenv/leftenv. It is a no-op at the default
-    # Plain(), but a non-Plain inner_checkpoint would silently diverge from serial — fail loud.
-    @assert alg.inner_checkpoint isa Plain "vumps_step_slice2d: inner_checkpoint other than Plain() is not supported on the slice2d path (the slice2d maps don't thread it); got $(alg.inner_checkpoint)"
+    # Slice2D env solvers do not thread inner_checkpoint through their per-map
+    # calls. Plain() is the supported no-op; non-Plain would be misleading.
+    @assert alg.inner_checkpoint isa Plain "vumps_step_slice2d: inner_checkpoint other than Plain() is not supported on the slice2d path; got $(alg.inner_checkpoint)"
     @unpack AL, C, AR, FL, FR = rt
     sub = alg.subop_checkpoint
     AC = ALCtoAC_slice2d(AL, C, grid)

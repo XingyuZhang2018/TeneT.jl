@@ -299,29 +299,33 @@ end
 # Cmap leg4 result[e,f] := FL[a,c,d,e] C[a,b] FR[b,c,d,f]; leg3 result[d,e] :=
 # FL[a,c,d] C[a,b] FR[b,c,e]. C stays REPLICATED (per the M3 design — C is
 # tiny χ×χ); only FL/FR are block-stored. Output is the FULL χ×χ tensor,
-# identical on every rank (every rank gathers the SAME full FL/FR and runs the
-# SAME full chain → identical replicated output, NO allreduce). No ring, no
-# output scatter, no square-grid assertion. Local einsum is CMAP_LEG*_CHAIN via
-# chain_apply (whole-chain engine API), NOT a hand kernel.
+# identical on every rank. The hot path never materializes full FL/FR: FL is
+# row-gathered to a local-a/full-e slice, FR is col-gathered to a full-b/local-f
+# slice, the local chain sums this rank's a-block, then a column allreduce
+# completes Σa and a row allgather replicates the full C output. No ring, no
+# square-grid assertion. Local einsum is CMAP_LEG*_CHAIN via chain_apply
+# (whole-chain engine API), NOT a hand kernel.
 # NO inner_etype kwarg: Cmap deliberately has no precondition/boundary downcast
 # path (C is tiny χ×χ, no production inner_etype caller — cf. chain_maps.jl:167).
 # The gather-class maps (FRmap/ACmap/ACdmap) DO take inner_etype and implement
 # the FLmap-style do_cast — do NOT copy this no-cast signature to them.
 # (CMAP_LEG*_CHAIN are defined in chain_maps.jl, included after this file, and
 # resolve at call time via Julia's global late-binding.)
+function Cmap_slice2d_sliced(C, FL_row, FR_col, grid::Slice2DGrid, a_rs, l_rs)
+    C_a = C[a_rs[grid.r1 + 1], :]
+    chain = ndims(FL_row) == 3 ? CMAP_LEG3_CHAIN : CMAP_LEG4_CHAIN
+    partial = chain_apply(chain, (FL_row, C_a, FR_col))  # full first output leg, local last output leg
+    partial = _slice2d_col_allgather(_slice2d_col_reduce_scatter(partial, grid, a_rs), grid, a_rs)
+    return _slice2d_row_allgather(partial, grid, l_rs)   # replicated full χ×χ C
+end
+
 function Cmap_slice2d(C, FL_blk, FR_blk, grid::Slice2DGrid)
     χ = MPI.Allreduce(size(FL_blk, 1), +, grid.col_comm)   # full a/b extent (r1)
     a_rs = split_ranges(χ, grid.N1)
-    e_rs = split_ranges(χ, grid.N2)
-    # Make FL/FR fully local: gather the r1 (a/b) leg over col, the r2 (e/f)
-    # leg over row. After both gathers each rank holds the IDENTICAL FULL FL and
-    # FR, so the local chain produces the complete replicated χ×χ output — NO
-    # allreduce needed (design (a) below).
-    FL_full = _slice2d_col_allgather(_slice2d_row_allgather(FL_blk, grid, e_rs), grid, a_rs)
-    FR_full = _slice2d_col_allgather(_slice2d_row_allgather(FR_blk, grid, e_rs), grid, a_rs)
-    chain = ndims(FL_blk) == 3 ? CMAP_LEG3_CHAIN : CMAP_LEG4_CHAIN
-    out = chain_apply(chain, (FL_full, C, FR_full))
-    return out   # full χ×χ, replicated
+    l_rs = split_ranges(χ, grid.N2)
+    FL_row = slice2d_gather_row(FL_blk, grid, l_rs)  # local a, full output e
+    FR_col = slice2d_gather_col(FR_blk, grid, a_rs)  # full b, local output f
+    return Cmap_slice2d_sliced(C, FL_row, FR_col, grid, a_rs, l_rs)
 end
 
 # cuTENSOR contracts the M3.5 ring chain's 7-dim intermediate I2 (≈ na·local_l·

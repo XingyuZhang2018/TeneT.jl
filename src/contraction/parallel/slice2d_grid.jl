@@ -145,13 +145,14 @@ function _slice2d_col_reduce_scatter(partial, grid::Slice2DGrid, d_rs)
     if _use_nccl() && partial isa CuArray && _equal_blocks(d_rs)   # NCCL fast path (cross-node col axis)
         return _nccl_slice2d_reduce_scatter!(partial, grid.col_comm, true)
     end
-    acc = partial[d_rs[r1 + 1], :, :, :]
+    tail = ntuple(_ -> Colon(), ndims(partial) - 1)
+    acc = partial[d_rs[r1 + 1], tail...]
     recvbufs = Vector{typeof(acc)}(undef, N1)
     sendbufs = Vector{typeof(acc)}(undef, N1)
     for j in 0:N1-1
         j == r1 && continue
         recvbufs[j + 1] = similar(acc)
-        sendbufs[j + 1] = partial[d_rs[j + 1], :, :, :]
+        sendbufs[j + 1] = partial[d_rs[j + 1], tail...]
     end
     synchronize(partial)            # one sync covers allocs + chunk copies
     reqs = MPI.Request[]

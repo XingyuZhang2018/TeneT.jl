@@ -249,24 +249,19 @@ function ACenv_slice2d(AC_blk, FL_blk, M, FR_blk, grid::Slice2DGrid; alg)
     return copy(λAC), copy(AC′)
 end
 
-# ── Batch D: Cenv (Cmap) — the REPLICATED-OUTPUT case ────────────────────────
-# Cmap's output (and the iterate C) is the FULL χ×χ replicated tensor, so this is
-# the simplest batch: NO sliced map, NO new rrule. We hoist the FIXED FL/FR to FULL
-# with `slice2d_gather` (its adjoint is TAKE-MY-BLOCK — correct for a replicated
-# downstream; reduce-scatter would over-count by P, R1-M3/§2.4), then run the SERIAL
-# `Cmap` kernel on the gathered-full tensors (its chain_apply rrule supplies the AD)
-# with PLAIN dot/norm/orth (C replicated → local == global; NO slice2d hooks). Mirrors
-# serial Cenv (general.jl:640-681): the jr=mod1(j+1,Nj) FL-column offset, the
-# i=2:Ni non-leading cells normalized by `norm` (local == global on a replicated C).
-# Cmap has no MPO arg and no eig_checkpoint (cheap map — serial Cenv skips it too).
-# Grid-agnostic (Cmap works on any grid; the cross-axis maps also carry separate
-# r1/r2 partitions on rectangular grids).
-function _simple_eig_Cmap_slice2d(C1j, FL_full, FR_full; power_iter,
+# ── Batch D: Cenv (Cmap) — replicated C, sliced FL/FR ─────────────────────────
+# Cmap's output (and the iterate C) is the FULL χ×χ replicated tensor, but FL/FR
+# must remain slice2D-sized. Per rank we hoist FL row slices (local a, full e)
+# and FR column slices (full b, local f), then `Cmap_slice2d_sliced` completes
+# the local Cmap with a column Σa and row replication of the tiny C output.
+# Mirrors serial Cenv (general.jl:640-681): the jr=mod1(j+1,Nj) FL-column offset,
+# and i=2:Ni non-leading cells normalized by `norm` (C is replicated).
+function _simple_eig_Cmap_slice2d(C1j, FL_row, FR_col, grid::Slice2DGrid, a_rs, l_rs; power_iter,
                                  segment_checkpoint::CheckpointMethod=Plain())
-    Ni = length(FL_full)
+    Ni = length(FL_row)
     function f(v)
         for i in 1:Ni
-            v = Cmap(v, FL_full[i], FR_full[i])      # SERIAL kernel on full tensors
+            v = Cmap_slice2d_sliced(v, FL_row[i], FR_col[i], grid, a_rs, l_rs)
         end
         return v
     end
@@ -276,26 +271,28 @@ end
 """
     λC, C = Cenv_slice2d(C, FL_blk, FR_blk, grid; alg)
 
-Distributed `Cenv`. `C` is the REPLICATED (full χ×χ) center matrix; FL/FR are
-block-stored and gathered to FULL once per column (gather hoisting; take-my-block
-adjoint). Output `C` is full χ×χ replicated. Plain dot/norm (C replicated). Design
-Batch D / §2.4.
+Distributed `Cenv`. `C` is the REPLICATED (full χ×χ) center matrix; FL/FR stay
+slice2D-sized via row/column gathers. Output `C` is full χ×χ replicated. Plain
+dot/norm is OK because C is replicated.
 """
 function Cenv_slice2d(C, FL_blk, FR_blk, grid::Slice2DGrid; alg)
     @assert alg.ifsimple_eig "Cenv_slice2d: requires ifsimple_eig=true"
     @unpack power_iter, segment_checkpoint = alg
     Ni, Nj = size(C)
+    χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
+        c = MPI.Allreduce(size(FL_blk[1, 1], 1), +, grid.col_comm)
+        (c, split_ranges(c, grid.N1), split_ranges(c, grid.N2))
+    end
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     for j in 1:Nj
         jr = mod1(j + 1, Nj)
-        # HOIST: gather FL[:,jr] / FR[:,j] to FULL (replicated; take-my-block adjoint).
-        FL_full = ntuple(ip -> slice2d_gather(FL_blk[ip, jr], grid), Ni)
-        FR_full = ntuple(ip -> slice2d_gather(FR_blk[ip, j],  grid), Ni)
+        FL_row = ntuple(ip -> slice2d_gather_row(FL_blk[ip, jr], grid, l_rs), Ni)
+        FR_col = ntuple(ip -> slice2d_gather_col(FR_blk[ip, j],  grid, a_rs), Ni)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FL_full, FR_full; power_iter, segment_checkpoint)
+            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FL_row, FR_col, grid, a_rs, l_rs; power_iter, segment_checkpoint)
             λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
             push!(processed_indices, p)
             length(processed_indices) == length(C.data) && break
@@ -303,7 +300,7 @@ function Cenv_slice2d(C, FL_blk, FR_blk, grid::Slice2DGrid; alg)
         for i in 2:Ni
             p2 = C.pattern[i, j]
             if p2 ∉ processed_indices
-                Cij = Cmap(C′[i-1, j], FL_full[i-1], FR_full[i-1])
+                Cij = Cmap_slice2d_sliced(C′[i-1, j], FL_row[i-1], FR_col[i-1], grid, a_rs, l_rs)
                 C′[i, j] = Cij / norm(Cij)            # local norm OK — C replicated (local == global)
                 λC[i, j] = λC[1, j]
                 push!(processed_indices, p2)
@@ -390,24 +387,28 @@ end
 """
     λC, C = Cenv_plaq_slice2d(C, FL_blk, grid; alg)
 
-Distributed plaquette `Cenv_plaq`: Cmap(C, FL[:,jl], FL[:,jr]). C REPLICATED (gather FL
-slices take-my-block, plain norm). Mirrors Cenv_slice2d.
+Distributed plaquette `Cenv_plaq`: Cmap(C, FL[:,jl], FL[:,jr]). C REPLICATED;
+FL operands stay slice2D-sized via row/column gathers. Mirrors Cenv_slice2d.
 """
 function Cenv_plaq_slice2d(C, FL_blk, grid::Slice2DGrid; alg::VUMPS{L}) where {L <: Plaquette}
     @assert alg.ifsimple_eig "Cenv_plaq_slice2d: requires ifsimple_eig=true"
     @unpack power_iter, segment_checkpoint = alg
     Ni, Nj = size(C)
+    χ, a_rs, l_rs = ChainRulesCore.ignore_derivatives() do
+        c = MPI.Allreduce(size(FL_blk[1, 1], 1), +, grid.col_comm)
+        (c, split_ranges(c, grid.N1), split_ranges(c, grid.N2))
+    end
     λC = Zygote.Buffer(randSA(Array, C.pattern))
     C′ = Zygote.Buffer(C)
     processed_indices = Set{Int}()
     for j in 1:Nj
         jl = mod1(j + 1, Nj)          # FL slot column (serial Cenv_plaq:117, all lattices)
         jr = _plaq_jr(L, j, Nj)       # FR slot column
-        FLjl_full = ntuple(ip -> slice2d_gather(FL_blk[ip, jl], grid), Ni)
-        FLjr_full = ntuple(ip -> slice2d_gather(FL_blk[ip, jr], grid), Ni)
+        FLjl_row = ntuple(ip -> slice2d_gather_row(FL_blk[ip, jl], grid, l_rs), Ni)
+        FLjr_col = ntuple(ip -> slice2d_gather_col(FL_blk[ip, jr], grid, a_rs), Ni)
         p = C.pattern[1, j]
         if p ∉ processed_indices
-            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FLjl_full, FLjr_full; power_iter, segment_checkpoint)
+            λCs, Cs = _simple_eig_Cmap_slice2d(C[1, j], FLjl_row, FLjr_col, grid, a_rs, l_rs; power_iter, segment_checkpoint)
             λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
             push!(processed_indices, p)
             length(processed_indices) == length(C.data) && break
@@ -415,7 +416,7 @@ function Cenv_plaq_slice2d(C, FL_blk, grid::Slice2DGrid; alg::VUMPS{L}) where {L
         for i in 2:Ni
             p2 = C.pattern[i, j]
             if p2 ∉ processed_indices
-                Cij = Cmap(C′[i-1, j], FLjl_full[i-1], FLjr_full[i-1])
+                Cij = Cmap_slice2d_sliced(C′[i-1, j], FLjl_row[i-1], FLjr_col[i-1], grid, a_rs, l_rs)
                 C′[i, j] = Cij / norm(Cij)    # local norm OK — C replicated
                 λC[i, j] = λC[1, j]
                 push!(processed_indices, p2)

@@ -1053,52 +1053,51 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_sliced), AC_blk, FL_g, FR_g
     return result, acmap_slice2d_sliced_back
 end
 
-# Cmap (replicated class): C replicated, FL/FR block-stored, output FULL χ×χ
-# replicated. Forward design (a): allgather FL/FR to full and run the chain, so
-# every rank computes the IDENTICAL replicated `out` from IDENTICAL full inputs.
-# The forward gather of each block into the full tensor is therefore an
-# allgather of a replicated-into-blocks tensor, whose adjoint is TAKE-MY-BLOCK
-# (a getindex slice of the identical full cotangent), exactly the `slice2d_gather`
-# rrule's `gather_back` — NOT reduce-scatter, which would SUM the identical peer
-# cotangents and over-count by P (FLmap_slice2d_dist uses reduce-scatter only
-# because its output is DISTRIBUTED; Cmap's output is replicated). dC comes
-# from chain_backward already replicated (identical chain on identical inputs
-# and identical dOut on every rank) — returned as-is, no allreduce, no slice.
-# No inner_etype: Cmap has no downcast path (cf. the forward in slice2d.jl).
+# Cmap (replicated-output class): C replicated, FL/FR block-stored, output FULL
+# χ×χ replicated. Unlike the original M3 prototype, the forward must not
+# materialize full FL/FR. The sliced forward uses FL_row (local a, full e),
+# FR_col (full b, local f), C[a_local,:], a column allreduce for Σa, and a row
+# allgather to replicate the full output. Because that last output is replicated,
+# its pullback takes the local f-block of dresult (no row reduce-scatter). FL/FR
+# slice gradients are returned as slice cotangents; the gather wrappers reduce-
+# scatter them once at the hoist boundary. dC is assembled by summing local
+# f-block contributions across the row and col-gathering the a-blocks.
+function ChainRulesCore.rrule(::typeof(Cmap_slice2d_sliced), C, FL_row, FR_col,
+                              grid::Slice2DGrid, a_rs, l_rs)
+    C_a = C[a_rs[grid.r1 + 1], :]
+    chain = ndims(FL_row) == 3 ? CMAP_LEG3_CHAIN : CMAP_LEG4_CHAIN
+    partial = chain_apply(chain, (FL_row, C_a, FR_col))
+    partial = _slice2d_col_allgather(_slice2d_col_reduce_scatter(partial, grid, a_rs), grid, a_rs)
+    result = _slice2d_row_allgather(partial, grid, l_rs)
+
+    function cmap_slice2d_sliced_back(dresult)
+        d_c = unthunk(dresult)
+        d_c isa AbstractZero && return NoTangent(), zero(C), zero(FL_row), zero(FR_col),
+                                      NoTangent(), NoTangent(), NoTangent()
+        if !(d_c isa DenseArray)
+            buf = similar(result, eltype(d_c), size(d_c)); buf .= d_c; d_c = buf
+        end
+        dlocal = d_c[:, l_rs[grid.r2 + 1]]   # replicated output adjoint: take this rank's f-block
+        dFL_row, dC_a, dFR_col = chain_backward(chain, (FL_row, C_a, FR_col), dlocal)
+        dC_a = _slice2d_row_allgather(_slice2d_row_reduce_scatter_last(dC_a, grid, l_rs), grid, l_rs)
+        dC = _slice2d_col_allgather(dC_a, grid, a_rs)
+        return NoTangent(), dC, dFL_row, dFR_col, NoTangent(), NoTangent(), NoTangent()
+    end
+    return result, cmap_slice2d_sliced_back
+end
+
 function ChainRulesCore.rrule(::typeof(Cmap_slice2d), C, FL_blk, FR_blk, grid::Slice2DGrid)
     χ = MPI.Allreduce(size(FL_blk, 1), +, grid.col_comm)
     a_rs = split_ranges(χ, grid.N1)
-    e_rs = split_ranges(χ, grid.N2)
-    FL_full = _slice2d_col_allgather(_slice2d_row_allgather(FL_blk, grid, e_rs), grid, a_rs)
-    FR_full = _slice2d_col_allgather(_slice2d_row_allgather(FR_blk, grid, e_rs), grid, a_rs)
-    chain = ndims(FL_blk) == 3 ? CMAP_LEG3_CHAIN : CMAP_LEG4_CHAIN
-    result = chain_apply(chain, (FL_full, C, FR_full))
+    l_rs = split_ranges(χ, grid.N2)
+    FL_row = slice2d_gather_row(FL_blk, grid, l_rs)
+    FR_col = slice2d_gather_col(FR_blk, grid, a_rs)
+    result, sliced_back = ChainRulesCore.rrule(Cmap_slice2d_sliced, C, FL_row, FR_col, grid, a_rs, l_rs)
 
     function cmap_slice2d_back(dresult)
-        r1, r2 = grid.r1, grid.r2
-        # B0: full χ×χ cotangent, identical on every rank (replicated output) —
-        # NO allgather. Densify structured cotangents (FillArrays.Fill from a
-        # bare `sum` loss) so chain_backward gets a real device buffer.
-        d_c = unthunk(dresult)
-        if !(d_c isa DenseArray)
-            buf = similar(FL_full, eltype(d_c), size(d_c))
-            buf .= d_c
-            d_c = buf
-        end
-        # B1: chain grads in ops order (FL, C, FR).
-        dFL_full, dC, dFR_full = chain_backward(chain, (FL_full, C, FR_full), d_c)
-        # B3: take-my-block — dFL_full/dFR_full are identical on every rank; slice
-        # the block this rank owns (leg4: [a, :, :, e]; leg3: [a, :, e]).
-        if ndims(FL_blk) == 3
-            dFL_blk = dFL_full[a_rs[r1 + 1], :, e_rs[r2 + 1]]
-            dFR_blk = dFR_full[a_rs[r1 + 1], :, e_rs[r2 + 1]]
-        else
-            dFL_blk = dFL_full[a_rs[r1 + 1], :, :, e_rs[r2 + 1]]
-            dFR_blk = dFR_full[a_rs[r1 + 1], :, :, e_rs[r2 + 1]]
-        end
-        _free!(dFL_full); _free!(dFR_full)
-        # B2: dC replicated, returned as-is (no allreduce — would over-count by P).
-        # map order Cmap_slice2d(C, FL_blk, FR_blk, grid).
+        _, dC, dFL_row, dFR_col, _, _, _ = sliced_back(dresult)
+        dFL_blk = _slice2d_row_reduce_scatter_last(dFL_row, grid, l_rs)
+        dFR_blk = _slice2d_col_reduce_scatter(dFR_col, grid, a_rs)
         return NoTangent(), dC, dFL_blk, dFR_blk, NoTangent()
     end
     return result, cmap_slice2d_back
