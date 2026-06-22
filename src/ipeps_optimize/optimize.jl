@@ -78,6 +78,8 @@ _inner(x, dx1, dx2) = real(dot(dx1, dx2))
 # Finalize callback — called after each LBFGS iteration
 # ============================================================================
 
+_imag_gate_hit(eimag, tol) = !isfinite(abs(eimag)) || abs(eimag) > tol
+
 # NOTE: Always called through a 4-arg closure adapter, never invoked directly.
 # The full 11-arg signature is specific to iPEPS optimization and does not follow
 # OptimKit's default finalize! convention (x, f, g, iter).  The closure in
@@ -134,8 +136,21 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x); iotype=IOStream)
     end
 
-    if abs(fδEierr[2]) < 1e-12 || abs(fδEierr[4]) > 1e-8
+    if _imag_gate_hit(fδEierr[4], params.imag_tol)
+        params.last_stop_reason = :large_Eimag
+        params.last_stop_chi = χ
+        params.last_stop_eimag = fδEierr[4]
+        params.verbosity >= 1 && @warn "Eimag above tolerance; ending current chi so optimization can increase chi" chi=χ Eimag=fδEierr[4] imag_tol=params.imag_tol
         g .= 0
+    elseif abs(fδEierr[2]) < 1e-12
+        params.last_stop_reason = :energy_stall
+        params.last_stop_chi = χ
+        params.last_stop_eimag = fδEierr[4]
+        g .= 0
+    else
+        params.last_stop_reason = :running
+        params.last_stop_chi = χ
+        params.last_stop_eimag = fδEierr[4]
     end
 
     # Aggressively release tape + return CUDA pool memory to OS between LBFGS iters
@@ -204,6 +219,11 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
 
     local e, eg, fgnum, history
     for _ in 1:params.maxiter_restart
+        χ_current = χ
+        params.last_stop_reason = :running
+        params.last_stop_chi = χ_current
+        params.last_stop_eimag = fδEierr[4]
+
         A, e, eg, fgnum, history = optimize_reload(fg, A, alg;
             resume_from  = params.ifload_lbfgs ? joinpath(state_path, "χ$χ.jld2") : nothing,
             save_state_to = params.ifsave_lbfgs ? joinpath(state_path, "χ$χ.jld2") : nothing,
@@ -212,11 +232,22 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
             inner         = _inner,
             finalize!     = (x, f, g, iter) -> _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
         )
+        stop_reason = params.last_stop_reason
         # Write obs at BEST iter of current χ (after LBFGS converged at this χ,
         # before chi-shift). Gives clean per-chi-stage obs vs the i=1-after-shift
         # snapshot that the existing call below produces.
         observable(A, χ, params_obs; restriction_ipeps)
         χ += χshift
+        if stop_reason == :large_Eimag
+            if χshift <= 0
+                params.verbosity >= 1 && @warn "Eimag gate ended current chi but chi_shift is zero; returning for caller-managed chi advance" chi=χ_current Eimag=params.last_stop_eimag imag_tol=params.imag_tol
+                break
+            end
+            params.verbosity >= 1 && @warn "Eimag gate ended current chi; advancing chi" chi=χ_current next_chi=χ Eimag=params.last_stop_eimag imag_tol=params.imag_tol
+            rt = initialize_env(A, D, χ, params; restriction_ipeps)
+            rt′ = deepcopy(rt)
+            continue
+        end
         enew, = observable(A, χ, params_obs; restriction_ipeps)
         rt = initialize_env(A, D, χ, params; restriction_ipeps)
         rt′ = deepcopy(rt)
