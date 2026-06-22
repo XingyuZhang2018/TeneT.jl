@@ -79,6 +79,7 @@
         @test v.inner_checkpoint   === TeneT.Plain()
         @test v.eig_checkpoint     === TeneT.Plain()
         @test v.step_checkpoint    === TeneT.Plain()
+        @test !(:distributed_qr in fieldnames(typeof(v)))
     end
 
     # ---- VUMPS struct — inner_etype field ----

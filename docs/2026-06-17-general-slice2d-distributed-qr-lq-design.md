@@ -293,10 +293,9 @@ function vumps_step_slice2d(rt::VUMPSRuntime, M::StructArray, grid::Slice2DGrid,
 end
 ```
 
-Plaquette may continue to use `ACCtoAL_tsqr_slice2d`. After the General seam is
-stable, the `distributed_qr` flag should be reinterpreted or removed so the
-production Slice2D path has one meaning instead of "gather by default, TSQR only
-when opted in." During migration, keep the flag only as a compatibility switch.
+Plaquette uses `ACCtoAL_tsqr_slice2d` on the production Slice2D path. The old
+`distributed_qr` opt-in flag was removed so Slice2D has one meaning instead of
+"gather by default, TSQR only when opted in."
 
 Observable code should call `ALCtoAC_slice2d`, not `ALCtoAC_slice2d_dist`.
 
@@ -373,7 +372,7 @@ Negative controls:
 - `ALCtoAC_slice2d_dist` has no production callers.
 - Forward and gradient parity tests pass on 4 CPU ranks for complex inputs.
 - `step_checkpoint=Recompute()` AD smoke passes without deadlock.
-- Plaquette `distributed_qr` behavior is not regressed.
+- Plaquette default Slice2D TSQR behavior is not regressed.
 
 ## Implementation notes
 
@@ -392,6 +391,6 @@ Negative controls:
 - Observable callers use production `ALCtoAC_slice2d`; the old
   `ALCtoAC_slice2d_dist` helper has been removed.
 - The remaining full-chi gap in this phase is General initialization, which
-  still uses full canonicalization. Plaquette `distributed_qr` now has a
+  still uses full canonicalization. Plaquette Slice2D now has a default
   distributed init path, while the matching General init work remains future
   work.

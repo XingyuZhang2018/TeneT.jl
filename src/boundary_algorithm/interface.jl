@@ -36,10 +36,6 @@ C4v
     # New public parallel API. When set, this method object takes precedence over
     # legacy `ifparallel`/`grid` routing at the high-level VUMPS boundary.
     parallel_method = nothing
-    # Opt-in forward-only distributed QR seam for Plaquette Slice2D observation runs.
-    # The default gather QR seam remains in place for AD/optimization.
-    distributed_qr::Bool = false
-
     inner_etype::Union{Nothing, Type} = nothing
     inner_etype_final_steps::Int = 0
     simple_eig_polish_steps::Int = 0

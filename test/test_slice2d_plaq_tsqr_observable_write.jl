@@ -1,4 +1,4 @@
-# Plaquette Slice2D distributed_qr observable write smoke (4 ranks, 2x2 grid, CPU).
+# Plaquette Slice2D default TSQR observable write smoke (4 ranks, 2x2 grid, CPU).
 # This exercises observable() through write_obs_log in an isolated temp folder.
 using Test, MPI, LinearAlgebra, Random, OptimKit, Zygote
 using TeneT
@@ -22,7 +22,7 @@ function restriction_ipeps(A)
     return copy(Ar)
 end
 
-@testset "Plaquette distributed_qr observable writes log" begin
+@testset "Plaquette Slice2D default TSQR observable writes log" begin
     D, d, chi = 2, 2, 8
     pattern = [1 3; 2 4]
     folder = rank == 0 ? mktempdir(; cleanup=false) : ""
@@ -35,7 +35,6 @@ end
     model = J1J2(lattice=Square(), S=0.5, J1=1.0, J2=0.5,
                  ifrotate=true, couplingtype=:uniform, bondratio=1.0)
     alg = VUMPS{Plaquette{Square}}(grid=slice2d_grid(2, 2),
-                                   distributed_qr=true,
                                    ifsimple_eig=true,
                                    ifparallel=false,
                                    forloop_iter=1,
@@ -105,4 +104,4 @@ end
     end
 end
 
-rank == 0 && println("Plaquette distributed_qr observable write smoke done.")
+rank == 0 && println("Plaquette Slice2D default TSQR observable write smoke done.")

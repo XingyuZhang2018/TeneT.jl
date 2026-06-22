@@ -34,31 +34,18 @@ end
 """
     rt = init_VUMPSRuntime_slice2d(M, χ, grid, alg::VUMPS{<:Plaquette})
 
-Block-distributed plaquette init: serial canonicalization (C = LRtoC(L,L), no right),
-unconditional bcast over grid.comm, then scatter AL/FL (C replicated).
+Block-distributed plaquette init: generate only each rank's χ-block, use the
+Slice2D TSQR seam for left canonicalization, solve FL block-distributed, and
+keep C replicated.
 """
 function init_VUMPSRuntime_slice2d(M::StructArray, χ::Int, grid::Slice2DGrid, alg::VUMPS{L}) where {L <: Plaquette}
-    if alg.distributed_qr
-        rng_bak = copy(Random.default_rng()); Random.seed!(_SLICE2D_INIT_SEED + grid.rank)
-        A_blk = _initial_A_slice2d_block(M, χ, grid)
-        AL_blk, Lg = _left_canonical_tsqr_slice2d(A_blk, grid)
-        C = LRtoC(Lg, Lg)
-        FL0_blk = _initial_FL_slice2d_block(M, χ, grid)
-        copy!(Random.default_rng(), rng_bak)
-        _, FL_blk = leftenv_slice2d(AL_blk, conj(AL_blk), M, FL0_blk, grid; alg)
-        return PlaquetteVUMPSRuntime(AL_blk, C, FL_blk)
-    end
-    # DISTRIBUTED init (see the General method above): shared-seed cross-rank consistency instead of
-    # the overflowing full-χ bcast; left_canonical stays (global, cheap); FL solved block-distributed
-    # via leftenv_slice2d (no serial full-χ leftenv / 108 GB). Plaquette is left-canonical only (no AR/FR).
-    rng_bak = copy(Random.default_rng()); Random.seed!(_SLICE2D_INIT_SEED)
-    A = initial_A(M, χ)
-    AL, Lg, _ = left_canonical(A)
-    C   = LRtoC(Lg, Lg)
-    FL0 = FLint(AL, M)
+    rng_bak = copy(Random.default_rng()); Random.seed!(_SLICE2D_INIT_SEED + grid.rank)
+    A_blk = _initial_A_slice2d_block(M, χ, grid)
+    AL_blk, Lg = _left_canonical_tsqr_slice2d(A_blk, grid)
+    C = LRtoC(Lg, Lg)
+    FL0_blk = _initial_FL_slice2d_block(M, χ, grid)
     copy!(Random.default_rng(), rng_bak)
-    AL_blk = scatter_struct(AL, grid)
-    _, FL_blk = leftenv_slice2d(AL_blk, conj(AL_blk), M, scatter_struct(FL0, grid), grid; alg)
+    _, FL_blk = leftenv_slice2d(AL_blk, conj(AL_blk), M, FL0_blk, grid; alg)
     return PlaquetteVUMPSRuntime(AL_blk, C, FL_blk)
 end
 

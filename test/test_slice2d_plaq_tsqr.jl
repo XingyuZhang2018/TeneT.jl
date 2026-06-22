@@ -71,19 +71,19 @@ end
     end
 end
 
-@testset "Plaquette distributed_qr init sanity" begin
+@testset "Plaquette Slice2D default TSQR init sanity" begin
     g = slice2d_grid(2, 2)
     chi, D = 12, 2
     pat = [1 3; 2 4]
     Random.seed!(1200)
     M = StructArray([rand(ComplexF64, D, D, D, D, 2) for _ in 1:4], pat)
 
-    # Diverge the ambient RNG; distributed init must be rank-uniform anyway.
+    # Diverge the ambient RNG; Slice2D default init must be rank-uniform anyway.
     for _ in 1:rank
         rand(ComplexF64)
     end
 
-    alg = VUMPS{Plaquette{Square}}(grid=g, distributed_qr=true, ifsimple_eig=true,
+    alg = VUMPS{Plaquette{Square}}(grid=g, ifsimple_eig=true,
                                    ifupdown=false, power_iter=1, forloop_iter=1,
                                    maxiter=1, maxiter_ad=0, verbosity=0)
     rt = init_VUMPSRuntime_slice2d(M, chi, g, alg)
@@ -95,7 +95,7 @@ end
             ref = MPI.bcast(SA.data[i], 0, comm)
             @test maximum(abs, SA.data[i] .- ref) <= 1e-12
         end
-        rank == 0 && println("  distributed_qr init $name is rank-uniform")
+        rank == 0 && println("  Slice2D default TSQR init $name is rank-uniform")
     end
 
     for A in ALf.data
