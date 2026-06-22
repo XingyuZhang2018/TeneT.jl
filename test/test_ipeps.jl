@@ -370,7 +370,7 @@
         params = GradientOptimize(model=model, pattern=pattern,
                                   boundary_alg=boundary_alg,
                                   optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
-                                  maxiter_restart=1, verbosity=0, folder=folder,
+                                  verbosity=0, folder=folder,
                                   ifSU=false, SUτ=0.0, ifprecondition=false,
                                   reuse_env=true, ifsave_env=false, ifload_env=false,
                                   ifsave_lbfgs=false, ifload_lbfgs=false)
@@ -443,7 +443,7 @@
         params = GradientOptimize(model=model, pattern=pattern,
                                   boundary_alg=boundary_alg,
                                   optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
-                                  maxiter_restart=1, verbosity=0, folder=folder,
+                                  verbosity=0, folder=folder,
                                   ifSU=false, SUτ=0.0, ifprecondition=false,
                                   reuse_env=true, ifsave_env=false, ifload_env=false,
                                   ifsave_lbfgs=false, ifload_lbfgs=false)
@@ -510,7 +510,7 @@
         params = GradientOptimize(model=model, pattern=pattern,
                                   boundary_alg=boundary_alg,
                                   optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
-                                  maxiter_restart=1, verbosity=0, folder=folder,
+                                  verbosity=0, folder=folder,
                                   ifSU=false, SUτ=0.0, ifprecondition=false,
                                   reuse_env=true, ifsave_env=false, ifload_env=false,
                                   ifsave_lbfgs=false, ifload_lbfgs=false)

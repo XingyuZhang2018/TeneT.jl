@@ -80,6 +80,59 @@ _inner(x, dx1, dx2) = real(dot(dx1, dx2))
 
 _imag_gate_hit(eimag, tol) = !isfinite(abs(eimag)) || abs(eimag) > tol
 
+_pow23_χ(stage::Integer) = isodd(stage) ? 2^((stage + 1) ÷ 2) : 3 * 2^(stage ÷ 2 - 1)
+_sqrt2_χ(stage::Integer) = round(Int, 2.0^((stage + 1) / 2))
+
+function _default_χ_at(stage::Integer, scheme::Symbol)
+    scheme == :pow23 && return _pow23_χ(stage)
+    scheme == :sqrt2 && return _sqrt2_χ(stage)
+    throw(ArgumentError("unknown χlist scheme $scheme; expected :pow23 or :sqrt2"))
+end
+
+"""
+    default_χlist(D; χmin=D^2, nstage=10, maxχ=nothing, scheme=:pow23)
+
+Return a default ordered list of boundary bond dimensions for optimization.
+The first entry is at least `χmin` (which defaults to `D^2`).  The default
+`:pow23` scheme uses the GPU-friendly sequence `2, 3, 4, 6, 8, 12, ...`.
+Use `scheme=:sqrt2` for the rounded `2^(i/2)` ladder.
+"""
+function default_χlist(D::Integer; χmin::Integer=D^2, nstage::Integer=10,
+                       maxχ::Union{Nothing,Integer}=nothing, scheme::Symbol=:pow23)
+    D > 0 || throw(ArgumentError("D must be positive"))
+    χmin > 0 || throw(ArgumentError("χmin must be positive"))
+    nstage > 0 || throw(ArgumentError("nstage must be positive"))
+    if maxχ !== nothing
+        maxχ > 0 || throw(ArgumentError("maxχ must be positive"))
+        maxχ >= χmin || throw(ArgumentError("maxχ must be at least χmin"))
+    end
+
+    χs = Int[]
+    stage = 1
+    while length(χs) < nstage
+        χ = _default_χ_at(stage, scheme)
+        stage += 1
+        χ < χmin && continue
+        maxχ !== nothing && χ > maxχ && break
+
+        if isempty(χs) && χ != χmin
+            push!(χs, Int(χmin))
+            length(χs) == nstage && break
+        end
+        (isempty(χs) || χs[end] != χ) && push!(χs, χ)
+    end
+
+    isempty(χs) && push!(χs, Int(χmin))
+    return χs
+end
+
+function _normalize_χlist(χlist::AbstractVector{<:Integer})
+    isempty(χlist) && throw(ArgumentError("χlist must contain at least one χ"))
+    χs = Int.(collect(χlist))
+    any(χ -> χ <= 0, χs) && throw(ArgumentError("χlist values must be positive"))
+    return χs
+end
+
 # NOTE: Always called through a 4-arg closure adapter, never invoked directly.
 # The full 11-arg signature is specific to iPEPS optimization and does not follow
 # OptimKit's default finalize! convention (x, f, g, iter).  The closure in
@@ -138,18 +191,18 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
 
     if _imag_gate_hit(fδEierr[4], params.imag_tol)
         params.last_stop_reason = :large_Eimag
-        params.last_stop_chi = χ
+        params.last_stop_χ = χ
         params.last_stop_eimag = fδEierr[4]
-        params.verbosity >= 1 && @warn "Eimag above tolerance; ending current chi so optimization can increase chi" chi=χ Eimag=fδEierr[4] imag_tol=params.imag_tol
+        params.verbosity >= 1 && @warn "Eimag above tolerance; ending current χ so optimization can advance to the next χ stage" χ=χ Eimag=fδEierr[4] imag_tol=params.imag_tol
         g .= 0
     elseif abs(fδEierr[2]) < 1e-12
         params.last_stop_reason = :energy_stall
-        params.last_stop_chi = χ
+        params.last_stop_χ = χ
         params.last_stop_eimag = fδEierr[4]
         g .= 0
     else
         params.last_stop_reason = :running
-        params.last_stop_chi = χ
+        params.last_stop_χ = χ
         params.last_stop_eimag = fδEierr[4]
     end
 
@@ -166,32 +219,31 @@ end
 # ============================================================================
 
 """
-    optimise_ipeps(A, χ, χshift, params::GradientOptimize; restriction_ipeps=_restriction_ipeps)
+    optimise_ipeps(A, χlist, params::GradientOptimize; restriction_ipeps=_restriction_ipeps)
 
 Unified gradient-based iPEPS optimization using automatic differentiation
 and LBFGS. Supports VUMPS boundary with multi-cell patterns.
 
 # Arguments
 - `A`: raw iPEPS parameter array of shape `(D, D, D, D, d, Nsites)`
-- `χ`: initial boundary bond dimension
-- `χshift`: increment to `χ` after each restart
+- `χlist`: ordered boundary bond dimensions to optimize
 - `params`: `GradientOptimize` containing model, boundary algorithm, I/O options
 - `restriction_ipeps`: symmetry restriction function applied to `A` before building tensors
 
-After each LBFGS run completes (converges or hits `maxiter`), the bond dimension
-is increased by `χshift` and the optimizer restarts from the current state.
-This loop repeats up to `params.maxiter_restart` times.
+After each LBFGS run completes (converges or hits `maxiter`), the optimizer
+restarts from the current state at the next χ in `χlist`. The sequence ends when
+`χlist` is exhausted or the per-stage convergence check stops early.
 """
-function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
+function optimise_ipeps(A, χlist::AbstractVector{<:Integer}, params::GradientOptimize;
                         restriction_ipeps=_restriction_ipeps)
+    χs = _normalize_χlist(χlist)
     D = _ipeps_bond_dimension(A)
-    rt = initialize_env(A, D, χ, params; restriction_ipeps)
-    rt′ = deepcopy(rt)
     fδEierr = [1.0, 1.0, 0.0, 0.0]
 
     params_obs = deepcopy(params)
     params_obs.boundary_alg.maxiter = params.boundary_alg.maxiter * 10
 
+    local rt, rt′
     function fenergy(A)
         _G_cache[] = nothing
         A = restriction_ipeps(A)
@@ -218,10 +270,12 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
     state_path = joinpath(params.folder, "D$(D)", "lbfgs_checkpoint")
 
     local e, eg, fgnum, history
-    for _ in 1:params.maxiter_restart
+    for (stage, χ) in pairs(χs)
+        rt = initialize_env(A, D, χ, params; restriction_ipeps)
+        rt′ = deepcopy(rt)
         χ_current = χ
         params.last_stop_reason = :running
-        params.last_stop_chi = χ_current
+        params.last_stop_χ = χ_current
         params.last_stop_eimag = fδEierr[4]
 
         A, e, eg, fgnum, history = optimize_reload(fg, A, alg;
@@ -234,23 +288,17 @@ function optimise_ipeps(A, χ::Int, χshift::Int, params::GradientOptimize;
         )
         stop_reason = params.last_stop_reason
         # Write obs at BEST iter of current χ (after LBFGS converged at this χ,
-        # before chi-shift). Gives clean per-chi-stage obs vs the i=1-after-shift
-        # snapshot that the existing call below produces.
+        # before probing the next χ). Gives clean per-χ-stage observables.
         observable(A, χ, params_obs; restriction_ipeps)
-        χ += χshift
+        if stage == length(χs)
+            break
+        end
+        χ_next = χs[stage + 1]
         if stop_reason == :large_Eimag
-            if χshift <= 0
-                params.verbosity >= 1 && @warn "Eimag gate ended current chi but chi_shift is zero; returning for caller-managed chi advance" chi=χ_current Eimag=params.last_stop_eimag imag_tol=params.imag_tol
-                break
-            end
-            params.verbosity >= 1 && @warn "Eimag gate ended current chi; advancing chi" chi=χ_current next_chi=χ Eimag=params.last_stop_eimag imag_tol=params.imag_tol
-            rt = initialize_env(A, D, χ, params; restriction_ipeps)
-            rt′ = deepcopy(rt)
+            params.verbosity >= 1 && @warn "Eimag gate ended current χ; advancing to next χ in χlist" χ=χ_current next_χ=χ_next Eimag=params.last_stop_eimag imag_tol=params.imag_tol
             continue
         end
-        enew, = observable(A, χ, params_obs; restriction_ipeps)
-        rt = initialize_env(A, D, χ, params; restriction_ipeps)
-        rt′ = deepcopy(rt)
+        enew, = observable(A, χ_next, params_obs; restriction_ipeps)
         if abs(real(enew[1]) - e) < 1e-7 && history[end-1] < 1e-5
             break
         end

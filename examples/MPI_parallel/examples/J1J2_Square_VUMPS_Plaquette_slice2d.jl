@@ -71,7 +71,7 @@ say("    step_checkpoint = $STEP_CKPT (AD-loop tape control)")
 params = GradientOptimize(model=model, pattern=pattern, boundary_alg=boundary_alg,
                           optimizer=LBFGS(200; maxiter=OPT_MAXITER, verbosity=(RANK == 0 ? 4 : 0),
                                           gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
-                          maxiter_restart=1, folder=folder, verbosity=(RANK == 0 ? 4 : 0),
+                          folder=folder, verbosity=(RANK == 0 ? 4 : 0),
                           ifSU=false, ifprecondition=false, iter_precond=0,
                           bond_checkpoint=_ckpt(BOND_CKPT),
                           reuse_env=true, ifsave_env=false, ifload_env=false,
@@ -124,6 +124,6 @@ else
     # Full optimization. NOTE: observable() (post-LBFGS) is not slice2d-ready for mag/ξ; that must be
     # addressed (slice2d-ize magnetization_value/cor_len_value, or gather-measure) before relying on
     # the M/ξ outputs of a full run.
-    optimise_ipeps(A, CHI_OPT, 0, params; restriction_ipeps)
+    optimise_ipeps(A, [CHI_OPT], params; restriction_ipeps)
     say("=== slice2d Plaquette full run finished (rank 0) ===")
 end

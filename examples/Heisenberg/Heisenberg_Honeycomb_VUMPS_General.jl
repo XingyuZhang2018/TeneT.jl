@@ -9,7 +9,8 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 2, 16, 0, 10
+D, χ_init = 2, 16
+χlist_opt = default_χlist(D; χmin=χ_init, nstage=10)
 pattern = [1 2;
            2 1]
 # pattern = [1;;]
@@ -43,7 +44,6 @@ params = GradientOptimize(model=model,
                           boundary_alg=boundary_alg, 
                           optimizer=LBFGS(200; maxiter=10, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
-                          maxiter_restart=maxiter_restart,
                           verbosity=4, 
                           folder=folder,
                           ifSU=false,
@@ -56,7 +56,7 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, D, χ, params)
+A = init_ipeps(;atype, etype, No, D, χ=χ_init, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 function restriction_ipeps(A)
@@ -76,5 +76,5 @@ function restriction_ipeps(A)
    return B/norm(B)
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
-# observable(A, χ, params; restriction_ipeps)
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps);
+# observable(A, χ_init, params; restriction_ipeps)

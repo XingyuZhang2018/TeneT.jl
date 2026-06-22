@@ -212,7 +212,7 @@
                                        tol=1e-10, verbosity=0)
         params = GradientOptimize(; model, pattern=[1;;], boundary_alg,
                                    optimizer=nothing, forloop_iter=1,
-                                   maxiter_restart=1, verbosity=0,
+                                   verbosity=0,
                                    folder=mktempdir(),
                                    ifSU=false, SUτ=0,
                                    ifprecondition=false, iter_precond=0,

@@ -10,7 +10,8 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift = 2, 16, 0
+D, χ_init = 2, 16
+χlist_opt = [χ_init]
 pattern = [1 2;
            2 1]
 
@@ -35,7 +36,6 @@ params = GradientOptimize(model=model,
                           optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7,
                                            linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
-                          maxiter_restart=1,
                           verbosity=4,
                           folder=folder,
                           ifSU=false, SUτ=0,
@@ -44,7 +44,7 @@ params = GradientOptimize(model=model,
                           ifsave_env=true, ifload_env=true,
                           ifsave_lbfgs=false, ifload_lbfgs=false)
 
-A = init_ipeps(; atype, etype, No, D, χ, params)
+A = init_ipeps(; atype, etype, No, D, χ=χ_init, params)
 
 function _c3v_symmetrize_site(A1)
     return (A1 +
@@ -67,4 +67,4 @@ function restriction_ipeps(A)
     return B / norm(B)
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps)
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps)

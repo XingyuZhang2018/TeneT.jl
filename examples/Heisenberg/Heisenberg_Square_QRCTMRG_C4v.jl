@@ -8,7 +8,8 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift = 2, 16, 0
+D, χ_init = 2, 16
+χlist_opt = default_χlist(D; χmin=χ_init, nstage=10)
 pattern = [1;;]
 model = Heisenberg(lattice=Square(),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
@@ -31,7 +32,6 @@ params = GradientOptimize(model=model,
                           optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7,
                                            linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
-                          maxiter_restart=10,
                           verbosity=4, folder=folder,
                           ifSU=false, SUτ=0,
                           ifprecondition=true, iter_precond=0,
@@ -39,10 +39,10 @@ params = GradientOptimize(model=model,
                           ifsave_env=false, ifload_env=false,
                           ifsave_lbfgs=false, ifload_lbfgs=false)
 
-A = init_ipeps(; atype, etype, No, D, χ, params)
+A = init_ipeps(; atype, etype, No, D, χ=χ_init, params)
 
 function restriction_ipeps(A)
     return C4v_restriction(A)
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps)
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps)

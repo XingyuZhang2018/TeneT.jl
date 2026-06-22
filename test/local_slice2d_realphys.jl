@@ -41,7 +41,7 @@ mkalg(grid) = VUMPS{Plaquette{Square}}(grid=grid, ifsimple_eig=true, ifparallel=
 mkparams(grid, folder; maxit=0) = GradientOptimize(model=model, pattern=pattern, boundary_alg=mkalg(grid),
     optimizer=LBFGS(20; maxiter=maxit, verbosity=(rank == 0 ? 2 : 0), gradtol=1e-7,
                     linesearch=HagerZhangLineSearch(maxfg=5)),
-    maxiter_restart=1, folder=folder, verbosity=0, ifSU=false, ifprecondition=false, iter_precond=0,
+    folder=folder, verbosity=0, ifSU=false, ifprecondition=false, iter_precond=0,
     reuse_env=true, ifsave_env=false, ifload_env=false, ifsave_lbfgs=false, ifload_lbfgs=false, ifplot=false)
 
 # ── Phase 1: real-physics energy reproduction (converged A) ──────────────────────────
@@ -70,7 +70,7 @@ const TMP = joinpath(pkgdir(TeneT), "data", "_local_slice2d_smoketest",
                      "$model", "$pattern", "VUMPS_Plaquette", "Float64", "seed2024")
 pc = mkparams(slice2d_grid(N, N), TMP; maxit=3)
 A0 = init_ipeps(; atype, etype=Float64, No=0, D=2, χ=16, params=pc)
-Aopt, e_final, eg, fgnum, history = optimise_ipeps(A0, 16, 0, pc; restriction_ipeps)
+Aopt, e_final, eg, fgnum, history = optimise_ipeps(A0, [16], pc; restriction_ipeps)
 say(@sprintf("  Phase 2 done: final energy = %.10f  (random→3 iters; descending, not converged)", real(e_final)))
 say("  history (energy per LBFGS iter): $(round.(real.(history), digits=8))")
 say("=== local slice2d real-physics validation done ===")

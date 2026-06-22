@@ -177,6 +177,7 @@ end
     include("test_boundary.jl")
     include("test_autodiff.jl")
     include("test_ipeps.jl")
+    include("test_ipeps_optimize_eimag_gate.jl")
     include("test_tm_spectrum.jl")
     include("test_tm_spectrum_plot.jl")
     include("test_patch.jl")

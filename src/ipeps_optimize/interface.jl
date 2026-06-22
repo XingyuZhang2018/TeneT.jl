@@ -19,10 +19,9 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
 
     # Verbosity and iteration control
     verbosity::Int = Defaults.VERBOSE_ITER
-    maxiter_restart::Int = 1
     imag_tol::Real = 1e-8
     last_stop_reason::Symbol = :not_started
-    last_stop_chi::Int = 0
+    last_stop_χ::Int = 0
     last_stop_eimag::Real = 0.0
 
     # Simple-update warm start

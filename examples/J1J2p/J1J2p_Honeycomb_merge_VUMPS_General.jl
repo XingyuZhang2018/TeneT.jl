@@ -10,8 +10,9 @@ Random.seed!(seed)
 atype = Array
 etype = Float64
 # Keep the default light enough to run through optimisation and observables.
-# Increase χ, χshift, maxiter_restart, and LBFGS maxiter for production scans.
-D, χ, χshift, maxiter_restart = 2, 16, 0, 1
+# Increase χlist_opt and LBFGS maxiter for production scans.
+D, χ_init = 2, 16
+χlist_opt = [χ_init]
 pattern = [1;;]
 # pattern = [1 2;
 #            2 1]
@@ -50,7 +51,6 @@ params = GradientOptimize(model=model,
                           boundary_alg=boundary_alg,
                           optimizer=LBFGS(200; maxiter=1, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=1)),
                           forloop_iter=1,
-                          maxiter_restart=maxiter_restart,
                           verbosity=4,
                           folder=folder,
                           ifSU=false,
@@ -64,14 +64,14 @@ params = GradientOptimize(model=model,
                           ifload_lbfgs=false,
                           ifplot=true
 )
-A = init_ipeps(;atype, etype, No, D, χ, params)
+A = init_ipeps(;atype, etype, No, D, χ=χ_init, params)
 # A = init_ipeps_perturbation(;atype, No, D, D_new=3, χ, ϵ=1e-2, params)
-# A = init_ipeps_SU(; atype, No, D, D_new=3, χ, params)
+# A = init_ipeps_SU(; atype, No, D, D_new=3, χ=χ_init, params)
 
 function restriction_ipeps(A)
    A = local_min_norm(A, params)
    return A
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
-# observable(A, χ, params; restriction_ipeps)
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps);
+# observable(A, χ_init, params; restriction_ipeps)

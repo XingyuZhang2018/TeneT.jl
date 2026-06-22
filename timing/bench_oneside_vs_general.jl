@@ -63,7 +63,7 @@ function make_params(alg)
                      boundary_alg=alg,
                      optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
                      forloop_iter=1,
-                     maxiter_restart=1, verbosity=0, folder=folder,
+                     verbosity=0, folder=folder,
                      ifSU=false, SUτ=0.0, ifprecondition=false,
                      iter_precond=0,
                      reuse_env=true, ifsave_env=false, ifload_env=false,

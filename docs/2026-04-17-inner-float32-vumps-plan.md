@@ -862,7 +862,7 @@ function run_L4(D, χ, seed, inner_etype)
                                               gradtol=1e-7,
                                               linesearch=HagerZhangLineSearch(maxfg=5)),
                               ifcheckpoint=false, forloop_iter=1,
-                              maxiter_restart=1, verbosity=0, folder=folder,
+                              verbosity=0, folder=folder,
                               ifSU=false, SUτ=0, ifprecondition=true,
                               iter_precond=0, reuse_env=true,
                               ifsave_env=true, ifload_env=false,
@@ -874,7 +874,7 @@ function run_L4(D, χ, seed, inner_etype)
 
     rss_before = Sys.maxrss()
     t_start = time()
-    result = optimise_ipeps(A, χ, 0, params; restriction_ipeps)
+    result = optimise_ipeps(A, [χ], params; restriction_ipeps)
     wall = time() - t_start
     rss_after = Sys.maxrss()
 

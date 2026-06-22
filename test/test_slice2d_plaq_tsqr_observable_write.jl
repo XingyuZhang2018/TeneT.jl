@@ -50,7 +50,6 @@ end
                                    verbosity=0)
     params = GradientOptimize(model=model, pattern=pattern, boundary_alg=alg,
                               optimizer=LBFGS(5; maxiter=1, verbosity=0, gradtol=1e-3),
-                              maxiter_restart=1,
                               folder=folder,
                               verbosity=0,
                               ifSU=false,

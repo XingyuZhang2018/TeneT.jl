@@ -42,13 +42,12 @@ atype = CuArray
 etype = Float64
 
 D = 10                          # iPEPS bond dimension
-χ = 400                         # boundary bond dimension
-χshift = 16                     # χ increment per restart
-maxiter_restart = 100           # number of restarts with increasing χ
+χ_init = 400                    # initial boundary bond dimension
+χlist_opt = default_χlist(D; χmin=χ_init, nstage=100)  # χ values to optimize
 total_splits = 128              # total forloop splits (fixed, independent of nprocs)
 forloop_iter = total_splits ÷ nprocs  # each rank processes this many splits
 
-rank == 0 && @info "D=$D χ=$χ forloop_iter=$forloop_iter total_splits=$total_splits"
+rank == 0 && @info "D=$D χ=$χ_init forloop_iter=$forloop_iter total_splits=$total_splits"
 
 # ── Model ────────────────────────────────────────────────────────────
 pattern = [1 3; 2 4]
@@ -86,7 +85,6 @@ params = GradientOptimize(
     optimizer       = LBFGS(200; maxiter=10, verbosity=verbosity_optim, gradtol=1e-7,
                             linesearch=HagerZhangLineSearch(maxfg=5)),
     forloop_iter    = forloop_iter,  # must match boundary_alg setting
-    maxiter_restart = maxiter_restart,
     verbosity       = verbosity_optim,
     folder          = folder,
     ifSU            = false,
@@ -115,8 +113,7 @@ function restriction_ipeps(A)
 end
 
 # ── Run optimization ────────────────────────────────────────────────
-# Starts at χ, increases by χshift each restart up to maxiter_restart times
-A = init_ipeps(; atype, etype, No, D, χ, params)
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps)
+A = init_ipeps(; atype, etype, No, D, χ=χ_init, params)
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps)
 
 MPI.Finalize()

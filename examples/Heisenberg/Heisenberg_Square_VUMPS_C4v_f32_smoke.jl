@@ -9,7 +9,8 @@ seed = 42
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift = 2, 8, 0
+D, χ_init = 2, 8
+χlist_opt = [χ_init]
 pattern = [1;;]
 model = Heisenberg(lattice=Square(),
                    S=0.5, Jx=1.0, Jy=1.0, Jz=1.0,
@@ -39,7 +40,6 @@ params = GradientOptimize(model=model,
                           boundary_alg=boundary_alg,
                           optimizer=LBFGS(200; maxiter=2, verbosity=1, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
-                          maxiter_restart=1,
                           verbosity=1,
                           folder=folder,
                           ifSU=false,
@@ -52,7 +52,7 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false
 )
-A = init_ipeps(;atype, etype, No, D, χ, params)
+A = init_ipeps(;atype, etype, No, D, χ=χ_init, params)
 # A = TeneT_demo.init_ipeps_to_D(;atype, No, D, D_new=3, params)
 
 
@@ -60,5 +60,5 @@ function restriction_ipeps(A)
     return C4v_restriction(A)
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
-# observable(A, χ, parasms; restriction_ipeps)
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps);
+# observable(A, χ_init, params; restriction_ipeps)

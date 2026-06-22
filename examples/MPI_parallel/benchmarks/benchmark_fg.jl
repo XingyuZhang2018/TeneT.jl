@@ -67,7 +67,6 @@ params = GradientOptimize(
     optimizer       = LBFGS(200; maxiter=1, verbosity=0, gradtol=1e-7,
                             linesearch=HagerZhangLineSearch(maxfg=1)),
     forloop_iter    = forloop_iter,
-    maxiter_restart = 1,
     verbosity       = 0,
     folder          = folder,
     ifSU            = false,

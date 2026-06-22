@@ -18,7 +18,8 @@ seed = 88
 Random.seed!(seed)
 atype = Array
 etype = Float64
-D, χ, χshift, maxiter_restart = 2, 16, 0, 100
+D, χ_init = 2, 16
+χlist_opt = default_χlist(D; χmin=χ_init, nstage=100)
 
 # Minimal 2×2 brickwall pattern. Site 1 occupies positions (1,1) and (2,2)
 # — both even parity; site 2 occupies (1,2) and (2,1) — both odd parity.
@@ -64,7 +65,6 @@ params = GradientOptimize(model=model,
                           boundary_alg=boundary_alg,
                           optimizer=LBFGS(200; maxiter=100, verbosity=4, gradtol=1e-7, linesearch=HagerZhangLineSearch(maxfg=5)),
                           forloop_iter=1,
-                          maxiter_restart=maxiter_restart,
                           verbosity=4,
                           folder=folder,
                           ifSU=false,
@@ -77,7 +77,7 @@ params = GradientOptimize(model=model,
                           ifsave_lbfgs=true,
                           ifload_lbfgs=false,
 )
-A = init_ipeps(; atype, etype, No, D, χ, params)
+A = init_ipeps(; atype, etype, No, D, χ=χ_init, params)
 
 # Restriction: map the 2 unique sites in the pattern to 2 independent tensors
 # by parity, AND enforce per-tensor U-D self-symmetry on the two
@@ -104,4 +104,4 @@ function restriction_ipeps(A)
     return B / norm(B)
 end
 
-optimise_ipeps(A, χ, χshift, params; restriction_ipeps);
+optimise_ipeps(A, χlist_opt, params; restriction_ipeps);
