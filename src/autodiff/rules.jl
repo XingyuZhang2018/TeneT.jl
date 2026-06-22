@@ -395,8 +395,8 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     end
 end
 
-function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
-    comm = MPI.COMM_WORLD
+function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in, N_out, size_out,
+                              inner_etype=nothing, comm=MPI.COMM_WORLD)
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
 

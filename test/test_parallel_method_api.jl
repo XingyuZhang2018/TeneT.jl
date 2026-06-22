@@ -1,6 +1,7 @@
 using Test
 using TeneT
 using MPI
+using Zygote
 
 using TeneT: ParallelMethod, Slice1DMethod, Slice2DMethod,
              SerialMethod, slice1D, slice2D, slice2d_grid,
@@ -79,6 +80,31 @@ end
     legacy = FLmap_parallel(FL, ALu, ALd, M; ifparallel=true, forloop_iter=1, comm)
     routed = parallel_map(FLmap, method, FL, ALu, ALd, M)
     @test routed ≈ legacy
+end
+
+@testset "slice1D explicit communicator supports AD" begin
+    if !MPI.Initialized()
+        MPI.Init()
+    end
+    comm = MPI.Comm_split(MPI.COMM_WORLD, 0, MPI.Comm_rank(MPI.COMM_WORLD))
+    method = slice1D(; comm)
+
+    FL = rand(ComplexF64, 2, 2, 2, 2)
+    ALu = rand(ComplexF64, 2, 2, 2, 2)
+    ALd = rand(ComplexF64, 2, 2, 2, 2)
+    M = rand(ComplexF64, 2, 2, 2, 2, 2)
+
+    serial_loss(fl, alu, ald, m) =
+        real(sum(abs2, FLmap_parallel(fl, alu, ald, m; ifparallel=false, forloop_iter=1)))
+    slice1d_loss(fl, alu, ald, m) =
+        real(sum(abs2, parallel_map(FLmap, method, fl, alu, ald, m)))
+
+    g_serial = Zygote.gradient(serial_loss, FL, ALu, ALd, M)
+    g_slice1d = Zygote.gradient(slice1d_loss, FL, ALu, ALd, M)
+
+    for (gs, gp) in zip(g_serial, g_slice1d)
+        @test gp ≈ gs
+    end
 end
 
 @testset "VUMPS accepts parallel_method" begin
