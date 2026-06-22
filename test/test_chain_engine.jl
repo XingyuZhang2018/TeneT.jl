@@ -17,11 +17,12 @@ using TensorOperations: tensorcontract, tensorcontract!
     @test ils[3] == (:a,:l,:g,:b,:h,:c)        # G
     @test ils[4] == out
 
-    # FLMAP_LEG5_CHAIN pins the hand-kernel layouts (_slice2d_stage1/_fold1/_fold2)
+    # FLMAP_LEG5_CHAIN pins the production AD layout found best for D10/χ512
+    # Float64 forloop16 full forward+backward.
     pls = chain_interlabels(FLMAP_LEG5_CHAIN)
     @test pls[1] == (:a,:e,:f,:j,:k,:l)        # H (hand == derived)
-    @test pls[2] == (:a,:f,:k,:g,:b,:p,:l)     # T (hand layout, ≠ derived)
-    @test pls[3] == (:a,:b,:c,:g,:h,:l)        # G (hand layout, ≠ derived)
+    @test pls[2] == (:a,:f,:k,:g,:b,:p,:l)     # T (AD-fast layout, ≠ derived)
+    @test pls[3] == (:a,:b,:c,:g,:h,:l)        # G (AD-fast layout, ≠ derived)
     @test pls[4] == out
     @test FLMAP_LEG5_CHAIN.out == out
 

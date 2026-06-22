@@ -103,10 +103,17 @@ end
     # N=3 edge case (one intermediate), N=2 → nothing
     @test tensor_pinned_inters(((:a,:b), (:b,:c), (:c,:d)), (:a,:d)) isa NTuple{1,Tuple}
     @test tensor_pinned_inters(((:a,:b), (:b,:c)), (:a,:c)) === nothing
-    # FRmap leg5 — helper output consistent with the constructed chain's first
-    # three inter layouts (chain_interlabels = (I₁, I₂, I₃, out) for N=5):
+    # FRmap leg5 helper output remains the @tensor-pinned baseline; production
+    # FR/AC leg5 chains below may pin autotuned permutations instead.
     @test tensor_pinned_inters(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)), (:a,:e,:f,:i)) ==
-          chain_interlabels(TeneT.FRMAP_LEG5_CHAIN)[1:3]
+          ((:i,:k,:d,:h,:j,:g), (:i,:d,:e,:b,:k,:h,:p), (:i,:e,:f,:d,:b,:c))
+end
+
+@testset "autotuned FR/AC leg5 chain layouts" begin
+    @test chain_interlabels(TeneT.FRMAP_LEG5_CHAIN)[1:3] ==
+          ((:i,:k,:d,:h,:j,:g), (:i,:k,:d,:h,:e,:b,:p), (:i,:e,:f,:d,:b,:c))
+    @test chain_interlabels(TeneT.ACMAP_LEG5_CHAIN)[1:3] ==
+          ((:a,:b,:c,:g,:h,:l), (:a,:c,:h,:l,:e,:j,:p), (:a,:e,:f,:l,:j,:k))
 end
 
 @testset "toggle + chainability guard" begin

@@ -33,7 +33,7 @@ engine_backward(f, args, dOut) = nothing
 # ─── FLmap family (leg4, leg8, leg5 pair via FLMAP_LEG5_CHAIN, leg5 single-M) ─
 # Chain tensor order is (FL, ALd, M..., ALu) — the kernels' left-assoc order;
 # map arg order is (FL, ALu, ALd, M). tensor_chain pins the @tensor temp
-# layouts; FLMAP_LEG5_CHAIN keeps its Part-7 hand-kernel pins (chain_engine.jl).
+# layouts; FLMAP_LEG5_CHAIN keeps its production AD pins (chain_engine.jl).
 const FLMAP_LEG4_CHAIN = tensor_chain(((:a,:d,:f), (:f,:g,:h), (:d,:g,:e,:b), (:a,:b,:c)), (:c,:e,:h))
 const FLMAP_LEG8_CHAIN = tensor_chain(((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:f,:j,:k,:g,:h,:b,:c), (:a,:b,:c,:d)), (:d,:g,:h,:l))
 const FLMAP_LEG5_CHAIN_1M = conj_variant(FLMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
@@ -68,7 +68,10 @@ end
 # operand (ARd) is NOT the map's first arg, so the gradient permutations
 # below differ from FLmap's — see the per-return comments.
 const FRMAP_LEG4_CHAIN = tensor_chain(((:f,:g,:h), (:c,:e,:h), (:d,:g,:e,:b), (:a,:b,:c)), (:a,:d,:f))
-const FRMAP_LEG5_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)), (:a,:e,:f,:i))
+const FRMAP_LEG5_CHAIN = Chain(
+    ((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)),
+    (:a,:e,:f,:i),
+    ((:i,:k,:d,:h,:j,:g), (:i,:k,:d,:h,:e,:b,:p), (:i,:e,:f,:d,:b,:c)))
 const FRMAP_LEG8_CHAIN = tensor_chain(((:i,:j,:k,:l), (:d,:g,:h,:l), (:e,:f,:j,:k,:g,:h,:b,:c), (:a,:b,:c,:d)), (:a,:e,:f,:i))
 const FRMAP_LEG5_CHAIN_1M = conj_variant(FRMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
 # M3.5 distributed-only RING-class reorder (docs/2026-06-15-m35-slice2d-ring-reorder-design.md):
@@ -111,7 +114,10 @@ end
 # gradient permutations differ from both FLmap's and FRmap's — see the
 # per-return comments.
 const ACMAP_LEG4_CHAIN = tensor_chain(((:a,:b,:c), (:c,:e,:h), (:d,:g,:e,:b), (:a,:d,:f)), (:f,:g,:h))
-const ACMAP_LEG5_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:e,:f,:i)), (:i,:j,:k,:l))
+const ACMAP_LEG5_CHAIN = Chain(
+    ((:a,:b,:c,:d), (:d,:g,:h,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:e,:f,:i)),
+    (:i,:j,:k,:l),
+    ((:a,:b,:c,:g,:h,:l), (:a,:c,:h,:l,:e,:j,:p), (:a,:e,:f,:l,:j,:k)))
 const ACMAP_LEG8_CHAIN = tensor_chain(((:a,:b,:c,:d), (:d,:g,:h,:l), (:e,:f,:j,:k,:g,:h,:b,:c), (:a,:e,:f,:i)), (:i,:j,:k,:l))
 const ACMAP_LEG5_CHAIN_1M = conj_variant(ACMAP_LEG5_CHAIN, 4)   # M2 = conj(M1), no materialization
 

@@ -104,9 +104,10 @@ end
 
 # FLmap leg5 (tuple-M), operand order (FL, ALd, M1, M2, ALu) — the current
 # left-assoc order of the serial kernel and the slice2d stage pipeline.
-# Intermediates pinned to the proven hand-kernel layouts (_slice2d_stage1 H,
-# _slice2d_fold1 T, _slice2d_fold2 G): the derived left-assoc layouts give
-# cuTENSOR different permutation problems, costing 5-9% at production cells.
+# Intermediates pinned to the production AD layout. A forward-only H100 probe
+# can make the final G⋆ALu link faster with alternative G orders, but D10/χ512
+# Float64 forloop16 shows those layouts slow the recompute/backward links. The
+# old T/G order is the best full forward+backward choice for FL.
 const FLMAP_LEG5_CHAIN = Chain(
     ((:a,:e,:f,:i), (:i,:j,:k,:l), (:e,:j,:g,:b,:p), (:f,:k,:h,:c,:p), (:a,:b,:c,:d)),
     (:d,:g,:h,:l),
