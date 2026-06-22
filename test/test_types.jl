@@ -60,14 +60,14 @@
     @testset "VUMPS default fields" begin
         v = VUMPS{General}()
         @test v.tol == 1e-10
-        @test v.maxiter == 10
-        @test v.miniter == 1
-        @test v.maxiter_ad == 10
-        @test v.miniter_ad == 3
-        @test v.forloop_iter == 1
-        @test v.power_iter == 1
-        @test v.power_iter_ad == 1
-        @test v.power_iter_obs == 20
+        @test v.maxiter == 30
+        @test v.miniter == 0
+        @test v.maxiter_ad == 4
+        @test v.miniter_ad == 4
+        @test v.forloop_iter == 5
+        @test v.power_iter == 5
+        @test v.power_iter_ad == 5
+        @test v.power_iter_obs == 40
         @test v.show_every == 10
         @test v.verbosity == Defaults.VERBOSE_WARN
         @test v.ifupdown == true

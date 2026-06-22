@@ -47,7 +47,7 @@ export DATA_ROOT=$WD/TeneT.jl/data; \
 export D=${D:-16}; export J2=${J2:-0.5}; export CHI_LOAD=${CHI_LOAD:-512}; export NO_LOAD=${NO_LOAD:-50}; \
 export CHI_OPT=${CHI_OPT:-768}; export OPT_MAXITER=${OPT_MAXITER:-0}; \
 export POWER_ITER=${POWER_ITER:-2}; export VUMPS_MAXITER=${VUMPS_MAXITER:-0}; \
-export POWER_ITER_OBS=${POWER_ITER_OBS:-20}; export ENV_TOL=${ENV_TOL:-1e-6}; \
+export POWER_ITER_OBS=${POWER_ITER_OBS:-40}; export ENV_TOL=${ENV_TOL:-1e-6}; \
 export FORLOOP_ITER=${FORLOOP_ITER:-16}"
 
 echo "=== Slice2D Plaquette D=${D:-16} J2=${J2:-0.5} χ${CHI_LOAD:-512}→χ${CHI_OPT:-768} OPT_MAXITER=${OPT_MAXITER:-0} VUMPS_MAXITER=${VUMPS_MAXITER:-0} forloop=${FORLOOP_ITER:-16} | 64 GPU 8x8 ==="

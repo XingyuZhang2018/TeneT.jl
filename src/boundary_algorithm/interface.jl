@@ -10,14 +10,14 @@ C4v
 """
 @kwdef mutable struct VUMPS{F <: ContractionMode} <: Algorithm
     tol::Float64 = 1e-10
-    maxiter::Int = 10
-    miniter::Int = 1
-    maxiter_ad::Int = 10
-    miniter_ad::Int = 3
-    forloop_iter::Int = 1
-    power_iter::Int = 1
-    power_iter_ad::Int = 1
-    power_iter_obs::Int = 20
+    maxiter::Int = 30
+    miniter::Int = 0
+    maxiter_ad::Int = 4
+    miniter_ad::Int = 4
+    forloop_iter::Int = 5
+    power_iter::Int = 5
+    power_iter_ad::Int = 5
+    power_iter_obs::Int = 40
 
     show_every::Int = 10
     verbosity::Int = Defaults.verbosity
