@@ -38,7 +38,15 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     A = build_A(A, params)
 
     rt, _ = leading_boundary(rt, A, params.boundary_alg)
-    params.ifsave_env && save_rt(joinpath(params.folder, "D$(D)", "environment"), rt; file="χ$(χ).jld2")
+    _obsgrid = _effective_grid(params.boundary_alg)
+    _obsroot = _obsgrid === nothing ? _mpi_io_root() : _obsgrid.rank == 0
+    if params.ifsave_env
+        if _obsgrid === nothing
+            _obsroot && save_rt(joinpath(params.folder, "D$(D)", "environment"), rt; file="χ$(χ).jld2")
+        elseif _obsroot
+            @warn "Skipping environment save for Slice2D observable runtime; distributed environment checkpointing is not implemented."
+        end
+    end
     env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = energy_value(params.model, A, env, params)
     # magnetization_value / cor_len_value are serial (not slice2d-ized): on the distributed (block)
@@ -59,8 +67,6 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     # run on ALL ranks (collective + replicated result), but all ranks racing the same obs-log file
     # hits the JLD2/IO write race that killed 1287372's checkpoint save. This gate is AFTER the
     # collective gather so control flow stays rank-uniform across every MPI collective.
-    _obsgrid = _effective_grid(params.boundary_alg)
-    _obsroot = _obsgrid === nothing || _obsgrid.rank == 0
     _obsroot && write_obs_log(e, mag, ξ, χ, joinpath(params.folder, "D$(D)"), params)
 
     # Visualization: read all logs and plot (includes history from previous runs)

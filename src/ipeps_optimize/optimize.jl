@@ -162,18 +162,26 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
 
     folder0 = joinpath(folder, "D$(D)")
     !(ispath(folder0)) && mkpath(folder0)
+    _gridfin = _effective_grid(params.boundary_alg)
+    _ioroot = _gridfin === nothing ? _mpi_io_root() : _gridfin.rank == 0
 
     # Reuse environment from the last iteration to speed up convergence
     params.reuse_env && update!(rt, rt′)
 
     # Save environment to disk
     if params.ifsave_env
-        folder1 = joinpath(folder, "D$(D)", "environment")
-        save_rt(folder1, rt; file="χ$(χ).jld2")
+        if _gridfin === nothing
+            if _ioroot
+                folder1 = joinpath(folder, "D$(D)", "environment")
+                save_rt(folder1, rt; file="χ$(χ).jld2")
+            end
+        elseif _ioroot
+            @warn "Skipping environment save for Slice2D runtime; distributed environment checkpointing is not implemented."
+        end
     end
 
     # Print and log
-    if params.verbosity >= 3 && iter % params.show_every == 0
+    if _ioroot && params.verbosity >= 3 && iter % params.show_every == 0
         printstyled(message; bold=true, color=:red)
         flush(stdout)
 
@@ -186,10 +194,9 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
     # only the grid-root rank writes No.<iter>.jld2 — if all N² ranks race the same file, JLD2's
     # checksum re-read on close hits `EOFError: read end of file` and the whole MPI job dies (this
     # killed the 64-rank χ768 J2=0.5 run 1287372 on its first save). rank 0's Array(x) is the full
-    # replicated iPEPS, so the written file is identical. Serial/replicated (grid===nothing) keeps
-    # the prior all-process behavior.
-    _gridfin = _effective_grid(params.boundary_alg)
-    if (_gridfin === nothing || _gridfin.rank == 0) && params.save_every != 0 && iter % params.save_every == 0
+    # replicated iPEPS, so the written file is identical. Without a Slice2D grid, only MPI rank 0
+    # writes when MPI is initialized; serial execution still writes normally.
+    if _ioroot && params.save_every != 0 && iter % params.save_every == 0
         ipeps_dir = joinpath(folder0, "ipeps", "χ$χ")
         !ispath(ipeps_dir) && mkpath(ipeps_dir)
         save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x); iotype=IOStream)
@@ -273,6 +280,11 @@ function optimise_ipeps(A, χlist::AbstractVector{<:Integer}, params::GradientOp
     _precond(x, g) = params.ifprecondition ? precondition_invese_single_envir(x, g, rt, params, restriction_ipeps, fδEierr, params.iter_precond) : g
 
     state_path = joinpath(params.folder, "D$(D)", "lbfgs_checkpoint")
+    _optgrid = _effective_grid(params.boundary_alg)
+    _optroot = _optgrid === nothing ? _mpi_io_root() : _optgrid.rank == 0
+    if params.ifsave_lbfgs && _optroot
+        isdir(state_path) || mkpath(state_path)
+    end
 
     local e, eg, fgnum, history
     for (stage, χ) in pairs(χs)
@@ -285,7 +297,7 @@ function optimise_ipeps(A, χlist::AbstractVector{<:Integer}, params::GradientOp
 
         A, e, eg, fgnum, history = optimize_reload(fg, A, alg;
             resume_from  = params.ifload_lbfgs ? joinpath(state_path, "χ$χ.jld2") : nothing,
-            save_state_to = params.ifsave_lbfgs ? joinpath(state_path, "χ$χ.jld2") : nothing,
+            save_state_to = (params.ifsave_lbfgs && _optroot) ? joinpath(state_path, "χ$χ.jld2") : nothing,
             save_every    = params.save_every,
             precondition  = _precond,
             inner         = _inner,

@@ -116,6 +116,16 @@ function _effective_grid(alg)
     return alg.parallel_method isa Slice2DMethod ? alg.parallel_method.grid : alg.grid
 end
 
+function _mpi_io_root()
+    !(MPI.Initialized() && !MPI.Finalized()) && return true
+    return MPI.Comm_rank(MPI.COMM_WORLD) == 0
+end
+
+function _io_root(alg)
+    grid = _effective_grid(alg)
+    return grid === nothing ? _mpi_io_root() : grid.rank == 0
+end
+
 # Convenience: VUMPS(General(); kwargs...) or VUMPS(Plaquette(lattice); kwargs...)
 VUMPS(::F; kwargs...) where {F <: ContractionMode} = VUMPS{F}(; kwargs...)
 

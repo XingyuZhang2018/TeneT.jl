@@ -65,8 +65,10 @@ _tm_k_filename(k::Real) = string(k)
 function _write_tm_spectrum(Δ, k, D, params::iPEPSOptimize; ifdomainwall)
     sector = ifdomainwall ? "non-trivial" : "trivial"
     folder = joinpath(params.folder, "D$(D)", "TM_spectrum", sector)
-    isdir(folder) || mkpath(folder)
     obs_log = joinpath(folder, "k$(_tm_k_filename(k)).log")
+    _io_root(params.boundary_alg) || return obs_log
+
+    isdir(folder) || mkpath(folder)
     open(obs_log, "w") do io
         for δ in Δ
             @printf(io, "%.15f\n", real(δ))
@@ -121,9 +123,16 @@ function _tm_converge_env(A, M, D, χ, params::iPEPSOptimize;
          _tm_initialize_named_env(A, D, χ, params, file; restriction_ipeps)
     rt, _ = leading_boundary(rt, M, params.boundary_alg)
     if params.ifsave_env
-        folder = joinpath(params.folder, "D$(D)", "environment")
-        mkpath(folder)
-        save_rt(folder, rt; file=file === nothing ? "χ$(χ).jld2" : file)
+        grid = _effective_grid(params.boundary_alg)
+        if grid === nothing
+            if _mpi_io_root()
+                folder = joinpath(params.folder, "D$(D)", "environment")
+                mkpath(folder)
+                save_rt(folder, rt; file=file === nothing ? "χ$(χ).jld2" : file)
+            end
+        elseif grid.rank == 0
+            @warn "Skipping TM spectrum environment save for Slice2D runtime; distributed environment checkpointing is not implemented."
+        end
     end
     return rt
 end
