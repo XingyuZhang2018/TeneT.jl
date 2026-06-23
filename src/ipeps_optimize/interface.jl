@@ -20,6 +20,7 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     # Verbosity and iteration control
     verbosity::Int = Defaults.VERBOSE_ITER
     imag_tol::Real = 1e-8
+    opt_obs_maxiter::Int = boundary_alg.maxiter * 3
     last_stop_reason::Symbol = :not_started
     last_stop_χ::Int = 0
     last_stop_eimag::Real = 0.0

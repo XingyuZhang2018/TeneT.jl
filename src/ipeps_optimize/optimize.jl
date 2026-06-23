@@ -133,6 +133,12 @@ function _normalize_χlist(χlist::AbstractVector{<:Integer})
     return χs
 end
 
+function _observable_params(params::GradientOptimize)
+    params_obs = deepcopy(params)
+    params_obs.boundary_alg.maxiter = params.opt_obs_maxiter
+    return params_obs
+end
+
 # NOTE: Always called through a 4-arg closure adapter, never invoked directly.
 # The full 11-arg signature is specific to iPEPS optimization and does not follow
 # OptimKit's default finalize! convention (x, f, g, iter).  The closure in
@@ -240,8 +246,7 @@ function optimise_ipeps(A, χlist::AbstractVector{<:Integer}, params::GradientOp
     D = _ipeps_bond_dimension(A)
     fδEierr = [1.0, 1.0, 0.0, 0.0]
 
-    params_obs = deepcopy(params)
-    params_obs.boundary_alg.maxiter = params.boundary_alg.maxiter * 10
+    params_obs = _observable_params(params)
 
     local rt, rt′
     function fenergy(A)
