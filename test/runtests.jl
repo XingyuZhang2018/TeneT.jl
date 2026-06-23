@@ -168,6 +168,8 @@ end
     include("test_types.jl")
     include("test_structarray.jl")
     include("test_utils.jl")
+    include("test_jld2_slab.jl")
+    include("test_slice2d_env_io.jl")
     include("test_checkpoint.jl")
     include("test_contraction.jl")
     include("test_parallel_method_api.jl")

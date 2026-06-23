@@ -170,13 +170,13 @@ function _finalize!(x, f, g, iter, rt, rt′, D, χ, params, t0, fδEierr)
 
     # Save environment to disk
     if params.ifsave_env
+        folder1 = joinpath(folder, "D$(D)", "environment")
         if _gridfin === nothing
             if _ioroot
-                folder1 = joinpath(folder, "D$(D)", "environment")
                 save_rt(folder1, rt; file="χ$(χ).jld2")
             end
-        elseif _ioroot
-            @warn "Skipping environment save for Slice2D runtime; distributed environment checkpointing is not implemented."
+        else
+            save_rt_slice2d(folder1, rt, _gridfin; file="χ$(χ).slice2d.jld2")
         end
     end
 

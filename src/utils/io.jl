@@ -50,14 +50,23 @@ iPEPS tensors.
 """
 function initialize_env(A, D::Int, χ::Int, params::iPEPSOptimize; restriction_ipeps=identity)
     folder_path = joinpath(params.folder, "D$(D)", "environment")
-    file_path = joinpath(folder_path, "χ$χ.jld2")
+    grid = _effective_grid(params.boundary_alg)
+    env_file = grid === nothing ? "χ$χ.jld2" : "χ$χ.slice2d.jld2"
+    if grid !== nothing && !ispath(joinpath(folder_path, env_file)) && ispath(joinpath(folder_path, "χ$χ.slice2d"))
+        env_file = "χ$χ.slice2d"
+    end
+    file_path = joinpath(folder_path, env_file)
 
     if hasproperty(params, :ifload_env) && params.ifload_env
         if ispath(file_path)
             try
-                ifparallelupdown = hasproperty(params.boundary_alg, :ifparallelupdown) ?
-                                   params.boundary_alg.ifparallelupdown : false
-                return load_rt(folder_path, _arraytype(A), ifparallelupdown; file="χ$χ.jld2")
+                if grid === nothing
+                    ifparallelupdown = hasproperty(params.boundary_alg, :ifparallelupdown) ?
+                                       params.boundary_alg.ifparallelupdown : false
+                    return load_rt(folder_path, _arraytype(A), ifparallelupdown; file=env_file)
+                else
+                    return load_rt_slice2d(folder_path, _arraytype(A), grid; file=env_file)
+                end
             catch e
                 @warn "Failed to load environment from $file_path: $(sprint(showerror, e)). Creating new environment."
                 return _create_new_env(A, χ, params; restriction_ipeps)
