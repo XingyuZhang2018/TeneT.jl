@@ -22,6 +22,8 @@ Set J1=0 for the pure ring exchange model.
     bondratio::Real = 1.0
 end
 
+_supports_dist_energy_general(::FWavePRVB{Honeycomb{:brickwall_h}}) = true
+
 """
     energy_value(model::FWavePRVB, A, env, params::iPEPSOptimize{:brickwall_h})
 

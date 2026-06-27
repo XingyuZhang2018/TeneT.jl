@@ -49,11 +49,12 @@ function observable(A, χ, params::iPEPSOptimize; restriction_ipeps=_restriction
     end
     env = ObsEnv(rt, A, params.boundary_alg, params.model)
     e = energy_value(params.model, A, env, params)
-    # magnetization_value / cor_len_value are serial (not slice2d-ized): on the distributed (block)
-    # obs env they'd run ALCtoAC on a χ-block → crash. For the slice2d-Plaquette case gather the
-    # block env to full just for them. energy_value above stays block-distributed (the expensive,
-    # accuracy-critical part); mag/ξ are a cheap replicated post-measurement on the gathered env.
-    env_obs = env
+    # magnetization_value / General cor_len_value are serial (not slice2d-ized):
+    # on a distributed (block) General obs env they'd treat a χ-block as full χ.
+    # Keep energy_value above block-distributed, then gather only the post-energy
+    # obs env needed by these serial measurements.
+    env_obs_grid = _dist_energy_general_grid(params.model, params.boundary_alg)
+    env_obs = env_obs_grid === nothing ? env : gather_env(env, env_obs_grid)
     mag = magnetization_value(params.model, A, env_obs, params)
     ξ = cor_len_method === :none ? nothing : cor_len_value(env_obs, params, A; method=cor_len_method)
 

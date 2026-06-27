@@ -1062,6 +1062,20 @@ end
 
 # ── Observation environment construction ─────────────────────────────
 
+# Keep the slice2d observation environment block-distributed only for General
+# models whose energy/imag-error contractions also consume a slice2d grid. All
+# other General models still gather to full before serial energy evaluation.
+_supports_dist_energy_general(model) = false
+_supports_dist_energy_general_alg(alg) = false
+_supports_dist_energy_general_alg(alg::VUMPS{General}) = true
+
+function _dist_energy_general_grid(model, alg, g=_effective_grid(alg))
+    return _supports_dist_energy_general_alg(alg) &&
+           g !== nothing &&
+           _supports_dist_energy_general(model) ? g : nothing
+end
+_dist_energy_general(model, alg, g=_effective_grid(alg)) = _dist_energy_general_grid(model, alg, g) !== nothing
+
 """
     ObsEnv(rt::VUMPSRuntime, M, alg::VUMPS{General}, model=nothing; Fo=[rt.FL, rt.FR])
 
@@ -1080,8 +1094,8 @@ Two return shapes:
 function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt.FL, rt.FR])
     @unpack AL, AR, C, FL, FR = rt
-    # Slice2D path: compute the obs env block-distributed (leftenv/rightenv_slice2d with
-    # ifobs=true), then gather to FULL for the serial energy_value (v1; see slice2d.jl).
+    # Slice2D path: compute the obs env block-distributed. Keep it block only
+    # when the matching model energy is slice2d-aware; otherwise gather to full.
     g = _effective_grid(alg)
     if g !== nothing
         AC = ALCtoAC_slice2d(AL, C, g)
@@ -1089,7 +1103,8 @@ function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
         _, FRo = rightenv_slice2d(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
         (model !== nothing && uses_oneside_obs_env(typeof(model))) &&
             error("ObsEnv slice2d: OnesideVUMPSEnv (oneside obs) not yet distributed; use a non-oneside model.")
-        return gather_env(VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo), g)
+        env = VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+        return _dist_energy_general(model, alg, g) ? env : gather_env(env, g)
     end
     AC = ALCtoAC(AL, C)
     _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
@@ -1105,14 +1120,14 @@ end
     ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General}, model=nothing; Fo=...)
 
 Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
-Computes mixed (observation) left and right environments. `model` is accepted
-for call-site uniformity but currently ignored: ACd/ARd come from the converged
-down runtime, so the `obs_index` trait is not needed.
+Computes mixed (observation) left and right environments. ACd/ARd come from the
+converged down runtime, so the `obs_index` trait is not needed; `model` still
+selects whether a slice2D observation environment may remain block-distributed.
 """
 function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
                 model=nothing; Fo=[rt[1].FL, rt[1].FR])
-    # Slice2D path: mixed obs env (ACu/ACd from up/down via ALCtoAC_slice2d; FLo/FRo from
-    # leftenv/rightenv_slice2d ifobs=true with the up AL/AR and down AL/AR) → gather to FULL.
+    # Slice2D path: mixed obs env block-distributed. Keep it block only when
+    # the matching model energy is slice2d-aware; otherwise gather to full.
     g = _effective_grid(alg)
     if g !== nothing
         rtup, rtdown = rt
@@ -1120,7 +1135,8 @@ function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMP
         ACd = ALCtoAC_slice2d(rtdown.AL, rtdown.C, g)
         _, FLo = leftenv_slice2d(rtup.AL, rtdown.AL, M, Fo[1], g; ifobs=true, alg)
         _, FRo = rightenv_slice2d(rtup.AR, rtdown.AR, M, Fo[2], g; ifobs=true, alg)
-        return gather_env(VUMPSEnv(ACu, rtup.AR, ACd, rtdown.AR, rtup.FL, rtup.FR, FLo, FRo), g)
+        env = VUMPSEnv(ACu, rtup.AR, ACd, rtdown.AR, rtup.FL, rtup.FR, FLo, FRo)
+        return _dist_energy_general(model, alg, g) ? env : gather_env(env, g)
     end
     atype = _arraytype(M)
     set_device_id!(atype, 1)
@@ -1143,11 +1159,12 @@ end
 function imag_error(env::VUMPSEnv, A, iSy, params::iPEPSOptimize)
     @unpack FLo, ACu, ACd, FRo = env
     @unpack forloop_iter, ifparallel = params.boundary_alg
+    grid = _dist_energy_general_grid(params.model, params.boundary_alg)
     Ni, Nj = size(A)
     i, j = 1, 1
     id = Ni + 1 - i
-    My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel)
-    n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel)
+    My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel, grid)
+    n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel, grid)
     return abs(My / n)
 end
 

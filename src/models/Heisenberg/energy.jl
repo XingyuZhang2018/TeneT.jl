@@ -16,6 +16,11 @@ Heisenberg model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
     bondratio = 1.0
 end
 
+_supports_dist_energy_general(::Heisenberg{Square}) = true
+_supports_dist_energy_general(::Heisenberg{Honeycomb{:brickwall_h}}) = true
+_supports_dist_energy_general(::Heisenberg{Kagome{:merge}}) = true
+_supports_dist_energy_general(::Heisenberg{<:KagomeOnehole}) = true
+
 function energy_value(model::Heisenberg{Square}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     Ni, Nj = size(A)
@@ -225,6 +230,7 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
     Ni, Nj = size(A)
     atype = _arraytype(A[1])
     len = length(A)
+    grid = _dist_energy_general_grid(model, params.boundary_alg)
 
     d = Int(2*S + 1)
     # Kagome merge: no sublattice rotation
@@ -254,39 +260,39 @@ function energy_value_perbond(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEn
 
         # Intra-cell bonds: onsite contraction
         ir = Ni + 1 - i
-        n = _contract_one(contract_n_11, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]), params)
+        n = _contract_one(contract_n_11, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j]), params; grid)
 
-        e = _contract_one(contract_o_11, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_12), params)
+        e = _contract_one(contract_o_11, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_12), params; grid)
         e_dict["bond_12_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_12 = $(e/n)")
 
-        e = _contract_one(contract_o_11, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_23), params)
+        e = _contract_one(contract_o_11, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,j], h_23), params; grid)
         e_dict["bond_23_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_23 = $(e/n)")
 
         # Inter-cell horizontal bonds
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params)
+        n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params; grid)
 
-        e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms_31H, params)
+        e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms_31H, params; grid)
         e_dict["bond_31H_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_31H = $(e/n)")
 
-        e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms_32H, params)
+        e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms_32H, params; grid)
         e_dict["bond_32H_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_32H = $(e/n)")
 
         # Inter-cell vertical bonds
         ir  = mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
-        n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), params)
+        n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), params; grid)
 
-        e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms_31V, params)
+        e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms_31V, params; grid)
         e_dict["bond_31V_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_31V = $(e/n)")
 
-        e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms_21V, params)
+        e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms_21V, params; grid)
         e_dict["bond_21V_energy"]["$(i),$(j)"] = e / n
         params.verbosity >= 4 && println("bond_21V = $(e/n)")
     end
@@ -301,6 +307,7 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
     atype = _arraytype(A[1])
     etol = 0
     len = length(A)
+    grid = _dist_energy_general_grid(model, params.boundary_alg)
     e_dict = Dict{String, Dict{String, Any}}(
         "bond_onsite_energy"   => Dict{String, Any}(),
         "bond_H_energy" => Dict{String, Any}(),
@@ -328,24 +335,24 @@ function energy_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv, param
         params.verbosity >= 4 && println("===========$i,$j===========")
 
         ir = Ni + 1 - i
-        e = _contract_one(contract_o_11, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,j], h_onsite), params)
-        n = _contract_one(contract_n_11, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,j]), params)
+        e = _contract_one(contract_o_11, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,j], h_onsite), params; grid)
+        n = _contract_one(contract_n_11, (FLo[i,j],ACu[i,j],A[i,j],ACd[ir,j],FRo[i,j]), params; grid)
         params.verbosity >= 4 && println("bond_onsite = $(e/n)")
         etol += e/n
         e_dict["bond_onsite_energy"]["$(i),$(j)"] = e/n
 
         ir = Ni + 1 - i
         jr = mod1(j + 1, Nj)
-        e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms_H, params)
-        n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params)
+        e = _contract_barebones(contract_o_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), terms_H, params; grid)
+        n = _contract_one(contract_n_12, (FLo[i,j], ACu[i,j], A[i,j], ACd[ir,j], FRo[i,jr], ARu[i,jr], A[i,jr], ARd[ir,jr]), params; grid)
         params.verbosity >= 4 && println("bond_H = $(e/n)")
         etol += e/n
         e_dict["bond_H_energy"]["$(i),$(j)"] = e/n
 
         ir  =  mod1(i + 1, Ni)
         irr = mod1(Ni - i, Ni)
-        e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms_V, params)
-        n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), params)
+        e = _contract_barebones(contract_o_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), terms_V, params; grid)
+        n = _contract_one(contract_n_21, (ACu[i,j], FLu[i,j], A[i,j], FRu[i,j], FLo[ir,j], A[ir,j], FRo[ir,j], ACd[irr,j]), params; grid)
         params.verbosity >= 4 && println("bond_V = $(e/n)")
         etol += e/n
         e_dict["bond_V_energy"]["$(i),$(j)"] = e/n

@@ -16,6 +16,9 @@ J1-J2 Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-neig
                           # for Honeycomb{:brickwall_h}, bondratio<1 is plaquette, bondratio>1 is dimmer
 end
 
+_supports_dist_energy_general(::J1J2{Square}) = true
+_supports_dist_energy_general(::J1J2{Honeycomb{:brickwall_h}}) = true
+
 function energy_value(model::J1J2{Square}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack J1, J2 = model

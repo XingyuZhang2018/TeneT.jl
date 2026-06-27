@@ -15,6 +15,8 @@ Kitaev model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
     bondratio::Real = 1.0 # bondratio < 1.0 for plaquette >1.0 for dimer
 end
 
+_supports_dist_energy_general(::Kitaev{Honeycomb{:brickwall_h}}) = true
+
 function energy_value(model::Kitaev{Honeycomb{:brickwall_h}}, A, env::VUMPSEnv, params::iPEPSOptimize)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     atype = _arraytype(A[1])

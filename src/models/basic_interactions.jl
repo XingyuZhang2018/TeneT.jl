@@ -15,6 +15,13 @@ end
 # ifparallel and forloop_iter are read from params, not passed as kwargs.
 # ────────────────────────────────────────────────────────────────────────────
 
+function _with_dist_energy_grid(params::iPEPSOptimize, kwargs)
+    haskey(kwargs, :grid) && return kwargs
+    grid = _dist_energy_general_grid(params.model, params.boundary_alg)
+    grid === nothing && return kwargs
+    return (; kwargs..., grid)
+end
+
 """
     _contract_barebones(contract_fn, args, terms, params::iPEPSOptimize; kwargs...)
 
@@ -29,8 +36,9 @@ function _contract_barebones(contract_fn, args, terms,
     _assert_bond_method(bond_ckpt)
     ifparallel   = params.boundary_alg.ifparallel
     forloop_iter = params.boundary_alg.forloop_iter
+    contract_kwargs = _with_dist_energy_grid(params, kwargs)
     return sum(c * checkpoint(bond_ckpt, contract_fn, args..., OL, OR;
-                              ifparallel, forloop_iter, kwargs...)
+                              ifparallel, forloop_iter, contract_kwargs...)
                for (c, OL, OR) in terms)
 end
 
@@ -44,10 +52,11 @@ over terms but still contribute a large tape entry.
 function _contract_one(contract_fn, args::Tuple, params::iPEPSOptimize;
                        kwargs...)
     _assert_bond_method(params.bond_checkpoint)
+    contract_kwargs = _with_dist_energy_grid(params, kwargs)
     return checkpoint(params.bond_checkpoint, contract_fn, args...;
                       ifparallel   = params.boundary_alg.ifparallel,
                       forloop_iter = params.boundary_alg.forloop_iter,
-                      kwargs...)
+                      contract_kwargs...)
 end
 
 # Term-by-term interaction decompositions using d×d spin operators (Sp, Sm, Sz).

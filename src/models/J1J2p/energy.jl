@@ -15,6 +15,9 @@ J1-J2p Heisenberg model with nearest-neighbor coupling `J1` and next-nearest-nei
     bondratio::Real = 1.0 # only used when couplingtype is not :uniform
 end
 
+_supports_dist_energy_general(::J1J2p{Honeycomb{:merge}}) = true
+_supports_dist_energy_general(::J1J2p{Honeycomb{:brickwall_h}}) = true
+
 """
     energy_value(model::J1J2p{Honeycomb{:merge}}, A, env::VUMPSEnv, params)
 
