@@ -79,3 +79,15 @@ function enlarge_coupling(model::J1J2{Honeycomb{:brickwall_h}}, ::Val{:plaquette
 
     return J1h, J1v
 end
+
+function enlarge_coupling(model::J1J2{Honeycomb{:merge}}, ::Val{:uniform}, i, j)
+    J1 = model.J1
+    return J1, J1, J1
+end
+
+function enlarge_coupling(model::J1J2{Honeycomb{:merge}}, ::Val{:plaquette}, i, j)
+    throw(ArgumentError(
+        "J1J2{Honeycomb{:merge}} with couplingtype=:plaquette is not implemented. " *
+        "The two-site merge geometry currently supports only couplingtype=:uniform."
+    ))
+end
