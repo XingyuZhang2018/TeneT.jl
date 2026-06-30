@@ -29,6 +29,9 @@ function SU_parameterization(A, params; D_new)
     if params.model.lattice isa KagomeOnehole
         throw(ArgumentError("SU_parameterization not yet implemented for $(typeof(params.model.lattice)) (gates would act on the empty site, producing wrong results)"))
     end
+    if params.model.lattice isa Honeycomb{:merge}
+        throw(ArgumentError("SU_parameterization not yet implemented for Honeycomb{:merge}. Use ifSU=false for merged honeycomb tensors."))
+    end
     if params.model.lattice isa Kagome{:merge}
         # d above is the merged physical dim (d_single^3). The Kagome helpers
         # work with the per-sublattice dim, so derive it from the model.

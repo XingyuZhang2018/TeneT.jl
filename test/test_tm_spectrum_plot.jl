@@ -61,13 +61,31 @@ using CairoMakie
 end
 
 @testset "Honeycomb merge observable visualization" begin
+    @testset "J2 sublattice offsets" begin
+        @test TeneT._bond_offsets_honeycomb_merge("bond_J2H_energy") ==
+              (1, 1, (0, 0), (0, 1))
+        @test TeneT._bond_offsets_honeycomb_merge("bond_J2V_energy") ==
+              (1, 1, (0, 0), (1, 0))
+        @test TeneT._bond_offsets_honeycomb_merge("bond_J2/_energy") ==
+              (1, 1, (0, 1), (1, 0))
+
+        @test TeneT._bond_offsets_honeycomb_merge("bond_J2H2_energy") ==
+              (2, 2, (0, 0), (0, 1))
+        @test TeneT._bond_offsets_honeycomb_merge("bond_J2V2_energy") ==
+              (2, 2, (0, 0), (1, 0))
+        @test TeneT._bond_offsets_honeycomb_merge("bond_J2/2_energy") ==
+              (2, 2, (0, 1), (1, 0))
+    end
+
     mktempdir() do folder
         chi = Char(0x03c7)
         open(joinpath(folder, string(chi, "8.log")), "w") do io
             write(io, "energy_per_site:\n-0.100000000000000\n")
             for bond_type in ("bond_J1_onsite_energy", "bond_J1H_energy",
                               "bond_J1V_energy", "bond_J2H_energy",
-                              "bond_J2V_energy", "bond_J2/_energy")
+                              "bond_J2V_energy", "bond_J2/_energy",
+                              "bond_J2H2_energy", "bond_J2V2_energy",
+                              "bond_J2/2_energy")
                 write(io, "$bond_type: i j energy\n")
                 write(io, "1,1 -0.010000000000000\t\n")
             end

@@ -333,7 +333,7 @@ function magnetization_value(model::Heisenberg{Kagome{:merge}}, A, env::VUMPSEnv
     return M_mean, m_dict
 end
 
-function magnetization_value(model::J1J2p{Honeycomb{:merge}}, A, env::VUMPSEnv, params)
+function magnetization_value(model::Union{J1J2{Honeycomb{:merge}}, J1J2p{Honeycomb{:merge}}}, A, env::VUMPSEnv, params)
     @unpack ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo = env
     @unpack ifparallel = params.boundary_alg
     @unpack forloop_iter = params

@@ -350,6 +350,47 @@
         @test_throws ArgumentError TeneT.enlarge_coupling(m_plaq, 1, 1)
     end
 
+    @testset "enlarge_coupling J1J2 :merge" begin
+        m_unif = J1J2(lattice=Honeycomb{:merge}(), J1=1.5, J2=0.3,
+                      couplingtype=:uniform)
+        @test TeneT.enlarge_coupling(m_unif, 1, 1) == (1.5, 1.5, 1.5)
+        @test TeneT.enlarge_coupling(m_unif, 3, 2) == (1.5, 1.5, 1.5)
+
+        m_plaq = J1J2(lattice=Honeycomb{:merge}(), J1=1.0, J2=0.3,
+                      couplingtype=:plaquette, bondratio=0.5)
+        @test_throws ArgumentError TeneT.enlarge_coupling(m_plaq, 1, 1)
+    end
+
+    @testset "ifSU rejects Honeycomb merge" begin
+        using OptimKit: LBFGS
+        using TeneT: build_A, J1J2
+
+        model = J1J2(lattice=Honeycomb{:merge}(),
+                     S=0.5, J1=1.0, J2=0.3,
+                     ifrotate=false,
+                     couplingtype=:uniform)
+        boundary_alg = VUMPS{General}(maxiter=1, miniter=0,
+                                      verbosity=0, show_every=1000)
+        params = GradientOptimize(model=model, pattern=[1;;],
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(2; maxiter=1, verbosity=0),
+                                  verbosity=0, folder=mktempdir(),
+                                  ifSU=true, SUτ=0.1, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        A_raw = rand(Float64, 2, 2, 2, 2, 4, 1)
+        err = try
+            build_A(A_raw, params)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("SU_parameterization not yet implemented for Honeycomb{:merge}",
+                       sprint(showerror, err))
+    end
+
     @testset "energy_value J1J2p :merge smoke" begin
         using OptimKit: LBFGS
         using TeneT: ObsEnv, energy_value, build_A,
@@ -398,6 +439,78 @@
         @test length(e_dict["bond_J2H_energy"]) == length(unique(pattern))
         @test length(e_dict["bond_J2V_energy"]) == length(unique(pattern))
         @test length(e_dict["bond_J2/_energy"]) == length(unique(pattern))
+        for key in keys(e_dict)
+            for (_, v) in e_dict[key]
+                @test isfinite(v)
+            end
+        end
+
+        mag, m_dict = TeneT.magnetization_value(model, A, env, params)
+        @test isfinite(mag)
+        @test haskey(m_dict, "1,1,1")
+        @test haskey(m_dict, "1,1,2")
+        for key in ("1,1,1", "1,1,2")
+            @test isfinite(m_dict[key]["Mx"])
+            @test isfinite(m_dict[key]["My"])
+            @test isfinite(m_dict[key]["Mz"])
+            @test isfinite(m_dict[key]["|M|"])
+        end
+    end
+
+    @testset "energy_value J1J2 :merge smoke" begin
+        using OptimKit: LBFGS
+        using TeneT: ObsEnv, energy_value, build_A,
+                     leading_boundary, initialize_env, J1J2
+
+        Random.seed!(13)
+        D, chi = 2, 4
+        pattern = [1;;]
+        model = J1J2(lattice=Honeycomb{:merge}(),
+                     S=0.5, J1=1.0, J2=0.3,
+                     ifrotate=false,
+                     couplingtype=:uniform, bondratio=1.0)
+        folder = mktempdir()
+        boundary_alg = VUMPS{General}(ifupdown=true, ifsimple_eig=true,
+                                      maxiter=3, miniter=0,
+                                      maxiter_ad=1, miniter_ad=1,
+                                      tol=1e-3, verbosity=0, show_every=1000)
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(10; maxiter=1, gradtol=1e-3, verbosity=0),
+                                  verbosity=0, folder=folder,
+                                  ifSU=false, SUτ=0.0, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        d, N = 2, 1
+        A_raw = (rand(Float64, D, D, D, D, d^2, N) .- 0.5)
+        A_raw /= norm(A_raw)
+        A = build_A(A_raw, params)
+
+        rt = initialize_env(A_raw, D, chi, params)
+        rt, _ = leading_boundary(rt, A, params.boundary_alg)
+        env = ObsEnv(rt, A, params.boundary_alg)
+
+        e, e_dict = energy_value(model, A, env, params)
+        @test isfinite(e)
+        @test haskey(e_dict, "bond_J1_onsite_energy")
+        @test haskey(e_dict, "bond_J1H_energy")
+        @test haskey(e_dict, "bond_J1V_energy")
+        @test haskey(e_dict, "bond_J2H_energy")
+        @test haskey(e_dict, "bond_J2V_energy")
+        @test haskey(e_dict, "bond_J2/_energy")
+        @test haskey(e_dict, "bond_J2H2_energy")
+        @test haskey(e_dict, "bond_J2V2_energy")
+        @test haskey(e_dict, "bond_J2/2_energy")
+        @test length(e_dict["bond_J1_onsite_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J1H_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J1V_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J2H_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J2V_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J2/_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J2H2_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J2V2_energy"]) == length(unique(pattern))
+        @test length(e_dict["bond_J2/2_energy"]) == length(unique(pattern))
         for key in keys(e_dict)
             for (_, v) in e_dict[key]
                 @test isfinite(v)
