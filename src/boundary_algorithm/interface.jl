@@ -89,7 +89,9 @@ C4v
     step_checkpoint::CheckpointMethod    = ifcheckpoint ? OffloadRecompute() : Plain()
 end
 
-function _apply_parallel_method!(alg)
+_apply_parallel_method!(alg) = alg
+
+function _apply_parallel_method!(alg::VUMPS)
     method = alg.parallel_method
     method === nothing && return alg
 
@@ -111,7 +113,9 @@ function _apply_parallel_method!(alg)
     return alg
 end
 
-function _effective_grid(alg)
+_effective_grid(alg) = nothing
+
+function _effective_grid(alg::VUMPS)
     _apply_parallel_method!(alg)
     return alg.parallel_method isa Slice2DMethod ? alg.parallel_method.grid : alg.grid
 end

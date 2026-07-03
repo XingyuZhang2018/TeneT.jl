@@ -132,3 +132,9 @@ end
         @test alg3.grid === nothing
     end
 end
+
+@testset "parallel_method helpers ignore algorithms without routing fields" begin
+    alg = QRCTMRG{C3v}()
+    @test TeneT._apply_parallel_method!(alg) === alg
+    @test TeneT._effective_grid(alg) === nothing
+end
