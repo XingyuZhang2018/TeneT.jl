@@ -176,6 +176,7 @@ end
     include("test_kagome_slice2d_grid.jl")
     include("test_nccl_wrapper_static.jl")
     include("test_script_paths.jl")
+    include("test_oracle_gates.jl")
     include("test_2d_classical.jl")
     include("test_boundary.jl")
     include("test_autodiff.jl")

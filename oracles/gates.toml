@@ -1,0 +1,159 @@
+# Oracle gate registry for TeneT.jl.
+#
+# The runner reads this file with:
+#   julia --project=. scripts/run_oracle_gates.jl --list
+#
+# Keep commands as argv arrays, not shell strings. This avoids quoting bugs on
+# Windows, macOS, and Linux.
+
+[gate.oracle_runner]
+description = "Sanity check for the oracle gate registry and runner."
+cmd = ["julia", "--project=.", "test/test_oracle_gates.jl"]
+groups = ["quick", "oracle", "local"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
+[gate.full_serial]
+description = "Full local serial regression suite run by the standard package test entry point."
+cmd = ["julia", "--project=.", "-e", "using Pkg; Pkg.test()"]
+groups = ["serial", "local", "ci"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
+[gate.chain_maps]
+description = "Map-chain forward and gradient parity against the legacy TensorOperations path."
+cmd = ["julia", "--project=.", "test/test_chain_maps.jl"]
+groups = ["chain", "ad", "local"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
+[gate.checkpoint]
+description = "Unified checkpoint API identity and gradient checks."
+cmd = ["julia", "--project=.", "test/test_checkpoint.jl"]
+groups = ["ad", "checkpoint", "local"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
+[gate.ising_exact]
+description = "2D classical Ising observable checks against the exact free-energy oracle."
+cmd = ["julia", "--project=.", "test/test_2d_classical.jl"]
+groups = ["physics", "oracle", "local"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
+[gate.parallel_api]
+description = "Public Serial/Slice1D/Slice2D parallel-method API routing checks."
+cmd = ["julia", "--project=.", "test/test_parallel_method_api.jl"]
+groups = ["api", "parallel", "local"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_flmap]
+description = "4-rank CPU MPI Slice2D FLmap forward and gradient parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d.jl"]
+groups = ["slice2d", "mpi", "local-mpi"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_m3_maps]
+description = "4-rank CPU MPI distributed Cmap/FRmap/ACmap/ACdmap parity gate."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_m3.jl"]
+groups = ["slice2d", "mpi", "local-mpi"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_m4_env]
+description = "4-rank CPU MPI Slice2D env-level eigenpair, gradient, and allocation gates."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_m4.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "env"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_m5_step]
+description = "4-rank CPU MPI General Slice2D vumps_step assembly and seam parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_m5.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "vumps"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_m5_plaq]
+description = "4-rank CPU MPI Plaquette Slice2D vumps_step assembly and TSQR seam parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_m5_plaq.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "vumps", "plaquette"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_energy_plaq]
+description = "4-rank CPU MPI distributed Plaquette J1J2 energy_value and imag_error parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_energy_plaq.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "physics"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_obsenv]
+description = "4-rank CPU MPI Slice2D observation-environment parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_obsenv.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "observable"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_general_qr_lq]
+description = "4-rank CPU MPI General Slice2D distributed QR/LQ seam parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_general_dist_qr_lq.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "qr"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_general_degenerate_qr_lq]
+description = "8-rank CPU MPI degenerate General Slice2D QR/LQ seam parity."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_general_degenerate_qr_lq.jl"]
+groups = ["slice2d", "mpi", "local-mpi", "qr"]
+requires_mpi = true
+requires_gpu = false
+requires_cluster = false
+
+[gate.slice2d_gpu_smoke]
+description = "Local single-process CUDA smoke for Slice2D General seam code; skips if CUDA is unavailable."
+cmd = ["julia", "--project=.", "test/run_test_slice2d_general_gpu_smoke.jl"]
+groups = ["slice2d", "gpu", "local"]
+requires_mpi = false
+requires_gpu = true
+requires_cluster = false
+
+[gate.sofia_slice2d_m3_gpu]
+description = "Sofia GPU validation for M3 Slice2D distributed maps. Submit manually under the HPC protocol."
+cmd = ["sbatch", "examples/MPI_parallel/Sofia/submit_test_slice2d_m3.sh"]
+groups = ["slice2d", "gpu", "cluster", "sofia"]
+requires_mpi = true
+requires_gpu = true
+requires_cluster = true
+
+[gate.sofia_slice2d_m4_gpu]
+description = "Sofia GPU validation for M4 Slice2D environments. Submit manually under the HPC protocol."
+cmd = ["sbatch", "examples/MPI_parallel/Sofia/submit_test_slice2d_m4.sh"]
+groups = ["slice2d", "gpu", "cluster", "sofia"]
+requires_mpi = true
+requires_gpu = true
+requires_cluster = true
+
+[gate.sofia_slice2d_m5_gpu]
+description = "Sofia GPU validation for M5 Slice2D vumps_step assembly. Submit manually under the HPC protocol."
+cmd = ["sbatch", "examples/MPI_parallel/Sofia/submit_test_slice2d_m5.sh"]
+groups = ["slice2d", "gpu", "cluster", "sofia"]
+requires_mpi = true
+requires_gpu = true
+requires_cluster = true
