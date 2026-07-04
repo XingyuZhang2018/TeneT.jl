@@ -391,6 +391,98 @@
                        sprint(showerror, err))
     end
 
+    @testset "SU_parameterization residual D-growth preserves old block" begin
+        using OptimKit: LBFGS
+        Random.seed!(1234)
+
+        D, D_new, d = 2, 3, 2
+        A5 = rand(Float64, D, D, D, D, d)
+        pattern = [1;;]
+        model = Heisenberg(lattice=Square(), S=0.5, ifrotate=true)
+        boundary_alg = VUMPS{General}(maxiter=1, miniter=0,
+                                      verbosity=0, show_every=1000)
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(2; maxiter=1, verbosity=0),
+                                  verbosity=0, folder=mktempdir(),
+                                  ifSU=false, SUτ=0.0, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        A_emb = zeros(ComplexF64, D_new, D_new, D_new, D_new, d)
+        A_emb[1:D, 1:D, 1:D, 1:D, :] = A5
+
+        A_single0 = TeneT.SU_parameterization(A5, params; D_new)
+        @test size(A_single0) == (D_new, D_new, D_new, D_new, d)
+        @test A_single0 ≈ A_emb atol=1e-10 rtol=1e-10
+
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(2; maxiter=1, verbosity=0),
+                                  verbosity=0, folder=mktempdir(),
+                                  ifSU=false, SUτ=0.05, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        A_single = TeneT.SU_parameterization(A5, params; D_new)
+        A_cell = TeneT.SU_parameterization(TeneT.StructArray([copy(A5)], pattern), params; D_new)
+
+        @test size(A_single) == (D_new, D_new, D_new, D_new, d)
+        @test all(isfinite, real.(A_single))
+        @test all(isfinite, imag.(A_single))
+        @test A_single ≈ A_cell[1] atol=1e-10 rtol=1e-10
+        @test A_single[1:D, 1:D, 1:D, 1:D, :] ≈ A5 atol=1e-10 rtol=1e-10
+        for l in 1:D_new, down in 1:D_new, r in 1:D_new, u in 1:D_new
+            nnew = count(==(D_new), (l, down, r, u))
+            if nnew >= 2
+                @test A_single[l, down, r, u, :] ≈ zeros(ComplexF64, d) atol=1e-10 rtol=1e-10
+            end
+        end
+        @test !(A_single ≈ C4v_restriction(A_single))
+
+        A2 = rand(Float64, D, D, D, D, d)
+        A4 = TeneT.StructArray([copy(A5), copy(A2)], [1 2])
+        A4_new = TeneT.SU_parameterization(A4, params; D_new)
+        @test A4_new[1][1:D, 1:D, 1:D, 1:D, :] ≈ A5 atol=1e-10 rtol=1e-10
+        @test A4_new[2][1:D, 1:D, 1:D, 1:D, :] ≈ A2 atol=1e-10 rtol=1e-10
+        for site in 1:2, l in 1:D_new, down in 1:D_new, r in 1:D_new, u in 1:D_new
+            nnew = count(==(D_new), (l, down, r, u))
+            if nnew >= 2
+                @test A4_new[site][l, down, r, u, :] ≈ zeros(ComplexF64, d) atol=1e-10 rtol=1e-10
+            end
+        end
+    end
+
+    @testset "init_ipeps_SU loads single-site 5D checkpoint" begin
+        using OptimKit: LBFGS
+        Random.seed!(2345)
+
+        D, D_new, d, χ, No = 2, 3, 2, 4, 7
+        pattern = [1;;]
+        folder = mktempdir()
+        ipeps_dir = joinpath(folder, "D$(D)", "ipeps", "χ$(χ)")
+        mkpath(ipeps_dir)
+        A5 = rand(Float64, D, D, D, D, d)
+        JLD2.save(joinpath(ipeps_dir, "No.$(No).jld2"), "bcipeps", A5; iotype=IOStream)
+
+        model = Heisenberg(lattice=Square(), S=0.5, ifrotate=true)
+        boundary_alg = VUMPS{General}(maxiter=1, miniter=0,
+                                      verbosity=0, show_every=1000)
+        params = GradientOptimize(model=model, pattern=pattern,
+                                  boundary_alg=boundary_alg,
+                                  optimizer=LBFGS(2; maxiter=1, verbosity=0),
+                                  verbosity=0, folder=folder,
+                                  ifSU=false, SUτ=0.05, ifprecondition=false,
+                                  reuse_env=true, ifsave_env=false, ifload_env=false,
+                                  ifsave_lbfgs=false, ifload_lbfgs=false)
+
+        A_new = init_ipeps_SU(; atype=Array, No, D, D_new, χ, params)
+        A_ref = TeneT.SU_parameterization(A5, params; D_new)
+
+        @test size(A_new) == (D_new, D_new, D_new, D_new, d)
+        @test A_new ≈ A_ref
+    end
+
     @testset "energy_value J1J2p :merge smoke" begin
         using OptimKit: LBFGS
         using TeneT: ObsEnv, energy_value, build_A,

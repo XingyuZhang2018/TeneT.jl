@@ -97,16 +97,22 @@ into a larger tensor (using SU parameterization for the existing part).
 function init_ipeps_SU(; atype=Array, No, D::Int, D_new::Int, χ::Int, params::iPEPSOptimize)
     file = joinpath(params.folder, "D$(D)", "ipeps", "χ$(χ)", "No.$(No).jld2")
     A = load(file, "bcipeps"; iotype=IOStream)
-    d = size(A, 5)
     params.verbosity >= 2 && @info "load ipeps from $file"
 
-    A = build_A(A, params)
-    A = SU_parameterization(A, params; D_new)
+    if ndims(A) == 5
+        A_new = SU_parameterization(A, params; D_new)
+    elseif ndims(A) == 6
+        d = size(A, 5)
+        A = build_A(A, params)
+        A = SU_parameterization(A, params; D_new)
 
-    Nsites = length(unique(params.pattern))
-    A_new = rand(eltype(A[1]), D_new, D_new, D_new, D_new, d, Nsites)
-    for i in 1:Nsites
-        A_new[:,:,:,:,:,i] = A[i][1:D_new, 1:D_new, 1:D_new, 1:D_new, :]
+        Nsites = length(unique(params.pattern))
+        A_new = rand(eltype(A[1]), D_new, D_new, D_new, D_new, d, Nsites)
+        for i in 1:Nsites
+            A_new[:,:,:,:,:,i] = A[i][1:D_new, 1:D_new, 1:D_new, 1:D_new, :]
+        end
+    else
+        throw(ArgumentError("init_ipeps_SU expects a 5D single-site or 6D multi-site iPEPS checkpoint; got ndims=$(ndims(A))"))
     end
     params.verbosity >= 2 && @info "enlarged iPEPS to D=$D_new, size=$(size(A_new))"
     set_device_id!(atype, 1)
