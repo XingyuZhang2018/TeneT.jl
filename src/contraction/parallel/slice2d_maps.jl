@@ -615,3 +615,53 @@ function ACdmap_slice2d_dist(ACd_blk, FL_blk, FR_blk, M, grid::Slice2DGrid;
     result, _, _, _ = _acdmap_slice2d_forward_sliced(ACd_g, FR_g, FL_g, M1, M2, grid, a_rs, l_rs; forloop_iter)
     return do_cast ? T_orig.(result) : result
 end
+
+"""
+    Mumap_slice2d_dist(AC_blk, ACd_blk, FL_blk, FR_blk, Mu, grid; forloop_iter=1, inner_etype=nothing)
+
+Distributed preconditioner transfer map. The chi-bearing inputs are Slice2D
+blocks. The output has no chi leg, so each rank computes its local contribution
+from row/column working slices and allreduces the replicated result.
+"""
+function Mumap_slice2d_dist(AC_blk, ACd_blk, FL_blk, FR_blk, Mu, grid::Slice2DGrid;
+                           forloop_iter = 1, inner_etype = nothing)
+    T_orig = eltype(AC_blk)
+    do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_cast
+        AC_blk = _downcast_eltype(inner_etype, AC_blk)
+        ACd_blk = _downcast_eltype(inner_etype, ACd_blk)
+        FL_blk = _downcast_eltype(inner_etype, FL_blk)
+        FR_blk = _downcast_eltype(inner_etype, FR_blk)
+        Mu = _downcast_eltype(inner_etype, Mu)
+    end
+
+    chi = MPI.Allreduce(size(AC_blk, 1), +, grid.col_comm)
+    a_rs = split_ranges(chi, grid.N1)
+    l_rs = split_ranges(chi, grid.N2)
+
+    AC_row = slice2d_gather_row(AC_blk, grid, l_rs)
+    FL_row = slice2d_gather_row(FL_blk, grid, l_rs)
+    FR_col = slice2d_gather_col(FR_blk, grid, a_rs)
+    ACd_col = slice2d_gather_col(ACd_blk, grid, a_rs)
+
+    partial = similar(Mu)
+    partial .= zero(eltype(partial))
+    nl = size(FR_col, 4)
+    l_chunks = split_ranges(nl, min(forloop_iter, nl))
+    for ch in l_chunks
+        FR_chunk = view(FR_col, :, :, :, ch)
+        ACd_chunk = view(ACd_col, :, :, :, ch)
+        @tensor Pc[f, k, h, c, p] := (AC_row[a, b, c, d] * FR_chunk[d, g, h, l]) *
+                                     ((FL_row[a, e, f, i] * ACd_chunk[i, j, k, l]) *
+                                      Mu[e, j, g, b, p])
+        partial .+= Pc
+        _free!(Pc)
+    end
+
+    allreduce_p2p!(partial, +, grid.comm)
+    _free!(AC_row)
+    _free!(FL_row)
+    _free!(FR_col)
+    _free!(ACd_col)
+    return do_cast ? T_orig.(partial) : partial
+end

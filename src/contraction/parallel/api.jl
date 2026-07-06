@@ -78,3 +78,7 @@ parallel_map(::typeof(ACmap), method::Slice2DMethod, AC_blk, FL_blk, FR_blk, M) 
 parallel_map(::typeof(ACdmap), method::Slice2DMethod, ACd_blk, FL_blk, FR_blk, M) =
     ACdmap_slice2d_dist(ACd_blk, FL_blk, FR_blk, M, method.grid;
                         forloop_iter=method.forloop_iter, inner_etype=method.inner_etype)
+
+parallel_map(::typeof(Mumap), method::Slice2DMethod, AC_blk, ACd_blk, FL_blk, FR_blk, Mu) =
+    Mumap_slice2d_dist(AC_blk, ACd_blk, FL_blk, FR_blk, Mu, method.grid;
+                       forloop_iter=method.forloop_iter, inner_etype=method.inner_etype)

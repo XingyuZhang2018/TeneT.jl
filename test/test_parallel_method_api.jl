@@ -6,6 +6,7 @@ using Zygote
 using TeneT: ParallelMethod, Slice1DMethod, Slice2DMethod,
              SerialMethod, slice1D, slice2D, slice2d_grid,
              FLmap, FLmap_parallel, FLmap_slice2d_dist,
+             Mumap, Mumap_slice2d_dist,
              parallel_map, slice2d_scatter
 
 @testset "parallel method public API" begin
@@ -50,6 +51,18 @@ end
         legacy = FLmap_slice2d_dist(FLb, ALub, ALdb, M, method.grid; forloop_iter=1)
         routed = parallel_map(FLmap, method, FLb, ALub, ALdb, M)
         @test routed ≈ legacy
+
+        AC = rand(ComplexF64, 2, 2, 2, 2)
+        ACd = rand(ComplexF64, 2, 2, 2, 2)
+        FR = rand(ComplexF64, 2, 2, 2, 2)
+        Mu = rand(ComplexF64, 2, 2, 2, 2, 2)
+        ACb = slice2d_scatter(AC, method.grid)
+        ACdb = slice2d_scatter(ACd, method.grid)
+        FRb = slice2d_scatter(FR, method.grid)
+
+        legacy_mu = Mumap_slice2d_dist(ACb, ACdb, FLb, FRb, Mu, method.grid; forloop_iter=1)
+        routed_mu = parallel_map(Mumap, method, ACb, ACdb, FLb, FRb, Mu)
+        @test routed_mu ≈ legacy_mu
     end
 end
 
