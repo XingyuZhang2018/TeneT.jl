@@ -277,7 +277,7 @@ function optimise_ipeps(A, χlist::AbstractVector{<:Integer}, params::GradientOp
     alg = params.optimizer
     t0 = time()
 
-    _precond(x, g) = params.ifprecondition ? precondition_invese_single_envir(x, g, rt, params, restriction_ipeps, fδEierr, params.iter_precond) : g
+    _precond(x, g) = params.ifprecondition ? precondition_invese_single_envir(x, g, rt′, params, restriction_ipeps, fδEierr, params.iter_precond) : g
 
     state_path = joinpath(params.folder, "D$(D)", "lbfgs_checkpoint")
     _optgrid = _effective_grid(params.boundary_alg)
