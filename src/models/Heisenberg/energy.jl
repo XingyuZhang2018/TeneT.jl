@@ -8,8 +8,8 @@ Heisenberg model with couplings `Jx`, `Jy`, `Jz` on a given lattice.
 @kwdef mutable struct Heisenberg{L<:AbstractLattice} <: HamiltonianModel
     lattice::L = Square()
     S::Real = 1/2
-    Jx::Real = -1.0
-    Jy::Real = -1.0
+    Jx::Real = 1.0
+    Jy::Real = 1.0
     Jz::Real = 1.0
     ifrotate::Bool = true
     couplingtype::Symbol = :uniform # :uniform, :plaquette...
