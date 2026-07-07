@@ -1,4 +1,4 @@
-export Ising, MPO
+export Ising, MPO, transfer_pepo
 
 """
     Ising{L}(; lattice=Square(), beta=0.4)
@@ -13,6 +13,10 @@ end
 
 function MPO(model::HamiltonianModel, args...; kwargs...)
     throw(ArgumentError("MPO is not implemented for $(typeof(model))"))
+end
+
+function transfer_pepo(model::HamiltonianModel, args...; kwargs...)
+    throw(ArgumentError("transfer_pepo is not implemented for $(typeof(model))"))
 end
 
 function _ising_weight_sqrt(beta::Real)

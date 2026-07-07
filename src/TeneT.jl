@@ -96,6 +96,7 @@ include("models/basic_op.jl")
 include("models/basic_interactions.jl")
 include("models/2D_Classical/MPO.jl")
 include("models/2D_Classical/obs.jl")
+include("models/3D_Classical/MPO.jl")
 include("models/Heisenberg/energy.jl")
 include("models/Heisenberg/order_init.jl")
 include("models/Kitaev/energy.jl")
@@ -133,6 +134,8 @@ include("observable/transfer_matrix_spectrum.jl")
 include("visualization/plot_obs.jl")
 include("visualization/plot_tm_spectrum.jl")
 include("ipeps_optimize/optimize.jl")
+include("ipeps_optimize/transfer_pepo.jl")
+include("models/3D_Classical/obs.jl")
 
 # ============================================================================
 # Exports
@@ -152,6 +155,7 @@ export C4v_restriction, local_min_norm
 export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
 export init_env, leading_boundary
 export GradientOptimize, default_χlist, optimise_ipeps
+export optimise_transfer_pepo, optimize_transfer_pepo
 export observable, TM_spectrum, plot_TM_spectrum
 
 end # module TeneT

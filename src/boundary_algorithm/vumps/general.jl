@@ -215,6 +215,11 @@ function FLint(AL, M::leg8)
     χ = size(AL[1], 1)
     return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
 end
+function FLint(AL, M::StructArray{<:Vector{<:Tuple}})
+    _assert_leg5_pair_struct(M)
+    χ = size(AL[1], 1)
+    return _randSA_for_leg5_pairs(M, [(χ, size(m[1], 1), size(m[2], 1), χ) for m in M.data])
+end
 
 function FRint(AR, M::leg4)
     χ = size(AR[1], 1)
@@ -227,6 +232,11 @@ end
 function FRint(AR, M::leg8)
     χ = size(AR[1], 1)
     return randSA(M, [(D = size(m, 5); (χ, D, D, χ)) for m in M.data])
+end
+function FRint(AR, M::StructArray{<:Vector{<:Tuple}})
+    _assert_leg5_pair_struct(M)
+    χ = size(AR[1], 1)
+    return _randSA_for_leg5_pairs(M, [(χ, size(m[1], 3), size(m[2], 3), χ) for m in M.data])
 end
 
 # ── Fixed-point environments ────────────────────────────────────────
@@ -765,6 +775,25 @@ function initial_A(M::leg5, χ::Int)
 end
 function initial_A(M::leg8, χ::Int)
     return randSA(M, [(D = size(m, 7); (χ, D, D, χ)) for m in M.data])
+end
+function initial_A(M::StructArray{<:Vector{<:Tuple}}, χ::Int)
+    _assert_leg5_pair_struct(M)
+    return _randSA_for_leg5_pairs(M, [(χ, size(m[1], 4), size(m[2], 4), χ) for m in M.data])
+end
+
+_is_leg5_pair(m) = m isa Tuple && length(m) == 2 && ndims(m[1]) == 5 && ndims(m[2]) == 5
+
+function _assert_leg5_pair_struct(M::StructArray)
+    all(_is_leg5_pair, M.data) ||
+        throw(ArgumentError("mixed VUMPS expects StructArray data entries of Tuple{leg5,leg5}"))
+    return nothing
+end
+
+function _randSA_for_leg5_pairs(M::StructArray, sizes)
+    m1, m2 = M.data[1]
+    T = promote_type(eltype(m1), eltype(m2))
+    atype = _arraytype(m1)
+    return randSA(T, atype, M.pattern, sizes)
 end
 
 """

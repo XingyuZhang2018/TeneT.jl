@@ -197,8 +197,10 @@ function cor_len_value(env::C4vVUMPSEnv, params, M; method::Symbol=:mps)
         error("cor_len_value: unknown method=$(method) (use :mps or :channel)")
     end
 
-    λcs, _, info = eigsolve(f, v_init, 5, :LM; maxiter=100, ishermitian=false)
+    nev = min(5, length(v_init))
+    λcs, _, info = eigsolve(f, v_init, nev, :LM; maxiter=100, ishermitian=false)
     info.converged == 0 && @warn "cor_len ($method) not converged"
+    length(λcs) < 2 && return Inf
     λ2 = 0
     for i in 2:length(λcs)
         if !(norm(λcs[i]) ≈ norm(λcs[1]))
@@ -206,6 +208,7 @@ function cor_len_value(env::C4vVUMPSEnv, params, M; method::Symbol=:mps)
             break
         end
     end
+    λ2 == 0 && return Inf
 
     ξ = -1/log(abs(λ2/λcs[1]))
     params.verbosity >= 4 && println("ξ ($method) = $(ξ)")

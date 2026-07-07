@@ -57,7 +57,7 @@ function _free_energy_result(model::Ising, lambda_AC, lambda_C; log_power::Real=
     )
 end
 
-_c4v_tensor(M::StructArray) = M[1][:, :, :, :, :, 1]
+_c4v_tensor(M::StructArray) = _c4v_local_tensor(M)
 
 """
     free_energy(rt::C4vVUMPSEnv, M, alg::VUMPS{C4v}, model::Ising)

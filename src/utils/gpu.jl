@@ -6,6 +6,7 @@ _mattype(::ROCArray) = ROCMatrix
 _arraytype(::Array) = Array
 _arraytype(::CuArray) = CuArray
 _arraytype(::ROCArray) = ROCArray
+_arraytype(S::StructArray{<:Vector{<:Tuple}}) = _arraytype(S.data[1][1])
 _arraytype(S::StructArray) = _arraytype(S.data[1])
 
 set_device_id!(::Type{ROCArray}, i::Int) = AMDGPU.device_id!(i)

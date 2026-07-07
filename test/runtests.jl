@@ -178,6 +178,7 @@ end
     include("test_script_paths.jl")
     include("test_oracle_gates.jl")
     include("test_2d_classical.jl")
+    include("test_cubic_dimer.jl")
     include("test_boundary.jl")
     include("test_autodiff.jl")
     include("test_ipeps.jl")

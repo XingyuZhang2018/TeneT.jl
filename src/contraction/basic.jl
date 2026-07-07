@@ -12,6 +12,10 @@ Rules:
 - otherwise                     → cast to `T`
 """
 _downcast_eltype(::Nothing, A) = A
+_downcast_eltype(::Nothing, A::Tuple) = A
+function _downcast_eltype(T::Type, A::Tuple)
+    return map(x -> _downcast_eltype(T, x), A)
+end
 function _downcast_eltype(T::Type, A)
     Ta = eltype(A)
     if Ta <: Complex

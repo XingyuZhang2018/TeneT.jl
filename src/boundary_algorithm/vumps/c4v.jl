@@ -90,16 +90,33 @@ end
 
 # ── initialization ─────────────────────────────────────────
 
-function init_env(M::StructArray, χ::Int, alg::VUMPS{C4v})
-    M = M[1][:,:,:,:,:,1]
-    D = size(M, 1)  
+_c4v_local_tensor(M::StructArray) = _c4v_local_tensor(M[1])
+_c4v_local_tensor(M::Tuple) = map(_c4v_local_tensor, M)
+_c4v_local_tensor(M::AbstractArray) = ndims(M) == 6 ? M[:, :, :, :, :, 1] : M
+
+function _c4v_initial_FL(M::Tuple, χ::Int)
+    D1 = size(M[1], 1)
+    D2 = size(M[2], 1)
+    FL = rand!(similar(M[1], χ, D1, D2, χ))
+    FL += conj(permutedims(FL, (4, 2, 3, 1)))
+    return FL
+end
+
+function _c4v_initial_FL(M::AbstractArray, χ::Int)
+    D = size(M, 1)
     if M isa leg4
-        FL = rand!(similar(M,χ,D,χ))
-        FL += conj(permutedims(FL, (3,2,1)))
+        FL = rand!(similar(M, χ, D, χ))
+        FL += conj(permutedims(FL, (3, 2, 1)))
     else
-        FL = rand!(similar(M,χ,D,D,χ))
-        FL += conj(permutedims(FL, (4,2,3,1)))
+        FL = rand!(similar(M, χ, D, D, χ))
+        FL += conj(permutedims(FL, (4, 2, 3, 1)))
     end
+    return FL
+end
+
+function init_env(M::StructArray, χ::Int, alg::VUMPS{C4v})
+    M = _c4v_local_tensor(M)
+    FL = _c4v_initial_FL(M, χ)
     AL, C = qr(_to_front(FL))
     AL = reshape(_arraytype(FL)(AL), size(FL))
 
@@ -112,7 +129,7 @@ end
 One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
 Only uses left environments (no right canonical / right environment).
 """
-function vumps_step(rt::C4vVUMPSEnv, M::AbstractArray, alg::VUMPS{C4v})
+function vumps_step(rt::C4vVUMPSEnv, M, alg::VUMPS{C4v})
     @unpack AL, C, FL = rt
     AC = ALCtoAC_map(AL, C)
     _, FL = leftenv_c4v(AL, conj(AL), M, FL; alg)
@@ -131,7 +148,7 @@ end
 
 function leading_boundary(rt::C4vVUMPSEnv, M::StructArray, alg::VUMPS{C4v})
     t = ignore_derivatives(() -> time())
-    M = M[1]
+    M = _c4v_local_tensor(M)
     local err
 
     # Whole-VUMPS precision mode (alternative to `inner_etype`):
