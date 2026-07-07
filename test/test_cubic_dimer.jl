@@ -280,7 +280,8 @@ using TeneT: StructArray, VUMPSRuntime, init_env, build_A, GradientOptimize
 
         g1 = [1.0, -2.0]
         δ1 = TeneT._cubic_dimer_update_stop!(g1, -0.4, fδ, params, 4)
-        @test isinf(δ1)
+        @test isfinite(δ1)
+        @test δ1 > 0
         @test g1 == [1.0, -2.0]
         @test params.last_stop_reason == :running
         @test params.last_stop_χ == 4
@@ -291,5 +292,46 @@ using TeneT: StructArray, VUMPSRuntime, init_env, build_A, GradientOptimize
         @test g2 == [0.0, 0.0]
         @test params.last_stop_reason == :objective_stall
         @test params.last_stop_χ == 4
+    end
+
+    @testset "preconditioned example-style optimization stays finite" begin
+        Random.seed!(8642)
+        model = CubicDimer()
+        alg = VUMPS{C4v}(;
+            maxiter=1,
+            maxiter_ad=1,
+            power_iter=2,
+            power_iter_ad=1,
+            miniter=1,
+            miniter_ad=1,
+            verbosity=0,
+            forloop_iter=1,
+        )
+        params = GradientOptimize(;
+            model,
+            pattern=[1;;],
+            boundary_alg=alg,
+            folder=mktempdir(),
+            verbosity=0,
+            ifprecondition=true,
+            iter_precond=0,
+            ifload_env=false,
+            ifsave_env=false,
+            ifsave_lbfgs=false,
+            ifload_lbfgs=false,
+            ifplot=false,
+            save_every=0,
+            optimizer=LBFGS(1; maxiter=2, verbosity=0),
+        )
+        A = ones(Float64, 1, 1, 1, 1, 2, 1)
+        Aopt, entropy, grad, fgnum, history = optimise_cubic_dimer(A, [1], params)
+        obs = cubic_dimer_observable(Aopt, 1, params)
+
+        @test isfinite(entropy)
+        @test all(isfinite, grad)
+        @test all(isfinite, history)
+        @test isfinite(obs.entropy)
+        @test !isnan(obs.xi)
+        @test fgnum > 0
     end
 end

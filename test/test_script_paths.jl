@@ -26,3 +26,19 @@ using Test
 
     @test isempty(missing_paths)
 end
+
+@testset "cubic dimer example script" begin
+    project_root = dirname(@__DIR__)
+    script = joinpath(project_root, "examples", "3D_Classical",
+                      "CubicDimer_D2_chi16_VUMPS_C4v.jl")
+
+    @test isfile(script)
+    if isfile(script)
+        body = read(script, String)
+        @test occursin("CubicDimer()", body)
+        @test occursin("D, χ_init = 2, 16", body)
+        @test !occursin("get(ENV", body)
+        @test occursin("optimise_cubic_dimer", body)
+        @test occursin("cubic_dimer_observable", body)
+    end
+end

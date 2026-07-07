@@ -38,7 +38,10 @@ _transfer_pepo_vumps_chi(rt::C4vVUMPSEnv) = size(rt.C, 1)
 
 function _transfer_pepo_update_stop!(g, f, fδ, params::GradientOptimize, χ::Integer; stall_tol=1e-12)
     previous = fδ[1]
-    δ = isfinite(previous) ? abs(real(previous) - real(f)) : Inf
+    f_real = real(f)
+    f_abs = abs(f_real)
+    δ = isfinite(previous) ? abs(real(previous) - f_real) :
+        (isfinite(f_abs) ? max(f_abs, one(f_abs)) : one(f_abs))
     fδ[1] = real(f)
     fδ[2] = δ
     params.last_stop_χ = Int(χ)
@@ -51,6 +54,16 @@ function _transfer_pepo_update_stop!(g, f, fδ, params::GradientOptimize, χ::In
         params.last_stop_reason = :running
     end
     return δ
+end
+
+function _transfer_pepo_precondition(A, grad, rt_norm, params::GradientOptimize,
+                                     restriction_ipeps, fδobjective)
+    params.ifprecondition || return grad
+    length(fδobjective) >= 2 || return grad
+    isfinite(fδobjective[2]) && fδobjective[2] > 0 || return grad
+    return precondition_invese_single_envir(A, grad, rt_norm, params,
+                                            restriction_ipeps, fδobjective,
+                                            params.iter_precond)
 end
 
 function _build_transfer_pepo_A(A, params::GradientOptimize; restriction_ipeps)
@@ -152,7 +165,7 @@ transfer_pepo_history_label(model) = "density"
 
 function _transfer_pepo_finalize!(x, f, g, iter, rt_norm, rt_norm_next,
                                   rt_transfer, rt_transfer_next, D, χ,
-                                  params, t0, last_obs, fδobjective)
+                                  params, t0, fδobjective)
     folder0 = joinpath(params.folder, "D$(D)")
     ispath(folder0) || mkpath(folder0)
 
@@ -160,11 +173,10 @@ function _transfer_pepo_finalize!(x, f, g, iter, rt_norm, rt_norm_next,
     update!(rt_transfer, rt_transfer_next)
 
     density = -real(f)
-    obs = last_obs[]
     label = transfer_pepo_history_label(params.model)
     message = @sprintf(
-        "i = %5d\tt = %0.2f sec\tobjective_χ%d = %.15f\t%s_χ%d = %.15f\tgnorm = %.3e\tlogT = %.15f\tlogN = %.15f\n",
-        iter, time() - t0, χ, real(f), label, χ, density, norm(g), obs.log_transfer, obs.log_norm,
+        "i = %5d\tt = %0.2f sec\tobjective_χ%d = %.15f\t%s_χ%d = %.15f\tgnorm = %.3e\n",
+        iter, time() - t0, χ, real(f), label, χ, density, norm(g),
     )
 
     if _io_root(params.boundary_alg) && params.verbosity >= 3 && iter % params.show_every == 0
@@ -181,6 +193,7 @@ function _transfer_pepo_finalize!(x, f, g, iter, rt_norm, rt_norm_next,
         save(joinpath(ipeps_dir, "No.$(iter).jld2"), "bcipeps", Array(x); iotype=IOStream)
     end
 
+    length(fδobjective) >= 3 && (fδobjective[3] = iter)
     δobjective = _transfer_pepo_update_stop!(g, f, fδobjective, params, χ)
     if params.last_stop_reason == :objective_stall && params.verbosity >= 1
         @warn "transfer-PEPO objective stalled; ending current χ and advancing" χ=χ delta=δobjective
@@ -214,9 +227,7 @@ function optimise_transfer_pepo(A, χlist::AbstractVector{<:Integer},
 
     local rt_norm, rt_norm_next, rt_transfer, rt_transfer_next
     active_params = Ref(params)
-    fδobjective = [NaN, Inf]
-    last_obs = Ref{Any}((log_density = NaN, log_transfer = NaN, log_norm = NaN,
-                         err_norm = NaN, err_transfer = NaN))
+    fδobjective = [NaN, Inf, 0.0]
 
     function fobjective(x)
         params = active_params[]
@@ -228,10 +239,6 @@ function optimise_transfer_pepo(A, χlist::AbstractVector{<:Integer},
         ignore_derivatives() do
             update!(rt_norm_next, rt_norm_new)
             update!(rt_transfer_next, rt_transfer_new)
-            last_obs[] = merge(obs, (
-                err_norm = err_norm,
-                err_transfer = err_transfer,
-            ))
         end
         return obs.objective
     end
@@ -263,7 +270,7 @@ function optimise_transfer_pepo(A, χlist::AbstractVector{<:Integer},
     for χ in χs
         params_χ = _transfer_pepo_params_for_chi(params, χ)
         active_params[] = params_χ
-        fδobjective .= (NaN, Inf)
+        fδobjective .= (NaN, Inf, 0.0)
         A_built = _build_transfer_pepo_A(A, params_χ; restriction_ipeps)
         rt_norm = init_env(A_built, χ, params_χ.boundary_alg)
         rt_norm_next = deepcopy(rt_norm)
@@ -275,10 +282,13 @@ function optimise_transfer_pepo(A, χlist::AbstractVector{<:Integer},
             resume_from = params.ifload_lbfgs ? joinpath(state_path, "χ$χ.jld2") : nothing,
             save_state_to = (params.ifsave_lbfgs && _io_root(params.boundary_alg)) ? joinpath(state_path, "χ$χ.jld2") : nothing,
             save_every = params.save_every,
+            precondition = (x, g) -> _transfer_pepo_precondition(
+                x, g, rt_norm_next, params_χ, restriction_ipeps, fδobjective
+            ),
             inner = _inner,
             finalize! = (x, f, g, iter) -> _transfer_pepo_finalize!(
                 x, f, g, iter, rt_norm, rt_norm_next,
-                rt_transfer, rt_transfer_next, D, χ, params_χ, t0, last_obs, fδobjective,
+                rt_transfer, rt_transfer_next, D, χ, params_χ, t0, fδobjective,
             ),
         )
         transfer_pepo_observable(A, χ, params_χ; restriction_ipeps)
