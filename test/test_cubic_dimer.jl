@@ -53,16 +53,51 @@ using TeneT: StructArray, VUMPSRuntime, init_env, build_A, GradientOptimize
         M_legacy = mixed_transfer_tensor(model, A_sa)
         @test M_generic isa StructArray
         @test M_generic.pattern == M_legacy.pattern
-        @test M_generic[1][1] == M_legacy[1][1]
-        @test M_generic[1][2] == M_legacy[1][2]
+        @test !(M_generic[1] isa Tuple)
+        @test M_legacy[1] isa Tuple
         @test hasmethod(TeneT.optimise_transfer_pepo, Tuple{Any, Vector{Int}, GradientOptimize})
+    end
+
+    @testset "layered transfer kernels match materialized transfer" begin
+        Random.seed!(1357)
+        model = CubicDimer()
+        D = 2
+        χ = 3
+        A = randn(Float64, D, D, D, D, 2)
+        A_sa = StructArray([A], [1;;])
+        M_layered = TeneT.transfer_layer(model, A_sa)[1]
+        M_materialized = mixed_transfer_tensor(model, A_sa)[1]
+
+        @test !(M_layered isa Tuple)
+        @test hasproperty(M_layered, :WA)
+        @test M_layered.WA == M_materialized[1]
+
+        FL = randn(Float64, χ, 2D, D, χ)
+        FR = randn(Float64, χ, 2D, D, χ)
+        ALu = randn(Float64, χ, 2D, D, χ)
+        ALd = randn(Float64, χ, 2D, D, χ)
+        AC = randn(Float64, χ, 2D, D, χ)
+
+        @test TeneT.FLmap(FL, ALu, ALd, M_layered) ≈
+              TeneT.FLmap(FL, ALu, ALd, M_materialized)
+        @test TeneT.FRmap(FR, ALu, ALd, M_layered) ≈
+              TeneT.FRmap(FR, ALu, ALd, M_materialized)
+        @test TeneT.ACmap(AC, FL, FR, M_layered) ≈
+              TeneT.ACmap(AC, FL, FR, M_materialized)
+
+        A3 = randn(Float64, 3, 3, 3, 3, 2)
+        A3_sa = StructArray([A3], [1;;])
+        M3_layered = TeneT.transfer_layer(model, A3_sa)[1]
+        M3_materialized = mixed_transfer_tensor(model, A3_sa)[1]
+        @test M3_layered.WA == M3_materialized[1]
     end
 
     @testset "mixed VUMPS runtime initializes" begin
         Random.seed!(1234)
         model = CubicDimer()
         A = StructArray([ones(Float64, 2, 2, 2, 2, 2)], [1;;])
-        M = mixed_transfer_tensor(model, A)
+        M = TeneT.transfer_layer(model, A)
+        @test !(M[1] isa Tuple)
         alg = VUMPS{General}(;
             ifupdown=false,
             forloop_iter=4,
