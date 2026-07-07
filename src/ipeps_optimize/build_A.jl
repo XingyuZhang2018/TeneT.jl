@@ -41,7 +41,7 @@ a round of Simple-Update bond updates before returning the StructArray.
 function build_A(A, params::iPEPSOptimize, rt)
     A = StructArray(A, params.pattern)
     A = _lattice_map(A, params.model.lattice, params.pattern)
-    if hasproperty(params, :SUτ) && params.SUτ != 0.0
+    if hasproperty(params, :SUτ) && params.ifSU && params.SUτ != 0.0
         for i in 1:4
             A = one_bond_SU(A, params)
             A = map(x -> permutedims(x, (2,3,4,1,5)), A)
