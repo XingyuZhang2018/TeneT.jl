@@ -14,7 +14,7 @@ C4v
     miniter::Int = 0
     maxiter_ad::Int = 4
     miniter_ad::Int = 4
-    forloop_iter::Int = 5
+    forloop_iter::Int = 1
     power_iter::Int = 5
     power_iter_ad::Int = 5
     power_iter_obs::Int = 40
