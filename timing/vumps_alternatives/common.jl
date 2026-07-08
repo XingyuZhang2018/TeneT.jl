@@ -84,7 +84,10 @@ function diag_free_energy(cnt, AL, C, FL, M, beta)
     end
 end
 
-# Gauge residual, same definition as c4v.jl vumps_step
+# Gauge residual, same definition as c4v.jl vumps_step.
+# DIAGNOSTIC-ONLY: costs one extra ACmap+Cmap charged to the diagnostic buckets.
+# An algorithm's own convergence `err` must come from `accto_al` on the step's
+# existing AC/C — do not call this inside a convergence-gating loop.
 function gauge_err(AL, C, M, FL, cnt)
     return with_diagnostics(cnt) do
         AC = TeneT.ALCtoAC_map(AL, C)
