@@ -59,8 +59,12 @@ Use the memory remedies in this order:
 
 1. Set `ifcheckpoint=true` on both `GradientOptimize` and the VUMPS boundary
    algorithm.
-2. Increase `forloop_iter`, but cap or adapt it for small chi stages. A requested
-   `forloop_iter` larger than the active chi can trigger low-chi failures.
+2. Increase `forloop_iter` gradually for OOM as powers of two: try `2^i` with
+   `i = 2, 3, ...` (`4`, `8`, `16`, ...), and stop at the first value that
+   fits. Do not start with a very large value; it can make the run much slower.
+   For `slice1D`, cap the useful maximum near `χ / nprocs`. For `slice2D`,
+   analyze the cap from the chosen `(N1,N2)` split instead of reusing the
+   `slice1D` rule.
 3. Set VUMPS `inner_checkpoint=Recompute()` if memory still fails.
 4. Use multi-GPU parallelism. Prefer `slice1D` when it fits; use `slice2D` when
    peak memory is the blocker.
