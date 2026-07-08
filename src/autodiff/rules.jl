@@ -280,6 +280,57 @@ end
 # These provide chunked backprop through loop iterations and MPI-aware gradient
 # accumulation, rather than hand-written per-map adjoints.
 
+_is_absent_tangent(x) = x === nothing || x isa AbstractZero
+
+function _tangent_accumulator_like(x)
+    x isa AbstractArray && return zero(x)
+    x isa NamedTuple && return nothing
+    x isa Tuple && return map(_tangent_accumulator_like, x)
+    return nothing
+end
+
+function _accumulate_tangent!(acc, grad)
+    _is_absent_tangent(grad) && return acc
+    _is_absent_tangent(acc) && return grad
+    if acc isa NamedTuple && grad isa NamedTuple
+        return NamedTuple{keys(acc)}(
+            map(_accumulate_tangent!, values(acc), values(grad))
+        )
+    elseif acc isa Tuple && grad isa Tuple
+        return map(_accumulate_tangent!, acc, grad)
+    elseif acc isa AbstractArray
+        acc .+= grad
+        return acc
+    else
+        return acc + grad
+    end
+end
+
+function _restore_tangent_eltype(t, ::Type{T}) where {T}
+    _is_absent_tangent(t) && return t
+    if t isa NamedTuple
+        return NamedTuple{keys(t)}(
+            map(x -> _restore_tangent_eltype(x, T), values(t))
+        )
+    elseif t isa Tuple
+        return map(x -> _restore_tangent_eltype(x, T), t)
+    else
+        return T.(t)
+    end
+end
+
+function _allreduce_tangent!(t, op, comm)
+    _is_absent_tangent(t) && return t
+    if t isa NamedTuple
+        foreach(x -> _allreduce_tangent!(x, op, comm), values(t))
+    elseif t isa Tuple
+        foreach(x -> _allreduce_tangent!(x, op, comm), t)
+    else
+        allreduce_p2p!(t, op, comm)
+    end
+    return t
+end
+
 function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=nothing)
     # Boundary cast: run the whole forward+backward in `inner_etype` when set.
     # Upcast/downcast happens at the rrule boundary, not inside each kernel call.
@@ -308,7 +359,7 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
                 # engine_backward returns map-arg-order gradients (tuple-M arg ⇒
                 # tuple grad slot) — same shape as Zygote's pullback tuple.
                 # Upcast to original precision at boundary exit.
-                dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+                dargs = do_cast ? ntuple(i -> _restore_tangent_eltype(dargs_c[i], T_orig), length(args)) :
                                   dargs_c
                 return NoTangent(), NoTangent(), dargs...
             end
@@ -322,7 +373,7 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
             dargs_c = back(_dresult_c)
             # Zygote's pullback returns one tangent per positional arg (no d_f).
             # Upcast to original precision at boundary exit.
-            dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+            dargs = do_cast ? ntuple(i -> _restore_tangent_eltype(dargs_c[i], T_orig), length(args)) :
                               dargs_c
             return NoTangent(), NoTangent(), dargs...
         end
@@ -354,7 +405,8 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
         function back(dresult)
             _dresult = unthunk(dresult)
             _dresult_c = do_cast ? _boundary_cast(inner_etype, _dresult) : _dresult
-            dargs_c = ntuple(i->args_c[i] isa Tuple ? zero.(args_c[i]) : zero(args_c[i]), length(args_c))
+            dargs_acc = Any[_tangent_accumulator_like(arg) for arg in args_c]
+            dargs_acc[N_in[1]] = zero(args_c[N_in[1]])
             t_bp = 0.0
             @views for r in ranges
                 in_idx_r  = Base.setindex(in_idx,  r, split_dim)
@@ -372,21 +424,16 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
                 t_bp += time() - t1
                 for i in 1:length(args_c)
                     if i == N_in[1]
-                        dargs_c[i][in_idx_r...] .= dargs_range[i]
+                        dargs_acc[i][in_idx_r...] .= dargs_range[i]
                     else
-                        if dargs_range[i] isa Tuple
-                            for j in 1:length(dargs_range[i])
-                                dargs_c[i][j] .+= dargs_range[i][j]
-                            end
-                        else
-                            dargs_c[i] .+= dargs_range[i]
-                        end
+                        dargs_acc[i] = _accumulate_tangent!(dargs_acc[i], dargs_range[i])
                     end
                 end
             end
             # println("  forloop_back: forloop=$forloop_iter bp=$(round(t_bp*1000,digits=1))ms split=$D_split→$(length(ranges))")
             # Upcast partial gradients back to original precision at boundary exit
-            dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+            dargs_c = Tuple(dargs_acc)
+            dargs = do_cast ? ntuple(i -> _restore_tangent_eltype(dargs_c[i], T_orig), length(args)) :
                               dargs_c
             return NoTangent(), NoTangent(), dargs...
         end
@@ -437,7 +484,8 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     function back(dresult)
         _dresult = unthunk(dresult)
         _dresult_c = do_cast ? _boundary_cast(inner_etype, _dresult) : _dresult
-        dargs_c = ntuple(i -> args_c[i] isa Tuple ? zero.(args_c[i]) : zero(args_c[i]), length(args_c))
+        dargs_acc = Any[_tangent_accumulator_like(arg) for arg in args_c]
+        dargs_acc[N_in[1]] = zero(args_c[N_in[1]])
         @views for i in 1:forloop_iter
             ind = forloop_iter * rank + i
             in_idx_r  = Base.setindex(in_idx,  D_split_ranges[ind], split_dim)
@@ -453,15 +501,9 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             end
             for j in 1:length(args_c)
                 if j == N_in[1]
-                    dargs_c[j][in_idx_r...] .= split_dargs[j]
+                    dargs_acc[j][in_idx_r...] .= split_dargs[j]
                 else
-                    if dargs_c[j] isa Tuple
-                        for k in 1:length(dargs_c[j])
-                            dargs_c[j][k] .+= split_dargs[j][k]
-                        end
-                    else
-                        dargs_c[j] .+= split_dargs[j]
-                    end
+                    dargs_acc[j] = _accumulate_tangent!(dargs_acc[j], split_dargs[j])
                 end
             end
         end
@@ -474,9 +516,9 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
         # 1) Allgatherv for split arg (if contiguous)
         if has_split_gather
             j = N_in[1]
-            element_size = prod(size(dargs_c[j])) ÷ D_split
+            element_size = prod(size(dargs_acc[j])) ÷ D_split
             counts = Cint[sum([length(D_split_ranges[(i-1)*forloop_iter+k]) for k in 1:forloop_iter]) * element_size for i in 1:nprocs]
-            allgatherv_p2p!(dargs_c[j], counts, comm)
+            allgatherv_p2p!(dargs_acc[j], counts, comm)
         end
 
         # 2) Allreduce non-split args via p2p with pre-allocated buffers
@@ -484,17 +526,12 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
             if j == N_in[1] && has_split_gather
                 continue
             end
-            if dargs_c[j] isa Tuple
-                for k in 1:length(dargs_c[j])
-                    allreduce_p2p!(dargs_c[j][k], +, comm)
-                end
-            else
-                allreduce_p2p!(dargs_c[j], +, comm)
-            end
+            _allreduce_tangent!(dargs_acc[j], +, comm)
         end
 
         # Upcast partial gradients back to original precision at boundary exit.
-        dargs = do_cast ? ntuple(i -> args[i] isa Tuple ? map(x -> T_orig.(x), dargs_c[i]) : T_orig.(dargs_c[i]), length(args)) :
+        dargs_c = Tuple(dargs_acc)
+        dargs = do_cast ? ntuple(i -> _restore_tangent_eltype(dargs_c[i], T_orig), length(args)) :
                           dargs_c
         return NoTangent(), NoTangent(), dargs...
     end

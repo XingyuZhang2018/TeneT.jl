@@ -92,6 +92,30 @@ using TeneT: StructArray, VUMPSRuntime, init_env, build_A, GradientOptimize
         @test M3_layered.WA == M3_materialized[1]
     end
 
+    @testset "layered transfer forloop gradient accumulates site tangents" begin
+        Random.seed!(9753)
+        model = CubicDimer()
+        D = 2
+        χ = 2
+        A = randn(Float64, D, D, D, D, 2)
+        A_sa = StructArray([A], [1;;])
+        M = TeneT.transfer_layer(model, A_sa)[1]
+        FL = randn(Float64, χ, 2D, D, χ)
+        ALu = randn(Float64, χ, 2D, D, χ)
+        ALd = randn(Float64, χ, 2D, D, χ)
+
+        loss(fl, alu, ald, m) =
+            sum(abs2, TeneT.FLmap_parallel(fl, alu, ald, m;
+                                           ifparallel=false, forloop_iter=2))
+        grads = Zygote.gradient(loss, FL, ALu, ALd, M)
+
+        @test grads[4] isa NamedTuple
+        @test grads[4].Ac isa AbstractArray
+        @test grads[4].WA isa AbstractArray
+        @test size(grads[4].Ac) == size(M.Ac)
+        @test size(grads[4].WA) == size(M.WA)
+    end
+
     @testset "mixed VUMPS runtime initializes" begin
         Random.seed!(1234)
         model = CubicDimer()
