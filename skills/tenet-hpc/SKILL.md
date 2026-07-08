@@ -1,13 +1,13 @@
 ---
 name: tenet-hpc
-description: "Optional repository-local HPC operations skill for TeneT.jl: Slurm submission, squeue/sacct checks, sync/pull, monitoring, archiving, local history, cluster preflight, and crash retry coordination for TeneT iPEPS jobs on BSC, Sofia, JSC, MareNostrum, and GPU clusters. Use only when this repo-local skill is explicitly enabled or invoked; otherwise prefer the user-global $hpc skill required by AGENTS.md."
+description: "Optional repository-local HPC operations supplement for TeneT.jl: Slurm submission, squeue/sacct checks, sync/pull, monitoring, archiving, local history, resource matching, cluster preflight, and crash retry coordination for TeneT iPEPS jobs on BSC, Sofia, JSC, MareNostrum, and GPU clusters. Use when explicitly invoked or when the user-global $hpc skill detects a TeneT job and reads repo-local supplements."
 ---
 
 # TeneT HPC Operations
 
-Use this optional skill for TeneT-specific cluster operations only when it has
-explicitly been enabled or invoked. If the user-global `$hpc` skill is available
-and AGENTS.md requires it, follow `$hpc` first.
+Use this optional skill for TeneT-specific cluster operations when explicitly
+enabled or invoked, or when the user-global `$hpc` skill detects a TeneT job and
+reads repo-local supplements. If AGENTS.md requires `$hpc`, follow `$hpc` first.
 
 `$hpc` safety, cancellation, history, and ledger rules remain authoritative;
 this skill only adds TeneT-specific preflight and provenance details.
@@ -58,6 +58,19 @@ Archive at least:
 - helper preflight scripts
 
 After submission, update `SUBMISSION.md` with the remote workdir and Slurm ID.
+
+## Resource Match
+
+Before submitting, verify the Slurm allocation matches the TeneT entry:
+
+- Do not request multiple GPUs for an entry that runs single-GPU code.
+- Match GPU count, MPI rank count, `CUDA_VISIBLE_DEVICES`, and the TeneT
+  `parallel_method`.
+- For single-GPU runs, request one GPU and one GPU-driving rank.
+- For multi-GPU runs, confirm every allocated GPU is used by Slice1D, Slice2D,
+  or another explicit parallel path before submission.
+- Record the intended GPU count, rank count, and parallel method in
+  `SUBMISSION.md`.
 
 ## Cluster Preflight
 

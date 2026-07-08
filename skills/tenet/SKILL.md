@@ -75,6 +75,9 @@ Use the memory remedies in this order:
 ## Parallelism
 
 - Prefer the newer `parallel_method` API for new runs.
+- For `D <= 8` and `χ <= 512`, do not use multi-GPU parallelism by default.
+  Use a single GPU unless measured memory pressure or throughput justifies
+  parallel execution.
 - Use `slice1D(...; forloop_iter=...)` as the first multi-GPU option when memory
   allows.
 - Use `slice2D(N1,N2; forloop_iter=...)` when peak memory remains too high.
@@ -126,6 +129,8 @@ preflight for:
 - CUDA kernel execution
 - cuTENSOR availability
 - MPI rank to GPU mapping
+- Slurm GPU count, MPI ranks, and the Julia entry's `parallel_method` must match
+  the planned single-GPU or multi-GPU execution.
 - MPI/NCCL basics for the chosen parallel method
 
 Do not issue `sbatch`, `squeue`, `sacct`, `scancel`, `rsync`, or remote SSH
