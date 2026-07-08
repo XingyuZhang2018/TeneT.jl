@@ -413,6 +413,19 @@
                 @test Array(direct) ≈ Array(par_res)
             end
 
+            @testset "FLmap_parallel skips empty chunks when forloop_iter > split dimension" begin
+                FL  = atype(randn(T, χ, D, D, χ))
+                ALu = atype(randn(T, χ, D, D, χ))
+                ALd = atype(randn(T, χ, D, D, χ))
+                M1  = atype(randn(T, D, D, D, D, D))
+                M2  = atype(randn(T, D, D, D, D, D))
+
+                direct  = FLmap(FL, ALu, ALd, (M1, M2))
+                par_res = FLmap_parallel(FL, ALu, ALd, (M1, M2);
+                                         ifparallel=false, forloop_iter=χ + 5)
+                @test Array(direct) ≈ Array(par_res)
+            end
+
             @testset "FRmap_parallel forloop_iter=1 matches FRmap" begin
                 FR  = atype(randn(T, χ, D, χ))
                 ARu = atype(randn(T, χ, D, χ))
