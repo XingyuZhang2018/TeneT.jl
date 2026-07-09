@@ -93,6 +93,11 @@ Use the memory remedies in this order:
   target chi list such as `[1024]`.
 - When increasing chi, the default chi ladder already gives later stages more
   VUMPS effort for the environment.
+- If the optimization gradient norm stalls and refuses to decrease, first
+  suspect that chi is too small and the physical variational space is poor.
+  Hermitian cases may tolerate this better; in non-Hermitian optimizations this
+  is especially often a chi bottleneck. Increase chi and recompute the
+  environment before spending time on optimizer hyperparameters.
 - When increasing D, that extra environment effort is not automatic. Add larger
   `boundary_alg.maxiter` / `opt_obs_maxiter`, or run an explicit env/observable
   warmup before the main LBFGS continuation.
