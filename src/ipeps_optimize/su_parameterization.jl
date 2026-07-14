@@ -68,7 +68,7 @@ function _su_embed_single_site(A::AbstractArray{<:Number,5}, D_new::Int)
     D_new >= maximum(old_dims) ||
         throw(ArgumentError("single-site SU_parameterization currently supports D_new >= current virtual dimensions; got D_new=$D_new and virtual dims=$old_dims"))
 
-    T = promote_type(eltype(A), ComplexF64)
+    T = eltype(A)
     A_new = _arraytype(A)(zeros(T, D_new, D_new, D_new, D_new, d))
     A_new[1:old_dims[1], 1:old_dims[2], 1:old_dims[3], 1:old_dims[4], :] = A
     return A_new
@@ -100,7 +100,7 @@ function _su_vertical_pair_matrix(A_upper, A_lower, gate)
 end
 
 function _su_horizontal_old_subspaces(A_left, A_right, D_old::Int, rows::Int, cols::Int)
-    T = promote_type(eltype(A_left), eltype(A_right), ComplexF64)
+    T = promote_type(eltype(A_left), eltype(A_right))
     atype = _arraytype(A_left)
     L0 = atype(zeros(T, rows, D_old))
     R0 = atype(zeros(T, cols, D_old))
@@ -112,7 +112,7 @@ function _su_horizontal_old_subspaces(A_left, A_right, D_old::Int, rows::Int, co
 end
 
 function _su_vertical_old_subspaces(A_upper, A_lower, D_old::Int, rows::Int, cols::Int)
-    T = promote_type(eltype(A_upper), eltype(A_lower), ComplexF64)
+    T = promote_type(eltype(A_upper), eltype(A_lower))
     atype = _arraytype(A_upper)
     L0 = atype(zeros(T, rows, D_old))
     R0 = atype(zeros(T, cols, D_old))
@@ -260,7 +260,7 @@ function SU_parameterization(A, params; D_new,
     Ah = Zygote.Buffer(A)
     if D_new > D
         for p in 1:length(A)
-            Ah[p] = zeros(ComplexF64, D_new, D_new, D_new, D_new, d)
+            Ah[p] = zeros(eltype(A[p]), D_new, D_new, D_new, D_new, d)
             Ah[p][1:D, 1:D, 1:D, 1:D, :] = A[p]
         end
     else
