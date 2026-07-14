@@ -1,6 +1,6 @@
 ---
 name: tenet
-description: "Use inside the TeneT.jl repository for iPEPS optimization and run design: fresh TeneT iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only runs, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT, TeneT.jl, optimise_ipeps, GradientOptimize, init_ipeps_SU, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
+description: "Use inside the TeneT.jl repository for iPEPS optimization and run design: fresh TeneT iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT, TeneT.jl, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
 ---
 
 # TeneT iPEPS Run Design
@@ -115,6 +115,22 @@ Use the memory remedies in this order:
 - Use `maxiter_ad=0` and no LBFGS continuation.
 - Set `ifsave_lbfgs=false` and `ifload_lbfgs=false`, except when reusing an
   existing wrapper that already forces them off.
+
+## TM Spectrum Runs
+
+- Before computing a `TM_spectrum` k-point grid, check whether the matching
+  boundary environment already exists. Load it when it is trustworthy; recompute
+  only when it is missing, stale, incompatible, or suspect.
+- Do not recompute the boundary environment separately for each k point. All k
+  points in the same sector should load/reuse the same converged environment.
+- For the trivial sector, reuse the single matching `χ<chi>.jld2` environment
+  across k points.
+- For `ifdomainwall=true`, do not treat the setup as left/right two-boundary
+  reuse. It is the same side with two different MPS fixed points/environments:
+  prepare or load the two matching named environments once, then reuse that pair
+  for every k point.
+- If saving environments is affordable, keep `ifsave_env=true` for the first TM
+  run so later k points and retries can use `ifload_env=true`.
 
 ## Precondition And New Paths
 
