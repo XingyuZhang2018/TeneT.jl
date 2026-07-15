@@ -1,6 +1,6 @@
 ---
 name: tenet
-description: "Use inside the TeneT.jl repository for iPEPS optimization and run design: fresh TeneT iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT, TeneT.jl, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
+description: "Use inside the TeneT.jl repository for iPEPS optimization and run design: fresh TeneT iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, default-parameter changes, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT, TeneT.jl, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT default parameters, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
 ---
 
 # TeneT iPEPS Run Design
@@ -35,6 +35,10 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
   `Plaquette`, `C4v`, `Oneside`, or `QRCTMRG`. Do not swap these casually.
 - Treat `restriction_ipeps` as physics-specific. Honeycomb brickwall, Kagome,
   C4v, Plaquette, General, and Oneside examples encode different assumptions.
+- When modifying any TeneT default parameter in source code, constructors,
+  examples, or run templates, pause before committing and ask the user to
+  confirm the default change. Do not decide and commit a default-parameter
+  change based only on subjective judgment.
 
 ## Environment And LBFGS Policy
 
