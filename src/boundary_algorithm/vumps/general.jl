@@ -975,6 +975,9 @@ function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
     end
 
     ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD...")
+    # maxiter = maxiter_ad = 0 (frozen environment, e.g. TM_spectrum on a
+    # loaded env) runs neither loop; err must exist for the final return.
+    err = Inf
     ChainRulesCore.ignore_derivatives() do
         for i in 1:alg.maxiter
         rt, err = vumps_step(rt, M, alg_wholemode)
