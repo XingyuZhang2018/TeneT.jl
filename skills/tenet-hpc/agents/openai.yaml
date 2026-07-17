@@ -1,7 +1,7 @@
 interface:
   display_name: "TeneT HPC"
-  short_description: "Operate TeneT cluster jobs safely"
-  default_prompt: "Use $tenet-hpc to prepare, monitor, or sync a TeneT Slurm job."
+  short_description: "Operate TeneT.c cluster jobs safely"
+  default_prompt: "Use $tenet-hpc to prepare, monitor, or sync a TeneT.c Slurm job after local TeneT.jl parity validation."
 
 policy:
   allow_implicit_invocation: false

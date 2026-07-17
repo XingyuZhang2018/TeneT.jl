@@ -1,7 +1,7 @@
 interface:
   display_name: "TeneT"
-  short_description: "Plan reliable TeneT iPEPS runs"
-  default_prompt: "Use $tenet to design a TeneT iPEPS optimization run."
+  short_description: "Plan reliable TeneT.c iPEPS runs"
+  default_prompt: "Use $tenet to design a TeneT.c iPEPS run with TeneT.jl parity validation."
 
 policy:
   allow_implicit_invocation: true

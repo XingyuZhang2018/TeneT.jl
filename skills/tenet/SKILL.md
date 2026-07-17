@@ -1,12 +1,14 @@
 ---
 name: tenet
-description: "Use inside the TeneT.jl repository for iPEPS optimization and run design: fresh TeneT iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, default-parameter changes, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT, TeneT.jl, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT default parameters, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
+description: "Use for TeneT iPEPS optimization and run design across TeneT.c and TeneT.jl: default TeneT.c production runs, TeneT.jl reference/parity checks, fresh iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, default-parameter changes, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT.c, TeneT.jl, TeneT, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT default parameters, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
 ---
 
 # TeneT iPEPS Run Design
 
-Use this skill before designing, modifying, or reviewing TeneT.jl iPEPS optimization runs.
+Use this skill before designing, modifying, or reviewing TeneT iPEPS optimization runs.
 This skill decides physics and runtime parameters. It does not submit Slurm jobs.
+Default production run design uses `TeneT.c`; use `TeneT.jl` as the reference
+implementation for parity checks, unsupported-feature fallbacks, and diagnosis.
 For cluster submission, monitoring, syncing, archiving, or cancellation, follow
 AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
 `tenet-hpc` only when the user explicitly invokes or enables that optional skill.
@@ -15,8 +17,11 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
 
 1. Read the closest example under `examples/` before inventing a model, pattern,
    contraction mode, or `restriction_ipeps`.
-2. Inspect recent `hpc/rendered/*/entry.jl` and `SUBMISSION.md` files when the
-   request resembles a previous run.
+   Prefer the app-backed mirror in sibling checkout
+   `D:\1 - research\1.26 - iPEPS_opt\TeneT.c\examples`; use the TeneT.jl
+   example as the reference oracle.
+2. Inspect recent `hpc/rendered/*/entry.*`, command scripts, and
+   `SUBMISSION.md` files when the request resembles a previous run.
 3. Classify the run as fresh optimization, chi continuation, D upgrade,
    observable-only, Slice2D/precondition smoke, or failure retry.
 4. Preserve durable run artifacts. Continue only from saved iPEPS files,
@@ -26,6 +31,15 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
 
 ## Core Defaults
 
+- Use `TeneT.c` as the default implementation for new production runs and HPC
+  submissions. Use `TeneT.jl` by default only for the local reference parity
+  run, for diagnosing mismatches, or after the user confirms a fallback because
+  the needed TeneT.c capability is not ported.
+- Before any TeneT HPC submission, run a local D=2, chi=16 parity check between
+  TeneT.c and TeneT.jl for the same model, lattice/pattern, contraction family,
+  seed or exported fixture, and relevant observable/optimization path. Do not
+  submit the HPC job until the two libraries agree within the task's numerical
+  tolerance and the commands, logs, and compared values are recorded.
 - Use GPU for production runs with `D >= 5`. CPU is for tiny smoke tests only.
 - Keep `ifsimple_eig=true` for real iPEPS optimization. Set it false only when
   the task explicitly studies eigensolver or algorithm behavior.
@@ -39,6 +53,9 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
   examples, or run templates, pause before committing and ask the user to
   confirm the default change. Do not decide and commit a default-parameter
   change based only on subjective judgment.
+- If TeneT.c lacks the requested model, lattice, complex arithmetic, TM sector,
+  or checkpoint/parallel capability, state the missing capability and ask before
+  falling back to a TeneT.jl production run.
 
 ## Environment And LBFGS Policy
 
@@ -150,12 +167,16 @@ Use the memory remedies in this order:
 When a high-D run will go to a cluster, ensure the HPC workflow includes a
 preflight for:
 
-- `using TeneT`
+- local D=2, chi=16 TeneT.c versus TeneT.jl parity evidence for the same run
+  family
+- TeneT.c build/driver smoke for the selected app, or `using TeneT` only when
+  the user has approved a TeneT.jl fallback
 - CUDA kernel execution
-- cuTENSOR availability
+- cuTENSOR/cuBLAS/cuSOLVER availability as applicable to the backend
 - MPI rank to GPU mapping
-- Slurm GPU count, MPI ranks, and the Julia entry's `parallel_method` must match
-  the planned single-GPU or multi-GPU execution.
+- Slurm GPU count, MPI ranks, and the TeneT.c entry's Slice1D/Slice2D settings
+  must match the planned single-GPU or multi-GPU execution. For approved
+  TeneT.jl fallback runs, match the Julia entry's `parallel_method`.
 - MPI/NCCL basics for the chosen parallel method
 
 Do not issue `sbatch`, `squeue`, `sacct`, `scancel`, `rsync`, or remote SSH
