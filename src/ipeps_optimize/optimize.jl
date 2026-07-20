@@ -90,14 +90,14 @@ function _default_χ_at(stage::Integer, scheme::Symbol)
 end
 
 """
-    default_χlist(D; χmin=D^2, nstage=10, maxχ=nothing, scheme=:pow23)
+    default_χlist(D; χmin=2 * D^2, nstage=10, maxχ=nothing, scheme=:pow23)
 
 Return a default ordered list of boundary bond dimensions for optimization.
-The first entry is at least `χmin` (which defaults to `D^2`).  The default
+The first entry is at least `χmin` (which defaults to `2 * D^2`).  The default
 `:pow23` scheme uses the GPU-friendly sequence `2, 3, 4, 6, 8, 12, ...`.
 Use `scheme=:sqrt2` for the rounded `2^(i/2)` ladder.
 """
-function default_χlist(D::Integer; χmin::Integer=D^2, nstage::Integer=10,
+function default_χlist(D::Integer; χmin::Integer=2 * D^2, nstage::Integer=10,
                        maxχ::Union{Nothing,Integer}=nothing, scheme::Symbol=:pow23)
     D > 0 || throw(ArgumentError("D must be positive"))
     χmin > 0 || throw(ArgumentError("χmin must be positive"))

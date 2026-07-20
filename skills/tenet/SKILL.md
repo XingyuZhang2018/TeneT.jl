@@ -109,7 +109,8 @@ Use the memory remedies in this order:
 
 ## D And Chi Growth
 
-- For fresh chi ladders, use `default_χlist(D; ...)`.
+- For fresh chi ladders, use `default_χlist(D; ...)`; its default minimum
+  boundary dimension is `2 * D^2`.
 - For continuation from an already optimized high-chi state, use an explicit
   target chi list such as `[1024]`.
 - When increasing chi, the default chi ladder already gives later stages more
