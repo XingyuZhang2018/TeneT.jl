@@ -94,6 +94,7 @@ include("boundary_algorithm/qrctmrg.jl")
 
 include("models/basic_op.jl")
 include("models/basic_interactions.jl")
+include("models/TFIsing/energy.jl")
 include("models/2D_Classical/MPO.jl")
 include("models/2D_Classical/obs.jl")
 include("models/3D_Classical/MPO.jl")

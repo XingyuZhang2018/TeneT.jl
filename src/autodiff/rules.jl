@@ -5,6 +5,7 @@
 @non_differentiable set_device_id!(kwargs...)
 @non_differentiable get_device(kwargs...)
 @non_differentiable get_device_id(kwargs...)
+@non_differentiable _tfising_pauli_operators(kwargs...)
 @non_differentiable _heisenberg_bond_terms(kwargs...)
 @non_differentiable _kitaev_bond_terms(kwargs...)
 @non_differentiable _kagome_onsite_op(kwargs...)
