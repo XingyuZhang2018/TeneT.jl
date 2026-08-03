@@ -46,7 +46,8 @@ part of the differentiated objective.
 
 In scope:
 
-- real `Float32`/`Float64` square-lattice TFIsing tensors;
+- real `Float32`/`Float64` ferromagnetic square-lattice TFIsing tensors with
+  `J >= 0` and imaginary-time step `tau >= 0`;
 - one unique site with pattern `[1;;]` and uniform virtual dimension D;
 - full C4v input and output symmetry;
 - a TFIsing-specific real imaginary-time gate;
@@ -88,11 +89,13 @@ The TFIsing C4v example selects `:c4v_real` explicitly.  There is no automatic
 model-based switch, because silently changing existing SU runs would make old
 checkpoints and results ambiguous.
 
-The new path rejects non-real tensors, non-square lattices, non-TFIsing models,
-non-single-site patterns, nonuniform virtual dimensions, or non-C4v input with
-an `ArgumentError` that names the violated contract.  The pre-SU C4v assertion
-also catches an example that forgot to pass `C4v_restriction` to
-`optimise_ipeps`.
+The new path rejects non-real tensors, negative `J` or `tau`, non-square
+lattices, non-TFIsing models, non-single-site patterns, nonuniform virtual
+dimensions, or non-C4v input with an `ArgumentError` that names the violated
+contract.  The pre-SU C4v assertion also catches an example that forgot to pass
+`C4v_restriction` to `optimise_ipeps`.  Antiferromagnetic coupling is left for
+a later sign/gauge-aware or complex extension instead of assuming that its
+self-bond matrix is positive semidefinite.
 
 ## Materialized-State Contract
 
