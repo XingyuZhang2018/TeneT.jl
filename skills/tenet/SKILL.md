@@ -24,10 +24,12 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
    `SUBMISSION.md` files when the request resembles a previous run.
 3. Classify the run as fresh optimization, chi continuation, D upgrade,
    observable-only, Slice2D/precondition smoke, or failure retry.
-4. Preserve durable run artifacts. Continue only from saved iPEPS files,
-   `history.log` rows, environment files, and LBFGS checkpoints.
+4. Preserve durable run artifacts. For an exact breakpoint continuation, pair
+   the saved iPEPS iterate with its matching LBFGS checkpoint/history; verify
+   the accepted iteration and optimization-variable layout before launching.
 5. Do not continue from a timeout candidate that only printed a forward energy
-   and did not write `No.N.jld2` or an LBFGS checkpoint.
+   and did not write `No.N.jld2` or an LBFGS checkpoint. Do not silently fall
+   back to a tensor-only restart when a matching LBFGS checkpoint should exist.
 
 ## Core Defaults
 
@@ -60,8 +62,27 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
 ## Environment And LBFGS Policy
 
 - Set `ifsave_lbfgs=true` for optimization runs.
-- Set `ifload_lbfgs=true` when continuing from a saved LBFGS checkpoint at the
-  same model, pattern, D, chi, and contraction setup.
+- Treat a breakpoint, walltime, preemption, requeue, or new job-segment resume
+  as an optimizer-state continuation, not a fresh optimization. Set
+  `ifload_lbfgs=true` and directly load the LBFGS history matching the saved
+  iPEPS iterate whenever the optimization problem and variable layout match.
+- Make LBFGS-history loading the mandatory default for large-scale runs.
+  Discarding valid quasi-Newton history repeats expensive gradient and line-search
+  work; a scheduler restart, wrapper change, resource-count change, or rebuilt
+  environment alone is not a reason to reset it.
+- Verify that the tensor and LBFGS checkpoint belong to the same accepted
+  iteration and compatible model, ansatz/restriction, pattern, symmetry, D,
+  scalar type, parameter ordering, objective, and optimizer-state format. Make
+  the loader report success; fail closed and diagnose instead of silently
+  starting with empty history.
+- Reset or set `ifload_lbfgs=false` only when the history is missing, incomplete,
+  unreadable, corrupt, incompatible with the resumed optimization variables, or
+  reproducibly causes non-finite values, invalid curvature/line-search behavior,
+  or an immediate pathological step. Record the evidence and preserve the old
+  checkpoint before starting fresh.
+- Decide environment and optimizer history independently. A missing, stale, or
+  suspect environment can justify `ifload_env=false` without discarding an
+  otherwise compatible LBFGS history.
 - Prefer `ifload_env=true` when an environment exists and is trustworthy:
   model, pattern, D, chi, contraction mode, parallel method, and lattice
   orientation must match, with no evidence that the saved environment was
@@ -73,6 +94,38 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
   incompatible, from a suspect trend, or intentionally being rebuilt.
 - Set `ifsave_env=true` when the environment file is practically small enough.
   Use `<10GB` as the default threshold. Avoid saving very large env files.
+
+## Required Post-Run Energy Trend
+
+- After every optimization segment reaches a terminal state, including normal
+  completion, an iteration cap, walltime, preemption, or a recoverable failure,
+  wait for the durable history and checkpoints to be available and then
+  automatically create or update `energy_vs_iter.png`. Do this before
+  recommending or launching another continuation. Prefer local post-processing
+  after result sync instead of spending reserved compute resources on plotting.
+- Plot only accepted-iterate energies from `history.log` or an equivalent
+  accepted-step table. Do not mix in line-search trial evaluations, forward-only
+  prints, observable energies from a different chi/model, or an unsaved timeout
+  candidate.
+- For a restart chain, preserve the raw logs and stitch all compatible segments
+  in accepted-step order. Deduplicate repeated records and mark chi/stage and
+  restart boundaries. Save a companion `energy_vs_iter.tsv` with at least the
+  iteration, chi, energy, gradient norm when available, segment/source, and
+  enough configuration provenance to audit the plot.
+- Use the plot to make an explicit `continue`, `stop/hold`, or `diagnose first`
+  recommendation. Report the best and final energy, recent-window energy gain,
+  gradient-norm trend, accepted-step cost, stop reason, and availability of the
+  matched iPEPS/LBFGS checkpoint. Judge whether the recent gain is material
+  relative to numerical noise and compute cost.
+- Do not treat a flat or attractive energy curve alone as convergence. Cross-check
+  the gradient, chi/environment adequacy, physical observables, and terminal
+  markers. Recommend diagnosis rather than more iterations when the energy rises
+  or oscillates pathologically, gradients are non-finite or stagnant, the chi is
+  likely limiting the objective, or the loaded optimizer history is suspect.
+- If fewer than two accepted iterations exist, record that the trend is
+  insufficient instead of fabricating a curve or continuation verdict. For
+  observable-only and TM-spectrum runs with no optimization iterations, mark
+  this post-run plot as not applicable.
 
 ## Memory Ladder
 
