@@ -1,0 +1,341 @@
+# ============================================================================
+# Plaquette VUMPS — specialized for 2×2 and 2x6 plaquette contractions
+#
+# Key differences from General VUMPS:
+#   - Only left-canonical form (no AR, FR)
+#   - ACenv uses FL on both sides (not FL and FR)
+#   - Cenv uses FL on both sides: Cmap(C, FL[:,jr], FL[:,jr])
+#   - PlaquetteVUMPSRuntime(AL, C, FL) — 3 fields
+#   - PlaquetteVUMPSEnv(AL, C, FLu, FLo) — 4 fields for observables
+# ============================================================================
+
+# ── Offload-friendly simple_eig wrapper (Plaquette) ──────────────────
+# Mirror `_simple_eig_ACmap` in general.jl: take per-column neighbourhood
+# slices as explicit args so `checkpoint(Recompute()/Offload(), ...)`
+# can capture / offload them cleanly, avoiding closure-pinned refs.
+function _simple_eig_ACmap_plaq(AC1j, FLj, FLjr, Mj; power_iter, ifparallel, forloop_iter,
+                                  inner_checkpoint::CheckpointMethod=Plain(),
+                                  inner_etype=nothing, final_polish_steps=0,
+                                  segment_checkpoint::CheckpointMethod=Plain())
+    f(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype)
+    if final_polish_steps > 0
+        f_final(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FLj, FLjr, Mj; ifparallel, forloop_iter, inner_etype=nothing)
+        return simple_eig(f, AC1j; power_iter, segment_checkpoint, f_final, final_polish_steps)
+    else
+        return simple_eig(f, AC1j; power_iter, segment_checkpoint)
+    end
+end
+
+# ── Plaquette-specific environment solvers ────────────────────────────
+"""
+    ACenv_plaq(AC, FL, M; kwargs...)
+
+AC environment for plaquette mode.  Uses `FL` on both sides of the
+column transfer matrix (no FR).
+"""
+function ACenv_plaq(AC, FL, M; alg::VUMPS{L}, kwargs...) where L <: Plaquette
+    @unpack inner_etype, power_iter, ifparallel, forloop_iter,
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+    # Env-level boundary cast — see leftenv for rationale.
+    T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        AC = _downcast_eltype(inner_etype, AC)
+        FL = _downcast_eltype(inner_etype, FL)
+        M  = _downcast_eltype(inner_etype, M)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
+    Ni, Nj = size(M)
+    λAC = Zygote.Buffer(randSA(Array, M.pattern))
+    AC′ = Zygote.Buffer(AC)
+    processed_indices = Set{Int}()
+    _assert_inner_method(inner_checkpoint)
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
+    for j in 1:Nj
+        p = AC.pattern[1,j]
+        if L <: Plaquette{Square}
+            jr = mod1(j + 1, Nj)
+        elseif L <: Plaquette{Honeycomb{:brickwall_h}}
+            jr = mod1(Nj - j , Nj)
+        else
+            error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")
+        end
+
+        if p ∉ processed_indices
+            f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:,j], FL[:,jr], M[:,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            if ifsimple_eig
+                λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap_plaq,
+                                        AC[1,j], FL[:,j], FL[:,jr], M[:,j];
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+            else
+                λACs, ACs, info = eigsolve(f, AC[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,shermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "ACenv_plaq not converged"
+            end
+            λAC[1,j], AC′[1,j] = selectpos(λACs, ACs, Ni)
+            push!(processed_indices, p)
+            length(processed_indices) == length(AC.data) && break
+        end
+        for i in 2:Ni
+            p = AC.pattern[i,j]
+            if p ∉ processed_indices
+                ACij = ACmap_parallel(AC′[i-1,j], FL[i-1,j], FL[i-1,jr], M[i-1,j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                AC′[i,j] = ACij / norm(ACij)
+                λAC[i,j] = λAC[1,j]
+                push!(processed_indices, p)
+                length(processed_indices) == length(AC.data) && break
+            end
+        end
+    end
+    if do_env_cast
+        return copy(λAC), _downcast_eltype(real(T_orig), copy(AC′))
+    end
+    return copy(λAC), copy(AC′)
+end
+
+"""
+    Cenv_plaq(C, FL; kwargs...)
+
+C environment for plaquette mode.  Uses `FL` on both sides:
+`Cmap(C, FL[:,jr], FL[:,jr])`.
+"""
+function Cenv_plaq(C, FL; alg::VUMPS{L}, kwargs...) where L <: Plaquette
+    # Note: eig_checkpoint is intentionally NOT applied to Cenv — Cmap is much
+    # cheaper than FLmap/ACmap so the forward tape savings are negligible.
+    @unpack power_iter, segment_checkpoint, inner_checkpoint, ifsimple_eig, verbosity = alg
+    Ni, Nj = size(C)
+    λC = Zygote.Buffer(randSA(Array, C.pattern))
+    C′ = Zygote.Buffer(C)
+    processed_indices = Set{Int}()
+    _assert_inner_method(inner_checkpoint)
+    for j in 1:Nj
+        jl = mod1(j + 1, Nj)
+        if L <: Plaquette{Square}
+            jr = mod1(j + 1, Nj)
+        elseif L <: Plaquette{Honeycomb{:brickwall_h}}
+            jr = mod1(Nj - j , Nj)
+        else
+            error("Unsupported lattice for Plaquette VUMPS: $(L). Only Square and Honeycomb are supported.")
+        end
+        p = C.pattern[1,j]
+        if p ∉ processed_indices
+            f(C1j) = checkpoint(inner_checkpoint, Cmap, 1, C1j, FL[:,jl], FL[:,jr])
+            if ifsimple_eig
+                λCs, Cs = simple_eig(f, C[1,j]; power_iter, segment_checkpoint)
+            else
+                λCs, Cs, info = eigsolve(f, C[1,j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100,ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "Cenv_plaq not converged"
+            end
+            λC[1,j], C′[1,j] = selectpos(λCs, Cs, Ni)
+            push!(processed_indices, p)
+            length(processed_indices) == length(C.data) && break
+        end
+        for i in 2:Ni
+            p = C.pattern[i,j]
+            if p ∉ processed_indices
+                Cij = Cmap(C′[i-1,j], FL[i-1,jl], FL[i-1,jr])
+                C′[i,j] = Cij / norm(Cij)
+                λC[i,j] = λC[1,j]
+                push!(processed_indices, p)
+                length(processed_indices) == length(C.data) && break
+            end
+        end
+    end
+    return copy(λC), copy(C′)
+end
+
+# ACCtoAL is already defined in vumps.jl and shared with plaquette mode.
+
+# ── Plaquette VUMPS step ─────────────────────────────────────────────
+
+"""
+    vumps_step(rt::PlaquetteVUMPSRuntime, M, alg::VUMPS{<:Plaquette})
+
+One step of the plaquette VUMPS: leftenv → ACenv → Cenv → ACCtoAL.
+Only uses left environments (no right canonical / right environment).
+"""
+function vumps_step(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
+    # Slice2D (2D block-distributed) path when a grid is set — routes both vumps_itr
+    # call sites. Serial body below runs whenever grid === nothing.
+    g = _effective_grid(alg)
+    g === nothing || return vumps_step_slice2d(rt, M, g, alg)
+    @unpack AL, C, FL = rt
+    sub = alg.subop_checkpoint
+    AC = ALCtoAC(AL, C)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv(a, b, m, fl; alg), AL, conj(AL), M, FL)
+    _, AC = checkpoint(sub, (a, fl, m) -> ACenv_plaq(a, fl, m; alg), AC, FL, M)
+    _, C  = Cenv_plaq(C, FL; alg)                 # C is chi×chi (~MB), no simple_eig — skip checkpoint
+    AL, err = checkpoint(sub, ACCtoAL, AC, C)
+    C = for_gc(C)
+    return PlaquetteVUMPSRuntime(AL, C, FL), err
+end
+
+# ── Plaquette initialization ─────────────────────────────────────────
+
+function init_env(M::StructArray, χ::Int, alg::VUMPS{<:Plaquette})
+    size(M.pattern) == (2,2) || size(M.pattern) == (2,6) || error("Plaquette VUMPS only supports 2×2 and 2×6 patterns. Got pattern of size $(size(M.pattern)).")
+    # Slice2D path: build a BLOCK-distributed plaquette runtime when a grid is set.
+    g = _effective_grid(alg)
+    g === nothing || return init_VUMPSRuntime_slice2d(M, χ, g, alg)
+    A = initial_A(M, χ)
+    AL, L, _ = left_canonical(A)
+    C = LRtoC(L, L)   # use L on both sides (no right canonical)
+    _, FL = leftenv(AL, conj(AL), M; alg)
+    return PlaquetteVUMPSRuntime(AL, C, FL)
+end
+
+# ── Plaquette iteration + boundary ───────────────────────────────────
+
+function vumps_itr(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
+    t = ignore_derivatives(() -> time())
+    local err
+
+    # Whole-VUMPS precision mode (alternative to `inner_etype`):
+    # pre-cast rt and M to alg.whole_vumps_etype; run whole VUMPS (FLmap, QR,
+    # norm, eigsolve, ...) in that precision; polish iters cast back to original.
+    # Original eltype is taken from the first data array of rt.AL (StructArrays
+    # have eltype = Any, so inspect the underlying data tensor).
+    T_orig = eltype(rt.AL.data[1])
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        rt = PlaquetteVUMPSRuntime(_downcast_eltype(W, rt.AL),
+                                   _downcast_eltype(W, rt.C),
+                                   _downcast_eltype(W, rt.FL))
+        M  = _downcast_eltype(W, M)
+    end
+    # For whole-VUMPS mode we pass alg with inner_etype=nothing (FLmap etc.
+    # should run natively on the already-downcasted tensors, no per-call conversion).
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+        alg_wholemode.simple_eig_polish_steps = 0
+    end
+
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration without AD...")
+    ignore_derivatives() do
+        for i in 1:alg.maxiter
+        rt, err = vumps_step(rt, M, alg_wholemode)
+        alg.verbosity >= 3 && i % alg.show_every == 0 &&
+            ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        if err < alg.tol && i >= alg.miniter
+            alg.verbosity >= 2 &&
+                ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            break
+        end
+        if i == alg.maxiter
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        end
+    end
+    end
+
+    ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start Plaquette VUMPS iteration with AD...")
+    alg_ad = deepcopy(alg_wholemode)
+    alg_ad.power_iter = alg.power_iter_ad
+    alg_ad.simple_eig_polish_steps = 0   # fine polish fires only on the LAST AD iter via alg_ad_fine
+    # Mixed-precision polish variants (activate only when mixed-precision mode is on):
+    #  - Coarse: final N AD iters run in ORIGINAL precision (Float64).
+    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0.
+    # If both set, coarse takes precedence.
+    alg_ad_coarse = deepcopy(alg_ad)
+    alg_ad_coarse.inner_etype = nothing
+    alg_ad_fine = deepcopy(alg_ad)
+    alg_ad_fine.simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Is ANY mixed-precision mode active that the polish machinery should react to?
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
+    for i in 1:alg.maxiter_ad
+        alg_this_iter = alg_ad
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active
+            if in_polish
+                alg_this_iter = alg_ad_coarse
+            elseif alg.simple_eig_polish_steps > 0 && i == alg.maxiter_ad
+                alg_this_iter = alg_ad_fine
+            end
+        end
+        # For whole-VUMPS mode: on the FIRST polish iter, cast rt and M back to T_orig.
+        if want_whole && in_polish && eltype(rt.AL.data[1]) != T_orig
+            rt = PlaquetteVUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                                       _downcast_eltype(real(T_orig), rt.C),
+                                       _downcast_eltype(real(T_orig), rt.FL))
+            M = _downcast_eltype(real(T_orig), M)
+        end
+        rt, err = checkpoint(alg.step_checkpoint, vumps_step, rt, M, alg_this_iter)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        if err < alg.tol && i >= alg.miniter_ad
+            alg.verbosity >= 2 && ignore_derivatives(() -> @info @sprintf("PlaqVUMPS conv@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+            break
+        end
+        if i == alg.maxiter_ad
+            alg.verbosity >= 2 && ignore_derivatives(() -> @warn @sprintf("PlaqVUMPS cancel@step: %4d\terr = %.3e\ttime = %.3f sec", i, err, time()-t))
+        end
+    end
+    # Exit guard: if whole-VUMPS mode is active and we never hit polish (e.g.
+    # inner_etype_final_steps==0 or early break before polish started), cast
+    # rt back to original precision so downstream AD flows correctly.
+    if want_whole && eltype(rt.AL.data[1]) != T_orig
+        rt = PlaquetteVUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                                   _downcast_eltype(real(T_orig), rt.C),
+                                   _downcast_eltype(real(T_orig), rt.FL))
+    end
+    return rt, err
+end
+
+function leading_boundary(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette})
+    return vumps_itr(rt, M, alg)
+end
+
+# ── Plaquette observation environment ────────────────────────────────
+"""
+    PlaquetteVUMPSEnv(rt::PlaquetteVUMPSRuntime, M, alg)
+
+Construct a `PlaquetteVUMPSEnv` from a plaquette runtime.
+Computes the observation left environment `FLo` using `ifobs=true`.
+"""
+# Distributed-energy predicate: keep the slice2d obs env BLOCK (don't gather) and run the
+# energy expectation block-distributed. Gated to the one model whose energy_value/imag_error
+# are slice2d-ized (J1J2{Square}); every other Plaquette model still gathers to full and runs
+# serial — so "env is block" ⟺ this predicate, used identically in ObsEnv/energy_value/imag_error.
+# (`isa J1J2{Square}` resolves at runtime; J1J2 is included after this file.) (R1-B1/B2)
+function _dist_energy_plaq_grid(model, alg)
+    g = _effective_grid(alg)
+    return g !== nothing && model isa J1J2{Square} ? g : nothing
+end
+_dist_energy_plaq(model, alg) = _dist_energy_plaq_grid(model, alg) !== nothing
+
+function ObsEnv(rt::PlaquetteVUMPSRuntime, M::StructArray, alg::VUMPS{<:Plaquette}, model=nothing)
+    @unpack AL, C, FL = rt
+    # Slice2D path: FLo block-distributed (leftenv_slice2d ifobs=true, FL on both sides).
+    g = _effective_grid(alg)
+    if g !== nothing
+        _, FLo = leftenv_slice2d(AL, AL, M, FL, g; ifobs=true, alg)
+        env = PlaquetteVUMPSEnv(AL, C, FL, FLo)
+        # Block for the distributed-energy model; gather to full for all other Plaquette models.
+        return _dist_energy_plaq(model, alg) ? env : gather_env(env, g)
+    end
+    _, FLo = leftenv(AL, AL, M, FL; ifobs=true, alg)
+    return PlaquetteVUMPSEnv(AL, C, FL, FLo)
+end
+
+# Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
+# See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
+function imag_error(env::PlaquetteVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AL, C, FLu, FLo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    # Same predicate as ObsEnv: env is block ⟺ J1J2{Square}+grid → slice2d oc_11; else full → serial.
+    grid = _dist_energy_plaq_grid(params.model, params.boundary_alg)
+    AC = grid === nothing ? ALCtoAC(AL, C) : ALCtoAC_slice2d(AL, C, grid)
+    Ni, Nj = size(A)
+    i, j, ir = 1, 1, 2
+    jr = params.model.lattice isa Square ? mod1(j + 1, Nj) : mod1(Nj - j, Nj)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr], iSy; ifparallel, forloop_iter, grid)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FLo[i,jr]; ifparallel, forloop_iter, grid)
+    return abs(My / n)
+end

@@ -1,0 +1,7 @@
+interface:
+  display_name: "TeneT HPC"
+  short_description: "Operate TeneT.jl cluster jobs safely"
+  default_prompt: "Use $tenet-hpc to prepare, monitor, or sync a validated TeneT.jl HPC job."
+
+policy:
+  allow_implicit_invocation: false

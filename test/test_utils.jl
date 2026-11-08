@@ -1,0 +1,385 @@
+@testset "utils" begin
+
+    # ===================== gpu.jl =====================
+    @testset "gpu.jl" begin
+
+        @testset "_arraytype and _mattype dispatch" begin
+            x = rand(3, 3)
+            @test _arraytype(x) === Array
+            @test _mattype(x) === Matrix
+            v = rand(5)
+            @test _arraytype(v) === Array
+        end
+
+        @testset "_arraytype on StructArray" begin
+            S = randSA(ComplexF64, Array, [1;;], NTuple{3,Int}[(2,3,4)])
+            @test _arraytype(S) === Array
+        end
+
+        @testset "device management for Array" begin
+            dev = get_device(Array)
+            @test dev isa String
+            @test occursin("CPU", dev)
+
+            @test device_count(Array) >= 1
+
+            # set_device_id! on Array is a no-op (returns nothing)
+            @test set_device_id!(Array, 1) === nothing
+        end
+
+        @testset "get_device_id" begin
+            x = rand(2, 2)
+            @test get_device_id(x) == 1
+            @test get_device_id(Array) isa Integer
+        end
+
+        @testset "for_gc identity" begin
+            x = rand(3, 3)
+            @test for_gc(x) === x
+            v = rand(ComplexF64, 5)
+            @test for_gc(v) === v
+        end
+
+        @testset "NamedTuple Array conversion" begin
+            nt = (data = [rand(2, 2), rand(3, 3)], tag = "test")
+            @test Array(nt) === nt  # identity for Array
+        end
+
+        @testset "atype_device!" begin
+            x = rand(4, 4)
+            y = atype_device!(Array, x, 1)
+            @test y isa Array
+            @test y == x
+        end
+    end
+
+    # ===================== misc.jl =====================
+    @testset "misc.jl" begin
+
+        @testset "qrpos ($atype)" for atype in ATYPES
+            A = atype(rand(ComplexF64, 6, 4))
+            Q, R = qrpos(A)
+
+            # Reconstruction
+            @test Q * R ≈ A
+
+            # Positive real diagonal of R
+            d = real.(diag(R))
+            @test all(d .> 0)
+            @test all(imag.(diag(R)) .≈ 0)
+
+            # Q is isometric: Q'Q ≈ I
+            @test Q' * Q ≈ I atol=1e-12
+
+            # Types are concrete arrays
+            @test Q isa atype{ComplexF64, 2}
+            @test R isa atype{ComplexF64, 2}
+        end
+
+        @testset "lqpos ($atype)" for atype in ATYPES
+            A = atype(rand(ComplexF64, 4, 6))
+            L, Q = lqpos(A)
+
+            # Reconstruction
+            @test L * Q ≈ A
+
+            # Positive real diagonal of L
+            d = real.(diag(L))
+            @test all(d .> 0)
+            @test all(imag.(diag(L)) .≈ 0)
+
+            # Q is isometric: QQ' ≈ I
+            @test Q * Q' ≈ I atol=1e-12
+
+            # Types
+            @test L isa atype{ComplexF64, 2}
+            @test Q isa atype{ComplexF64, 2}
+        end
+
+        @testset "qr_for_ad ($atype)" for atype in ATYPES
+            A = atype(rand(ComplexF64, 6, 4))
+            Q, R = qr_for_ad(A)
+
+            # Reconstruction
+            @test Q * R ≈ A
+
+            # Q should be a concrete array, not QRCompactWYQ
+            @test Q isa atype{ComplexF64, 2}
+        end
+
+        @testset "rsvd" begin
+            Random.seed!(2024)
+            U0 = qr(randn(ComplexF64, 12, 3)).Q[:, 1:3]
+            V0 = qr(randn(ComplexF64, 8, 3)).Q[:, 1:3]
+            S0 = [8.0, 3.0, 0.5]
+            A = U0 * Diagonal(S0) * V0'
+
+            F = rsvd(A, 3; oversampling=2, niter=1, rng=Random.MersenneTwister(7))
+
+            @test F isa SVD
+
+            U, S, V = F
+
+            @test size(U) == (12, 3)
+            @test size(S) == (3,)
+            @test size(V) == (8, 3)
+            @test U' * U ≈ I atol=1e-10
+            @test V' * V ≈ I atol=1e-10
+            @test U * Diagonal(S) * V' ≈ A atol=1e-10
+            @test S ≈ S0 atol=1e-10
+
+            F_kw = rsvd(A; D_trunc=2, oversampling=1, niter=0, rng=Random.MersenneTwister(9))
+            U_kw, S_kw, V_kw = F_kw
+
+            @test size(U_kw) == (12, 2)
+            @test size(S_kw) == (2,)
+            @test size(V_kw) == (8, 2)
+            @test F_kw.U === U_kw
+            @test F_kw.S === S_kw
+            @test F_kw.V == V_kw
+            @test S_kw ≈ S0[1:2] atol=1e-10
+
+            @test_throws ArgumentError rsvd(A, 0)
+            @test_throws ArgumentError rsvd(A, 4; oversampling=-1)
+            @test_throws ArgumentError rsvd(A, 4; niter=-1)
+        end
+
+        @testset "rsvd linear map" begin
+            Random.seed!(2028)
+            U0 = qr(randn(ComplexF64, 12, 3)).Q[:, 1:3]
+            V0 = qr(randn(ComplexF64, 8, 3)).Q[:, 1:3]
+            S0 = [8.0, 3.0, 0.5]
+            A = U0 * Diagonal(S0) * V0'
+            m, n = size(A)
+            calls_f = Ref(0)
+            calls_fadj = Ref(0)
+            f(X::AbstractMatrix) = (calls_f[] += 1; A * X)
+            fadj(Y::AbstractMatrix) = (calls_fadj[] += 1; A' * Y)
+            fmap(X::AbstractMatrix, flag) = flag === Val(true) ? fadj(X) : f(X)
+            Omega = randn(ComplexF64, n, 5)
+
+            F = rsvd(f, fadj, m, n, 3; oversampling=2, niter=1, Omega=Omega)
+            @test F isa SVD
+            @test size(F.U) == (m, 3)
+            @test size(F.S) == (3,)
+            @test size(F.V) == (n, 3)
+            @test F.S ≈ S0 atol=1e-10
+            @test F.U * Diagonal(F.S) * F.V' ≈ A atol=1e-10
+            @test calls_f[] == 2
+            @test calls_fadj[] == 2
+
+            F_tuple = rsvd((f, fadj), m, n, 3; oversampling=2, niter=0, Omega=Omega)
+            @test F_tuple.S ≈ S0 atol=1e-10
+            @test F_tuple.U * Diagonal(F_tuple.S) * F_tuple.V' ≈ A atol=1e-10
+
+            F_map = rsvd(fmap, m, n, 3; oversampling=2, niter=0, Omega=Omega)
+            @test F_map.S ≈ S0 atol=1e-10
+            @test F_map.U * Diagonal(F_map.S) * F_map.V' ≈ A atol=1e-10
+
+            F_auto = rsvd(f, fadj, m, n, 3; oversampling=3, niter=1, T=ComplexF64, rng=Random.MersenneTwister(11))
+            @test F_auto.S ≈ S0 atol=1e-10
+            @test F_auto.U * Diagonal(F_auto.S) * F_auto.V' ≈ A atol=1e-10
+
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 0)
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 9)
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 3; oversampling=-1)
+            @test_throws ArgumentError rsvd(f, fadj, m, n, 3; niter=-1)
+            @test_throws DimensionMismatch rsvd(f, fadj, m, n, 3; Omega=randn(ComplexF64, n - 1, 5))
+        end
+
+        @testset "svd linear map" begin
+            Random.seed!(2026)
+            A = randn(ComplexF64, 9, 5)
+            f(x) = A * x
+            fadj(y) = A' * y
+            fmap(x, flag) = flag === Val(true) ? fadj(x) : f(x)
+            x0 = randn(ComplexF64, size(A, 1))
+            F_ref = svd(A, 3)
+
+            F = svd(f, fadj, x0, 3; krylovdim=8, maxiter=2, tol=1e-12)
+            @test F isa SVD
+            @test size(F.U) == (9, 3)
+            @test size(F.S) == (3,)
+            @test size(F.V) == (5, 3)
+            @test F.S ≈ F_ref.S atol=1e-10
+            @test A * F.V ≈ F.U * Diagonal(F.S) atol=1e-10
+            @test A' * F.U ≈ F.V * Diagonal(F.S) atol=1e-10
+
+            F_tuple = svd((f, fadj), x0, 3; krylovdim=8, maxiter=2, tol=1e-12)
+            @test F_tuple.S ≈ F.S atol=1e-10
+            @test A * F_tuple.V ≈ F_tuple.U * Diagonal(F_tuple.S) atol=1e-10
+
+            F_map = svd(fmap, x0, 3; krylovdim=8, maxiter=2, tol=1e-12)
+            @test F_map.S ≈ F.S atol=1e-10
+            @test A * F_map.V ≈ F_map.U * Diagonal(F_map.S) atol=1e-10
+
+            F_dim = svd(f, fadj, size(A, 1), 3; T=ComplexF64, krylovdim=8, maxiter=2, tol=1e-12)
+            @test F_dim.S ≈ F_ref.S atol=1e-10
+
+            @test_throws ArgumentError svd(f, fadj, x0, 0)
+            @test_throws ArgumentError svd((f, fadj), x0, 6; krylovdim=8, maxiter=2, tol=1e-12)
+        end
+
+        @testset "svd D_trunc" begin
+            Random.seed!(2025)
+            A = randn(ComplexF64, 9, 5)
+            F = svd(A)
+            F_full = svd(A; full=true)
+            F_trunc = svd(A; D_trunc=3)
+            F_trunc_pos = svd(A, 3)
+            F_trunc_full = svd(A; D_trunc=3, full=true)
+            F_trunc_pos_full = svd(A, 3; full=true)
+
+            @test F_trunc isa SVD
+            @test F_trunc_pos isa SVD
+            @test size(F_full.U) == (9, 9)
+            @test size(F_full.V) == (5, 5)
+            @test size(F_trunc.U) == (9, 3)
+            @test size(F_trunc.S) == (3,)
+            @test size(F_trunc.V) == (5, 3)
+            @test size(F_trunc_pos.U) == (9, 3)
+            @test size(F_trunc_pos.S) == (3,)
+            @test size(F_trunc_pos.V) == (5, 3)
+            @test size(F_trunc_full.U) == (9, 3)
+            @test size(F_trunc_full.V) == (5, 3)
+            @test size(F_trunc_pos_full.U) == (9, 3)
+            @test size(F_trunc_pos_full.V) == (5, 3)
+            @test F_trunc.S ≈ F.S[1:3]
+            @test F_trunc_pos.S ≈ F_trunc.S
+            @test F_trunc_pos.U * Diagonal(F_trunc_pos.S) * F_trunc_pos.V' ≈ F_trunc.U * Diagonal(F_trunc.S) * F_trunc.V'
+            @test F_trunc.U * Diagonal(F_trunc.S) * F_trunc.V' ≈ F.U[:, 1:3] * Diagonal(F.S[1:3]) * F.V[:, 1:3]'
+
+            @test_throws ArgumentError svd(A; D_trunc=0)
+            @test_throws ArgumentError svd(A; D_trunc=6)
+            @test_throws ArgumentError svd(A, 0)
+            @test_throws ArgumentError svd(A, 6)
+        end
+
+        @testset "safesign" begin
+            @test safesign(0.0) == 1.0
+            @test safesign(0.0 + 0.0im) == 1.0 + 0.0im
+            @test safesign(3.0) == 1.0
+            @test safesign(-2.0) == -1.0
+            z = 3.0 + 4.0im
+            @test safesign(z) ≈ z / abs(z)
+        end
+
+        @testset "simple_eig" begin
+            # Build a Hermitian matrix with a known dominant eigenvalue
+            Random.seed!(123)
+            H = rand(ComplexF64, 8, 8)
+            H = H + H'  # Hermitian
+            # Add a large shift to make the leading eigenvalue well-separated
+            H += 10 * I
+
+            v0 = rand(ComplexF64, 8)
+            v0 /= norm(v0)
+            f(v) = H * v
+            vals, vecs = simple_eig(f, v0; power_iter=50)
+
+            # Should return vectors of length 1
+            @test length(vals) == 1
+            @test length(vecs) == 1
+
+            # Compare with LinearAlgebra eigen
+            evals = eigvals(H)
+            dominant_eval = evals[argmax(abs.(evals))]
+            @test abs(vals[1]) ≈ abs(dominant_eval) atol=1e-4
+
+            # Eigenvector should satisfy H*v ≈ lambda*v (up to phase)
+            v1 = vecs[1]
+            @test norm(v1) ≈ 1.0 atol=1e-10
+        end
+
+        @testset "checkpoint (legacy smoke — see test_checkpoint.jl for full API)" begin
+            f(x) = 2 * x .+ 1
+            x = rand(5)
+            @test f(x) == checkpoint(TeneT.Recompute(), f, x)
+
+            # With kwargs
+            g(x; scale=1.0) = scale * x
+            y = rand(3)
+            @test g(y; scale=2.0) == checkpoint(TeneT.Recompute(), g, y; scale=2.0)
+        end
+
+        @testset "takagi_decomposition" begin
+            # Build a complex symmetric matrix M = B * transpose(B)
+            Random.seed!(42)
+            n = 6
+            B = rand(ComplexF64, n, n)
+            M = B * transpose(B)
+            @test norm(M - transpose(M)) < 1e-10  # M is symmetric
+
+            # Full decomposition
+            A = takagi_decomposition(M; D_trunc=n)
+            @test A * transpose(A) ≈ M atol=1e-8
+
+            # Truncated decomposition
+            D_trunc = 3
+            A_trunc = takagi_decomposition(M; D_trunc=D_trunc)
+            @test size(A_trunc) == (n, D_trunc)
+
+            # Non-symmetric matrix should throw
+            M_bad = rand(ComplexF64, 4, 4)
+            @test_throws ArgumentError takagi_decomposition(M_bad; D_trunc=2)
+        end
+
+        @testset "leg type aliases" begin
+            @test rand(2, 3, 4) isa leg3
+            @test rand(2, 3, 4, 5) isa leg4
+            @test rand(2, 3, 4, 5, 6) isa leg5
+            @test rand(2, 3, 4, 5, 6, 7, 8, 9) isa leg8
+
+            # 2D array should NOT match leg3
+            @test !(rand(2, 3) isa leg3)
+        end
+    end
+
+    # ===================== io.jl =====================
+    @testset "io.jl" begin
+
+        @testset "save_rt / load_rt roundtrip" begin
+            mktempdir() do dir
+                # Build a minimal VUMPSRuntime with random StructArrays
+                pattern = [1;;]
+                chi = 4
+                d = 2
+                AL = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(d, chi, chi)])
+                AR = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(d, chi, chi)])
+                C  = randSA(ComplexF64, Array, pattern, NTuple{2,Int}[(chi, chi)])
+                FL = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(chi, d, chi)])
+                FR = randSA(ComplexF64, Array, pattern, NTuple{3,Int}[(chi, d, chi)])
+                rt = VUMPSRuntime(AL, AR, C, FL, FR)
+
+                # Save and load
+                save_rt(dir, rt)
+                rt2 = load_rt(dir, Array, false)
+
+                # Check fields match
+                @test rt2.AL.data[1] ≈ rt.AL.data[1]
+                @test rt2.C.data[1] ≈ rt.C.data[1]
+                @test rt2.AR.data[1] ≈ rt.AR.data[1]
+                @test rt2 isa VUMPSRuntime
+            end
+        end
+
+        @testset "read_last_log" begin
+            mktempdir() do dir
+                D = 4
+                logdir = joinpath(dir, "D$D")
+                mkpath(logdir)
+                logfile = joinpath(logdir, "history.log")
+
+                # Write a mock log with the expected format
+                open(logfile, "w") do io
+                    println(io, "i =     3   t = 100.00 sec    e_χ64 = -0.4 gnorm = 1.0e-03   Eimag = 1.0e-10")
+                    println(io, "i =     6   t = 43039.05 sec    e_χ144 = -0.501858316272094 gnorm = 1.984e-04   Eimag = 1.389e-10")
+                end
+
+                last_i, last_chi = read_last_log(dir, D)
+                @test last_i == 6
+                @test last_chi == 144
+            end
+        end
+    end
+end

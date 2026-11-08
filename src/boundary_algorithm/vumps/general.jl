@@ -1,0 +1,1226 @@
+# VUMPS boundary algorithm implementation
+# Uses struct definitions from boundary/algorithm.jl (VUMPS{M}) and
+# boundary/environment.jl (VUMPSRuntime, VUMPSEnv)
+
+# ─── Reshape helpers ──────────────────────────────────────────────────────────
+
+function _to_tail(t)
+    χ = size(t)[end]
+    return reshape(t, χ, Int(prod(size(t))/χ))
+end
+
+function _to_front(t)
+    χ = size(t, 1)
+    return reshape(t, Int(prod(size(t))/χ), χ)
+end
+
+# ─── Permutation helpers ─────────────────────────────────────────────────────
+
+permute_fronttail(t::leg3) = permutedims(t, (3,2,1))
+permute_fronttail(t::leg4) = permutedims(t, (4,2,3,1))
+permute_fronttail(t::InnerProductVec) = RealVec(permute_fronttail(t.vec))
+permute_fronttail(t::AbstractZero) = t
+
+# ── Offload-friendly simple_eig wrappers ────────────────────────────
+# These accept the big neighbourhood tensors as explicit args so that
+# `checkpoint(Offload(), ...)` can move them to host memory during the backward
+# re-compute on GPU runs.
+#
+# Mixed-precision + polish support: the helpers thread `inner_etype` into
+# the underlying map call, and if `final_polish_steps > 0` they construct
+# an `f_final` that promotes back to full precision for the last N power
+# iterations — mirroring the non-offload `polish_fine` branch in leftenv /
+# rightenv / ACenv below.
+function _simple_eig_FLmap(FLij, ALu_i, ALd_ir, M_i; power_iter, ifparallel, forloop_iter,
+                            inner_checkpoint::CheckpointMethod=Plain(),
+                            inner_etype=nothing, final_polish_steps=0,
+                            segment_checkpoint::CheckpointMethod=Plain())
+    f(x) = checkpoint(inner_checkpoint, FLmap, 1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype)
+    if final_polish_steps > 0
+        f_final(x) = checkpoint(inner_checkpoint, FLmap, 1, x, ALu_i, ALd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
+        return simple_eig(f, FLij; power_iter, segment_checkpoint, f_final, final_polish_steps)
+    else
+        return simple_eig(f, FLij; power_iter, segment_checkpoint)
+    end
+end
+function _simple_eig_FRmap(FRiNj, ARu_i, ARd_ir, M_i, Nj; power_iter, ifparallel, forloop_iter,
+                            inner_checkpoint::CheckpointMethod=Plain(),
+                            inner_etype=nothing, final_polish_steps=0,
+                            segment_checkpoint::CheckpointMethod=Plain())
+    f(x) = checkpoint(inner_checkpoint, FRmap, Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype)
+    if final_polish_steps > 0
+        f_final(x) = checkpoint(inner_checkpoint, FRmap, Nj, x, ARu_i, ARd_ir, M_i; ifparallel, forloop_iter, inner_etype=nothing)
+        return simple_eig(f, FRiNj; power_iter, segment_checkpoint, f_final, final_polish_steps)
+    else
+        return simple_eig(f, FRiNj; power_iter, segment_checkpoint)
+    end
+end
+function _simple_eig_ACmap(AC1j, FL_j, FR_j, M_j; power_iter, ifparallel, forloop_iter,
+                            inner_checkpoint::CheckpointMethod=Plain(),
+                            inner_etype=nothing, final_polish_steps=0,
+                            segment_checkpoint::CheckpointMethod=Plain())
+    f(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype)
+    if final_polish_steps > 0
+        f_final(x) = checkpoint(inner_checkpoint, ACmap, 1, x, FL_j, FR_j, M_j; ifparallel, forloop_iter, inner_etype=nothing)
+        return simple_eig(f, AC1j; power_iter, segment_checkpoint, f_final, final_polish_steps)
+    else
+        return simple_eig(f, AC1j; power_iter, segment_checkpoint)
+    end
+end
+
+# ── Helpers ──────────────────────────────────────────────────────────
+"""
+    λs[1], Fs[1] = selectpos(λs, Fs, N)
+
+Select the max positive one of λs and corresponding Fs.
+"""
+function selectpos(λs, Fs, N)
+    if length(λs) > 1 && norm(abs(λs[1]) - abs(λs[2])) < 1e-12
+        N = max(N, length(λs))
+        p = argmax(real(λs[1:N]))
+        return λs[1:N][p], Fs[1:N][p]
+    else
+        return λs[1], Fs[1]
+    end
+end
+
+"""
+    getL!(A, L; kwargs...)
+
+Compute the gauge transform `L` from the transfer matrix density.
+ρ = L' * L, returns `L` with positive diagonal elements.
+"""
+function getL!(A, L; kwargs...)
+    Ni, Nj = size(A)
+    @inbounds for j = 1:Nj, i = 1:Ni
+        _, ρ = simple_eig(x -> ρmap(x, A[i, :], j), L[i, j]' * L[i, j]; kwargs...)
+        ρ = real(ρ + ρ')
+        ρ ./= tr(ρ)
+        F = svd!(ρ)
+        Lo = Diagonal(sqrt.(F.S)) * F.Vt
+        _, R = qrpos!(Lo)
+        L[i, j] = R
+    end
+    return L
+end
+
+"""
+    getAL(A, L)
+
+Given an MPS tensor `A` and `L`, return a left-canonical MPS tensor `AL`, a gauge transform `R` and
+a scalar factor `λ` such that `λ AR R = L A`.
+"""
+function getAL(A, L)
+    AL = similar(A)
+    Le = similar(L)
+    λ = randSA(Array, AL.pattern)
+    for i in 1:length(A)
+        Q, R = qrpos!(_to_front(L[i] * _to_tail(A[i])))
+        AL[i] = reshape(Q, size(A[i]))
+        λ[i] = norm(R)
+        Le[i] = rmul!(R, 1 / λ[i])
+    end
+    return AL, Le, λ
+end
+
+function getLsped(Le, A, AL; kwargs...)
+    L = similar(Le)
+    for i in 1:length(A)
+        _, Ls1 = simple_eig(X -> Lmap(X, conj(AL[i]), A[i]), Le[i]; power_iter=5, kwargs...)
+        _, R = qrpos!(Ls1[1])
+        L[i] = R
+    end
+    return L
+end
+
+# ── Canonical forms ──────────────────────────────────────────────────
+
+"""
+    left_canonical(A, L=cellones(A); tol=1e-12, maxiter=100, kwargs...)
+
+Given an MPS tensor `A`, return a left-canonical MPS tensor `AL`, a gauge transform `L` and
+a scalar factor `λ` such that `λ AL L = L A`.
+"""
+function left_canonical(A, L=cellones(A); tol=1e-12, maxiter=100, kwargs...)
+    AL, Le, λ = getAL(A, L; kwargs...)
+    numiter = 1
+    while norm(L .- Le) > tol && numiter < maxiter
+        L = getLsped(Le, A, AL; kwargs...)
+        AL, Le, λ = getAL(A, L; kwargs...)
+        numiter += 1
+    end
+    L = Le
+    return AL, L, λ
+end
+
+"""
+    right_canonical(A, L=cellones(A); tol=1e-12, maxiter=100, kwargs...)
+
+Given an MPS tensor `A`, return a gauge transform `R`, a right-canonical MPS tensor `AR`, and
+a scalar factor `λ` such that `λ R AR = A R`.
+"""
+function right_canonical(A, L=cellones(A); tol=1e-12, maxiter=100, kwargs...)
+    Ar = similar(A)
+    Lr = similar(L)
+    @inbounds for i in 1:length(A)
+        Ar[i] = permute_fronttail(A[i])
+        Lr[i] = permutedims(L[i], (2, 1))
+    end
+
+    AL, L, λ = left_canonical(Ar, Lr; tol=tol, maxiter=maxiter, kwargs...)
+    R = similar(L)
+    AR = similar(AL)
+    @inbounds for i in 1:length(AL)
+        R[i] = permutedims(L[i], (2, 1))
+        AR[i] = permute_fronttail(AL[i])
+    end
+    return R, AR, λ
+end
+
+"""
+    LRtoC(L, R)
+
+Compute center matrix `C` from gauge transforms: `Cᵢⱼ = Lᵢⱼ * Rᵢⱼ₊₁`.
+"""
+function LRtoC(L, R)
+    Rijr = circshift(R, (0, -1))
+    C = similar(L)
+    @inbounds for i in 1:length(L)
+        C[i] = L[i] * Rijr[i]
+    end
+    return C
+end
+
+# ── Mixed canonical tensor ──────────────────────────────────────────
+
+function ALCtoAC(AL, C)
+    AC = Zygote.Buffer(AL)
+    @inbounds for i in 1:length(AL)
+        AC[i] = ALCtoAC_map(AL[i], C[i])
+    end
+    return copy(AC)
+end
+
+# ── Int FL FR environments ────────────────────────────────────────
+
+function FLint(AL, M::leg4)
+    χ = size(AL[1], 1)
+    return randSA(M, [(D = size(m, 1); (χ, D, χ)) for m in M.data])
+end
+function FLint(AL, M::leg5)
+    χ = size(AL[1], 1)
+    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
+end
+function FLint(AL, M::leg8)
+    χ = size(AL[1], 1)
+    return randSA(M, [(D = size(m, 1); (χ, D, D, χ)) for m in M.data])
+end
+function FLint(AL, M::StructArray{<:Vector{<:Tuple}})
+    _assert_leg5_pair_struct(M)
+    χ = size(AL[1], 1)
+    return _randSA_for_leg5_pairs(M, [(χ, size(m[1], 1), size(m[2], 1), χ) for m in M.data])
+end
+
+function FRint(AR, M::leg4)
+    χ = size(AR[1], 1)
+    return randSA(M, [(D = size(m, 3); (χ, D, χ)) for m in M.data])
+end
+function FRint(AR, M::leg5)
+    χ = size(AR[1], 1)
+    return randSA(M, [(D = size(m, 3); (χ, D, D, χ)) for m in M.data])
+end
+function FRint(AR, M::leg8)
+    χ = size(AR[1], 1)
+    return randSA(M, [(D = size(m, 5); (χ, D, D, χ)) for m in M.data])
+end
+function FRint(AR, M::StructArray{<:Vector{<:Tuple}})
+    _assert_leg5_pair_struct(M)
+    χ = size(AR[1], 1)
+    return _randSA_for_leg5_pairs(M, [(χ, size(m[1], 3), size(m[2], 3), χ) for m in M.data])
+end
+
+# ── Fixed-point environments ────────────────────────────────────────
+
+function FLmap(J::Int, FLij, ALui, ALdir, Mi; ifparallel, forloop_iter, inner_etype=nothing)
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        FLij = FLmap_parallel(FLij, ALui[jr], ALdir[jr], Mi[jr]; ifparallel, forloop_iter, inner_etype)
+    end
+    return FLij
+end
+
+"""
+    λL, FL = leftenv(ALu, ALd, M, FL=FLint(ALu,M); ifobs=false, alg, model=nothing, kwargs...)
+
+Compute the left environment tensor for MPS `ALu`, `ALd` and MPO `M`, by finding the left fixed point
+of ALu - M - ALd contracted along the physical dimension.
+
+When `ifobs=true`, the down-row partner of row `i` is `ir = Ni + 1 - i` by default.
+Passing a non-`nothing` `model` overrides this with `obs_index(typeof(model), i, Ni)`,
+which lets per-model U-D symmetries (e.g. `J1J2p{Honeycomb{:brickwall_v}}` → `ir = i`)
+replace the default reflection.
+"""
+function leftenv(ALu, ALd, M, FL=FLint(ALu, M); ifobs=false, alg, model=nothing, kwargs...)
+    @unpack inner_etype, forloop_iter, ifparallel,
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+    # Env-level boundary cast: Plaquette/General leftenv makes multiple
+    # `parallel()` calls per invocation (2 simple_eig each calling FLmap's
+    # internal Nj-loop + Nj-1 naked FLmap_parallel inner-loop calls). If we
+    # let each parallel() cast at its own boundary, the per-call cast
+    # overhead accumulates and cancels the F32 kernel savings (measured:
+    # Plaquette 4-GPU leftenv F32=+12ms vs F64, while isolated FLmap_parallel
+    # F32 is -47ms). Cast once at env entry, run all sub-calls on already-cast
+    # tensors (inner_etype_pass=nothing), cast FL' back at exit.
+    T_orig = ALu isa StructArray ? eltype(ALu.data[1]) : eltype(ALu)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        ALu = _downcast_eltype(inner_etype, ALu)
+        ALd = _downcast_eltype(inner_etype, ALd)
+        M   = _downcast_eltype(inner_etype, M)
+        FL  = _downcast_eltype(inner_etype, FL)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
+    λL = Zygote.Buffer(randSA(Array, M.pattern))
+    FL′ = Zygote.Buffer(FL)
+    Ni, Nj = size(M)
+    processed_indices = Set{Int}()
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    _assert_inner_method(inner_checkpoint)
+    # polish_fine (last N power iters in F64) is tricky when tensors are already
+    # cast at env-level; disable within env-level cast mode. Coarse polish via
+    # `inner_etype_final_steps` at the AD-loop level is unaffected.
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
+    for i in 1:Ni
+        ir = if ifobs
+            model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)
+        else
+            mod1(i + 1, Ni)
+        end
+        p = FL.pattern[i, 1]
+        if p ∉ processed_indices
+            f(FLij) = checkpoint(inner_checkpoint, FLmap, 1, FLij, ALu[i, :], ALd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            if ifsimple_eig
+                λLs, FLi1s = checkpoint(eig_checkpoint, _simple_eig_FLmap,
+                                         FL[i, 1], ALu[i, :], ALd[ir, :], M[i, :];
+                                         power_iter, ifparallel, forloop_iter,
+                                         inner_checkpoint,
+                                         inner_etype=inner_etype_pass,
+                                         segment_checkpoint,
+                                         final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+            else
+                λLs, FLi1s, info = eigsolve(f, FL[i, 1], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "leftenv not converged"
+            end
+            λL[i, 1], FL′[i, 1] = selectpos(λLs, FLi1s, Nj)
+
+            push!(processed_indices, p)
+            if length(processed_indices) == length(FL.data)
+                break
+            end
+        end
+        for j in 2:Nj
+            p = FL.pattern[i, j]
+            if p ∉ processed_indices
+                FL′[i, j] = FLmap_parallel(FL′[i, j-1], ALu[i, j-1], ALd[ir, j-1], M[i, j-1]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                λL[i, j] = λL[i, 1]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(FL.data)
+                    break
+                end
+            end
+        end
+    end
+
+    # Upcast FL' back to original precision at env exit. λL is a scalar-per-cell
+    # container (eigenvalues); callers typically discard with `_`, so skip cast.
+    if do_env_cast
+        return copy(λL), _downcast_eltype(real(T_orig), copy(FL′))
+    end
+    return copy(λL), copy(FL′)
+end
+
+function FRmap(J::Int, FRij, ARui, ARdir, Mi; ifparallel, forloop_iter, inner_etype=nothing)
+    Nj = length(ARui)
+    for j in J:-1:(J - Nj + 1)
+        jr = mod1(j, Nj)
+        FRij = FRmap_parallel(FRij, ARui[jr], ARdir[jr], Mi[jr]; ifparallel, forloop_iter, inner_etype)
+    end
+    return FRij
+end
+
+"""
+    λR, FR = rightenv(ARu, ARd, M, FR=FRint(ARu,M); ifobs=false, alg, model=nothing, kwargs...)
+
+Compute the right environment tensor for MPS `ARu`, `ARd` and MPO `M`, by finding the right fixed point
+of AR - M - conj(AR) contracted along the physical dimension.
+
+When `ifobs=true`, the down-row partner of row `i` is `ir = Ni + 1 - i` by default.
+Passing a non-`nothing` `model` overrides this with `obs_index(typeof(model), i, Ni)`,
+which lets per-model U-D symmetries (e.g. `J1J2p{Honeycomb{:brickwall_v}}` → `ir = i`)
+replace the default reflection.
+"""
+function rightenv(ARu, ARd, M, FR=FRint(ARu, M); ifobs=false, alg, model=nothing, kwargs...)
+    @unpack inner_etype, forloop_iter, ifparallel,
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+    # Env-level boundary cast — see leftenv for rationale.
+    T_orig = ARu isa StructArray ? eltype(ARu.data[1]) : eltype(ARu)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        ARu = _downcast_eltype(inner_etype, ARu)
+        ARd = _downcast_eltype(inner_etype, ARd)
+        M   = _downcast_eltype(inner_etype, M)
+        FR  = _downcast_eltype(inner_etype, FR)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
+    Ni, Nj = size(M)
+    λR = Zygote.Buffer(randSA(Array, M.pattern))
+    FR′ = Zygote.Buffer(FR)
+    processed_indices = Set{Int}()
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    _assert_inner_method(inner_checkpoint)
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
+    for i in 1:Ni
+        ir = if ifobs
+            model === nothing ? Ni + 1 - i : obs_index(typeof(model), i, Ni)
+        else
+            mod1(i + 1, Ni)
+        end
+        p = FR.pattern[i, Nj]
+        if p ∉ processed_indices
+            f(FRiNj) = checkpoint(inner_checkpoint, FRmap, Nj, FRiNj, ARu[i, :], ARd[ir, :], M[i, :]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            if ifsimple_eig
+                λRs, FR1s = checkpoint(eig_checkpoint, _simple_eig_FRmap,
+                                        FR[i, Nj], ARu[i, :], ARd[ir, :], M[i, :], Nj;
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+            else
+                λRs, FR1s, info = eigsolve(f, FR[i, Nj], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "rightenv not converged"
+            end
+            λR[i, Nj], FR′[i, Nj] = selectpos(λRs, FR1s, Nj)
+
+            push!(processed_indices, p)
+            if length(processed_indices) == length(FR.data)
+                break
+            end
+        end
+        for j in Nj-1:-1:1
+            p = FR.pattern[i, j]
+            if p ∉ processed_indices
+                FR′[i, j] = FRmap_parallel(FR′[i, j+1], ARu[i, j+1], ARd[ir, j+1], M[i, j+1]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                λR[i, j] = λR[i, Nj]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(FR.data)
+                    break
+                end
+            end
+        end
+    end
+    if do_env_cast
+        return copy(λR), _downcast_eltype(real(T_orig), copy(FR′))
+    end
+    return copy(λR), copy(FR′)
+end
+
+# ── Left/Right C environments (no MPO) ──────────────────────────────
+
+function Lmap(J::Int, Lij, ALui, ALdir)
+    Nj = length(ALui)
+    for j in J:(J + Nj - 1)
+        jr = mod1(j, Nj)
+        Lij = Lmap(Lij, ALui[jr], ALdir[jr])
+    end
+    return Lij
+end
+
+"""
+    leftCenv(ALu, ALd, L=cellones(ALu); kwargs...)
+
+Compute the left environment tensor for MPS `ALu` and `ALd` (no MPO), by finding the left fixed point.
+"""
+function leftCenv(ALu::StructArray,
+                  ALd::StructArray,
+                  L::StructArray=cellones(ALu);
+                  ifobs=false, alg, kwargs...)
+
+    @unpack segment_checkpoint, ifsimple_eig, verbosity = alg
+    Ni, Nj = size(L)
+    λL = Zygote.Buffer(randSA(Array, ALu.pattern))
+    L′ = Zygote.Buffer(L)
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    processed_indices = Set{Int}()
+    for i in 1:Ni
+        ir = ifobs ? mod1(Ni + 2 - i, Ni) : i
+        p = L.pattern[i, 1]
+        if p ∉ processed_indices
+            f(Lij) = Lmap(1, Lij, ALu[i, :], ALd[ir, :])
+            if ifsimple_eig
+                λLs, Li1s = simple_eig(f, L[i, 1]; power_iter, segment_checkpoint)
+            else
+                λLs, Li1s, info = eigsolve(f, L[i, 1], 1, :LM; maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "leftCenv not converged"
+            end
+            λL[i, 1], L′[i, 1] = selectpos(λLs, Li1s, Nj)
+
+            push!(processed_indices, p)
+            if length(processed_indices) == length(L.data)
+                break
+            end
+        end
+        for j in 2:Nj
+            p = L.pattern[i, j]
+            if p ∉ processed_indices
+                Lij = Lmap(L′[i, j-1], ALu[i, j-1], ALd[ir, j-1])
+                L′[i, j] = Lij / norm(Lij)
+                λL[i, j] = λL[i, 1]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(L.data)
+                    break
+                end
+            end
+        end
+    end
+
+    return copy(λL), copy(L′)
+end
+
+function Rmap(J::Int, Rij, ARui, ARdir)
+    Nj = length(ARui)
+    for j in J:-1:(J - Nj + 1)
+        jr = mod1(j, Nj)
+        Rij = Rmap(Rij, ARui[jr], ARdir[jr])
+    end
+    return Rij
+end
+
+"""
+    rightCenv(ARu, ARd, R=cellones(ARu); kwargs...)
+
+Compute the right environment tensor for MPS `ARu` and `ARd` (no MPO), by finding the right fixed point.
+"""
+function rightCenv(ARu::StructArray,
+                   ARd::StructArray,
+                   R::StructArray=cellones(ARu);
+                   ifobs=false, alg, kwargs...)
+
+    @unpack segment_checkpoint, ifsimple_eig, verbosity = alg
+    λR = Zygote.Buffer(randSA(Array, ARu.pattern))
+    R′ = Zygote.Buffer(R)
+    power_iter = ifobs ? alg.power_iter_obs : alg.power_iter
+    processed_indices = Set{Int}()
+    Ni, Nj = size(R)
+    for i in 1:Ni
+        ir = ifobs ? mod1(Ni + 2 - i, Ni) : i
+        p = R.pattern[i, Nj]
+        if p ∉ processed_indices
+            f(RiNj) = Rmap(Ni, RiNj, ARu[i, :], ARd[ir, :])
+            if ifsimple_eig
+                λLs, Li1s = simple_eig(f, R[i, Nj]; power_iter, segment_checkpoint)
+            else
+                λLs, Li1s, info = eigsolve(f, R[i, Nj], 1, :LM; maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= Nj && info.converged == 0 && @warn "rightCenv not converged"
+            end
+            λR[i, Nj], R′[i, Nj] = selectpos(λLs, Li1s, Nj)
+
+            push!(processed_indices, p)
+            if length(processed_indices) == length(R.data)
+                break
+            end
+        end
+        for j in Nj-1:-1:1
+            p = R.pattern[i, j]
+            if p ∉ processed_indices
+                Rij = Rmap(R′[i, j+1], ARu[i, j+1], ARd[ir, j+1])
+                R′[i, j] = Rij / norm(Rij)
+                λR[i, j] = λR[i, Nj]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(R.data)
+                    break
+                end
+            end
+        end
+    end
+
+    return copy(λR), copy(R′)
+end
+
+# ── AC and C environment updates ────────────────────────────────────
+
+function ACmap(I::Int, ACij, FLj, FRj, Mj; ifparallel, forloop_iter, inner_etype=nothing)
+    Ni = length(FLj)
+    for i in I:(I + Ni - 1)
+        ir = mod1(i, Ni)
+        ACij = ACmap_parallel(ACij, FLj[ir], FRj[ir], Mj[ir]; ifparallel, forloop_iter, inner_etype)
+    end
+    return ACij
+end
+
+"""
+    ACenv(AC, FL, M, FR; kwargs...)
+
+Compute the up environment tensor for MPS `FL`, `FR` and MPO `M`, by finding the up fixed point
+of `FL - M - FR` contracted along the physical dimension.
+"""
+function ACenv(AC, FL, M, FR; alg, kwargs...)
+    @unpack inner_etype, power_iter, forloop_iter, ifparallel,
+            segment_checkpoint, inner_checkpoint, eig_checkpoint, ifsimple_eig, verbosity = alg
+    # Env-level boundary cast — see leftenv for rationale.
+    T_orig = AC isa StructArray ? eltype(AC.data[1]) : eltype(AC)
+    do_env_cast = inner_etype !== nothing && inner_etype != real(T_orig)
+    if do_env_cast
+        AC = _downcast_eltype(inner_etype, AC)
+        FL = _downcast_eltype(inner_etype, FL)
+        FR = _downcast_eltype(inner_etype, FR)
+        M  = _downcast_eltype(inner_etype, M)
+    end
+    inner_etype_pass = do_env_cast ? nothing : inner_etype
+
+    Ni, Nj = size(M)
+    λAC = Zygote.Buffer(randSA(Array, M.pattern))
+    AC′ = Zygote.Buffer(AC)
+    processed_indices = Set{Int}()
+    _assert_inner_method(inner_checkpoint)
+    simple_eig_polish_steps = do_env_cast ? 0 : alg.simple_eig_polish_steps
+    polish_fine = inner_etype_pass !== nothing && simple_eig_polish_steps > 0
+    for j in 1:Nj
+        p = AC.pattern[1, j]
+        if p ∉ processed_indices
+            f(AC1j) = checkpoint(inner_checkpoint, ACmap, 1, AC1j, FL[:, j], FR[:, j], M[:, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+            if ifsimple_eig
+                λACs, ACs = checkpoint(eig_checkpoint, _simple_eig_ACmap,
+                                        AC[1, j], FL[:, j], FR[:, j], M[:, j];
+                                        power_iter, ifparallel, forloop_iter,
+                                        inner_checkpoint,
+                                        inner_etype=inner_etype_pass,
+                                        segment_checkpoint,
+                                        final_polish_steps = polish_fine ? simple_eig_polish_steps : 0)
+            else
+                λACs, ACs, info = eigsolve(f, AC[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "ACenv Not converged"
+            end
+            λAC[1, j], AC′[1, j] = selectpos(λACs, ACs, Ni)
+
+            push!(processed_indices, p)
+            if length(processed_indices) == length(AC.data)
+                break
+            end
+        end
+        for i in 2:Ni
+            p = AC.pattern[i, j]
+            if p ∉ processed_indices
+                ACij = ACmap_parallel(AC′[i-1, j], FL[i-1, j], FR[i-1, j], M[i-1, j]; ifparallel, forloop_iter, inner_etype=inner_etype_pass)
+                AC′[i, j] = ACij / norm(ACij)
+                λAC[i, j] = λAC[1, j]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(AC.data)
+                    break
+                end
+            end
+        end
+    end
+    if do_env_cast
+        return copy(λAC), _downcast_eltype(real(T_orig), copy(AC′))
+    end
+    return copy(λAC), copy(AC′)
+end
+
+function Cmap(I, Cij, FLjr, FRj)
+    Ni = length(FLjr)
+    for i in I:(I + Ni - 1)
+        ir = mod1(i, Ni)
+        Cij = Cmap(Cij, FLjr[ir], FRj[ir])
+    end
+    return Cij
+end
+
+"""
+    Cenv(C, FL, FR; kwargs...)
+
+Compute the up environment tensor for MPS `FL` and `FR`, by finding the up fixed point
+of `FL - FR` contracted along the physical dimension.
+"""
+function Cenv(C, FL, FR; alg, kwargs...)
+    # Note: eig_checkpoint is intentionally NOT applied to Cenv — Cmap is much
+    # cheaper than FLmap/ACmap so the forward tape savings are negligible.
+    @unpack power_iter, segment_checkpoint, inner_checkpoint, ifsimple_eig, verbosity = alg
+    Ni, Nj = size(C)
+    λC = Zygote.Buffer(randSA(Array, C.pattern))
+    C′ = Zygote.Buffer(C)
+    processed_indices = Set{Int}()
+    _assert_inner_method(inner_checkpoint)
+    for j in 1:Nj
+        jr = mod1(j + 1, Nj)
+        p = C.pattern[1, j]
+        if p ∉ processed_indices
+            f(C1j) = checkpoint(inner_checkpoint, Cmap, 1, C1j, FL[:, jr], FR[:, j])
+            if ifsimple_eig
+                λCs, Cs = simple_eig(f, C[1, j]; power_iter, segment_checkpoint)
+            else
+                λCs, Cs, info = eigsolve(f, C[1, j], 1, :LM; alg_rrule=GMRES(verbosity=-1), maxiter=100, ishermitian=false, kwargs...)
+                verbosity >= 1 && info.converged == 0 && @warn "Cenv Not converged"
+            end
+            λC[1, j], C′[1, j] = selectpos(λCs, Cs, Ni)
+
+            push!(processed_indices, p)
+            if length(processed_indices) == length(C.data)
+                break
+            end
+        end
+        for i in 2:Ni
+            p = C.pattern[i, j]
+            if p ∉ processed_indices
+                Cij = Cmap(C′[i-1, j], FL[i-1, jr], FR[i-1, j])
+                C′[i, j] = Cij / norm(Cij)
+                λC[i, j] = λC[1, j]
+                push!(processed_indices, p)
+                if length(processed_indices) == length(C.data)
+                    break
+                end
+            end
+        end
+    end
+    return copy(λC), copy(C′)
+end
+
+# ── AC/C to AL/AR conversions ───────────────────────────────────────
+
+function ACCtoAL(AC, C)
+    errL = 0.0
+    AL = Zygote.Buffer(AC)
+    @inbounds for i in 1:length(AC)
+        QAC, RAC = qrpos(_to_front(AC[i]))
+        QC, RC = qrpos(C[i])
+        errL += norm(RAC - RC)
+        AL[i] = reshape(QAC * QC', size(AC[i]))
+    end
+    return copy(AL), errL
+end
+
+function ACCtoAR(AC, C)
+    errR = 0.0
+    AR = Zygote.Buffer(AC)
+    Nj = size(AC, 2)
+    @inbounds for p in 1:length(AC.data)
+        i, j = Tuple(findfirst(==(p), AC.pattern))
+        jr = mod1(j - 1, Nj)
+        LAC, QAC = lqpos(_to_tail(AC[i, j]))
+        LC, QC = lqpos(C[i, jr])
+        errR += norm(LAC - LC)
+        AR[i, j] = reshape(QC' * QAC, size(AC[i, j]))
+    end
+    return copy(AR), errR
+end
+
+"""
+    AL, AR, errL, errR = ACCtoALAR(AC, C)
+
+QR factorization to get `AL` and `AR` from `AC` and `C`.
+"""
+function ACCtoALAR(AC, C)
+    AL, errL = ACCtoAL(AC, C)
+    AR, errR = ACCtoAR(AC, C)
+    return AL, AR, errL, errR
+end
+
+# ── Down environment helpers ────────────────────────────────────────
+
+_down_m(m::leg4) = permutedims(m, (1, 4, 3, 2))
+_down_m(m::leg5) = permutedims(m, (1, 4, 3, 2, 5))
+_down_m(m::leg8) = permutedims(m, (1, 2, 7, 8, 5, 6, 3, 4))
+
+function _down_M(M::StructArray)
+    Ni, Nj = size(M)
+    pattern_d = copy(M.pattern)
+    ChainRulesCore.ignore_derivatives() do
+        @inbounds for i in 1:Ni, j in 1:Nj
+            ir = Ni + 1 - i
+            pattern_d[i, j] = M.pattern[ir, j]
+        end
+    end
+    data_d = [_down_m(data) for data in M.data]
+    Md = StructArray(data_d, pattern_d)
+    return Md
+end
+
+function _down_init_from_up(rtup::VUMPSRuntime, Md::StructArray)
+    @unpack AL, AR, C, FL, FR = rtup
+    ALd = StructArray(AL.data, Md.pattern)
+    ARd = StructArray(AR.data, Md.pattern)
+    Cd = StructArray(C.data, Md.pattern)
+    FLd = StructArray(FL.data, Md.pattern)
+    FRd = StructArray(FR.data, Md.pattern)
+    return VUMPSRuntime(ALd, ARd, Cd, FLd, FRd)
+end
+
+# ── Initialization ──────────────────────────────────────────────────
+
+function cellones(A)
+    χ = size(A[1], 1)
+    return ISA(A, [(χ, χ) for _ in 1:length(A.data)])
+end
+
+function initial_A(M::leg4, χ::Int)
+    return randSA(M, [(D = size(m, 4); (χ, D, χ)) for m in M.data])
+end
+function initial_A(M::leg5, χ::Int)
+    return randSA(M, [(D = size(m, 4); (χ, D, D, χ)) for m in M.data])
+end
+function initial_A(M::leg8, χ::Int)
+    return randSA(M, [(D = size(m, 7); (χ, D, D, χ)) for m in M.data])
+end
+function initial_A(M::StructArray{<:Vector{<:Tuple}}, χ::Int)
+    _assert_leg5_pair_struct(M)
+    return _randSA_for_leg5_pairs(M, [(χ, size(m[1], 4), size(m[2], 4), χ) for m in M.data])
+end
+
+_is_leg5_pair(m) = m isa Tuple && length(m) == 2 && ndims(m[1]) == 5 && ndims(m[2]) == 5
+
+function _assert_leg5_pair_struct(M::StructArray)
+    all(_is_leg5_pair, M.data) ||
+        throw(ArgumentError("mixed VUMPS expects StructArray data entries of Tuple{leg5,leg5}"))
+    return nothing
+end
+
+function _randSA_for_leg5_pairs(M::StructArray, sizes)
+    m1, m2 = M.data[1]
+    T = promote_type(eltype(m1), eltype(m2))
+    atype = _arraytype(m1)
+    return randSA(T, atype, M.pattern, sizes)
+end
+
+"""
+    init_VUMPSRuntime(M, alg; χ)
+
+Create a single VUMPSRuntime: canonical forms + fixed-point environments.
+"""
+function init_VUMPSRuntime(M::StructArray,  χ::Int, alg::VUMPS{General})
+    A = initial_A(M, χ)
+    AL, L, _ = left_canonical(A)
+    R, AR, _ = right_canonical(AL)
+    C = LRtoC(L, R)
+    if alg.ifparallel
+        AL = MPI.bcast(AL, 0, MPI.COMM_WORLD)
+        AR = MPI.bcast(AR, 0, MPI.COMM_WORLD)
+        C = MPI.bcast(C, 0, MPI.COMM_WORLD)
+    end
+    _, FL = leftenv(AL, conj(AL), M; alg)
+    _, FR = rightenv(AR, conj(AR), M; alg)
+    return VUMPSRuntime(AL, AR, C, FL, FR)
+end
+
+"""
+    init_env(M, χ, alg)
+
+Initialize one or two `VUMPSRuntime`s (up and optionally down) from an MPO `M`
+and bond dimension `χ`.
+"""
+function init_env(M::StructArray, χ::Int, alg::VUMPS{General})
+    _apply_parallel_method!(alg)
+    alg.ifparallelupdown && alg.ifparallel && throw(ArgumentError("Parallel up/down only works for two GPUs in one thread. ifparallel = true is supported by MPI-based multi-process parallelism."))
+
+    # M5: Slice2D (2D block-distributed) path — build a BLOCK-distributed runtime so the
+    # grid-routed vumps_step_slice2d receives blocks. Supports ifupdown (up on M + down on
+    # _down_M(M)); leading_boundary(Tuple) then runs each via the slice2d vumps_step guard.
+    g = _effective_grid(alg)
+    if g !== nothing
+        rtup = init_VUMPSRuntime_slice2d(M, χ, g, alg)
+        if alg.ifupdown
+            alg.ifdownfromup && throw(ArgumentError("init_env slice2d: ifdownfromup not yet supported; use ifdownfromup=false."))
+            return rtup, init_VUMPSRuntime_slice2d(_down_M(M), χ, g, alg)
+        end
+        return rtup
+    end
+
+    Ni, Nj = size(M)
+
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            if alg.ifdownfromup
+                set_device_id!(atype, 1)
+                rtup = init_VUMPSRuntime(M, χ, alg)
+                alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
+                set_device_id!(atype, 2)
+                Md = _down_M(atype(M))
+                rtdown = _down_init_from_up(atype(rtup), Md)
+                alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment")
+            else
+                @async begin
+                    set_device_id!(atype, 1)
+                    rtup = init_VUMPSRuntime(M, χ, alg)
+                    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
+                end
+                @async begin
+                    set_device_id!(atype, 2)
+                    Md = _down_M(atype(M))
+                    rtdown = init_VUMPSRuntime(Md, χ, alg)
+                    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init at device $(get_device(atype)): cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment")
+                end
+            end
+        end
+        return rtup, rtdown
+    end
+
+    rtup = init_VUMPSRuntime(M, χ, alg)
+    alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) up(↑) environment")
+
+    if alg.ifupdown
+        Md = _down_M(M)
+        if alg.ifdownfromup
+            rtdown = _down_init_from_up(rtup, Md)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) from up(↑) environment")
+            return rtup, rtdown
+        else
+            rtdown = init_VUMPSRuntime(Md, χ, alg)
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info "VUMPS init: cell=($(Ni)×$(Nj)) χ = $(χ) down(↓) environment")
+            return rtup, rtdown
+        end
+    else
+        return rtup
+    end
+end
+
+# ── VUMPS step functions ────────────────────────────────────────────
+
+"""
+    vumps_step_power(rt, M, alg::VUMPS{General}{General})
+
+One step of the VUMPS algorithm with the standard (General) contraction mode.
+Uses the power-method variant: update environments first, then re-solve AC/C.
+"""
+function vumps_step_power(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    _apply_parallel_method!(alg)
+    @unpack AL, C, AR, FL, FR = rt
+    AC = ALCtoAC(AL, C)
+    _, ACp = ACenv(AC, FL, M, FR; alg)
+    _, Cp = Cenv(C, FL, FR; alg)
+    ALp, ARp, _, _ = ACCtoALAR(ACp, Cp)
+    _, FL = leftenv(AL, conj(ALp), M, FL; alg)
+    _, FR = rightenv(AR, conj(ARp), M, FR; alg)
+    _, ACp = ACenv(ACp, FL, M, FR; alg)
+    _, Cp = Cenv(Cp, FL, FR; alg)
+    ALp, ARp, errL, errR = ACCtoALAR(ACp, Cp)
+    err = errL + errR
+    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    Cp = for_gc(Cp)
+    return VUMPSRuntime(ALp, ARp, Cp, FL, FR), err
+end
+
+function vumps_step(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    # M5: route to the Slice2D (2D block-distributed) step when a grid is set. This
+    # single guard covers BOTH vumps_itr call sites (warm-up + AD loop). Serial body
+    # below is unchanged and runs whenever grid === nothing.
+    g = _effective_grid(alg)
+    g === nothing || return vumps_step_slice2d(rt, M, g, alg)
+    @unpack AL, C, AR, FL, FR = rt
+    sub = alg.subop_checkpoint
+    AC = ALCtoAC(AL, C)
+    _, FL = checkpoint(sub, (a, b, m, fl) -> leftenv(a, b, m, fl; alg), AL, conj(AL), M, FL)
+    _, FR = checkpoint(sub, (a, b, m, fr) -> rightenv(a, b, m, fr; alg), AR, conj(AR), M, FR)
+    _, AC = checkpoint(sub, (ac, fl, m, fr) -> ACenv(ac, fl, m, fr; alg), AC, FL, M, FR)
+    _, C  = Cenv(C, FL, FR; alg)                  # C is chi×chi (~MB), no simple_eig — skip checkpoint
+    AL, AR, errL, errR = checkpoint(sub, ACCtoALAR, AC, C)
+    err = errL + errR
+    alg.verbosity >= 4 && err > 1e-8 && println("errL=$errL, errR=$errR")
+    C = for_gc(C)
+    return VUMPSRuntime(AL, AR, C, FL, FR), err
+end
+
+# ── VUMPS iteration loop ────────────────────────────────────────────
+
+"""
+    vumps_itr(rt, M, alg::VUMPS{General})
+
+Run the VUMPS iteration loop: first without AD tracking (warm-up), then with AD.
+Returns the converged runtime and final error.
+"""
+function vumps_itr(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    t = ChainRulesCore.ignore_derivatives(() -> time())
+
+    atype = _arraytype(M)
+    id = get_device_id(atype)
+    local err
+
+    # Whole-VUMPS precision mode (alternative to `inner_etype`):
+    # pre-cast rt and M to alg.whole_vumps_etype; run whole VUMPS (FLmap, QR,
+    # norm, eigsolve, ...) in that precision; polish iters cast back to original.
+    # Original eltype is taken from the first data array of rt.AL (StructArrays
+    # have eltype = Any, so inspect the underlying data tensor).
+    T_orig = eltype(rt.AL.data[1])
+    want_whole = alg.whole_vumps_etype !== nothing && alg.whole_vumps_etype != real(T_orig)
+    if want_whole
+        W = alg.whole_vumps_etype
+        rt = VUMPSRuntime(_downcast_eltype(W, rt.AL),
+                          _downcast_eltype(W, rt.AR),
+                          _downcast_eltype(W, rt.C),
+                          _downcast_eltype(W, rt.FL),
+                          _downcast_eltype(W, rt.FR))
+        M  = _downcast_eltype(W, M)
+    end
+    # For whole-VUMPS mode we pass alg with inner_etype=nothing (FLmap etc.
+    # should run natively on the already-downcasted tensors, no per-call conversion).
+    alg_wholemode = alg
+    if want_whole
+        alg_wholemode = deepcopy(alg)
+        alg_wholemode.inner_etype = nothing
+        alg_wholemode.simple_eig_polish_steps = 0
+    end
+
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) without AD...")
+    # maxiter = maxiter_ad = 0 (frozen environment, e.g. TM_spectrum on a
+    # loaded env) runs neither loop; err must exist for the final return.
+    err = Inf
+    ChainRulesCore.ignore_derivatives() do
+        for i in 1:alg.maxiter
+        rt, err = vumps_step(rt, M, alg_wholemode)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
+        if err < alg.tol && i >= alg.miniter
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
+            break
+        end
+        if i == alg.maxiter
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
+        end
+    end
+    end
+
+    ChainRulesCore.ignore_derivatives(() -> alg.verbosity >= 2 && @info "Start VUMPS iteration at $(get_device(atype)) with AD...")
+    alg_ad = deepcopy(alg_wholemode)
+    alg_ad.power_iter = alg.power_iter_ad
+    alg_ad.simple_eig_polish_steps = 0   # fine polish fires only on the LAST AD iter via alg_ad_fine
+    # Mixed-precision polish variants (activate only when mixed-precision mode is on):
+    #  - Coarse: final N AD iters run in ORIGINAL precision (Float64).
+    #  - Fine:   only the LAST AD iter sets simple_eig_polish_steps > 0.
+    # If both set, coarse takes precedence.
+    alg_ad_coarse = deepcopy(alg_ad)
+    alg_ad_coarse.inner_etype = nothing
+    alg_ad_fine = deepcopy(alg_ad)
+    alg_ad_fine.simple_eig_polish_steps = alg.simple_eig_polish_steps
+    # Is ANY mixed-precision mode active that the polish machinery should react to?
+    mixed_active = (alg.inner_etype !== nothing) || want_whole
+    for i in 1:alg.maxiter_ad
+        alg_this_iter = alg_ad
+        in_polish = alg.inner_etype_final_steps > 0 &&
+                    i > alg.maxiter_ad - alg.inner_etype_final_steps
+        if mixed_active
+            if in_polish
+                alg_this_iter = alg_ad_coarse
+            elseif alg.simple_eig_polish_steps > 0 && i == alg.maxiter_ad
+                alg_this_iter = alg_ad_fine
+            end
+        end
+        # For whole-VUMPS mode: on the FIRST polish iter, cast rt and M back to T_orig.
+        if want_whole && in_polish && eltype(rt.AL.data[1]) != T_orig
+            rt = VUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                              _downcast_eltype(real(T_orig), rt.AR),
+                              _downcast_eltype(real(T_orig), rt.C),
+                              _downcast_eltype(real(T_orig), rt.FL),
+                              _downcast_eltype(real(T_orig), rt.FR))
+            M = _downcast_eltype(real(T_orig), M)
+        end
+        rt, err = checkpoint(alg.step_checkpoint, vumps_step, rt, M, alg_this_iter)
+        alg.verbosity >= 3 && i % alg.show_every == 0 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
+        if err < alg.tol && i >= alg.miniter_ad
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @info @sprintf("VUMPS conv@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
+            break
+        end
+        if i == alg.maxiter_ad
+            alg.verbosity >= 2 && ChainRulesCore.ignore_derivatives(() -> @warn @sprintf("VUMPS cancel@step device-%d: %4d\terr = %.3e\ttime = %.3f sec", id, i, err, time()-t))
+        end
+    end
+    # Exit guard: if whole-VUMPS mode is active and we never hit polish (e.g.
+    # inner_etype_final_steps==0 or early break before polish started), cast
+    # rt back to original precision so downstream AD flows correctly.
+    if want_whole && eltype(rt.AL.data[1]) != T_orig
+        rt = VUMPSRuntime(_downcast_eltype(real(T_orig), rt.AL),
+                          _downcast_eltype(real(T_orig), rt.AR),
+                          _downcast_eltype(real(T_orig), rt.C),
+                          _downcast_eltype(real(T_orig), rt.FL),
+                          _downcast_eltype(real(T_orig), rt.FR))
+    end
+
+    return rt, err
+end
+
+"""
+    leading_boundary(rt::VUMPSRuntime, M, alg::VUMPS{General})
+
+Run the VUMPS boundary contraction for a single (up) environment.
+Returns the converged runtime and error.
+"""
+function leading_boundary(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General})
+    rt, err = vumps_itr(rt, M, alg)
+    return rt, err
+end
+
+"""
+    leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General})
+
+Run the VUMPS boundary contraction for both up and down environments.
+Returns the converged runtimes and errors.
+"""
+function leading_boundary(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General})
+    rtup, rtdown = rt
+
+    if alg.ifupdown && alg.ifparallelupdown
+        atype = _arraytype(M)
+        @sync begin
+            @async begin
+                set_device_id!(atype, 1)
+                rtup, errup = vumps_itr(rtup, M, alg)
+            end
+            @async begin
+                set_device_id!(atype, 2)
+                Md = _down_M(atype(M))
+                rtdown, errdown = vumps_itr(rtdown, Md, alg)
+            end
+        end
+        return (rtup, rtdown), (errup, errdown)
+    end
+
+    rtup, errup = vumps_itr(rtup, M, alg)
+    Md = _down_M(M)
+    rtdown, errdown = vumps_itr(rtdown, Md, alg)
+    return (rtup, rtdown), (errup, errdown)
+end
+
+# ── Observation environment construction ─────────────────────────────
+
+# Keep the slice2d observation environment block-distributed only for General
+# models whose energy/imag-error contractions also consume a slice2d grid. All
+# other General models still gather to full before serial energy evaluation.
+_supports_dist_energy_general(model) = false
+_supports_dist_energy_general_alg(alg) = false
+_supports_dist_energy_general_alg(alg::VUMPS{General}) = true
+
+function _dist_energy_general_grid(model, alg, g=_effective_grid(alg))
+    return _supports_dist_energy_general_alg(alg) &&
+           g !== nothing &&
+           _supports_dist_energy_general(model) ? g : nothing
+end
+_dist_energy_general(model, alg, g=_effective_grid(alg)) = _dist_energy_general_grid(model, alg, g) !== nothing
+
+"""
+    ObsEnv(rt::VUMPSRuntime, M, alg::VUMPS{General}, model=nothing; Fo=[rt.FL, rt.FR])
+
+Build an observation environment from a single VUMPS runtime (i.e. when
+`alg.ifupdown == false`, so no separate down runtime was converged).
+
+Two return shapes:
+- If `model === nothing` or `uses_oneside_obs_env(typeof(model)) == false`,
+  returns the legacy `VUMPSEnv` filling ACd/ARd with AC/AR (the U-D-symmetric
+  default; the down row partner is implicit `Ni+1-i`).
+- If `uses_oneside_obs_env(typeof(model))`, returns an `OnesideVUMPSEnv` (no
+  ACd/ARd; down row partner determined per-call by `obs_index(typeof(model), i,
+  Ni)`). Used by `optimise_ipeps` / `observable` / `precondition` to opt the
+  J1J2p `:brickwall_v` self-symmetric model into the memory-saving env shape.
+"""
+function ObsEnv(rt::VUMPSRuntime, M::StructArray, alg::VUMPS{General},
+                model=nothing; Fo=[rt.FL, rt.FR])
+    @unpack AL, AR, C, FL, FR = rt
+    # Slice2D path: compute the obs env block-distributed. Keep it block only
+    # when the matching model energy is slice2d-aware; otherwise gather to full.
+    g = _effective_grid(alg)
+    if g !== nothing
+        AC = ALCtoAC_slice2d(AL, C, g)
+        _, FLo = leftenv_slice2d(AL, AL, M, Fo[1], g; ifobs=true, alg, model)
+        _, FRo = rightenv_slice2d(AR, AR, M, Fo[2], g; ifobs=true, alg, model)
+        (model !== nothing && uses_oneside_obs_env(typeof(model))) &&
+            error("ObsEnv slice2d: OnesideVUMPSEnv (oneside obs) not yet distributed; use a non-oneside model.")
+        env = VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+        return _dist_energy_general(model, alg, g) ? env : gather_env(env, g)
+    end
+    AC = ALCtoAC(AL, C)
+    _, FLo =  leftenv(AL, AL, M, Fo[1]; ifobs = true, alg, model)
+    _, FRo = rightenv(AR, AR, M, Fo[2]; ifobs = true, alg, model)
+    if model !== nothing && uses_oneside_obs_env(typeof(model))
+        return OnesideVUMPSEnv(AC, AR, FL, FR, FLo, FRo)
+    else
+        return VUMPSEnv(AC, AR, AC, AR, FL, FR, FLo, FRo)
+    end
+end
+
+"""
+    ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M, alg::VUMPS{General}, model=nothing; Fo=...)
+
+Construct a `VUMPSEnv` observation environment from up and down VUMPS runtimes.
+Computes mixed (observation) left and right environments. ACd/ARd come from the
+converged down runtime, so the `obs_index` trait is not needed; `model` still
+selects whether a slice2D observation environment may remain block-distributed.
+"""
+function ObsEnv(rt::Tuple{VUMPSRuntime, VUMPSRuntime}, M::StructArray, alg::VUMPS{General},
+                model=nothing; Fo=[rt[1].FL, rt[1].FR])
+    # Slice2D path: mixed obs env block-distributed. Keep it block only when
+    # the matching model energy is slice2d-aware; otherwise gather to full.
+    g = _effective_grid(alg)
+    if g !== nothing
+        rtup, rtdown = rt
+        ACu = ALCtoAC_slice2d(rtup.AL, rtup.C, g)
+        ACd = ALCtoAC_slice2d(rtdown.AL, rtdown.C, g)
+        _, FLo = leftenv_slice2d(rtup.AL, rtdown.AL, M, Fo[1], g; ifobs=true, alg)
+        _, FRo = rightenv_slice2d(rtup.AR, rtdown.AR, M, Fo[2], g; ifobs=true, alg)
+        env = VUMPSEnv(ACu, rtup.AR, ACd, rtdown.AR, rtup.FL, rtup.FR, FLo, FRo)
+        return _dist_energy_general(model, alg, g) ? env : gather_env(env, g)
+    end
+    atype = _arraytype(M)
+    set_device_id!(atype, 1)
+    rtup, rtdown = rt
+
+    ALu, ARu, Cu, FLu, FRu = rtup.AL, rtup.AR, rtup.C, rtup.FL, rtup.FR
+    ACu = ALCtoAC(ALu, Cu)
+
+    ALd, ARd, Cd = rtdown.AL, rtdown.AR, rtdown.C
+    ALd, ARd, Cd = map(x->atype_device!(atype, x, 1), [ALd, ARd, Cd]) # transfer device 2 data to 1
+    ACd = ALCtoAC(ALd, Cd)
+
+    _, FLo =  leftenv(ALu, ALd, M, Fo[1]; ifobs = true, alg)
+    _, FRo = rightenv(ARu, ARd, M, Fo[2]; ifobs = true, alg)
+    return VUMPSEnv(ACu, ARu, ACd, ARd, FLu, FRu, FLo, FRo)
+end
+
+# Imaginary-error indicator (|⟨iSy⟩|) for real-valued energies.
+# See docstring on `imag_error` in src/ipeps_optimize/optimize.jl.
+function imag_error(env::VUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack FLo, ACu, ACd, FRo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    grid = _dist_energy_general_grid(params.model, params.boundary_alg)
+    Ni, Nj = size(A)
+    i, j = 1, 1
+    id = Ni + 1 - i
+    My = contract_o_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j], iSy; forloop_iter, ifparallel, grid)
+    n  = contract_n_11(FLo[i,j], ACu[i,j], A[i,j], ACd[id,j], FRo[i,j]; forloop_iter, ifparallel, grid)
+    return abs(My / n)
+end
+
+"""
+    imag_error(env::OnesideVUMPSEnv, A, iSy, params)
+
+|⟨iSy⟩| indicator for real-valued energies under the one-sided env. Uses the
+observation env (FLo, FRo) and the up AC tensor; the "down" partner is
+`AC[ir, j]` where `ir = obs_index(typeof(model), i, Ni)`.
+
+Mirrors `imag_error(env::PlaquetteVUMPSEnv, ...)` but adapted to the L-R-
+asymmetric env: uses both FLo (left observation env) and FRo (right) instead
+of FLo on both sides.
+"""
+function imag_error(env::OnesideVUMPSEnv, A, iSy, params::iPEPSOptimize)
+    @unpack AC, FLo, FRo = env
+    @unpack forloop_iter, ifparallel = params.boundary_alg
+    Ni, Nj = size(A)
+    i, j = 1, 1
+    model = params.model
+    ir = obs_index(typeof(model), i, Ni)
+    My = contract_o_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j], iSy;
+                        ifparallel, forloop_iter)
+    n  = contract_n_11(FLo[i,j], AC[i,j], A[i,j], AC[ir,j], FRo[i,j];
+                        ifparallel, forloop_iter)
+    return abs(My / n)
+end

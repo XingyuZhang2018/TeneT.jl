@@ -1,0 +1,7 @@
+interface:
+  display_name: "TeneT"
+  short_description: "Plan reliable TeneT.jl iPEPS runs"
+  default_prompt: "Use $tenet to design and validate a TeneT.jl iPEPS run."
+
+policy:
+  allow_implicit_invocation: true

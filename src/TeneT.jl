@@ -1,9 +1,162 @@
 module TeneT
 
-include("patch.jl")
-include("environment.jl")
-include("fixedpoint.jl")
-include("vumpsruntime.jl")
-include("autodiff.jl")
+using LinearAlgebra, Random, Printf
+using Parameters
 
-end
+using CUDA
+using AMDGPU
+using cuTENSOR
+
+using TensorOperations
+
+using Zygote, ChainRulesCore, ForwardDiff
+using ChainRulesCore: ignore_derivatives
+using KrylovKit, VectorInterface
+
+using OptimKit, LineSearches
+
+using JLD2, FileIO
+
+using MPI
+
+using CairoMakie
+
+using Base.Threads
+CUDA.allowscalar(false)
+
+# ============================================================================
+# Core types and defaults
+# ============================================================================
+
+include("types.jl")
+include("defaults.jl")
+
+# ============================================================================
+# StructArray (custom unit-cell array with pattern)
+# ============================================================================
+
+include("structarray/base.jl")
+include("structarray/initial.jl")
+include("structarray/buffer.jl")
+
+# ============================================================================
+# Utility functions
+# ============================================================================
+
+include("utils/gpu.jl")
+include("utils/checkpoint.jl")
+include("utils/io.jl")
+include("utils/jld2_slab.jl")
+include("utils/misc.jl")
+
+# ============================================================================
+# Patch for other packages (e.g. Zygote, OptimKit)
+# ============================================================================
+
+include("patch/OptimKit_patch.jl")
+
+# ============================================================================
+# Contraction kernels
+# ============================================================================
+
+include("contraction/basic.jl")
+include("contraction/parallel/collectives.jl")
+include("contraction/parallel/slice1d.jl")
+include("contraction/parallel/slice2d_grid.jl")
+include("contraction/parallel/slice2d_maps.jl")
+include("contraction/parallel/api.jl")
+include("contraction/chain_engine.jl")
+include("contraction/chain_maps.jl")
+include("contraction/observable.jl")
+
+# ============================================================================
+# Boundary algorithms (environment structs, then algorithm implementations)
+# ============================================================================
+
+include("boundary_algorithm/interface.jl")
+include("boundary_algorithm/environment.jl")
+# obs_index trait — referenced by leftenv/rightenv (general.jl); must precede them.
+include("models/oneside_traits.jl")
+include("boundary_algorithm/vumps/general.jl")
+include("boundary_algorithm/vumps/plaquette.jl")
+include("boundary_algorithm/vumps/c4v.jl")
+include("boundary_algorithm/vumps/slice2d/env.jl")          # M4: distributed env (gather hoisting)
+include("boundary_algorithm/vumps/slice2d/seams.jl")
+include("boundary_algorithm/vumps/slice2d/init.jl")
+include("boundary_algorithm/vumps/slice2d/io.jl")
+include("boundary_algorithm/vumps/slice2d/step.jl")
+include("boundary_algorithm/vumps/slice2d/observable.jl")
+include("boundary_algorithm/qrctmrg.jl")
+
+# ============================================================================
+# Hamiltonian models
+# ============================================================================
+
+include("models/basic_op.jl")
+include("models/basic_interactions.jl")
+include("models/TFIsing/energy.jl")
+include("models/2D_Classical/MPO.jl")
+include("models/2D_Classical/obs.jl")
+include("models/3D_Classical/MPO.jl")
+include("models/Heisenberg/energy.jl")
+include("models/Heisenberg/order_init.jl")
+include("models/Kitaev/energy.jl")
+include("models/Kitaev/order_init.jl")
+include("models/J1J2/energy.jl")
+include("models/J1J2/order_init.jl")
+include("models/J1J2p/energy.jl")
+include("models/J1J2p/order_init.jl")
+include("models/J1J2J3/energy.jl")
+include("models/J1J2J3/order_init.jl")
+include("models/FWavePRVB/energy.jl")
+
+# ============================================================================
+# Automatic differentiation rules
+# ============================================================================
+
+include("autodiff/rules.jl")
+include("autodiff/grassmann.jl")
+
+# ============================================================================
+# iPEPS: interface, build, init, restriction, precondition, SU, energy, observable, optimize
+# ============================================================================
+
+include("ipeps_optimize/interface.jl")
+include("ipeps_optimize/build_A.jl")
+include("ipeps_optimize/init.jl")
+include("ipeps_optimize/restriction.jl")
+include("ipeps_optimize/precondition.jl")
+include("ipeps_optimize/su_parameterization.jl")
+include("observable/interface.jl")
+include("observable/magnetization.jl")
+include("observable/correlation_length.jl")
+include("observable/wp_order.jl")
+include("observable/transfer_matrix_spectrum.jl")
+include("visualization/plot_obs.jl")
+include("visualization/plot_tm_spectrum.jl")
+include("ipeps_optimize/optimize.jl")
+include("ipeps_optimize/transfer_pepo.jl")
+include("models/3D_Classical/obs.jl")
+
+# ============================================================================
+# Exports
+# ============================================================================
+
+export VUMPS
+export QRCTMRG
+
+export Square, Honeycomb, Kagome
+export General, C4v, C3v, C3vTwoSite, Plaquette
+
+export CheckpointMethod, Plain, Recompute, OffloadRecompute, Offload
+export ParallelMethod, SerialMethod, Slice1DMethod, Slice2DMethod, slice1D, slice2D
+
+export C4v_restriction, local_min_norm
+
+export init_ipeps, init_ipeps_perturbation, init_ipeps_SU, init_ipeps_from_1x1
+export init_env, leading_boundary
+export GradientOptimize, default_χlist, optimise_ipeps
+export optimise_transfer_pepo, optimize_transfer_pepo
+export observable, TM_spectrum, plot_TM_spectrum
+
+end # module TeneT

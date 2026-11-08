@@ -1,0 +1,75 @@
+┌ Error: You are using CUDA 13.0.0, but CUDA.jl was precompiled for CUDA 13.2.0.
+│ This is unexpected; please file an issue.
+└ @ CUDA C:\Users\xingzhan\.julia\packages\CUDA\Il00B\src\initialization.jl:148
+┌ Warning: HIP library is unavailable, HIP integration will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:202
+┌ Warning: rocBLAS is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocSPARSE is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocSOLVER is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocRAND is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: rocFFT is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+┌ Warning: MIOpen is unavailable, functionality will be disabled.
+└ @ AMDGPU C:\Users\xingzhan\.julia\packages\AMDGPU\Z4UN5\src\AMDGPU.jl:213
+====================================================================================================
+# VUMPS forward + AD bench at D=4, χ=64, ComplexF64
+Hardware: NVIDIA GeForce RTX 4090
+CUDA: 13.0.0  Julia: 1.11.1
+Date: 2026-05-09T10:38:13.580
+State dim N = χ²·D² = 65536
+====================================================================================================
+
+## Phase 1: simple_eig configurations
+
+
+────────────────────────────────────────────────────────────────────────────────
+[A: simple_eig power_iter_ad=5]
+────────────────────────────────────────────────────────────────────────────────
+  forward (leading_boundary): t=1.202s  err=6.71e-03
+  gradient (Zygote): t=2.017s  g=2.101539  finite=true  grad/fwd=1.68x
+
+────────────────────────────────────────────────────────────────────────────────
+[B: simple_eig power_iter_ad=40]
+────────────────────────────────────────────────────────────────────────────────
+  forward (leading_boundary): t=2.503s  err=6.71e-03
+  gradient (Zygote): t=47.909s  g=2.101538  finite=true  grad/fwd=19.14x
+
+## Phase 2: GPUKrylov override
+
+[ Info: Extension didn't auto-load. Trying Base.retry_load_extensions()...
+┌ Warning: GPUKrylov ChainRulesCore extension did NOT load (Julia ext-graph precompile-skip in this TeneT dep env). Forward GPUKrylov override will work, but Zygote.gradient through it will fail with `llvmcall requires the compiler` because the rrule is not registered. Will skip GK gradient and report only GK forward time.
+└ @ Main D:\1 - research\1.26 - iPEPS_opt\TeneT.jl\timing\bench_vumps_chi64_D4_ad.jl:207
+┌ Warning: GPUKrylov: ChainRulesCore extension is not loaded — only the forward override
+│ of `KrylovKit.eigsolve(::CuArray)` was installed; the rrule was NOT.
+│ To enable AD (Zygote/ChainRules) through the pirated `KrylovKit.eigsolve`,
+│ load ChainRulesCore (or Zygote) BEFORE calling `install_krylovkit_override!()`,
+│ or call `install_krylovkit_override!()` again after loading them.
+└ @ GPUKrylov D:\1 - research\1.19 - GPU\GPUKrylov.jl\src\install.jl:103
+[ Info: GPUKrylov: KrylovKit.eigsolve(::CuArray) override installed
+
+────────────────────────────────────────────────────────────────────────────────
+[C: GPUKrylov (ifsimple_eig=false)]
+────────────────────────────────────────────────────────────────────────────────
+  forward (leading_boundary): t=109.034s  err=2.74e-03
+  gradient: SKIPPED (rrule not registered)
+
+====================================================================================================
+# Summary  (D=4, χ=64, ComplexF64, tol=1.0e-10)
+====================================================================================================
+Config                                     Forward (s)  Gradient (s)      grad/fwd
+----------------------------------------------------------------------------------------------------
+A: simple_eig power_iter_ad=5                    1.202         2.017          1.68x
+B: simple_eig power_iter_ad=40                   2.503        47.909         19.14x
+C: GPUKrylov (ifsimple_eig=false)              109.034    (skipped)         --
+
+## Speedup vs simple_eig power_iter_ad=5 baseline
+
+Config                                       Forward x    Gradient x
+----------------------------------------------------------------------
+A: simple_eig power_iter_ad=5                     1.00x          1.00x
+B: simple_eig power_iter_ad=40                    0.48x          0.04x
+C: GPUKrylov (ifsimple_eig=false)                 0.01x         --

@@ -1,0 +1,275 @@
+using Test
+using MPI
+using LinearAlgebra
+using Random
+using Zygote
+using ChainRulesCore: rrule, Tangent, ZeroTangent, @thunk, unthunk
+using TeneT
+using TeneT: slice2d_grid, slice2d_scatter, slice2d_gather, split_ranges,
+             VUMPS, General, StructArray, VUMPSRuntime, Recompute,
+             ALCtoAC, ALCtoAC_slice2d,
+             ACCtoAL, ACCtoAL_tsqr_slice2d,
+             ACCtoAR, ACCtoAR_tslq_slice2d,
+             ACCtoALAR, ACCtoALAR_dist_slice2d,
+             vumps_step, vumps_step_slice2d, checkpoint
+
+MPI.Init()
+const comm = MPI.COMM_WORLD
+const rank = MPI.Comm_rank(comm)
+@assert MPI.Comm_size(comm) == 4 "test_slice2d_general_dist_qr_lq.jl expects exactly 4 ranks"
+say(s) = (rank == 0 && (println(s); flush(stdout)))
+
+scatter_sa(SA, g) = StructArray([slice2d_scatter(t, g) for t in SA.data], SA.pattern)
+gather_sa(SA, g) = StructArray([slice2d_gather(t, g) for t in SA.data], SA.pattern)
+scatter_rt(rt, g) = VUMPSRuntime(scatter_sa(rt.AL, g), scatter_sa(rt.AR, g), rt.C,
+                                 scatter_sa(rt.FL, g), scatter_sa(rt.FR, g))
+ph_relerr(a, b) = (c = dot(b, a) / dot(b, b); norm(a .- b .* c) / max(norm(b), eps()))
+
+function build_inputs(χ, D, pat; seed)
+    Random.seed!(seed)
+    nu = length(unique(pat))
+    AC = StructArray([rand(ComplexF64, χ, D, D, χ) for _ in 1:nu], pat)
+    AL = StructArray([rand(ComplexF64, χ, D, D, χ) for _ in 1:nu], pat)
+    C = StructArray([Matrix(qr(rand(ComplexF64, χ, χ)).Q) for _ in 1:nu], pat)
+    return AL, AC, C
+end
+
+function block_of(t, g)
+    a_rs = split_ranges(size(t, 1), g.N1)
+    l_rs = split_ranges(size(t, ndims(t)), g.N2)
+    inds = ntuple(i -> i == 1 ? a_rs[g.r1 + 1] :
+                       (i == ndims(t) ? l_rs[g.r2 + 1] : Colon()), ndims(t))
+    return t[inds...]
+end
+
+function assert_block_grad(label, got, ref, g; rtol=1e-7, atol=1e-10)
+    @test length(got.data) == length(ref.data)
+    for k in eachindex(ref.data)
+        rb = block_of(ref.data[k], g)
+        err = norm(got.data[k] - rb) / max(norm(rb), atol)
+        rank == 0 && println("  $label block $k relerr = $err")
+        @test isapprox(got.data[k], rb; rtol, atol)
+    end
+end
+
+function general_vumps_step_body()
+    slice2d_src = read(joinpath(@__DIR__, "..", "src", "boundary_algorithm", "vumps", "slice2d", "step.jl"), String)
+    sig = "function vumps_step_slice2d(rt::VUMPSRuntime, M::StructArray, grid::Slice2DGrid, alg::VUMPS{General})"
+    start = findfirst(sig, slice2d_src)
+    @test start !== nothing
+    tail = slice2d_src[last(start):end]
+    marker = "function vumps_step_slice2d(rt::PlaquetteVUMPSRuntime"
+    stop = findfirst(marker, tail)
+    @test stop !== nothing
+    return tail[1:first(stop)-1]
+end
+
+const PATS = (reshape(collect(1:4), 2, 2), [1 2; 2 1])
+
+@testset "General distributed ALCtoAC forward and gradient parity" begin
+    g = slice2d_grid(2, 2)
+    χ, D = 10, 2
+    for (ci, pat) in enumerate(PATS)
+        AL, _, C = build_inputs(χ, D, pat; seed=1100 + ci)
+        ALb = scatter_sa(AL, g)
+        ACs = ALCtoAC(AL, C)
+        ACc = ALCtoAC_slice2d(ALb, C, g)
+        ACcf = gather_sa(ACc, g)
+        @test maximum(norm(ACcf.data[k] - ACs.data[k]) for k in eachindex(ACs.data)) <= 1e-10
+
+        Random.seed!(1150 + ci)
+        W = [rand(ComplexF64, χ, D, D, χ) for _ in 1:length(ACs.data)]
+        Wb = [slice2d_scatter(w, g) for w in W]
+        loss_ref(al, c) = real(sum(sum(conj(W[k]) .* ALCtoAC(al, c).data[k]) for k in eachindex(W)))
+        loss_can(al, c) = real(sum(sum(conj(Wb[k]) .* ALCtoAC_slice2d(al, c, g).data[k]) for k in eachindex(Wb)))
+        gr = Zygote.gradient(loss_ref, AL, C)
+        gc = Zygote.gradient(loss_can, ALb, C)
+        assert_block_grad("ALCtoAC dAL", gc[1], gr[1], g)
+        for k in eachindex(C.data)
+            @test isapprox(gc[2].data[k], gr[2].data[k]; rtol=1e-7, atol=1e-10)
+        end
+    end
+end
+
+@testset "ALCtoAC slice2d pullback densifies per-cell cotangents collectively" begin
+    g = slice2d_grid(2, 2)
+    χ, D = 6, 2
+    pat = reshape(collect(1:4), 2, 2)
+    AL, _, C = build_inputs(χ, D, pat; seed=1175)
+    ALb = scatter_sa(AL, g)
+    AC, back = rrule(ALCtoAC_slice2d, ALb, C, g)
+
+    dense = zeros(ComplexF64, size(AC.data[2]))
+    dense .= complex(rank + 1, 0)
+    cot = Tangent{Any}(;
+        data=Any[ZeroTangent(), @thunk(view(dense, :, :, :, :)), ZeroTangent(), ZeroTangent()],
+        pattern=ZeroTangent(),
+    )
+    dAL, dC = back(cot)[2:3]
+
+    @test dAL.data[1] == zero(ALb.data[1])
+    @test dC.data[1] == zero(C.data[1])
+    @test size(dAL.data[2]) == size(ALb.data[2])
+    @test size(dC.data[2]) == size(C.data[2])
+end
+
+@testset "row first-dimension gather primitive parity" begin
+    g = slice2d_grid(2, 2)
+    local_rows = g.r2 == 0 ? 3 : 2
+    rs = split_ranges(5, g.N2)
+    blk = Matrix{ComplexF64}(undef, local_rows, 4)
+    for i in 1:local_rows, j in 1:4
+        row = first(rs[g.r2 + 1]) + i - 1
+        blk[i, j] = complex(100 * g.r1 + 10 * g.r2 + row, j)
+    end
+    full = TeneT.slice2d_gather_first_row(blk, g, rs)
+    expected_full = Matrix{ComplexF64}(undef, 5, 4)
+    for j in 0:g.N2-1, row in rs[j + 1], col in 1:4
+        expected_full[row, col] = complex(100 * g.r1 + 10 * j + row, col)
+    end
+    @test size(full) == size(expected_full)
+    @test full == expected_full
+
+    Random.seed!(1001 + rank)
+    W = rand(ComplexF64, 5, 4)
+    loss(x) = real(sum(conj(W) .* TeneT.slice2d_gather_first_row(x, g, rs)))
+    gb = Zygote.gradient(loss, blk)[1]
+    expected = nothing
+    for j in 0:g.N2-1
+        contrib = copy(W[rs[j + 1], :])
+        MPI.Allreduce!(contrib, +, g.row_comm)
+        if j == g.r2
+            expected = contrib
+        end
+    end
+    @test isapprox(gb, expected; rtol=1e-12, atol=1e-12)
+
+    _, back = rrule(TeneT.slice2d_gather_first_row, blk, g, rs)
+    @test back(ZeroTangent())[2] == zero(blk)
+end
+
+@testset "lqpos_colrep pullback tangent edge cases" begin
+    g = slice2d_grid(2, 2)
+    Random.seed!(1288 + rank)
+    Ck = Matrix(qr(rand(ComplexF64, 6, 6)).Q)
+    (L, Q), back = rrule(TeneT.lqpos_colrep, Ck, g)
+    dz = unthunk(back((ZeroTangent(), ZeroTangent()))[2])
+    @test dz == zero(Ck)
+
+    dQ_dense = zeros(ComplexF64, size(Q))
+    dQ_dense .= complex(rank + 1, 0)
+    dC = unthunk(back((ZeroTangent(), @thunk(view(dQ_dense, :, :))))[2])
+    @test size(L) == size(Ck)
+    @test size(dC) == size(Ck)
+end
+
+@testset "General distributed right LQ gradient parity" begin
+    g = slice2d_grid(2, 2)
+    χ, D = 10, 2
+    for (ci, pat) in enumerate(PATS)
+        _, AC, C = build_inputs(χ, D, pat; seed=1250 + ci)
+        ACb = scatter_sa(AC, g)
+        Random.seed!(1275 + ci)
+        WAR = [rand(ComplexF64, χ, D, D, χ) for _ in 1:length(AC.data)]
+        WARb = [slice2d_scatter(w, g) for w in WAR]
+
+        loss_ref(ac, c) = let (ar, _) = ACCtoAR(ac, c)
+            real(sum(sum(conj(WAR[k]) .* ar.data[k]) for k in eachindex(WAR)))
+        end
+        loss_can(ac, c) = let (ar, _) = ACCtoAR_tslq_slice2d(ac, c, g)
+            real(sum(sum(conj(WARb[k]) .* ar.data[k]) for k in eachindex(WARb)))
+        end
+        gr = Zygote.gradient(loss_ref, AC, C)
+        gc = Zygote.gradient(loss_can, ACb, C)
+        assert_block_grad("ACCtoAR dAC", gc[1], gr[1], g)
+        for k in eachindex(C.data)
+            @test isapprox(gc[2].data[k], gr[2].data[k]; rtol=1e-7, atol=1e-10)
+        end
+    end
+end
+
+@testset "General distributed QR/LQ forward parity" begin
+    g = slice2d_grid(2, 2)
+    χ, D = 12, 2
+    for (ci, pat) in enumerate(PATS)
+        _, AC, C = build_inputs(χ, D, pat; seed=1200 + ci)
+        ACb = scatter_sa(AC, g)
+
+        ALs, errLs = ACCtoAL(AC, C)
+        ALc, errLc = ACCtoAL_tsqr_slice2d(ACb, C, g)
+        ALcf = gather_sa(ALc, g)
+        @test maximum(norm(ALcf.data[k] - ALs.data[k]) / max(norm(ALs.data[k]), 1e-12) for k in eachindex(ALs.data)) <= 1e-10
+        @test abs(errLc - errLs) <= 1e-10
+
+        ARs, errRs = ACCtoAR(AC, C)
+        ARc, errRc = ACCtoAR_tslq_slice2d(ACb, C, g)
+        ARcf = gather_sa(ARc, g)
+        @test maximum(norm(ARcf.data[k] - ARs.data[k]) / max(norm(ARs.data[k]), 1e-12) for k in eachindex(ARs.data)) <= 1e-10
+        @test abs(errRc - errRs) <= 1e-10
+
+        AL2, AR2, eL2, eR2 = ACCtoALAR_dist_slice2d(ACb, C, g)
+        AL2f = gather_sa(AL2, g)
+        AR2f = gather_sa(AR2, g)
+        @test maximum(norm(AL2f.data[k] - ALcf.data[k]) / max(norm(ALcf.data[k]), 1e-12) for k in eachindex(ALcf.data)) <= 1e-10
+        @test maximum(norm(AR2f.data[k] - ARcf.data[k]) / max(norm(ARcf.data[k]), 1e-12) for k in eachindex(ARcf.data)) <= 1e-10
+        @test isapprox(eL2, errLc; rtol=1e-10, atol=1e-10)
+        @test isapprox(eR2, errRc; rtol=1e-10, atol=1e-10)
+    end
+end
+
+@testset "General distributed QR/LQ gradient parity" begin
+    g = slice2d_grid(2, 2)
+    χ, D = 10, 2
+    for (ci, pat) in enumerate(PATS)
+        _, AC, C = build_inputs(χ, D, pat; seed=1300 + ci)
+        ACb = scatter_sa(AC, g)
+        Random.seed!(1350 + ci)
+        WAL = [rand(ComplexF64, χ, D, D, χ) for _ in 1:length(AC.data)]
+        WAR = [rand(ComplexF64, χ, D, D, χ) for _ in 1:length(AC.data)]
+        WALb = [slice2d_scatter(w, g) for w in WAL]
+        WARb = [slice2d_scatter(w, g) for w in WAR]
+
+        loss_ref(ac, c) = let (al, ar, _, _) = ACCtoALAR(ac, c)
+            real(sum(sum(conj(WAL[k]) .* al.data[k]) + sum(conj(WAR[k]) .* ar.data[k]) for k in eachindex(WAL)))
+        end
+        loss_can(ac, c) = let (al, ar, _, _) = ACCtoALAR_dist_slice2d(ac, c, g)
+            real(sum(sum(conj(WALb[k]) .* al.data[k]) + sum(conj(WARb[k]) .* ar.data[k]) for k in eachindex(WALb)))
+        end
+        gr = Zygote.gradient(loss_ref, AC, C)
+        gc = Zygote.gradient(loss_can, ACb, C)
+        assert_block_grad("ACCtoALAR dAC", gc[1], gr[1], g)
+        for k in eachindex(C.data)
+            @test isapprox(gc[2].data[k], gr[2].data[k]; rtol=1e-7, atol=1e-10)
+        end
+
+        loss_recompute(ac, c) = let (al, ar, _, _) = checkpoint(Recompute(), ACCtoALAR_dist_slice2d, ac, c, g)
+            real(sum(sum(conj(WALb[k]) .* al.data[k]) + sum(conj(WARb[k]) .* ar.data[k]) for k in eachindex(WALb)))
+        end
+        gcr = Zygote.gradient(loss_recompute, ACb, C)
+        assert_block_grad("ACCtoALAR recompute dAC", gcr[1], gr[1], g)
+    end
+end
+
+@testset "General vumps_step_slice2d uses distributed seams" begin
+    step_body = general_vumps_step_body()
+    @test occursin("ACCtoALAR_dist_slice2d", step_body)
+    @test !occursin("ACCtoALAR_slice2d(ac, c, grid)", step_body)
+    g = slice2d_grid(2, 2)
+    χ, D = 8, 2
+    pat = reshape(collect(1:4), 2, 2)
+    Random.seed!(1400)
+    nu = length(unique(pat))
+    sa(dims) = StructArray([rand(ComplexF64, dims...) for _ in 1:nu], pat)
+    rt = VUMPSRuntime(sa((χ, D, D, χ)), sa((χ, D, D, χ)), sa((χ, χ)), sa((χ, D, D, χ)), sa((χ, D, D, χ)))
+    M = StructArray([rand(ComplexF64, D, D, D, D, 2) for _ in 1:nu], pat)
+    alg_s = VUMPS(General(); ifsimple_eig=true, ifupdown=false, power_iter=2, forloop_iter=1, maxiter=1, maxiter_ad=1, verbosity=0)
+    alg_c = VUMPS(General(); ifsimple_eig=true, ifupdown=false, power_iter=2, forloop_iter=1, maxiter=1, maxiter_ad=1, verbosity=0, grid=g)
+    rtb = scatter_rt(rt, g)
+    rt_s, err_s = vumps_step(rt, M, alg_s)
+    rt_c, err_c = vumps_step_slice2d(rtb, M, g, alg_c)
+    @test abs(err_c - err_s) <= 1e-8
+    @test maximum(ph_relerr(gather_sa(rt_c.FL, g).data[k], rt_s.FL.data[k]) for k in eachindex(rt_s.FL.data)) <= 1e-8
+    @test maximum(ph_relerr(gather_sa(rt_c.FR, g).data[k], rt_s.FR.data[k]) for k in eachindex(rt_s.FR.data)) <= 1e-8
+end
+
+say("all General distributed QR/LQ gates done.")
