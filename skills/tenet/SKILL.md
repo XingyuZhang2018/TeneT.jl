@@ -1,25 +1,23 @@
 ---
 name: tenet
-description: "Use for TeneT iPEPS optimization and run design across TeneT.c and TeneT.jl: default TeneT.c production runs, TeneT.jl reference/parity checks, fresh iPEPS runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, default-parameter changes, precondition smoke tests, and interpreting recent TeneT HPC run artifacts. Trigger on TeneT.c, TeneT.jl, TeneT, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT default parameters, TeneT D-upgrade, TeneT chi continuation, TeneT Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside TeneT examples."
+description: "Use for TeneT.jl iPEPS optimization and run design: fresh runs, D or chi growth, GPU/CPU choice, VUMPS/QRCTMRG contraction mode, environment and LBFGS save/load policy, checkpoint/forloop_iter memory tuning, Slice1D/Slice2D parallel method selection, observable-only and TM_spectrum runs, default-parameter changes, precondition smoke tests, and interpreting TeneT.jl run artifacts. Trigger on TeneT.jl, using TeneT, optimise_ipeps, GradientOptimize, init_ipeps_SU, TM_spectrum, transfer-matrix spectrum, TeneT.jl default parameters, TeneT.jl D-upgrade, TeneT.jl chi continuation, TeneT.jl Slice2D/Slice1D, or Kagome/Honeycomb/Plaquette/C4v/Oneside Julia examples."
 ---
 
-# TeneT iPEPS Run Design
+# TeneT.jl iPEPS Run Design
 
-Use this skill before designing, modifying, or reviewing TeneT iPEPS optimization runs.
+Use this skill before designing, modifying, or reviewing TeneT.jl iPEPS optimization runs.
 This skill decides physics and runtime parameters. It does not submit Slurm jobs.
-Default production run design uses `TeneT.c`; use `TeneT.jl` as the reference
-implementation for parity checks, unsupported-feature fallbacks, and diagnosis.
+Use TeneT.jl directly for production, local validation, and diagnosis. Do not
+require a cross-library parity check or switch backends automatically.
 For cluster submission, monitoring, syncing, archiving, or cancellation, follow
 AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
-`tenet-hpc` only when the user explicitly invokes or enables that optional skill.
+`tenet-hpc` when explicitly invoked/enabled or selected by the global `$hpc`
+workflow as its TeneT.jl supplement.
 
 ## First Checks
 
-1. Read the closest example under `examples/` before inventing a model, pattern,
-   contraction mode, or `restriction_ipeps`.
-   Prefer the app-backed mirror in sibling checkout
-   `D:\1 - research\1.26 - iPEPS_opt\TeneT.c\examples`; use the TeneT.jl
-   example as the reference oracle.
+1. Read the closest TeneT.jl example under `examples/` before inventing a model,
+   pattern, contraction mode, or `restriction_ipeps`.
 2. Inspect recent `hpc/rendered/*/entry.*`, command scripts, and
    `SUBMISSION.md` files when the request resembles a previous run.
 3. Classify the run as fresh optimization, chi continuation, D upgrade,
@@ -33,15 +31,12 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
 
 ## Core Defaults
 
-- Use `TeneT.c` as the default implementation for new production runs and HPC
-  submissions. Use `TeneT.jl` by default only for the local reference parity
-  run, for diagnosing mismatches, or after the user confirms a fallback because
-  the needed TeneT.c capability is not ported.
-- Before any TeneT HPC submission, run a local D=2, chi=16 parity check between
-  TeneT.c and TeneT.jl for the same model, lattice/pattern, contraction family,
-  seed or exported fixture, and relevant observable/optimization path. Do not
-  submit the HPC job until the two libraries agree within the task's numerical
-  tolerance and the commands, logs, and compared values are recorded.
+- Use TeneT.jl as the implementation for this skill's local and production
+  workflows. Do not require a cross-library parity run.
+- Before any TeneT.jl HPC submission, run a local `D=2`, `chi=16` TeneT.jl smoke
+  for the same model, lattice/pattern, contraction family, scalar type, and
+  relevant observable or optimization path. Require finite output and expected
+  persistence behavior; archive the command and result with the job.
 - Use GPU for production runs with `D >= 5`. CPU is for tiny smoke tests only.
 - Keep `ifsimple_eig=true` for real iPEPS optimization. Set it false only when
   the task explicitly studies eigensolver or algorithm behavior.
@@ -55,9 +50,70 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
   examples, or run templates, pause before committing and ask the user to
   confirm the default change. Do not decide and commit a default-parameter
   change based only on subjective judgment.
-- If TeneT.c lacks the requested model, lattice, complex arithmetic, TM sector,
-  or checkpoint/parallel capability, state the missing capability and ask before
-  falling back to a TeneT.jl production run.
+- If TeneT.jl lacks the requested model, lattice, scalar type, TM sector, or
+  checkpoint/parallel capability, state the gap and ask the user to choose a
+  supported path. Do not switch libraries automatically.
+
+## VUMPS Iteration Limit (User Requirement, 2026-10-21)
+
+- Set the internal forward/untaped VUMPS limit to **at most 50 boundary
+  iterations** (`boundary_alg.maxiter`, or the selected entry's equivalent).
+  Use a larger value only when the user explicitly specifies or approves it
+  for that run or solve. Never raise it automatically to obtain convergence.
+- Apply this limit to optimization FG evaluations, environment preparation,
+  observables, diagnostics and refinement. Count forward updates for the same
+  physical tensor, target chi and boundary side cumulatively across segments,
+  retries and restarts; splitting a solve does not authorize another 50 steps.
+  Preserve existing work counts and exact state/environment provenance.
+- If the 50-step allowance is exhausted without passing the required gate,
+  save the partial environment and report its residual/trend. Stop and obtain
+  explicit authorization before extending that solve. Historical 200/500-step
+  recipes, templates, larger source defaults and automation prompts are not
+  authorization to exceed this limit.
+- The forward limit is distinct from LBFGS iterations, line-search `maxfg`,
+  taped AD depth (`maxiter_ad`/`miniter_ad`, e.g. AD4), and inner Power counts
+  (`power_iter`, `power_iter_ad`, `power_iter_obs`). Do not set those knobs to
+  50 or change them to evade this cap. Retain their separate accounting and
+  any applicable total-work budget.
+
+## Mandatory Pre-Optimization Environment Gate
+
+The following is the default policy. An explicit user instruction about gate
+placement or trial acceptance governs that run. If the user specifies a
+final-observable-only boundary gate, do not impose this pre-optimization gate
+or reject intermediate line-search trials solely for failing it; keep recording
+residuals and enforce the requested gate on final observables. Scope this
+exception to the named task, not other projects.
+
+Otherwise apply this gate before every fresh optimization, D/chi-grown
+optimization, or resumed optimization segment:
+
+1. Check for a durable environment at the exact optimization state and target
+   chi. Require matching model, tensor/checkpoint, lattice/pattern,
+   restriction, scalar type, contraction family, orientation, D, chi, and
+   parallel layout, plus a recorded final VUMPS error.
+2. Treat `err <= 1e-6` as the default pass condition. If the error is only near
+   that scale but remains above it, report the exact value and recent trend;
+   do not silently release optimization without explicit user acceptance.
+3. When no passing environment exists, run a separate environment-only stage
+   with at most 50 forward boundary VUMPS iterations, reduced by earlier work
+   on the same solve. Disable optimizer iterations and LBFGS, set the selected
+   boundary/observable VUMPS `maxiter` explicitly, and save the environment.
+   Use the established env-only wrapper for that run family; `maxiter_ad=0`
+   alone is not a universal optimizer-disable switch.
+4. Preserve a partial environment. Resume an interrupted or shorter segment
+   only within the remaining 50-step allowance, with `ifload_env=true` and
+   `ifsave_env=true`; never reset its counts. Once that allowance is exhausted,
+   stop rather than automatically launching another segment. A larger solve
+   requires the user's explicit specification or approval.
+5. Start optimization only from the passed environment with `ifload_env=true`.
+   Require an explicit environment-load success marker and re-check the loaded
+   metadata. A missing or failed load blocks LBFGS; the optimizer's own boundary
+   iterations do not replace this precondition.
+
+For D growth, apply the gate after SU has produced the new-D tensor. For chi
+growth, converge and save the target-chi environment before optimizing at that
+chi.
 
 ## Environment And LBFGS Policy
 
@@ -81,8 +137,9 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
   or an immediate pathological step. Record the evidence and preserve the old
   checkpoint before starting fresh.
 - Decide environment and optimizer history independently. A missing, stale, or
-  suspect environment can justify `ifload_env=false` without discarding an
-  otherwise compatible LBFGS history.
+  suspect environment can justify `ifload_env=false` during an environment-only
+  rebuild without discarding an otherwise compatible LBFGS history; it never
+  justifies starting optimization without first passing the environment gate.
 - Prefer `ifload_env=true` when an environment exists and is trustworthy:
   model, pattern, D, chi, contraction mode, parallel method, and lattice
   orientation must match, with no evidence that the saved environment was
@@ -92,8 +149,23 @@ AGENTS.md and use the user-global `$hpc` skill by default. Use repo-local
   production allocation.
 - Turn `ifload_env=false` only when the environment is missing, stale,
   incompatible, from a suspect trend, or intentionally being rebuilt.
-- Set `ifsave_env=true` when the environment file is practically small enough.
-  Use `<10GB` as the default threshold. Avoid saving very large env files.
+- Set `ifsave_env=true` for the mandatory pre-optimization environment. If its
+  estimated file size exceeds 10GB, pause and confirm the storage/persistence
+  plan with the user instead of bypassing the loadable-environment gate. For
+  optional non-gate environments, use `<10GB` as the default save threshold.
+
+## Live Monitor Layout
+
+When creating or adapting a TeneT monitor, use the shared
+[HPC monitor layout](C:/Users/xingzhan/.codex/skills/hpc/reference/dashboard-layout.md).
+Put complete parameters in the first collapsed block; keep current work
+prominent and put historical jobs and historical curves in separate collapsed
+blocks. Show energy, gradient and the configured environment residual over
+cumulative chi-continuation steps, with stage boundaries and independent
+seed/initialization chains kept distinct. Absolute energies use decimal notation;
+outlier handling preserves all raw points. Apply the actual Julia
+logs/checkpoints and gate policy rather than copying C++ field names or
+campaign-specific numerical settings.
 
 ## Required Post-Run Energy Trend
 
@@ -166,16 +238,17 @@ Use the memory remedies in this order:
   boundary dimension is `2 * D^2`.
 - For continuation from an already optimized high-chi state, use an explicit
   target chi list such as `[1024]`.
-- When increasing chi, the default chi ladder already gives later stages more
-  VUMPS effort for the environment.
+- When increasing chi, inspect the ladder's effective VUMPS limits and cap
+  them at 50 unless the user explicitly approves more. The ladder does not
+  replace the mandatory target-chi environment gate before optimization.
 - If the optimization gradient norm stalls and refuses to decrease, first
   suspect that chi is too small and the physical variational space is poor.
   Hermitian cases may tolerate this better; in non-Hermitian optimizations this
   is especially often a chi bottleneck. Increase chi and recompute the
   environment before spending time on optimizer hyperparameters.
-- When increasing D, that extra environment effort is not automatic. Add larger
-  `boundary_alg.maxiter` / `opt_obs_maxiter`, or run an explicit env/observable
-  warmup before the main LBFGS continuation.
+- When increasing D, prepare a matching target-D environment before LBFGS.
+  Keep `boundary_alg.maxiter` / `opt_obs_maxiter` and any env/observable warmup
+  within the 50-step allowance; do not automatically increase them beyond it.
 - Prefer `init_ipeps_SU` for D growth. Use `SUτ=0.1` as the practical default
   for initialization, then reset `params.SUτ=0.0` and run with `ifSU=false`
   before `optimise_ipeps`.
@@ -221,19 +294,16 @@ Use the memory remedies in this order:
 When a high-D run will go to a cluster, ensure the HPC workflow includes a
 preflight for:
 
-- local D=2, chi=16 TeneT.c versus TeneT.jl parity evidence for the same run
-  family
-- TeneT.c build/driver smoke for the selected app, or `using TeneT` only when
-  the user has approved a TeneT.jl fallback
+- local `D=2`, `chi=16` TeneT.jl same-path smoke evidence
+- `using TeneT` and the selected Julia entry script smoke
 - CUDA kernel execution
 - cuTENSOR/cuBLAS/cuSOLVER availability as applicable to the backend
 - MPI rank to GPU mapping
-- Slurm GPU count, MPI ranks, and the TeneT.c entry's Slice1D/Slice2D settings
-  must match the planned single-GPU or multi-GPU execution. For approved
-  TeneT.jl fallback runs, match the Julia entry's `parallel_method`.
+- Slurm GPU count, MPI ranks, and the Julia entry's `parallel_method` must match
+  the planned single-GPU or multi-GPU execution.
 - MPI/NCCL basics for the chosen parallel method
 
 Do not issue `sbatch`, `squeue`, `sacct`, `scancel`, `rsync`, or remote SSH
 commands from this skill. Follow AGENTS.md and hand those operations to
-user-global `$hpc` by default; use `tenet-hpc` only when explicitly enabled or
-invoked.
+user-global `$hpc` by default. Use `tenet-hpc` when explicitly enabled/invoked
+or selected as a supplement by that global HPC workflow.
