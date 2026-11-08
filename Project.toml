@@ -32,8 +32,10 @@ AMDGPU = "2"
 CairoMakie = "0.12, 0.13"
 CUDA = "5"
 ChainRulesCore = "1"
+FileIO = "1"
 ForwardDiff = "0.10"
 ForwardDiffChainRules = "0.3"
+JLD2 = "0.6"
 KrylovKit = "0.10"
 LineSearches = "7.6.0"
 MPI = "0.20"
@@ -42,12 +44,14 @@ OMEinsum = "0.8"
 OptimKit = "0.4"
 Parameters = "0.12"
 TensorOperations = "5"
+VectorInterface = "0.5"
 Zygote = "0.7"
 cuTENSOR = "2"
+julia = "1.10"
 
 [extras]
-Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Documenter"]
+test = ["Test", "TOML"]
