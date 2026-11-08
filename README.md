@@ -84,7 +84,7 @@ GitHub instead:
 pkg> add https://github.com/XingyuZhang2018/TeneT.jl OptimKit
 ```
 
-- **Julia version.** TeneT needs Julia ≥ 1.10. It is developed and tested on 1.11.
+- **Julia version.** TeneT needs Julia ≥ 1.11; Julia 1.10 is not supported. It is developed on 1.11, and CI also tests the latest release.
 - **Heavy dependencies.** `using TeneT` loads CUDA.jl, cuTENSOR, AMDGPU.jl, MPI.jl and CairoMakie,
   so the first precompilation takes a while.
 - **No GPU needed for CPU runs.** On machines without ROCm, AMDGPU.jl prints harmless
@@ -707,7 +707,7 @@ It turns the contractor into the framework described above:
 - **Dense tensors only.** Tensors are dense `Array` or `CuArray`. The U(1)/Z₂ symmetric tensors
   advertised for 0.1 are not part of 0.2.
 - **Dependencies.**
-  - Requires Julia ≥ 1.10, CUDA.jl 5, Zygote 0.7 and KrylovKit 0.10.
+  - Requires Julia ≥ 1.11, CUDA.jl 5, Zygote 0.7 and KrylovKit 0.10.
   - MPI.jl, cuTENSOR, AMDGPU.jl and CairoMakie are now hard dependencies.
 
 ## License
