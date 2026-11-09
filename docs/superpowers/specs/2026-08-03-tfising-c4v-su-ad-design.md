@@ -38,9 +38,9 @@ caller-controlled.  This design adds a separate mode with a stronger contract;
 it does not reinterpret the generic multi-cell SU implementation.
 
 The forward self-bond construction follows the one-factor Takagi idea in the
-commented TeneT_demo implementation and the active real C4v D-resize
-implementation in TeneT.c.  Unlike those paths, this layer keeps D fixed and is
-part of the differentiated objective.
+commented TeneT_demo implementation and in a separate real C4v D-resize
+implementation.  Unlike those paths, this layer keeps D fixed and is part of
+the differentiated objective.
 
 ## Scope
 

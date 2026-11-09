@@ -38,9 +38,7 @@ restart and diagnose optimizations according to the maintainer's run policy.
 > workarounds cost run time or development effort: recompute checkpointing, `GC.gc()` and
 > `CUDA.reclaim()` between passes, and hand-written adjoints with explicit frees. Multi-GPU
 > scaling of the full gradient stays well below linear; see
-> [Performance and limitations](#performance-and-limitations). **TeneT.c**, a separate C++/CUDA
-> implementation with hand-written adjoints and no AD framework, is being developed for that
-> regime.
+> [Performance and limitations](#performance-and-limitations).
 
 ## Features
 
