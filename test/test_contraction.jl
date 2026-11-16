@@ -413,6 +413,32 @@
                 @test Array(direct) ≈ Array(par_res)
             end
 
+            @testset "forloop_iter=0 resolves to width-8 chunks" begin
+                @test TeneT.resolve_forloop_iter(0, 1) == 1
+                @test TeneT.resolve_forloop_iter(0, 8) == 1
+                @test TeneT.resolve_forloop_iter(0, 9) == 2
+                @test TeneT.resolve_forloop_iter(0, 192) == 24
+                @test TeneT.resolve_forloop_iter(5, 192) == 5     # explicit values unchanged
+                @test_throws ArgumentError TeneT.resolve_forloop_iter(-1, 8)
+            end
+
+            @testset "FLmap_parallel forloop_iter=0 (auto) matches FLmap, forward and gradient" begin
+                χa = 20                                            # 3 automatic chunks
+                FL  = atype(randn(T, χa, D, χa))
+                ALu = atype(randn(T, χa, D, χa))
+                ALd = atype(randn(T, χa, D, χa))
+                M   = atype(randn(T, D, D, D, D))
+
+                direct  = FLmap(FL, ALu, ALd, M)
+                par_res = FLmap_parallel(FL, ALu, ALd, M; ifparallel=false, forloop_iter=0)
+                @test Array(direct) ≈ Array(par_res)
+
+                loss(fl, n) = real(sum(abs2, FLmap_parallel(fl, ALu, ALd, M; ifparallel=false, forloop_iter=n)))
+                g_auto = Zygote.gradient(fl -> loss(fl, 0), FL)[1]
+                g_one  = Zygote.gradient(fl -> loss(fl, 1), FL)[1]
+                @test Array(g_auto) ≈ Array(g_one)
+            end
+
             @testset "FLmap_parallel skips empty chunks when forloop_iter > split dimension" begin
                 FL  = atype(randn(T, χ, D, D, χ))
                 ALu = atype(randn(T, χ, D, D, χ))

@@ -469,14 +469,20 @@ backward pass. The gradient then matches `Plain` only up to the run-to-run varia
 random start.
 
 `forloop_iter` on `VUMPS`, or on `slice1D`/`slice2D`, splits each boundary contraction into chunks
-to cap transient memory. Set `GradientOptimize.forloop_iter` to the same value, because the
-preconditioner, magnetization and correlation-length contractions read that field.
+along one χ leg to cap transient memory. The default `forloop_iter = 0` is automatic: each map
+uses `cld(L, 8)` chunks, where `L` is the local length of the leg it slices, so every slice is at
+most 8 wide (χ = 192 → 24 chunks). A positive value sets the chunk count explicitly. Fewer chunks
+launch fewer kernels and can be faster when memory is plentiful; more chunks lower the peak.
+`GradientOptimize.forloop_iter` (also `0` by default) is read by the preconditioner,
+magnetization and correlation-length contractions; set it to the same value as the boundary
+algorithm when you override it.
 
 **Out-of-memory ladder.** When a run does not fit, apply these steps in order and stop at the
 first one that works:
 
 1. `ifcheckpoint = true` on both `GradientOptimize` and `VUMPS`
-2. a larger `forloop_iter` (4, 8, 16, …); under `slice1D` the useful maximum is about χ / nprocs
+2. an explicit `forloop_iter` larger than the automatic `cld(χ, 8)` (narrower slices); under
+   `slice1D` the useful maximum is about χ / nprocs
 3. `inner_checkpoint = Recompute()`
 4. several GPUs: `slice1D` while the replicated environments fit, and `slice2D` when they do not
 

@@ -129,7 +129,7 @@ function _slice2d_forward_sliced(FL_blk, ALu_row, ALd_col, M1, M2, grid::Slice2D
     # local block, so chunks index it directly.
     Dg, Dh = size(M1, 3), size(M2, 3)
     partial = similar(FL_blk, χ, Dg, Dh, nl)
-    l_chunks = split_ranges(nl, min(forloop_iter, nl))
+    l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
     for ch in l_chunks
         ALd_chunk = view(ALd_col, :, :, :, ch)
         Hc = _slice2d_stage1(FL_row, ALd_chunk)
@@ -342,7 +342,7 @@ function _ring_l_chunks(na::Int, nl::Int, M1, M2, forloop_iter::Int)
     dphys = size(M1, 5)
     inter_n1 = na * nl * Dmax^4 * dphys            # I2 element count at a single l-chunk
     n_floor  = cld(inter_n1, 2_000_000_000)        # keep each chunk's I2 < 2e9 (< 2^31, margin)
-    n_eff    = clamp(max(forloop_iter, n_floor), 1, nl)
+    n_eff    = clamp(max(resolve_forloop_iter(forloop_iter, nl), n_floor), 1, nl)
     return split_ranges(nl, n_eff)
 end
 
@@ -467,7 +467,7 @@ function _acmap_slice2d_forward_sliced(AC_g, FR_g, FL_g, M1, M2, grid, a_rs; for
     # block.) These are the ACmap output legs — NOT size(M1,1)/size(M2,1) (those
     # are :e/:f, the FRmap output legs).
     partial = similar(AC_g, χ, size(M1,2), size(M2,2), nl)   # [i∈1:χ, j, k, l-block]
-    l_chunks = split_ranges(nl, min(forloop_iter, nl))
+    l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
     for ch in l_chunks
         # F4: single local chain over full-i FL_g; full i, local l-chunk. The
         # chain contracts a at the LAST link (FL), so it sums only the LOCAL
@@ -647,7 +647,7 @@ function Mumap_slice2d_dist(AC_blk, ACd_blk, FL_blk, FR_blk, Mu, grid::Slice2DGr
     partial = similar(Mu)
     partial .= zero(eltype(partial))
     nl = size(FR_col, 4)
-    l_chunks = split_ranges(nl, min(forloop_iter, nl))
+    l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
     for ch in l_chunks
         FR_chunk = view(FR_col, :, :, :, ch)
         ACd_chunk = view(ACd_col, :, :, :, ch)

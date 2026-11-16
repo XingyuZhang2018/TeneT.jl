@@ -21,6 +21,32 @@ function split_ranges(N::Integer, n::Integer)
     return split_ranges(counts)
 end
 
+# ─── Automatic chunk count (`forloop_iter = 0`) ────────────────────────────
+
+"""Target slice width of the automatic chunking mode `forloop_iter = 0`."""
+const FORLOOP_AUTO_WIDTH = 8
+
+"""
+    resolve_forloop_iter(forloop_iter, extent) -> Int
+
+Chunk count used by a map that slices a leg of local length `extent`.
+
+- `forloop_iter > 0`: exactly that many chunks (explicit control, unchanged).
+- `forloop_iter == 0`: automatic — the smallest chunk count whose slices are at
+  most `FORLOOP_AUTO_WIDTH` (= 8) wide, i.e. `cld(extent, 8)`, at least 1.
+  Each map resolves its own count from the leg it actually slices; a forward
+  map and its pullback resolve the same count because it depends only on shapes.
+
+Width 8 trades peak memory against kernel-launch overhead; it is a starting
+point, not an optimum for every shape. Negative values are rejected.
+"""
+function resolve_forloop_iter(forloop_iter::Integer, extent::Integer)
+    forloop_iter > 0 && return Int(forloop_iter)
+    forloop_iter == 0 ||
+        throw(ArgumentError("forloop_iter must be >= 0 (0 = automatic width-$(FORLOOP_AUTO_WIDTH) chunks); got $forloop_iter"))
+    return max(1, cld(Int(extent), FORLOOP_AUTO_WIDTH))
+end
+
 # ─── Pre-allocated communication buffers ──────────────────────────────────
 
 const _comm_sendbuf = Dict{Any,Any}()

@@ -17,13 +17,13 @@ struct Slice2DMethod <: ParallelMethod
     inner_etype
 end
 
-slice1D(; forloop_iter::Integer=1, inner_etype=nothing, comm=MPI.COMM_WORLD) =
+slice1D(; forloop_iter::Integer=0, inner_etype=nothing, comm=MPI.COMM_WORLD) =
     Slice1DMethod(Int(forloop_iter), inner_etype, comm)
 
-slice2D(N1::Integer, N2::Integer; forloop_iter::Integer=1, inner_etype=nothing, comm=MPI.COMM_WORLD) =
+slice2D(N1::Integer, N2::Integer; forloop_iter::Integer=0, inner_etype=nothing, comm=MPI.COMM_WORLD) =
     Slice2DMethod(slice2d_grid(N1, N2; comm), Int(forloop_iter), inner_etype)
 
-slice2D(grid::Slice2DGrid; forloop_iter::Integer=1, inner_etype=nothing) =
+slice2D(grid::Slice2DGrid; forloop_iter::Integer=0, inner_etype=nothing) =
     Slice2DMethod(grid, Int(forloop_iter), inner_etype)
 
 _uses_mpi(::SerialMethod) = false

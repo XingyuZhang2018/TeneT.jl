@@ -8,6 +8,7 @@
 @non_differentiable _tfising_pauli_operators(kwargs...)
 @non_differentiable _heisenberg_bond_terms(kwargs...)
 @non_differentiable _kitaev_bond_terms(kwargs...)
+@non_differentiable resolve_forloop_iter(::Any, ::Any)
 @non_differentiable _kagome_onsite_op(kwargs...)
 @non_differentiable _kagome_intercell_terms(kwargs...)
 @non_differentiable _honeycomb_merge_onsite_op(kwargs...)
@@ -338,6 +339,7 @@ function ChainRulesCore.rrule(::typeof(forloop), f, args...; forloop_iter, N_in,
     T_orig = eltype(args[1])
     do_cast = inner_etype !== nothing && inner_etype != real(T_orig)
     args_c = do_cast ? map(a -> _boundary_cast(inner_etype, a), args) : args
+    forloop_iter = resolve_forloop_iter(forloop_iter, size(args_c[N_in[1]], N_in[2]))
 
     if forloop_iter == 1
         # Engine routing is decided AT FORWARD TIME: when the toggle+guard pass,
@@ -459,6 +461,7 @@ function ChainRulesCore.rrule(::typeof(parallel), f, args...; forloop_iter, N_in
     Ain = args_c[N_in[1]]
     split_dim = N_in[2]
     D_split = size(Ain, split_dim)
+    forloop_iter = resolve_forloop_iter(forloop_iter, cld(D_split, nprocs))
     result_c = similar(args_c[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs * forloop_iter)
 
@@ -741,7 +744,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_slice2d), FL_blk, ALu, ALd, M, grid
         dM1 = zero(M1_c)
         dM2 = zero(M2_c)
         dFL_row = zero(FL_row)
-        l_chunks = split_ranges(length(l_rng), min(forloop_iter, length(l_rng)))
+        l_chunks = split_ranges(length(l_rng), min(resolve_forloop_iter(forloop_iter, length(l_rng)), length(l_rng)))
         for ch in l_chunks
             l_glob = l_rng[ch]
             ALd_chunk = view(ALd_c, :, :, :, l_glob)
@@ -854,7 +857,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_slice2d_dist), FL_blk, ALu_blk, ALd
         dM1 = zero(M1_c)
         dM2 = zero(M2_c)
         dFL_row = zero(FL_row)
-        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
         for ch in l_chunks
             ALd_chunk = view(ALd_col, :, :, :, ch)
             Hc = _slice2d_stage1(FL_row, ALd_chunk)
@@ -950,7 +953,7 @@ function ChainRulesCore.rrule(::typeof(FLmap_slice2d_sliced), FL_blk, ALu_row, A
         dM1 = zero(M1)
         dM2 = zero(M2)
         dFL_row = zero(FL_row)
-        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
         for ch in l_chunks
             ALd_chunk = view(ALd_col, :, :, :, ch)
             Hc = _slice2d_stage1(FL_row, ALd_chunk)
@@ -1069,7 +1072,7 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_sliced), AC_blk, FL_g, FR_g
         dpartial = _slice2d_col_allgather(d_c, grid, a_rs)   # B5 (full i, local l-block)
         dAC_g = zero(AC_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
         dM1 = zero(M1); dM2 = zero(M2)
-        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
         for ch in l_chunks
             dPc = dpartial[:, :, :, ch]
             (dAC_c, dFR_c, dM1_c, dM2_c, dFL_c) =
@@ -1301,7 +1304,7 @@ function ChainRulesCore.rrule(::typeof(ACmap_slice2d_dist), AC_blk, FL_blk, FR_b
         # gathered-slice grad accumulators FIRST.
         dAC_g = zero(AC_g); dFR_g = zero(FR_g); dFL_g = zero(FL_g)
         dM1 = zero(M1_c); dM2 = zero(M2_c)
-        l_chunks = split_ranges(nl, min(forloop_iter, nl))
+        l_chunks = split_ranges(nl, min(resolve_forloop_iter(forloop_iter, nl), nl))
         for ch in l_chunks
             dPc = dpartial[:, :, :, ch]
             # Chain grads in ops order (dAC, dFR, dM1, dM2, dFL).
