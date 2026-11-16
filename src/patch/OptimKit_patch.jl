@@ -17,28 +17,27 @@ function Array(H::LBFGSInverseHessian)
     S = []
     Y = []
     ρ = []
-    for i in 1:length(H.S)
-        if isassigned(H.S, i)
-            push!(S, Array(H.S[i]))
-            push!(Y, Array(H.Y[i]))
-            push!(ρ, H.ρ[i])
-        end
+    # H[k] follows the active history from oldest to newest, including after
+    # the circular buffer wraps or shrinks. The constructor resets first=1.
+    for k in 1:length(H)
+        s, y, rho = H[k]
+        push!(S, Array(s))
+        push!(Y, Array(y))
+        push!(ρ, rho)
     end
 
     return LBFGSInverseHessian(H.maxlength, S, Y, ρ)
-    # return LBFGSInverseHessian(H.maxlength, H.length, H.first, S, Y, H.ρ, H.α)
 end
 
 function CuArray(H::LBFGSInverseHessian)
     S = []
     Y = []
     ρ = []
-    for i in 1:length(H.S)
-        if isassigned(H.S, i)
-            push!(S, CuArray(H.S[i]))
-            push!(Y, CuArray(H.Y[i]))
-            push!(ρ, H.ρ[i])
-        end
+    for k in 1:length(H)
+        s, y, rho = H[k]
+        push!(S, CuArray(s))
+        push!(Y, CuArray(y))
+        push!(ρ, rho)
     end
 
     return LBFGSInverseHessian(H.maxlength, S, Y, ρ)
@@ -48,12 +47,11 @@ function ROCArray(H::LBFGSInverseHessian)
     S = []
     Y = []
     ρ = []
-    for i in 1:length(H.S)
-        if isassigned(H.S, i)
-            push!(S, ROCArray(H.S[i]))
-            push!(Y, ROCArray(H.Y[i]))
-            push!(ρ, H.ρ[i])
-        end
+    for k in 1:length(H)
+        s, y, rho = H[k]
+        push!(S, ROCArray(s))
+        push!(Y, ROCArray(y))
+        push!(ρ, rho)
     end
 
     return LBFGSInverseHessian(H.maxlength, S, Y, ρ)
