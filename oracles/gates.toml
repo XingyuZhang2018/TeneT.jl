@@ -38,6 +38,14 @@ requires_mpi = false
 requires_gpu = false
 requires_cluster = false
 
+[gate.lbfgs_checkpoint_order]
+description = "Preserve active LBFGS history order through circular-buffer conversion and checkpoint reload."
+cmd = ["julia", "--project=.", "test/test_lbfgs_checkpoint_order.jl"]
+groups = ["quick", "checkpoint", "local"]
+requires_mpi = false
+requires_gpu = false
+requires_cluster = false
+
 [gate.ising_exact]
 description = "2D classical Ising observable checks against the exact free-energy oracle."
 cmd = ["julia", "--project=.", "test/test_2d_classical.jl"]
