@@ -205,12 +205,17 @@ Use the memory remedies in this order:
 
 1. Set `ifcheckpoint=true` on both `GradientOptimize` and the VUMPS boundary
    algorithm.
-2. Increase `forloop_iter` gradually for OOM as powers of two: try `2^i` with
-   `i = 2, 3, ...` (`4`, `8`, `16`, ...), and stop at the first value that
-   fits. Do not start with a very large value; it can make the run much slower.
-   For `slice1D`, cap the useful maximum near `χ / nprocs`. For `slice2D`,
-   analyze the cap from the chosen `(N1,N2)` split instead of reusing the
-   `slice1D` rule.
+2. `forloop_iter` defaults to `0` (automatic): each map slices its χ leg into
+   `cld(L, 8)` chunks of width at most 8 (χ = 192 → 24 chunks). Keep the
+   default first. Only if memory still fails, set an explicit larger count
+   (narrower slices, e.g. about twice `cld(χ, 8)`). When memory is plentiful
+   and throughput matters, a smaller explicit count (e.g. 4 or 8) can be
+   faster; measure the per-step time before switching. Never run large χ with
+   `forloop_iter = 1` (no chunking): D=4, χ=192 already saturated a 24 GB GPU
+   and stalled. Set `GradientOptimize.forloop_iter` to the same value as the
+   boundary algorithm when overriding. For `slice1D`, cap the useful maximum
+   near `χ / nprocs`. For `slice2D`, analyze the cap from the chosen `(N1,N2)`
+   split instead of reusing the `slice1D` rule.
 3. Set VUMPS `inner_checkpoint=Recompute()` if memory still fails.
 4. Use multi-GPU parallelism. Prefer `slice1D` when it fits; use `slice2D` when
    peak memory is the blocker.

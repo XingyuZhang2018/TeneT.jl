@@ -64,7 +64,7 @@
         @test v.miniter == 0
         @test v.maxiter_ad == 4
         @test v.miniter_ad == 4
-        @test v.forloop_iter == 1
+        @test v.forloop_iter == 0
         @test v.power_iter == 5
         @test v.power_iter_ad == 5
         @test v.power_iter_obs == 40
@@ -115,7 +115,7 @@
         @test q.ifsimple_eig == true
         @test q.ifparallel == false
         @test q.step_checkpoint === TeneT.Plain()
-        @test q.forloop_iter == 1
+        @test q.forloop_iter == 0
     end
 
     @testset "obs_index trait" begin

@@ -22,10 +22,11 @@ function forloop(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=no
         args = map(a -> _boundary_cast(inner_etype, a), args)
     end
 
+    D_split = size(args[N_in[1]])[N_in[2]]
+    forloop_iter = resolve_forloop_iter(forloop_iter, D_split)
     if forloop_iter == 1
         result = f(args...)
     else
-        D_split = size(args[N_in[1]])[N_in[2]]
         result = similar(args[1], size_out)
         D_split_ranges = split_ranges(D_split, forloop_iter)
 
@@ -52,6 +53,7 @@ function parallel(f, args...; forloop_iter, N_in, N_out, size_out, inner_etype=n
     end
 
     D_split = size(args[N_in[1]])[N_in[2]]
+    forloop_iter = resolve_forloop_iter(forloop_iter, cld(D_split, nprocs))
     result = similar(args[1], size_out)
     D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)
 
@@ -80,10 +82,11 @@ function forloop_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_ety
         args = map(a -> _boundary_cast(inner_etype, a), args)
     end
 
+    D_split = size(args[N_in1[1]])[N_in1[2]]
+    forloop_iter = resolve_forloop_iter(forloop_iter, D_split)
     if forloop_iter == 1
         result = f(args...)
     else
-        D_split = size(args[N_in1[1]])[N_in1[2]]
         result = similar(args[1], size_out)
         result .= 0
         D_split_ranges = split_ranges(D_split, forloop_iter)
@@ -111,6 +114,7 @@ function parallel_sum(f, args...; forloop_iter, N_in1, N_in2, size_out, inner_et
     end
 
     D_split = size(args[N_in1[1]])[N_in1[2]]
+    forloop_iter = resolve_forloop_iter(forloop_iter, cld(D_split, nprocs))
     result = similar(args[1], size_out)
     result .= 0
     D_split_ranges = split_ranges(D_split, nprocs*forloop_iter)

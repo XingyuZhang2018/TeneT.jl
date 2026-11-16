@@ -48,7 +48,7 @@ energy gradients, then applies a quasi-Newton optimizer (e.g. LBFGS).
     ifload_lbfgs::Bool = false
 
     # Tensor layout
-    forloop_iter::Int = 1
+    forloop_iter::Int = 0  # 0 = automatic: each map uses cld(extent, 8) chunks (slice width <= 8)
 
     # ── AD checkpointing on the energy/gradient side (coarse → fine) ────
     # See src/utils/checkpoint.jl for Plain/Recompute/Offload semantics.

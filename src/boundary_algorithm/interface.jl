@@ -14,7 +14,7 @@ C4v
     miniter::Int = 0
     maxiter_ad::Int = 4
     miniter_ad::Int = 4
-    forloop_iter::Int = 1
+    forloop_iter::Int = 0  # 0 = automatic: each map uses cld(extent, 8) chunks (slice width <= 8)
     power_iter::Int = 5
     power_iter_ad::Int = 5
     power_iter_obs::Int = 40
@@ -174,7 +174,7 @@ QR-based Corner Transfer Matrix Renormalization Group algorithm.
     # Offload()          — pb-capture walker swaps GPU captures for CPU copies; on
     #                      backward reload + run original pb (no forward recompute).
     step_checkpoint::CheckpointMethod = Plain()
-    forloop_iter::Int = 1
+    forloop_iter::Int = 0  # 0 = automatic: each map uses cld(extent, 8) chunks (slice width <= 8)
 
     # Mixed-precision fields (same semantics as VUMPS; see VUMPS struct doc).
     # QRCTMRG doesn't use simple_eig, so simple_eig_polish_steps is functionally
